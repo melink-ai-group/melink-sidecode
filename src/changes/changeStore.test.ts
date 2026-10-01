@@ -1,0 +1,472 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ChangeJournal, type JournalFs, type JournalStorage } from './journal.ts';
+import { ChangeStore } from './changeStore.ts';
+
+/**
+ * A fake that is both the journal's fs seam and the store's workspace fs seam,
+ * plus a write counter so "accept never writes" is provable.
+ */
+class FakeFs implements JournalFs {
+  files = new Map<string, Uint8Array>();
+  blobs = new Map<string, Uint8Array>();
+  writes = 0;
+  failWrites = false;
+  private readonly roots: string[];
+
+  constructor(roots: string[] = ['/ws']) {
+    this.roots = roots;
+  }
+
+  workspaceRoots(): readonly string[] {
+    return this.roots;
+  }
+
+  async readFile(absPath: string): Promise<Uint8Array | undefined> {
+    return this.files.get(normalize(absPath));
+  }
+
+  async writeFile(absPath: string, bytes: Uint8Array): Promise<void> {
+    if (this.failWrites) {
+      throw new Error('disk is read-only');
+    }
+    this.writes += 1;
+    this.files.set(normalize(absPath), bytes);
+  }
+
+  async deleteFile(absPath: string): Promise<void> {
+    if (this.failWrites) {
+      throw new Error('disk is read-only');
+    }
+    this.writes += 1;
+    this.files.delete(normalize(absPath));
+  }
+
+  async writeBlob(key: string, bytes: Uint8Array): Promise<void> {
+    this.blobs.set(key, bytes);
+  }
+
+  async readBlob(key: string): Promise<Uint8Array | undefined> {
+    return this.blobs.get(key);
+  }
+
+  async deleteBlob(key: string): Promise<void> {
+    this.blobs.delete(key);
+  }
+}
+
+function storage(): JournalStorage {
+  const data = new Map<string, unknown>();
+  return {
+    get: <T>(key: string, fallback: T): T => (data.has(key) ? (data.get(key) as T) : fallback),
+    update: async (key: string, value: unknown): Promise<void> => {
+      if (value === undefined) {
+        data.delete(key);
+      } else {
+        data.set(key, value);
+      }
+    }
+  };
+}
+
+function normalize(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+function text(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+function decode(bytes: Uint8Array | undefined): string {
+  return bytes ? new TextDecoder().decode(bytes) : '';
+}
+
+/** Record a modified file `/ws/a.ts` from `before` to `after` as turn `t1`. */
+async function turnModified(fs: FakeFs, before: string, after: string): Promise<ChangeJournal> {
+  fs.files.set('/ws/a.ts', text(before));
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text(after));
+  await journal.endTurn('t1');
+  return journal;
+}
+
+test('every file and hunk defaults to pending with no decision made', async () => {
+  const fs = new FakeFs();
+  const journal = await turnModified(fs, 'a\nb\nc\n', 'a\nB\nC\n');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const view = await store.view('codex', 'thr', 't1');
+  assert.ok(view);
+  assert.equal(view.files.length, 1);
+  assert.equal(view.files[0].decision, 'pending');
+  assert.ok(view.files[0].hunks.length > 0);
+  assert.ok(view.files[0].hunks.every((hunk) => hunk.decision === 'pending'));
+  assert.equal(view.fullyDecided, false);
+});
+
+test('accept records the decision and writes nothing to the workspace', async () => {
+  const fs = new FakeFs();
+  const journal = await turnModified(fs, 'a\nb\n', 'a\nB\n');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const before = fs.writes;
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    decision: 'accepted'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.decision, 'accepted');
+  assert.equal(fs.writes, before, 'accept must not write a workspace file');
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'a\nB\n');
+
+  const view = await store.view('codex', 'thr', 't1');
+  assert.equal(view?.files[0].decision, 'accepted');
+});
+
+test('reject restores the exact pre-turn bytes', async () => {
+  const fs = new FakeFs();
+  const journal = await turnModified(fs, 'one\ntwo\n', 'one\nTWO\n');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    decision: 'rejected'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'one\ntwo\n');
+});
+
+test('rejecting a created file deletes it', async () => {
+  const fs = new FakeFs();
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex' });
+  fs.files.set('/ws/new.ts', text('brand new'));
+  await journal.observe('t1', '/ws/new.ts', 'watched', 'created');
+  await journal.endTurn('t1');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'new.ts',
+    decision: 'rejected'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(fs.files.has('/ws/new.ts'), false);
+});
+
+test('rejecting a deleted file recreates it with the pre-turn bytes', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/gone.ts', text('restore me'));
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/gone.ts'] });
+  fs.files.delete('/ws/gone.ts');
+  await journal.endTurn('t1');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'gone.ts',
+    decision: 'rejected'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(decode(fs.files.get('/ws/gone.ts')), 'restore me');
+});
+
+test('a file changed after the turn reports a conflict and is not overwritten', async () => {
+  const fs = new FakeFs();
+  const journal = await turnModified(fs, 'one\ntwo\n', 'one\nTWO\n');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  // The user edits the file again after the turn.
+  fs.files.set('/ws/a.ts', text('one\nTWO\nand more\n'));
+
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    decision: 'rejected'
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.conflict, true);
+  assert.equal(result.decision, 'pending');
+  // The conflict path must leave the on-disk content exactly as it was.
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'one\nTWO\nand more\n');
+});
+
+test('an explicit overwrite-pre-turn completes a conflicting reject', async () => {
+  const fs = new FakeFs();
+  const journal = await turnModified(fs, 'one\ntwo\n', 'one\nTWO\n');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+  fs.files.set('/ws/a.ts', text('user edit\n'));
+
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    decision: 'rejected',
+    conflictResolution: 'overwrite-pre-turn'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'one\ntwo\n');
+});
+
+test('keep-current completes a conflicting reject without writing', async () => {
+  const fs = new FakeFs();
+  const journal = await turnModified(fs, 'one\ntwo\n', 'one\nTWO\n');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+  fs.files.set('/ws/a.ts', text('user edit\n'));
+
+  const before = fs.writes;
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    decision: 'rejected',
+    conflictResolution: 'keep-current'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.conflict, true);
+  assert.equal(fs.writes, before);
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'user edit\n');
+});
+
+test('a failed write is reported and the reject is not recorded', async () => {
+  const fs = new FakeFs();
+  const journal = await turnModified(fs, 'one\ntwo\n', 'one\nTWO\n');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  fs.failWrites = true;
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    decision: 'rejected'
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /read-only/);
+  assert.equal(result.decision, 'pending');
+
+  // The decision must not survive as rejected: a fresh read still shows pending.
+  fs.failWrites = false;
+  const view = await store.view('codex', 'thr', 't1');
+  assert.equal(view?.files[0].decision, 'pending');
+});
+
+test('hunk-level decisions are recorded and reflected per hunk', async () => {
+  const fs = new FakeFs();
+  const before = Array.from({ length: 30 }, (_, i) => `l${i}`).join('\n') + '\n';
+  const after = before.replace('l1\n', 'changed1\n').replace('l25\n', 'changed2\n');
+  const journal = await turnModified(fs, before, after);
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const initial = await store.view('codex', 'thr', 't1');
+  assert.ok(initial);
+  assert.equal(initial.files[0].hunks.length, 2);
+  const firstId = initial.files[0].hunks[0].id;
+
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    hunkId: firstId,
+    decision: 'rejected'
+  });
+  assert.equal(result.ok, true);
+
+  const view = await store.view('codex', 'thr', 't1');
+  assert.ok(view);
+  const decisions = view.files[0].hunks.map((hunk) => hunk.decision);
+  assert.deepEqual(decisions, ['rejected', 'pending']);
+  // A hunk reject rewrites only that hunk, leaving the other change applied.
+  assert.match(decode(fs.files.get('/ws/a.ts')), /changed2\n/);
+  assert.match(decode(fs.files.get('/ws/a.ts')), /l1\n/);
+  assert.doesNotMatch(decode(fs.files.get('/ws/a.ts')), /changed1\n/);
+});
+
+test('a second hunk reject does not read its own earlier reject as a conflict', async () => {
+  const fs = new FakeFs();
+  const before = Array.from({ length: 40 }, (_, i) => `l${i}`).join('\n') + '\n';
+  const after = before.replace('l1\n', 'changed1\n').replace('l30\n', 'changed2\n');
+  const journal = await turnModified(fs, before, after);
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const initial = await store.view('codex', 'thr', 't1');
+  assert.ok(initial);
+  assert.equal(initial.files[0].hunks.length, 2);
+  const [firstHunk, secondHunk] = initial.files[0].hunks;
+
+  const first = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    hunkId: firstHunk.id,
+    decision: 'rejected'
+  });
+  assert.equal(first.ok, true);
+
+  const second = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    hunkId: secondHunk.id,
+    decision: 'rejected'
+  });
+  assert.equal(second.ok, true, 'the earlier hunk reject is not an external edit');
+  assert.equal(second.conflict, undefined);
+  assert.equal(decode(fs.files.get('/ws/a.ts')), before);
+});
+
+test('hunk-level reject on a created file can clear it entirely', async () => {
+  const fs = new FakeFs();
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex' });
+  fs.files.set('/ws/new.ts', text('line one\nline two\n'));
+  await journal.observe('t1', '/ws/new.ts', 'watched', 'created');
+  await journal.endTurn('t1');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const view = await store.view('codex', 'thr', 't1');
+  assert.ok(view);
+  assert.equal(view.files[0].hunks.length, 1);
+  const result = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'new.ts',
+    hunkId: view.files[0].hunks[0].id,
+    decision: 'rejected'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(fs.files.has('/ws/new.ts'), false);
+});
+
+test('decisions survive a reload and stale decisions are dropped', async () => {
+  const fs = new FakeFs();
+  const seam = storage();
+  fs.files.set('/ws/a.ts', text('one\n'));
+  const journal = new ChangeJournal({ storage: seam, fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('one\nTWO\n'));
+  await journal.endTurn('t1');
+
+  const store = new ChangeStore({ storage: seam, fs, artifacts: journal, now: () => 1_000 });
+  await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    relPath: 'a.ts',
+    decision: 'accepted'
+  });
+
+  // A second store over the same storage is a reload: the decision repaints.
+  const reloaded = new ChangeStore({ storage: seam, fs, artifacts: journal, now: () => 1_000 });
+  const view = await reloaded.view('codex', 'thr', 't1');
+  assert.equal(view?.files[0].decision, 'accepted');
+
+  // Re-record the turn with different content: the old decision references
+  // content that no longer matches and must be dropped, not shown actionable.
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('one\nTHREE\n'));
+  await journal.endTurn('t1');
+  const afterRescan = await reloaded.view('codex', 'thr', 't1');
+  assert.equal(afterRescan?.files[0].decision, 'pending');
+});
+
+test('decideAll applies to every file and returns each outcome', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/a.ts', text('a1\n'));
+  fs.files.set('/ws/b.ts', text('b1\n'));
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({
+    turnId: 't1',
+    threadId: 'thr',
+    backendId: 'codex',
+    candidates: ['/ws/a.ts', '/ws/b.ts']
+  });
+  fs.files.set('/ws/a.ts', text('a2\n'));
+  fs.files.set('/ws/b.ts', text('b2\n'));
+  await journal.endTurn('t1');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const results = await store.decideAll({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    decision: 'rejected'
+  });
+  assert.equal(results.length, 2);
+  assert.ok(results.every((result) => result.ok));
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'a1\n');
+  assert.equal(decode(fs.files.get('/ws/b.ts')), 'b1\n');
+
+  const view = await store.view('codex', 'thr', 't1');
+  assert.equal(view?.fullyDecided, true);
+});
+
+test('decideAll reports the files whose writes failed', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/a.ts', text('a1\n'));
+  fs.files.set('/ws/b.ts', text('b1\n'));
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({
+    turnId: 't1',
+    threadId: 'thr',
+    backendId: 'codex',
+    candidates: ['/ws/a.ts', '/ws/b.ts']
+  });
+  fs.files.set('/ws/a.ts', text('a2\n'));
+  fs.files.set('/ws/b.ts', text('b2\n'));
+  await journal.endTurn('t1');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  fs.failWrites = true;
+  const results = await store.decideAll({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    decision: 'rejected'
+  });
+  assert.equal(results.length, 2);
+  assert.ok(results.every((result) => !result.ok && result.error));
+});
+
+test('a binary file is listed but not diffable', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/blob.bin', new Uint8Array([1, 0, 2]));
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/blob.bin'] });
+  fs.files.set('/ws/blob.bin', new Uint8Array([1, 0, 3]));
+  await journal.endTurn('t1');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const view = await store.view('codex', 'thr', 't1');
+  assert.ok(view);
+  assert.equal(view.files[0].binary, true);
+  assert.equal(view.files[0].diffable, false);
+  assert.equal(view.files[0].hunks.length, 0);
+  assert.ok(view.files[0].detail);
+});
+
+test('an unknown turn has no view', async () => {
+  const fs = new FakeFs();
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: new ChangeJournal({ storage: storage(), fs }), now: () => 1_000 });
+  assert.equal(await store.view('codex', 'thr', 'missing'), undefined);
+});

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent chat - approval could not be delivered</title>
+<link rel="stylesheet" href="../../tokens.css">
+<link rel="stylesheet" href="./app.css">
+</head>
+<body class="theme-light">
+<div class="workbench">
+
+  <nav class="activitybar" aria-label="Activity bar">
+    <button class="ab-item" type="button" aria-label="Explorer">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h6l2 2h8v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"/></svg>
+    </button>
+    <button class="ab-item" type="button" aria-label="Search">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+    </button>
+    <button class="ab-item is-active" type="button" aria-label="Agent" aria-current="page">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4L12 3z"/><path d="M18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z"/></svg>
+    </button>
+    <span class="ab-spacer"></span>
+    <button class="ab-item" type="button" aria-label="Settings">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></svg>
+    </button>
+  </nav>
+
+  <section class="sidebar" aria-label="Agent chat">
+
+    <header class="view-title">
+      <button class="icon-btn" type="button" aria-label="New conversation">
+        <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="view-heading">
+        <span class="view-name">Agent</span>
+        <span class="view-sub">ci-fix</span>
+      </div>
+      <div class="view-title-actions">
+        <button class="icon-btn" type="button" aria-label="Conversation history">
+          <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/></svg>
+        </button>
+        <button class="icon-btn" type="button" aria-label="Agent settings">
+          <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="transcript" aria-label="Conversation" aria-live="polite">
+
+      <article class="msg msg--user">
+        <p class="msg-role">You</p>
+        <div class="msg-body">The build is failing on the CI runner. Can you look?</div>
+      </article>
+
+      <article class="msg msg--assistant">
+        <p class="msg-role">Agent</p>
+        <div class="msg-body">I can reproduce it locally. One command needs your approval before I continue.</div>
+      </article>
+
+      <!-- Error state: the approval could not be delivered. Exactly one card, no stale duplicate.
+           Informational and recoverable, not a failure of the sidebar. -->
+      <section class="prompt prompt--error" id="approval-prompt" role="group" aria-labelledby="approval-title" tabindex="-1" autofocus>
+        <header class="prompt-head">
+          <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/></svg>
+          <span class="prompt-title" id="approval-title">Approval not delivered</span>
+          <span class="spacer"></span>
+          <span class="prompt-meta">1 request</span>
+        </header>
+        <div class="prompt-body">
+          <p class="ask">Your decision was not sent to the agent. The request is still open.</p>
+
+          <pre class="codeblock" aria-label="Command the agent wants to run">npm run build && npx tsc --noEmit --project tsconfig.ci.json</pre>
+
+          <div class="decisions" role="group" aria-label="Retry or decide on this request">
+            <button class="decision decision--primary" type="button">Try again</button>
+            <button class="decision" type="button">Allow once</button>
+            <button class="decision decision--reject" type="button">Reject</button>
+          </div>
+
+          <p class="scope-note">
+            <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+            <span>Nothing was applied and no rule was added. Retrying resends the same single request.</span>
+          </p>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="composer">
+      <label class="sr-only" for="composer-input">Message the agent</label>
+      <textarea class="composer-input" id="composer-input" placeholder="Waiting for your decision above&hellip;" disabled></textarea>
+      <div class="waiting-note waiting-note--error" role="status">
+        <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/></svg>
+        <span>Approval needs resending. The agent is still paused.</span>
+      </div>
+      <div class="composer-controls">
+        <button class="ctl" type="button" aria-label="Model: Ollama Cloud qwen2.5-coder" aria-haspopup="listbox">
+          <span class="provider-dot" aria-hidden="true"></span>
+          <span class="ctl-label">qwen2.5-coder</span>
+          <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <button class="ctl" type="button" aria-label="Mode: Agent" aria-haspopup="listbox">
+          <span class="ctl-label">Agent</span>
+          <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <button class="ctl ctl--permission" type="button" data-level="ask" aria-label="Permission level: Ask before changes" aria-haspopup="listbox" aria-expanded="false">
+          <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6l7-3z"/></svg>
+          <span class="ctl-label">Ask before changes</span>
+          <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <span class="spacer"></span>
+        <button class="send" type="button" aria-label="Send message" disabled>
+          <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 12l16-8-6 16-2.5-6.5z"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </section>
+
+  <main class="editor" aria-hidden="true">
+    <div class="tabs">
+      <span class="tab is-active">layout.tsx</span>
+    </div>
+    <div class="editor-body">
+      <div class="editor-line"><span class="ln">1</span><span>// A failed delivery keeps one request open; it never duplicates.</span></div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+*.vsix
+*.tsbuildinfo
+
+# Extension test runner
+.vscode-test/
+coverage/
+
+# Local editor and agent state
+.melink/
+.melink-verify.json
+.cursor/
+.zvec-grep/
+
+# Machine-specific workspace settings (absolute tool paths live here)
+.vscode/settings.json
+
+# Logs and scratch
+*.log
+err.txt
+
+# Secrets
+.env
+.env.*
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Windows null device materialized as a real file.
+# cmd treats `>nul` as the device; other shells create a file named nul.
+nul

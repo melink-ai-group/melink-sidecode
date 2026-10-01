@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self';">
+<title>Agent chat - empty</title>
+<link rel="stylesheet" href="../../tokens.css">
+<link rel="stylesheet" href="./app.css">
+</head>
+<body class="theme-light">
+<div class="workbench">
+
+  <nav class="activitybar" aria-label="Activity bar">
+    <button class="ab-item" type="button" aria-label="Explorer">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h6l2 2h8v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"/></svg>
+    </button>
+    <button class="ab-item" type="button" aria-label="Search">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+    </button>
+    <button class="ab-item is-active" type="button" aria-label="Agent" aria-current="page">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4L12 3z"/><path d="M18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z"/></svg>
+    </button>
+    <button class="ab-item" type="button" aria-label="Source control">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.5 6H13a2 2 0 0 1 2 2v1"/><path d="M15.5 11.2 15 14.5"/></svg>
+    </button>
+    <span class="ab-spacer"></span>
+    <button class="ab-item" type="button" aria-label="Settings">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></svg>
+    </button>
+  </nav>
+
+  <section class="sidebar" aria-label="Agent chat">
+
+    <header class="view-title">
+      <span>Agent chat</span>
+      <span class="view-title-actions">
+        <button class="icon-btn" type="button" aria-label="Refresh backend availability">
+          <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 11a8 8 0 1 0-1.6 5"/><path d="M20 5v6h-6"/></svg>
+        </button>
+        <button class="icon-btn" type="button" aria-label="Open settings">
+          <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></svg>
+        </button>
+      </span>
+    </header>
+
+    <div class="provider-bar">
+      <button class="provider-chip" type="button" aria-expanded="true" aria-controls="model-panel">
+        <span class="provider-dot provider-dot--ollama" aria-hidden="true"></span>
+        <span class="provider-name">Ollama Cloud</span>
+        <span class="meta-sep" aria-hidden="true">/</span>
+        <span class="model-name">qwen2.5-coder:32b</span>
+        <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+    </div>
+
+      <!-- Inline model switcher: full-width inside the view, never a floating popover (DESIGN.md). -->
+      <div class="model-panel" id="model-panel">
+        <div class="model-panel-head">Choose a model</div>
+        <ul class="model-list" role="listbox" aria-label="Model">
+          <li class="model-option" role="option" aria-selected="true">
+            <span class="provider-dot provider-dot--ollama" aria-hidden="true"></span>
+            <span>qwen2.5-coder:32b</span>
+            <span class="model-sub">Ollama Cloud</span>
+          </li>
+          <li class="model-option" role="option" aria-selected="false">
+            <span class="provider-dot provider-dot--ollama" aria-hidden="true"></span>
+            <span>llama3.1:70b</span>
+            <span class="model-sub">Ollama Cloud</span>
+          </li>
+          <li class="model-option" role="option" aria-selected="false">
+            <span class="provider-dot provider-dot--codex" aria-hidden="true"></span>
+            <span>gpt-5-codex</span>
+            <span class="model-sub">Codex</span>
+          </li>
+        </ul>
+      </div>
+
+    <div class="transcript" aria-label="Conversation transcript">
+      <div class="empty-state">
+        <span class="empty-icon" aria-hidden="true">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4L12 3z"/><path d="M18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z"/></svg>
+        </span>
+        <p class="empty-title">Ask the agent about this workspace</p>
+        <p class="empty-text">It can read files, run commands, and propose edits. Nothing is applied without your review.</p>
+        <hr class="divider">
+        <div class="suggestions">
+          <button class="suggestion" type="button">Explain the selected code</button>
+          <button class="suggestion" type="button">Find and fix a failing test</button>
+          <button class="suggestion" type="button">Add a retry with backoff to the Ollama client</button>
+        </div>
+      </div>
+    </div>
+
+    <form class="composer" aria-label="Message composer">
+      <div class="composer-box">
+        <label class="sr-only" for="prompt">Message the agent</label>
+        <textarea id="prompt" class="composer-input" rows="1" placeholder="Ask the agent..."></textarea>
+        <div class="composer-row">
+          <button class="icon-btn" type="button" aria-label="Attach context">
+            <svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 12.5 14.5 6a3 3 0 0 1 4.2 4.2L11 18a5 5 0 0 1-7-7l7.5-7.5"/></svg>
+          </button>
+          <span class="spacer"></span>
+          <button class="btn btn--primary" type="submit">
+            Send
+            <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <span class="composer-hint">Enter to send, Shift+Enter for a new line</span>
+    </form>
+
+  </section>
+
+  <main class="editor" aria-hidden="true">
+    <div class="tabs">
+      <span class="tab is-active">ollamaClient.ts</span>
+      <span class="tab">ollamaClient.test.ts</span>
+    </div>
+    <div class="editor-body">
+      <div class="editor-line"><span class="ln">1</span><span>export async function streamChat(input: ChatInput) {</span></div>
+      <div class="editor-line"><span class="ln">2</span><span>  const res = await fetch(this.url, { method: "POST" });</span></div>
+      <div class="editor-line"><span class="ln">3</span><span>  return parseStream(res);</span></div>
+      <div class="editor-line"><span class="ln">4</span><span>}</span></div>
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,276 @@
+/**
+ * Pure parser for `opencode run --format json` output.
+ *
+ * opencode writes one JSON object per line (NDJSON). This module turns a line
+ * into a small, provider-neutral shape the adapter can drive its normalized
+ * event union with. It is free of `vscode`, child processes and the filesystem
+ * so the mapping is unit-testable against real captured output.
+ *
+ * ## Facts this module is built on (verified against opencode 1.1.65)
+ *
+ * - Each line is `{ type, timestamp, sessionID, part?, error? }`. The `sessionID`
+ *   is how the adapter learns the runtime's own session id to persist and resume.
+ * - `type: "text"` carries `part.text`; `type: "reasoning"` carries reasoning
+ *   text. In this pinned version a whole text/reasoning part arrives at once
+ *   rather than as token deltas, so the adapter forwards each part as it lands.
+ * - `type: "tool_use"` carries `part.tool` and a `part.state` with a `status`
+ *   (`pending` | `running` | `completed` | `error`). A `write`/`edit`/`patch`
+ *   tool's `state.metadata.filepath` is the changed file; a `bash` tool's
+ *   `state.input.command` is the command.
+ * - `type: "error"` carries `error.data.message`.
+ * - A stream that ends without a terminal `step_finish` (reason `stop`) is a
+ *   stream error, not a successful turn.
+ */
+
+export interface OpencodeStepStartEvent {
+  kind: 'step-start';
+  sessionId?: string;
+}
+
+export interface OpencodeTextEvent {
+  kind: 'text';
+  sessionId?: string;
+  /** Part id, used to correlate deltas of one message part. */
+  partId: string;
+  text: string;
+}
+
+export interface OpencodeReasoningEvent {
+  kind: 'reasoning';
+  sessionId?: string;
+  partId: string;
+  text: string;
+}
+
+export interface OpencodeToolEvent {
+  kind: 'tool';
+  sessionId?: string;
+  callId: string;
+  tool: string;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  /** bash: the command line. */
+  command?: string;
+  /** write/edit/patch: the file the tool touched. */
+  filePath?: string;
+  /**
+   * write/patch: whether the target file already existed, from the tool's own
+   * metadata. `false` means the tool created it, so a late before snapshot
+   * cannot prove the create and this hint is used instead. Absent when the
+   * runtime did not report it.
+   */
+  fileExists?: boolean;
+  /** Tool output text, when completed. */
+  output?: string;
+  /** Short title opencode assigned the call. */
+  title?: string;
+  /** Structured todo list reported by OpenCode's todowrite tool. */
+  todos?: Array<{ text: string; status: 'pending' | 'inProgress' | 'completed' }>;
+}
+
+export interface OpencodeStepFinishEvent {
+  kind: 'step-finish';
+  sessionId?: string;
+  reason: string;
+}
+
+export interface OpencodeErrorEvent {
+  kind: 'error';
+  sessionId?: string;
+  message: string;
+  statusCode?: number;
+}
+
+/** A line that is valid JSON but of a shape this pinned version does not name. */
+export interface OpencodeUnknownEvent {
+  kind: 'unknown';
+  sessionId?: string;
+  type?: string;
+}
+
+/** A line that is not JSON at all, e.g. a human-readable log line. */
+export interface OpencodeMalformedEvent {
+  kind: 'malformed';
+  raw: string;
+}
+
+export type OpencodeEvent =
+  | OpencodeStepStartEvent
+  | OpencodeTextEvent
+  | OpencodeReasoningEvent
+  | OpencodeToolEvent
+  | OpencodeStepFinishEvent
+  | OpencodeErrorEvent
+  | OpencodeUnknownEvent
+  | OpencodeMalformedEvent;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** The `part` object of an event, when present. */
+function partOf(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  return asRecord(record.part);
+}
+
+/**
+ * Parse one NDJSON line from opencode. Never throws: an unparseable line is a
+ * `malformed` event and an unrecognized shape is `unknown`, so a newer opencode
+ * release adding an event type cannot break the transcript.
+ */
+export function parseOpencodeEvent(line: string): OpencodeEvent {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return { kind: 'malformed', raw: line };
+  }
+  let record: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(trimmed);
+    const asObj = asRecord(parsed);
+    if (!asObj) {
+      return { kind: 'malformed', raw: trimmed };
+    }
+    record = asObj;
+  } catch {
+    return { kind: 'malformed', raw: trimmed };
+  }
+
+  const type = asString(record.type);
+  const sessionId = asString(record.sessionID);
+  const part = partOf(record);
+
+  switch (type) {
+    case 'step_start':
+      return { kind: 'step-start', sessionId };
+    case 'text': {
+      const text = asString(part?.text);
+      const partId = asString(part?.id);
+      if (text === undefined || partId === undefined) {
+        return { kind: 'unknown', sessionId, type };
+      }
+      return { kind: 'text', sessionId, partId, text };
+    }
+    case 'reasoning': {
+      const text = asString(part?.text);
+      const partId = asString(part?.id);
+      if (text === undefined || partId === undefined) {
+        return { kind: 'unknown', sessionId, type };
+      }
+      return { kind: 'reasoning', sessionId, partId, text };
+    }
+    case 'tool_use': {
+      const tool = asString(part?.tool);
+      const callId = asString(part?.callID);
+      const state = asRecord(part?.state);
+      const status = asString(state?.status);
+      if (tool === undefined || callId === undefined) {
+        return { kind: 'unknown', sessionId, type };
+      }
+      const input = asRecord(state?.input);
+      const metadata = asRecord(state?.metadata);
+      const normalizedStatus =
+        status === 'completed' || status === 'error' || status === 'running' || status === 'pending'
+          ? status
+          : 'running';
+      const command = asString(input?.command);
+      const filePath = asString(metadata?.filepath) ?? asString(input?.filePath);
+      const fileExists = typeof metadata?.exists === 'boolean' ? metadata.exists : undefined;
+      const output = asString(state?.output);
+      const title = asString(state?.title);
+      const todos = tool.toLowerCase() === 'todowrite' ? parseTodos(input?.todos) : undefined;
+      return {
+        kind: 'tool',
+        sessionId,
+        callId,
+        tool,
+        status: normalizedStatus,
+        command,
+        filePath,
+        fileExists,
+        output,
+        title,
+        todos
+      };
+    }
+    case 'step_finish': {
+      const reason = asString(part?.reason) ?? 'unknown';
+      return { kind: 'step-finish', sessionId, reason };
+    }
+    case 'error': {
+      const error = asRecord(record.error);
+      const data = asRecord(error?.data);
+      const message = asString(data?.message) ?? asString(error?.name) ?? 'opencode reported an error.';
+      const statusCode = typeof data?.statusCode === 'number' ? data.statusCode : undefined;
+      return { kind: 'error', sessionId, message, statusCode };
+    }
+    default:
+      return { kind: 'unknown', sessionId, type };
+  }
+}
+
+function parseTodos(value: unknown): Array<{ text: string; status: 'pending' | 'inProgress' | 'completed' }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const todos = value.flatMap((entry) => {
+    const todo = asRecord(entry);
+    const text = asString(todo?.content)?.trim();
+    if (!todo || !text) return [];
+    const status = asString(todo.status)?.toLowerCase();
+    const normalizedStatus =
+      status === 'completed' || status === 'done'
+        ? 'completed'
+        : status === 'in_progress' || status === 'inprogress'
+          ? 'inProgress'
+          : 'pending';
+    return [{ text, status: normalizedStatus as 'pending' | 'inProgress' | 'completed' }];
+  });
+  return todos.length > 0 ? todos : undefined;
+}
+
+/**
+ * The session id on any event that carries one, so the adapter can persist it
+ * before the stream ends and even if the stream later fails.
+ */
+export function sessionIdOf(event: OpencodeEvent): string | undefined {
+  switch (event.kind) {
+    case 'malformed':
+      return undefined;
+    default:
+      return event.sessionId;
+  }
+}
+
+/** Whether a tool name changes files, so its card is a file-change card. */
+export function isFileTool(tool: string): boolean {
+  return tool === 'write' || tool === 'edit' || tool === 'patch';
+}
+
+/**
+ * The neutral file change a file-tool call names, or `undefined` for a tool that
+ * is not a file edit or that reported no path.
+ *
+ * `write`/`patch` on a path the tool says did not exist is a create; an `edit`
+ * or an existing target is a modification. A `bash` command's side effects are
+ * deliberately not inferred from its command line: the host watcher catches
+ * those as `watched`, which is honest about how they were learned.
+ */
+export function reportedChangeOfTool(event: OpencodeToolEvent): { absPath: string; status: 'created' | 'modified' } | undefined {
+  if (!isFileTool(event.tool) || !event.filePath) {
+    return undefined;
+  }
+  if (event.tool === 'write' && event.fileExists === false) {
+    return { absPath: event.filePath, status: 'created' };
+  }
+  return { absPath: event.filePath, status: 'modified' };
+}
+
+/**
+ * Whether a stream that ended with this last `step_finish` reason is a clean
+ * terminal. `stop` is a completed turn; anything else means the model stopped
+ * to run tools or the stream was cut, so the adapter must not report success.
+ */
+export function isTerminalStepReason(reason: string): boolean {
+  return reason === 'stop';
+}

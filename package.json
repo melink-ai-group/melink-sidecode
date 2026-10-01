@@ -1,0 +1,212 @@
+{
+  "name": "melink-agent-sidebar",
+  "displayName": "Agent sidebar",
+  "description": "One agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud and the OpenAI Codex CLI.",
+  "version": "0.1.0",
+  "publisher": "melink",
+  "icon": "media/melink-logo.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/melink/melink-agent-sidebar.git"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "agent",
+    "ollama",
+    "codex",
+    "chat",
+    "open-vsx"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "melinkAgent",
+          "title": "Agent",
+          "icon": "media/melink-logo.png"
+        }
+      ]
+    },
+    "views": {
+      "melinkAgent": [
+        {
+          "id": "melinkAgent.chat",
+          "name": "Agent chat",
+          "type": "webview",
+          "contextualTitle": "Agent sidebar"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "melink.setOllamaToken",
+        "title": "Agent: Set Ollama Cloud token"
+      },
+      {
+        "command": "melink.clearOllamaToken",
+        "title": "Agent: Clear Ollama Cloud token"
+      },
+      {
+        "command": "melink.refreshBackends",
+        "title": "Agent: Refresh backend availability",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "melink.openSettings",
+        "title": "Agent: Open settings"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "melink.refreshBackends",
+          "when": "view == melinkAgent.chat",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Agent sidebar",
+      "properties": {
+        "melink.ollama.baseUrl": {
+          "type": "string",
+          "default": "https://ollama.com",
+          "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **Agent: Set Ollama Cloud token** is sent as a bearer credential to this host."
+        },
+        "melink.ollama.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Default Ollama Cloud model. Empty means the first model reported by the backend is used."
+        },
+        "melink.ollama.opencode.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Run Ollama Cloud turns through the optional **opencode** agentic runtime (tool execution, file edits, session resume) instead of the direct `/api/chat` streaming adapter. Off by default; when off, no opencode process is spawned and the direct adapter is used unchanged."
+        },
+        "melink.ollama.opencode.path": {
+          "type": "string",
+          "default": "opencode",
+          "description": "Path to the opencode CLI executable used when melink.ollama.opencode.enabled is on. Resolved from PATH when it is a bare name."
+        },
+        "melink.codex.path": {
+          "type": "string",
+          "default": "codex",
+          "description": "Path to the OpenAI Codex CLI executable. Resolved from PATH when it is a bare name."
+        },
+        "melink.codex.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Default model passed to the Codex CLI. Empty means the CLI default is used."
+        },
+        "melink.defaults.permissionLevel": {
+          "type": "string",
+          "enum": ["read-only", "default", "unrestricted"],
+          "enumDescriptions": [
+            "Read-only: Codex runs read-only; anything that would write is requested.",
+            "Default: Codex runs workspace-write and asks before anything outside the sandbox.",
+            "Unrestricted: no sandbox and no prompts. Selecting this requires an explicit confirmation."
+          ],
+          "default": "default",
+          "description": "Default permission level for a new conversation. A per-conversation choice overrides it. Unrestricted must be confirmed before it is applied."
+        },
+        "melink.defaults.mode": {
+          "type": "string",
+          "enum": ["agent", "plan", "ask"],
+          "enumDescriptions": [
+            "Agent: the agent acts on the workspace.",
+            "Plan: the agent proposes a plan before acting.",
+            "Ask: the agent only answers questions."
+          ],
+          "default": "agent",
+          "description": "Default mode for a new conversation. A per-conversation choice overrides it."
+        },
+        "melink.defaults.thinking": {
+          "type": "string",
+          "enum": ["", "off", "low", "medium", "high", "extra high"],
+          "enumDescriptions": [
+            "No app default: each model uses its own reported default level.",
+            "Off: do not reason.",
+            "Low: minimal reasoning.",
+            "Medium: balanced reasoning.",
+            "High: more reasoning.",
+            "Extra high: the model's maximum reasoning effort."
+          ],
+          "default": "",
+          "description": "App-level default thinking level. A per-model choice overrides it, and a model's own reported default overrides this when neither is set."
+        },
+        "melink.context.includeInstructions": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Include instruction documents (`AGENTS.md`, `README.md`, `.github/copilot-instructions.md`) in the project context snapshot. A disabled category is never sent."
+        },
+        "melink.context.includeShape": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Include project shape (language breakdown, directory tree, manifests) in the project context snapshot."
+        },
+        "melink.context.includeEditorState": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Follow the active file and open editors. When off, no active-file path, language, or open-editor list is read or sent, and the composer strip stops naming a current file."
+        },
+        "melink.context.includeSelection": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Quote the current selection in the project context snapshot. When off, the selected text is never read. Selected text is sent verbatim, so only enable this when the selection is safe to share."
+        },
+        "melink.context.includeChangedFiles": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Include a changed-files notice in the per-turn context delta."
+        },
+        "melink.context.maxBytes": {
+          "type": "number",
+          "default": 20480,
+          "minimum": 1024,
+          "markdownDescription": "Overall byte cap for a rendered project-context snapshot. When the cap is reached, categories truncate in a documented order (open editors, then instruction documents, then the tree)."
+        },
+        "melink.context.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. An excluded path is never read, and a selection inside one is reported as excluded rather than quoted."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "schemas:generate": "codex app-server generate-ts --out ./schemas",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/vscode": "^1.93.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3"
+  }
+}

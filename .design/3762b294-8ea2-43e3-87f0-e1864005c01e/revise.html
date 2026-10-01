@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan review - revision in flight</title>
+<link rel="stylesheet" href="../../tokens.css">
+<link rel="stylesheet" href="./plan.css">
+</head>
+<body class="theme-light">
+<div class="workbench">
+
+  <nav class="activitybar" aria-label="Activity bar">
+    <button class="ab-item" type="button" aria-label="Explorer">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6h6l2 2h8v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"/></svg>
+    </button>
+    <button class="ab-item is-active" type="button" aria-label="Agent" aria-current="page">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4L12 3z"/></svg>
+    </button>
+    <span class="ab-spacer"></span>
+    <button class="ab-item" type="button" aria-label="Settings">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></svg>
+    </button>
+  </nav>
+
+  <section class="sidebar" aria-label="Agent chat">
+    <header class="view-title">
+      <div class="view-heading"><span class="view-name">Agent</span><span class="view-sub">sidebar</span></div>
+      <div class="view-title-actions">
+        <button class="icon-btn" type="button" aria-label="New chat"><svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button class="icon-btn" type="button" aria-label="Chat history"><svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></button>
+      </div>
+    </header>
+
+    <div class="transcript" aria-label="Conversation">
+      <article class="msg msg--user">
+        <div class="msg-meta"><span class="msg-name">You</span><span class="spacer"></span><span>just now</span></div>
+        <div class="msg-body"><p>Plan a fix for <code>buildContext()</code> dropping the selection when the file has unsaved edits.</p></div>
+      </article>
+
+      <article class="msg msg--assistant">
+        <div class="msg-meta"><span class="provider-dot" aria-hidden="true"></span><span class="msg-name">Ollama Cloud</span><span class="spacer"></span><span>just now</span></div>
+
+        <section class="plan-card is-revising" aria-labelledby="plan-title-r" aria-busy="true">
+          <header class="plan-card-head">
+            <span class="plan-card-title" id="plan-title-r">Plan</span>
+            <span class="chip chip--state">Revising</span>
+            <span class="spacer"></span>
+            <button class="plan-path" type="button" title="Open the plan file in the editor">
+              <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>
+              <span class="plan-path-text">.melink/plans/context-selection-dirty.md</span>
+            </button>
+          </header>
+
+          <div class="revising-bar" role="status">
+            <span class="stream-dot" aria-hidden="true"></span>
+            <span>Updating the plan from your request...</span>
+            <span class="spacer"></span>
+            <button class="link-btn" type="button">Cancel</button>
+          </div>
+
+          <div class="plan-doc is-dimmed" tabindex="0" aria-label="Current plan, being replaced">
+            <p>Make <code>buildContext()</code> read the live editor model instead of the saved document.</p>
+            <ol class="plan-steps">
+              <li>Add a live-model accessor to the context builder.</li>
+              <li>Fall back to disk only when no editor model exists.</li>
+              <li>Cover the dirty-buffer path with a unit test.</li>
+              <li>Update the context inspector to show the source of the selection.</li>
+            </ol>
+          </div>
+
+          <div class="revise-box">
+            <div class="revise-field" role="textbox" aria-label="Ask the model to update the plan" aria-multiline="true">
+              <span class="placeholder">Ask the model to update this plan</span>
+            </div>
+            <div class="revise-actions">
+              <span class="plan-actions-note">The updated plan replaces this one in place.</span>
+              <span class="spacer"></span>
+              <button class="btn btn--primary rev-send" type="button" disabled>Send revision</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="msg-body">
+          <p>I will fold the retry-on-conflict step into the plan and show it in place here.</p>
+        </div>
+      </article>
+    </div>
+
+    <div class="composer" aria-label="Message composer">
+      <div class="composer-input" role="textbox" aria-label="Message" aria-multiline="true">
+        <span class="placeholder">Ask about this workspace</span><span class="caret" aria-hidden="true"></span>
+      </div>
+      <div class="composer-bar" aria-label="Composer controls">
+        <button class="pill pill--model" type="button">
+          <span class="provider-dot" aria-hidden="true"></span>
+          <span class="pill-model-name">qwen3-coder:32b</span>
+          <svg class="ico-xs caret-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <button class="pill pill--mode" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="mode-panel" aria-label="Mode: Plan">
+          <svg class="ico-xs mode-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg>
+          <span>Plan</span>
+          <svg class="ico-xs caret-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <button class="pill" type="button" aria-label="Permissions: Workspace write">
+          <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="10" width="14" height="9" rx="1.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          <span>Workspace write</span>
+        </button>
+        <button class="pill pill--send" type="button" aria-label="Stop the current turn">
+          <svg class="ico-xs" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+          <span>Stop</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <main class="editor" aria-hidden="true">
+    <div class="editor-head">.melink/plans/context-selection-dirty.md</div>
+    <div class="editor-body"><div class="editor-line"><span class="ln">1</span><span># Fix selection in dirty buffers</span></div></div>
+  </main>
+
+</div>
+</body>
+</html>
