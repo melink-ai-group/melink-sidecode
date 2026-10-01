@@ -6,6 +6,7 @@ import {
   type JournalFs,
   type JournalStorage
 } from './journal.ts';
+import { diffLines } from './diff.ts';
 
 /**
  * An in-memory stand-in for `vscode.Memento`, so the index half of the store
@@ -397,4 +398,31 @@ test('a failed restore-point blob write leaves no point recorded', async () => {
   );
   fs.writeBlob = original;
   assert.equal(store.getRestorePoint('p1'), undefined);
+});
+
+test('a reported one-line edit without a pre-turn snapshot reviews as that line', async () => {
+  const fs = new FakeFs();
+  const before = 'alpha\nbeta\ngamma\ndelta\nepsilon\n';
+  const after = 'alpha\nbeta\nGAMMA\ndelta\nepsilon\n';
+  fs.files.set('/ws/.gitignore', text(after));
+  const store = journal(fs);
+
+  await store.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex' });
+  await store.observe(
+    't1',
+    '/ws/.gitignore',
+    'reported',
+    'modified',
+    '@@ -2,3 +2,3 @@\n beta\n-gamma\n+GAMMA\n delta\n'
+  );
+  await store.endTurn('t1');
+
+  const entry = store.getTurn('t1')!.files[0];
+  assert.equal(entry.relPath, '.gitignore');
+  assert.equal(entry.status, 'modified');
+  assert.equal(entry.hasBefore, true);
+  assert.equal(bytesToText(await store.getBefore('t1', '.gitignore')), before);
+  const diff = diffLines(before, after, '.gitignore');
+  assert.equal(diff.additions, 1);
+  assert.equal(diff.deletions, 1);
 });

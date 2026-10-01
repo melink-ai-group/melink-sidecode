@@ -4567,10 +4567,71 @@ button.context-meter:hover {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 2px 6px;
+}
+
+.changes-review.is-open .changes-review__head {
   border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.changes-review__collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-review__collapse:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.changes-review__collapse:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.changes-review__chevron {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  transition: transform 0.1s ease;
+}
+
+.changes-review.is-open .changes-review__chevron {
+  transform: rotate(90deg);
+}
+
+.changes-review__counts {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__review {
+  border-color: var(--melink-primary);
+  background: var(--melink-primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.changes-review__review:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
+  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  color: #fff;
 }
 
 /* The spacer pushes the file actions right; narrow sidebars wrap instead of clipping. */
@@ -4578,13 +4639,30 @@ button.context-meter:hover {
   flex: 1 1 auto;
 }
 
+.changes-review__head .btn:not(.btn--link) {
+  min-height: 0;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  gap: 3px;
+  line-height: 1;
+}
+
 .changes-review__head .btn--link {
   flex: 0 0 auto;
   white-space: nowrap;
+  font-size: 11px;
+  gap: 3px;
+  line-height: 1;
+}
+
+.changes-review__head .ico {
+  width: 12px;
+  height: 12px;
 }
 
 .changes-review__title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--vscode-foreground);
   white-space: nowrap;
@@ -4624,10 +4702,12 @@ button.context-meter:hover {
 .changes-review__list {
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: 2px 0;
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .changes-review__more {
@@ -4638,9 +4718,65 @@ button.context-meter:hover {
 }
 
 .change-row {
+  width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: var(--melink-radius-sm, 4px);
+}
+
+.change-row__line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 2px 6px;
+}
+
+.change-row__main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.change-row__main .status-chip,
+.change-row__main .diff-stats {
+  flex: 0 0 auto;
+}
+
+.change-row__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.change-row__actions .btn {
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.change-row__detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .change-row:hover {
@@ -4939,7 +5075,7 @@ button.context-meter:hover {
 
 @media (max-width: 340px) {
   .changes-review__foot-actions .btn,
-  .change-row__bar .btn {
+  .change-row__actions .btn {
     flex: 1 1 auto;
     justify-content: center;
   }

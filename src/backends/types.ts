@@ -405,6 +405,12 @@ export interface ReportedChange {
   /** Absolute path the adapter observed. */
   absPath: string;
   status: ChangeStatus;
+  /**
+   * Unified diff of this edit, when the backend sent one. The journal uses it
+   * to recover the pre-edit file when it has no pre-turn snapshot, so a
+   * one-line edit is not reviewed as a whole-file addition.
+   */
+  diff?: string;
 }
 
 /** One changed file attached to a `file-change` item. */

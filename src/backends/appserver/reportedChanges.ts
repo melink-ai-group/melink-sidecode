@@ -63,10 +63,10 @@ function fromLegacyChange(path: string, change: FileChange, origin: string): Rep
         // match reports the pair as one rename rather than a delete plus create.
         return [
           { absPath, status: 'deleted' },
-          { absPath: absolute(change.move_path, origin), status: 'modified' }
+          reported(absolute(change.move_path, origin), 'modified', change.unified_diff)
         ];
       }
-      return [{ absPath, status: 'modified' }];
+      return [reported(absPath, 'modified', change.unified_diff)];
     default:
       return [];
   }
@@ -92,10 +92,15 @@ function fromUpdateChange(change: FileUpdateChange, origin: string): ReportedCha
       if (!patchHasEdits(change.diff)) {
         return [];
       }
-      return [{ absPath, status: 'modified' }];
+      return [reported(absPath, 'modified', change.diff)];
     default:
       return [];
   }
+}
+
+/** Attach a diff only when it names a real edit, so a read stays path-only. */
+function reported(absPath: string, status: 'modified', diff: string): ReportedChange {
+  return patchHasEdits(diff) ? { absPath, status, diff } : { absPath, status };
 }
 
 /** True when a unified diff contains at least one added or removed line. */
