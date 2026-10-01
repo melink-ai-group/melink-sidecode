@@ -9,6 +9,8 @@ import {
   ApprovalRule,
   BackendError,
   BackendModel,
+  CompactRequest,
+  CompactResult,
   ConnectionTestResult,
   ContextPayload,
   DefaultMode,
@@ -30,6 +32,16 @@ import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './mod
 // imported inside the enabled branch only. `isFileTool` is a pure predicate
 // with no child-process dependency, so it is safe to import directly.
 import { isFileTool, reportedChangeOfTool } from './opencode/events';
+import { ollamaContextUsed } from './contextUsage';
+import {
+  COMPACTION_INSTRUCTIONS,
+  compactedTranscript,
+  compactedSummary,
+  compactionPreface,
+  compactionSource,
+  fitCompactionSource
+} from './compaction';
+import { cleanToolTarget, friendlyToolTitle, isStatusText } from './toolLabel.ts';
 import type { OpencodeEvent } from './opencode/events';
 import type { OpencodeOutcome } from './opencode/runtime';
 import { isAbsolute, resolve } from 'node:path';
@@ -42,6 +54,10 @@ interface OllamaChatChunk {
   message?: { role?: string; content?: string; thinking?: string };
   done?: boolean;
   error?: string;
+  /** Prompt tokens evaluated for this request. Present on the final chunk, and sometimes earlier. */
+  prompt_eval_count?: number;
+  /** Tokens generated so far. Grows as the stream runs when the server reports it. */
+  eval_count?: number;
 }
 
 /** A provider failure already translated into the UI's error taxonomy. */
@@ -93,14 +109,17 @@ function isAbortError(error: unknown): boolean {
  * compact delta, keeping the stable prefix cacheable and per-turn cost flat. The
  * context exists only in this prompt and is never written to any transcript.
  */
-function opencodePrompt(request: SendTurnRequest, freshSession: boolean): string {
+function opencodePrompt(request: SendTurnRequest, freshSession: boolean, summary?: string): string {
   const context = request.context;
   const block = freshSession
     ? context?.snapshot ?? context?.notice
     : context?.delta ?? context?.notice;
   const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
   const instructions = modeInstructions(mode);
-  const parts = [instructions, block, context?.attachedFile, request.text].filter(
+  // A fresh session has no memory of the thread. The compaction summary is
+  // included once here; later turns resume the session and do not repeat it.
+  const preface = freshSession && summary ? compactionPreface(summary) : undefined;
+  const parts = [instructions, preface, block, context?.attachedFile, request.text].filter(
     (part): part is string => Boolean(part && part.trim().length > 0)
   );
   return parts.join('\n\n');
@@ -477,6 +496,79 @@ export class OllamaBackend implements AgentBackend {
     this.inFlight?.abort();
   }
 
+  /**
+   * Summarize the stored conversation with the same model and replace it.
+   *
+   * `/api/chat` is stateless, and an opencode session keeps its own history, so
+   * both paths shrink only when the transcript becomes the summary and the
+   * opencode session is dropped. The next opencode turn is fresh and carries
+   * the summary once. The transcript itself is returned for the host to store;
+   * this adapter does not write it.
+   */
+  async compact(handle: ThreadHandle, request: CompactRequest): Promise<CompactResult> {
+    const token = await this.token();
+    if (!token) {
+      throw new BackendError('unauthenticated', 'Set an Ollama Cloud token before compacting context.');
+    }
+    const model = request.model ?? this.defaultModel;
+    if (!model) {
+      throw new BackendError('provider', 'No Ollama Cloud model selected.');
+    }
+    const source = fitCompactionSource(compactionSource(request.transcript), request.maxTokens);
+    if (!source.trim()) {
+      throw new BackendError('provider', 'There is no conversation to compact.');
+    }
+
+    const controller = new AbortController();
+    this.inFlight = controller;
+    let summary = '';
+    try {
+      const settings =
+        request.modelSettings?.contextWindow !== undefined
+          ? request.modelSettings
+          : request.maxTokens
+            ? { ...request.modelSettings, contextWindow: request.maxTokens }
+            : request.modelSettings;
+      const response = await this.request('/api/chat', token, {
+        method: 'POST',
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          stream: false,
+          messages: [
+            { role: 'system', content: COMPACTION_INSTRUCTIONS },
+            { role: 'user', content: source }
+          ],
+          ...ollamaNativeRequest(settings)
+        })
+      });
+      const body = (await response.json()) as OllamaChatChunk;
+      if (body.error) {
+        throw new BackendError('provider', body.error);
+      }
+      summary = body.message?.content?.trim() ?? '';
+    } catch (error) {
+      if (this.inFlight === controller) {
+        this.inFlight = undefined;
+      }
+      const failure = this.categorize(error);
+      throw new BackendError(
+        failure.code === 'unauthenticated' ? 'unauthenticated' : 'provider',
+        failure.code === 'canceled' ? 'Compaction canceled.' : failure.message
+      );
+    }
+    if (this.inFlight === controller) {
+      this.inFlight = undefined;
+    }
+    if (!summary) {
+      throw new BackendError('provider', 'Compaction did not return a summary.');
+    }
+    // Drop the live session only after a summary exists, so a failed compact
+    // leaves the conversation where it was.
+    await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
+    return { transcript: compactedTranscript(summary) };
+  }
+
   async sendTurn(handle: ThreadHandle, request: SendTurnRequest): Promise<void> {
     const token = await this.token();
     if (!token) {
@@ -639,7 +731,8 @@ export class OllamaBackend implements AgentBackend {
     // even when this is not the thread's first turn, so a stale-session retry
     // does not start a new session with only a delta. The cwd above is the
     // workspace root, so opencode's own `AGENTS.md` discovery works either way.
-    const promptFor = (fresh: boolean) => opencodePrompt(request, fresh);
+    const summary = compactedSummary(this.store?.getTranscript(this.id, handle.threadId) ?? []);
+    const promptFor = (fresh: boolean) => opencodePrompt(request, fresh, fresh ? summary : undefined);
 
     // The cwd the child is spawned with, reused to anchor a relative tool path.
     // It is the same root the snapshot service supplied, or the adapter's own
@@ -782,6 +875,12 @@ export class OllamaBackend implements AgentBackend {
             changes: [{ absPath: isAbsolute(reported.absPath) ? reported.absPath : resolve(cwd, reported.absPath), status: reported.status }]
           });
         }
+        const target =
+          cleanToolTarget(event.target) ??
+          cleanToolTarget(event.command) ??
+          cleanToolTarget(event.filePath) ??
+          cleanToolTarget(event.title);
+        const output = event.output && !isStatusText(event.output) ? event.output : undefined;
         this.events.fire({
           type: 'item/started',
           backendId: this.id,
@@ -790,15 +889,16 @@ export class OllamaBackend implements AgentBackend {
             ? {
                 id: itemId,
                 kind: 'file-change',
-                title: event.title ?? event.tool,
-                files: event.filePath ? [{ path: event.filePath }] : []
+                title: friendlyToolTitle(event.tool, event.filePath ?? target),
+                files: event.filePath ? [{ path: event.filePath }] : [],
+                text: output
               }
             : {
                 id: itemId,
                 kind: 'tool',
-                title: event.tool,
-                command: event.command,
-                detail: event.status
+                title: friendlyToolTitle(event.tool, target),
+                command: target,
+                text: output
               }
         });
         // A non-terminal tool card must not be closed early; a terminal state
@@ -815,6 +915,15 @@ export class OllamaBackend implements AgentBackend {
         break;
       }
       case 'step-finish':
+        if (event.usedTokens !== undefined) {
+          this.events.fire({
+            type: 'context/usage',
+            backendId: this.id,
+            threadId,
+            usedTokens: event.usedTokens
+          });
+        }
+        break;
       case 'step-start':
       case 'unknown':
       case 'malformed':
@@ -1014,6 +1123,15 @@ export class OllamaBackend implements AgentBackend {
     const delta = chunk.message?.content;
     if (delta) {
       this.events.fire({ type: 'item/delta', backendId: this.id, threadId: handle.threadId, itemId, delta });
+    }
+    const used = ollamaContextUsed(chunk.prompt_eval_count, chunk.eval_count);
+    if (used !== undefined) {
+      this.events.fire({
+        type: 'context/usage',
+        backendId: this.id,
+        threadId: handle.threadId,
+        usedTokens: used
+      });
     }
   }
 

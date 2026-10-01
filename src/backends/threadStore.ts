@@ -51,6 +51,8 @@ export interface PersistedPlanState {
   title: string;
   /** The plan's "what it will do" paragraph, when one was written. */
   summary?: string;
+  /** Markdown between the title and the `## Steps` list. */
+  body?: string;
   /** The plan's bullet list, with each step's live status. */
   steps: TodoStep[];
   /** True once the plan has been built (the thread moved to execution). */

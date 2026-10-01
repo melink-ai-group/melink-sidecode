@@ -64,7 +64,7 @@ test('the opencode prompt priming is documented as a deliberate fallback', async
   const text = await source('backends/ollama.ts');
   assert.match(text, /native system\/instructions field/i);
   assert.match(text, /deliberate fallback, not an oversight/i);
-  assert.match(text, /opencodePrompt\(request, fresh\)/);
+  assert.match(text, /opencodePrompt\(request, fresh, fresh \? summary : undefined\)/);
 });
 
 test('the snapshot service owns the workspace root; adapters prefer it over the host', async () => {
@@ -138,13 +138,12 @@ test('the strip follows editor and selection changes without touching the transc
   assert.equal(/refreshContextView\(\)[\s\S]{0,200}transcript/.test(view), false);
 });
 
-test('the inspect panel floats above the composer with bounded scrolling', async () => {
+test('the strip shows context fill and does not open project-context references', async () => {
   const strip = await source('webview/ContextStrip.tsx');
-  assert.match(strip, /className="context-panel"/);
-  assert.equal(/createPortal|position:\s*fixed/.test(strip), false);
-  const css = await source('webview/styles.css');
-  const contextBlock = css.slice(css.indexOf('.context-panel {'));
-  assert.match(contextBlock.slice(0, 500), /position:\s*absolute/);
-  assert.match(contextBlock.slice(0, 500), /min-height:\s*min\(/);
-  assert.match(contextBlock.slice(0, 500), /overflow-y:\s*auto/);
+  assert.match(strip, /context-meter/);
+  assert.match(strip, /onCompact/);
+  assert.equal(/context-panel/.test(strip), false);
+  assert.equal(/context-branch/.test(strip), false);
+  assert.equal(/context-more/.test(strip), false);
+  assert.equal(/setOpen/.test(strip), false);
 });

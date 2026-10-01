@@ -412,6 +412,12 @@ export type WebviewToHostMessage =
       modelSettings?: ModelSettingOverrides;
       /** Files attached to this turn; carried on the outgoing message. */
       attachments?: Attachment[];
+      /**
+       * True when this turn should replace the plan document. Set by Ask for
+       * changes. Composer text that asks to revise the plan is detected on
+       * the host as well.
+       */
+      updatePlan?: boolean;
     }
   | { type: 'steerTurn'; text: string }
   /**
@@ -426,6 +432,11 @@ export type WebviewToHostMessage =
    */
   | { type: 'readClipboard'; requestId: string }
   | { type: 'cancelTurn' }
+  /**
+   * Compact the active thread. The webview sends the fill it is showing; the
+   * host compacts only while idle and only when that fill is above 25%.
+   */
+  | { type: 'compactContext'; usedTokens: number; maxTokens: number }
   | { type: 'listThreads'; backendId: string }
   | { type: 'resumeThread'; backendId: string; threadId: string }
   | { type: 'getSettings' }
@@ -464,7 +475,7 @@ export type WebviewToHostMessage =
    * documented per-thread path; creating it is the one permitted write in Plan
    * mode. A revision updates the same file rather than creating a second plan.
    */
-  | { type: 'writePlan'; title: string; summary?: string; steps: TodoStep[] }
+  | { type: 'writePlan'; title: string; summary?: string; body?: string; steps: TodoStep[] }
   /** Set one tracked todo step's status; persisted so a reload keeps progress. */
   | { type: 'setTodoStepStatus'; step: string; status: TodoStepStatus }
   /**

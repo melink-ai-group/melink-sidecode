@@ -52,6 +52,7 @@ test('a terminal step_finish is recognized, a non-terminal one is not', () => {
   assert.equal(stop.kind, 'step-finish');
   if (stop.kind === 'step-finish') {
     assert.equal(stop.reason, 'stop');
+    assert.equal(stop.usedTokens, 11479);
     assert.equal(isTerminalStepReason(stop.reason), true);
   }
   assert.equal(isTerminalStepReason('tool-calls'), false);
@@ -148,6 +149,34 @@ test('an edit tool reports a modification and a bash tool reports nothing', () =
     // A shell command's writes are deliberately not inferred; the watcher is
     // what catches those, marked `watched`.
     assert.equal(reportedChangeOfTool(bash), undefined);
+  }
+});
+
+test('glob, read, and grep expose the pattern, path, or query as the target', () => {
+  const glob = parseOpencodeEvent(
+    '{"type":"tool_use","sessionID":"s","part":{"callID":"g","tool":"glob","state":{"status":"completed","input":{"pattern":"**/*.ts"},"title":"completed"}}}'
+  );
+  assert.equal(glob.kind, 'tool');
+  if (glob.kind === 'tool') {
+    assert.equal(glob.target, '**/*.ts');
+    assert.equal(glob.command, undefined);
+  }
+
+  const read = parseOpencodeEvent(
+    '{"type":"tool_use","sessionID":"s","part":{"callID":"r","tool":"read","state":{"status":"completed","input":{"filePath":"src/webview/App.tsx"}}}}'
+  );
+  assert.equal(read.kind, 'tool');
+  if (read.kind === 'tool') {
+    assert.equal(read.target, 'src/webview/App.tsx');
+    assert.equal(read.filePath, 'src/webview/App.tsx');
+  }
+
+  const grep = parseOpencodeEvent(
+    '{"type":"tool_use","sessionID":"s","part":{"callID":"p","tool":"grep","state":{"status":"completed","input":{"pattern":"transcriptRef","path":"src"}}}}'
+  );
+  assert.equal(grep.kind, 'tool');
+  if (grep.kind === 'tool') {
+    assert.equal(grep.target, 'transcriptRef');
   }
 });
 

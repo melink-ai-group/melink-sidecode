@@ -33,7 +33,7 @@ const webviewOptions = {
   platform: 'browser',
   target: 'es2020',
   jsx: 'automatic',
-  loader: { '.css': 'css' },
+  loader: { '.css': 'css', '.png': 'dataurl' },
   define: { 'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development') }
 };
 

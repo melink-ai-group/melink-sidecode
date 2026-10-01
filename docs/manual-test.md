@@ -112,7 +112,8 @@ the same workspace.
 - [ ] 3. Command Palette → **Developer: Reload Window**.
 - [ ] 4. Open the sidebar (Activity Bar → **SideCode**).
 - [ ] 5. **Expected sidebar state:** transcript reaches the empty state
-      *“Ask the agent about this workspace”* with the three suggestion buttons;
+      the meLink mark and the name *“meLink SideCode”*, with no suggestion buttons
+      and a tall composer;
       composer placeholder reads `Ask the agent...` and is enabled (input not
       disabled) after restore completes.
 - [ ] 6. **Expected switcher:** open the **Model** trigger.
@@ -130,8 +131,8 @@ the same workspace.
 - [ ] 8. **SideCode: Clear Ollama Cloud token**, then reload the window.
 - [ ] 9. Ensure the CLI is resolvable again (step 0.5 restored) and signed in.
 - [ ] 10. Open the sidebar, open the **Model** trigger.
-      - **Expected sidebar state:** empty state *“Ask the agent about this
-        workspace”*; composer enabled with placeholder `Ask the agent...`.
+      - **Expected sidebar state:** empty state with the meLink mark and the name
+        *“meLink SideCode”*; composer enabled with placeholder `Ask the agent...`.
       - **Expected switcher:** exactly one group, **OpenAI Codex CLI**, listing
         `gpt-5-codex` and `gpt-5`. The **Ollama Cloud group does not appear** (an
         unauthenticated provider is not diluted in while a provider is available).

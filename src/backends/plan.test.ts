@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PLAN_DIRECTORY,
+  mergeCheckboxStatuses,
+  parsePlanBody,
   parsePlanSteps,
   parsePlanSummary,
   parsePlanTitle,
   planArtifactFromMarkdown,
+  planDocumentFromReply,
   planFileName,
   planRelativePath,
   planStepsFromReply,
@@ -15,7 +18,8 @@ import {
   stepMarker,
   statusForMarker,
   todoStepsFromNative,
-  updateStepStatus
+  updateStepStatus,
+  userAsksToRevisePlan
 } from './plan.ts';
 import { denyInProgressStep, settleInProgressSteps } from './types.ts';
 import { modeRefusalReason } from './modes.ts';
@@ -262,6 +266,105 @@ test('settling never revives a denied step', () => {
     { text: 'refused', status: 'denied' },
     { text: 'running', status: 'pending' }
   ]);
+});
+
+test('the document body round-trips and the todo list stays at the end', () => {
+  const body = ['Read the editor model first.', '', 'Then fall back to disk when no model is open.'].join('\n');
+  const steps: TodoStep[] = [
+    { text: 'Add the accessor', status: 'pending' },
+    { text: 'Cover the fallback', status: 'inProgress' }
+  ];
+  const markdown = renderPlanMarkdown({ title: 'Live selection', body, steps });
+  assert.ok(markdown.indexOf(body) < markdown.indexOf('## Steps'));
+  assert.equal(parsePlanBody(markdown), body);
+  assert.equal(parsePlanSummary(markdown), 'Read the editor model first.');
+  assert.deepEqual(parsePlanSteps(markdown), steps);
+  const artifact = planArtifactFromMarkdown({
+    path: '.melink/plans/t.md',
+    markdown,
+    fallbackTitle: 'Plan',
+    updatedAt: 3
+  });
+  assert.equal(artifact.body, body);
+  assert.equal(artifact.summary, 'Read the editor model first.');
+});
+
+test('a reply with a steps heading keeps the body and ignores an earlier bullet list', () => {
+  const reply = [
+    '# Live selection',
+    '',
+    'Read the editor model first.',
+    '',
+    'Notes:',
+    '',
+    '- this bullet is prose, not a step',
+    '',
+    '## Steps',
+    '',
+    '- [ ] Add the accessor',
+    '- [x] Cover the fallback'
+  ].join('\n');
+  assert.deepEqual(planDocumentFromReply(reply), {
+    title: 'Live selection',
+    body: ['Read the editor model first.', '', 'Notes:', '', '- this bullet is prose, not a step'].join('\n'),
+    summary: 'Read the editor model first.',
+    steps: [
+      { text: 'Add the accessor', status: 'pending' },
+      { text: 'Cover the fallback', status: 'completed' }
+    ]
+  });
+});
+
+test('a reply without a steps heading still uses the first list and the prose before it', () => {
+  const reply = ['Here is the plan.', '', 'It touches one file.', '', '- Add a retry', '- Run the suite'].join('\n');
+  const draft = planDocumentFromReply(reply);
+  assert.equal(draft.body, 'Here is the plan.\n\nIt touches one file.');
+  assert.equal(draft.summary, 'Here is the plan.');
+  assert.deepEqual(draft.steps, [
+    { text: 'Add a retry', status: 'pending' },
+    { text: 'Run the suite', status: 'pending' }
+  ]);
+});
+
+test('a revision is recognised only when the user asks to change the plan', () => {
+  assert.equal(userAsksToRevisePlan('please update the plan to include tests'), true);
+  assert.equal(userAsksToRevisePlan('revise this plan'), true);
+  assert.equal(userAsksToRevisePlan('can you change the plan'), true);
+  assert.equal(userAsksToRevisePlan('does this plan include tests?'), false);
+  assert.equal(userAsksToRevisePlan('fix the failing test'), false);
+  assert.equal(userAsksToRevisePlan(''), false);
+});
+
+test('checkbox lines update matching steps and leave the rest of the list alone', () => {
+  const steps: TodoStep[] = [
+    { text: 'Add the accessor', status: 'pending' },
+    { text: 'Cover the fallback', status: 'pending' },
+    { text: 'same', status: 'pending' },
+    { text: 'same', status: 'pending' }
+  ];
+  const reply = ['Done with the first step.', '', '- [x] Add the accessor', '- [~] same', '- [x] same'].join('\n');
+  assert.deepEqual(mergeCheckboxStatuses(steps, reply), [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'pending' },
+    { text: 'same', status: 'inProgress' },
+    { text: 'same', status: 'completed' }
+  ]);
+  assert.deepEqual(mergeCheckboxStatuses(steps, 'No checklist here.'), steps.map((step) => ({ ...step })));
+});
+
+test('rewriting steps keeps the document body', () => {
+  const body = 'Read the editor model first.\n\nThen fall back to disk.';
+  const markdown = renderPlanMarkdown({
+    title: 'Live selection',
+    body,
+    steps: [
+      { text: 'Add the accessor', status: 'completed' },
+      { text: 'Cover the fallback', status: 'pending' }
+    ]
+  });
+  assert.equal(parsePlanBody(markdown), body);
+  assert.match(markdown, /- \[x\] Add the accessor/);
+  assert.ok(markdown.trimEnd().endsWith('- [ ] Cover the fallback'));
 });
 
 test('denying marks the running step as denied and leaves the rest alone', () => {

@@ -1,4 +1,5 @@
 import type { FileChange, FileChangeLine, TranscriptItem } from '../types';
+import { friendlyToolTitle, targetFromJson } from '../toolLabel.ts';
 import type { ThreadItem } from '../../../schemas/v2/ThreadItem';
 import type { CommandExecutionStatus } from '../../../schemas/v2/CommandExecutionStatus';
 import type { PatchApplyStatus } from '../../../schemas/v2/PatchApplyStatus';
@@ -77,7 +78,7 @@ export function translateItem(item: ThreadItem): TranslatedItem {
         item: {
           id: item.id,
           kind: 'tool',
-          title: 'Command',
+          title: friendlyToolTitle('command', item.command ?? undefined),
           command: item.command,
           detail: item.aggregatedOutput ?? undefined,
           text: item.aggregatedOutput ?? '',
@@ -103,7 +104,8 @@ export function translateItem(item: ThreadItem): TranslatedItem {
         item: {
           id: item.id,
           kind: 'tool',
-          title: `${item.server} · ${item.tool}`,
+          title: `${item.server} · ${friendlyToolTitle(item.tool, targetFromJson(item.tool, item.arguments))}`,
+          command: targetFromJson(item.tool, item.arguments),
           detail: item.error?.message ?? undefined,
           status: item.status === 'inProgress' ? undefined : item.status === 'completed' ? 'completed' : 'failed'
         }
@@ -115,7 +117,8 @@ export function translateItem(item: ThreadItem): TranslatedItem {
         item: {
           id: item.id,
           kind: 'tool',
-          title: item.tool,
+          title: friendlyToolTitle(item.tool, targetFromJson(item.tool, item.arguments)),
+          command: targetFromJson(item.tool, item.arguments),
           status: item.status === 'inProgress' ? undefined : item.status === 'completed' ? 'completed' : 'failed'
         }
       };

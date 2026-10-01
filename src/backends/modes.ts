@@ -35,8 +35,8 @@ export interface ModeDescriptor {
    */
   enforcement: ModeEnforcement;
   /**
-   * The `developerInstructions` Codex receives, or `undefined` for the default.
-   * These shape the model's behaviour; they are never the only line of defence.
+   * The `developerInstructions` Codex receives. These shape the model's
+   * behaviour; they are never the only line of defence.
    */
   developerInstructions?: string;
 }
@@ -47,15 +47,16 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     label: 'Agent',
     description: 'The agent acts on the workspace.',
     enforcement: 'act',
-    developerInstructions: undefined
+    developerInstructions:
+      'Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report progress with checkbox lines that repeat each step\u2019s text exactly ("- [~] ..." while it is in progress, "- [x] ..." when it is done, "- [-] ..." if it was denied). Do not rewrite the plan prose.'
   },
   {
     mode: 'plan',
     label: 'Plan',
-    description: 'The agent writes a plan and waits for approval before changing anything.',
+    description: 'The agent writes a plan document that ends in a todo list, and waits for approval before changing anything.',
     enforcement: 'act',
     developerInstructions:
-      'Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and propose steps before implementation), and Ask (answer questions without acting). Investigate what the task requires, then produce a plan whose steps are a markdown bullet list, one step per line. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps.'
+      'Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Investigate what the task requires, then answer with one markdown plan: a title, the plan body (approach, files, and risks), and a final "## Steps" section whose items are a checkbox list, one step per line ("- [ ] ..."). Do not implement the plan. If a plan already exists, leave that document unchanged unless the user asked you to update or revise it. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps.'
   },
   {
     mode: 'ask',
@@ -63,7 +64,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent only answers questions and does not change anything.',
     enforcement: 'answer-only',
     developerInstructions:
-      'Work in Ask mode. The available modes are Agent (act on the workspace), Plan (investigate and propose steps without applying them), and Ask (answer questions without acting). Answer the user\u2019s questions using what you can read. Do not run commands, edit files, or propose changes to the workspace; if the user asks you to make a change, explain that Ask mode only answers questions and that the host can switch to Agent or Plan.'
+      'Work in Ask mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Answer the user\u2019s questions using what you can read. Do not run commands, edit files, write or revise the plan document, or propose changes to the workspace; if the user asks you to make a change, explain that Ask mode only answers questions and that the host can switch to Agent or Plan.'
   }
 ];
 
@@ -80,7 +81,7 @@ export function isDefaultMode(value: unknown): value is DefaultMode {
   return typeof value === 'string' && (DEFAULT_MODES as readonly string[]).includes(value);
 }
 
-/** The `developerInstructions` for a mode, or `undefined` for the CLI default. */
+/** The `developerInstructions` for a mode. */
 export function modeInstructions(mode: DefaultMode): string | undefined {
   return modeDescriptor(mode).developerInstructions;
 }

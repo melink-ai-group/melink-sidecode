@@ -367,8 +367,8 @@ across a reload.
 
 ## Verify it works
 
-1. Reopen the sidebar. The empty state should read *"Ask the agent about this
-   workspace"* with a few suggestion buttons.
+1. Reopen the sidebar. An empty chat shows the meLink mark and the name
+   **meLink SideCode**, with a tall composer and no suggestion buttons.
 2. Open the **Model** trigger. You should see one group per provider you set up,
    listing that provider's live models.
 3. Type a message and press **Enter**. The reply streams into the transcript.
