@@ -180,6 +180,12 @@ export interface EditorState {
   /** The active terminal's cwd, or `null` when no terminal is open. */
   terminalCwd: string | null;
   truncated: string | null;
+  /**
+   * Set only on the copy handed to the renderer.
+   * `false`: do not name a current file.
+   * `true`: a separate per-turn block carries the file the user attached.
+   */
+  activeFileAttached?: boolean;
 }
 
 /** Per-category byte caps, plus the overall cap. Every value is a byte count. */
@@ -206,6 +212,9 @@ export interface ContextBudget {
   /** Largest excerpt length for one instruction document or selection. */
   excerptBytes: number;
 }
+
+/** Largest excerpt of an explicitly attached file. The rest is marked truncated. */
+export const ATTACHED_FILE_BYTES = 12_288;
 
 export const DEFAULT_BUDGET: ContextBudget = {
   identity: 2_048,
@@ -324,6 +333,11 @@ export interface ProjectContextHost {
     isActive: boolean;
     isDirty: boolean;
   }[];
+  /**
+   * Text of the file the user is viewing, including unsaved edits. Called only
+   * after the path has been classified as safe to read.
+   */
+  activeFileText?(): string;
   /** Paths of dirty files (whether or not they are visible). */
   dirtyFiles(): readonly string[];
   /** The active terminal's cwd, or `null` when no terminal is open. */
@@ -403,6 +417,22 @@ export interface ProjectContextReads {
    * need not supply them; an absent read means the documented defaults.
    */
   contextSettings?(): ContextSettings;
+  /**
+   * The file the user is viewing, read only when that path is safe. Absent when
+   * no file is open. The renderer turns this into the per-turn block.
+   */
+  viewedFileAttachment?(): Promise<ViewedFileAttachment | undefined>;
+}
+
+/** The current file, ready to render. Contents are absent when the path is excluded. */
+export interface ViewedFileAttachment {
+  path: string;
+  languageId: string;
+  excluded: boolean;
+  exclusionReason?: ExclusionReason;
+  text?: string;
+  truncated?: boolean;
+  selection?: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1281,6 +1311,50 @@ export class ProjectContext implements ProjectContextReads {
         truncated: null
       },
       excludedPaths
+    };
+  }
+
+  /**
+   * The file the user is viewing, for an explicit attach. A secret or other
+   * excluded path is reported and never read.
+   */
+  async viewedFileAttachment(): Promise<ViewedFileAttachment | undefined> {
+    const active = this.host.activeEditor();
+    if (!active) {
+      return undefined;
+    }
+    const roots = this.host.workspaceRoots();
+    const globOptions: GlobOptions = {
+      patterns: [...this.host.filesExclude(), ...this.host.searchExclude()],
+      user: [...this.host.userExclude()],
+      root: roots[0]
+    };
+    const classified = this.classify(active.absolutePath, roots, globOptions);
+    const path = displayPath(active.absolutePath, roots) ?? active.absolutePath;
+    if (classified.excluded) {
+      return {
+        path,
+        languageId: active.languageId,
+        excluded: true,
+        ...(classified.reason ? { exclusionReason: classified.reason } : {})
+      };
+    }
+    const raw = this.host.activeFileText?.() ?? (await this.host.readFile(active.absolutePath)) ?? '';
+    const bounded = cutToBytes(raw, ATTACHED_FILE_BYTES);
+    let selection: string | undefined;
+    if (active.selection && this.settings().includeSelection) {
+      const selected = cutToBytes(this.host.activeSelectionText(), this.budget.excerptBytes);
+      if (selected.text.length > 0) {
+        selection = selected.text;
+      }
+    }
+    return {
+      path,
+      languageId: active.languageId,
+      excluded: false,
+      text: bounded.text,
+      truncated: bounded.truncated,
+      ...(selection ? { selection } : {})
     };
   }
 

@@ -308,7 +308,14 @@ export type HostToWebviewMessage =
    * inspect panel. Built by the host from the same snapshot a turn is sent
    * with, so the panel never shows context the next turn would not carry.
    */
-  | { type: 'context'; view: ContextView; settingsEnabled: boolean; exclusions: string[] }
+  | {
+      type: 'context';
+      view: ContextView;
+      settingsEnabled: boolean;
+      exclusions: string[];
+      /** Whether the file the user is viewing is included on the next turn. */
+      includeViewedFile: boolean;
+    }
   /**
    * The files a turn changed, pushed on turn end and on webview reload.
    *
@@ -370,6 +377,11 @@ export type WebviewToHostMessage =
   | { type: 'setContextExclusions'; keys: string[] }
   /** Restore the default context set, dropping every per-turn exclusion. */
   | { type: 'resetContextExclusions' }
+  /**
+   * Include or remove the file open in the editor. Off by default. The host
+   * echoes the choice on the next context view.
+   */
+  | { type: 'setIncludeViewedFile'; included: boolean }
   /** Open a context file in the editor (the active file named in the strip). */
   | { type: 'openContextFile'; path: string }
   | { type: 'openSettings' }

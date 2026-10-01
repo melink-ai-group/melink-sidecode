@@ -31,6 +31,44 @@ import {
  * `gitBranch` invalidation is available to hosts that want it.
  */
 export class VscodeProjectContextHost implements ProjectContextHost {
+  /**
+   * The last real file editor. Focusing the sidebar clears
+   * `activeTextEditor`, and a non-file editor (output, debug) must not replace
+   * the file the user was just looking at.
+   */
+  private lastFileEditor: vscode.TextEditor | undefined;
+
+  /** Remember a file editor. A non-file editor leaves the last file in place. */
+  noteActiveEditor(editor: vscode.TextEditor | undefined): void {
+    if (editor && editor.document.uri.scheme === 'file') {
+      this.lastFileEditor = editor;
+    }
+  }
+
+  /** Subscribe to editor focus and seed the file that is already open. */
+  watchEditors(): vscode.Disposable {
+    this.noteActiveEditor(vscode.window.activeTextEditor);
+    return vscode.window.onDidChangeActiveTextEditor((editor) => this.noteActiveEditor(editor));
+  }
+
+  /**
+   * The file the user is viewing. A focused file editor wins; otherwise the
+   * last file editor, so clicking the chat does not swap in a different file.
+   */
+  private fileEditor(): vscode.TextEditor | undefined {
+    const active = vscode.window.activeTextEditor;
+    if (active && active.document.uri.scheme === 'file') {
+      this.lastFileEditor = active;
+      return active;
+    }
+    const last = this.lastFileEditor;
+    if (last && last.document.uri.scheme === 'file' && !last.document.isClosed) {
+      return last;
+    }
+    this.lastFileEditor = undefined;
+    return undefined;
+  }
+
   workspaceRoots(): string[] {
     return (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
   }
@@ -82,7 +120,7 @@ export class VscodeProjectContextHost implements ProjectContextHost {
   }
 
   activeEditor(): ReturnType<ProjectContextHost['activeEditor']> {
-    const editor = vscode.window.activeTextEditor;
+    const editor = this.fileEditor();
     if (!editor) {
       return null;
     }
@@ -102,15 +140,20 @@ export class VscodeProjectContextHost implements ProjectContextHost {
   }
 
   activeSelectionText(): string {
-    const editor = vscode.window.activeTextEditor;
+    const editor = this.fileEditor();
     if (!editor || editor.selection.isEmpty) {
       return '';
     }
     return editor.document.getText(editor.selection);
   }
 
+  activeFileText(): string {
+    const editor = this.fileEditor();
+    return editor ? editor.document.getText() : '';
+  }
+
   openEditors(): ReturnType<ProjectContextHost['openEditors']> {
-    const active = vscode.window.activeTextEditor?.document.uri.fsPath;
+    const active = this.fileEditor()?.document.uri.fsPath;
     return vscode.window.visibleTextEditors.map((editor) => ({
       absolutePath: editor.document.uri.fsPath,
       languageId: editor.document.languageId,
@@ -174,9 +217,11 @@ export class VscodeProjectContextHost implements ProjectContextHost {
  */
 export class VscodeProjectContext {
   readonly context: ProjectContext;
+  private readonly host: VscodeProjectContextHost;
 
   constructor() {
-    this.context = new ProjectContext({ host: new VscodeProjectContextHost() });
+    this.host = new VscodeProjectContextHost();
+    this.context = new ProjectContext({ host: this.host });
   }
 
   /**
@@ -187,6 +232,7 @@ export class VscodeProjectContext {
   watch(): vscode.Disposable {
     const invalidate = (reason: ContextInvalidation): void => this.context.invalidate(reason);
     const listeners: vscode.Disposable[] = [
+      this.host.watchEditors(),
       vscode.workspace.onDidChangeWorkspaceFolders(() => invalidate('workspaceFolders')),
       vscode.workspace.onDidCreateFiles(() => invalidate('fileCreated')),
       vscode.workspace.onDidDeleteFiles(() => invalidate('fileDeleted')),

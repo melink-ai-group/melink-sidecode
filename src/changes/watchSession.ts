@@ -1,4 +1,5 @@
 import type { ChangeStatus } from '../backends/types';
+import { hasIgnoredSegment } from './ignore.ts';
 import { relativeWithin } from './journal.ts';
 
 /**
@@ -64,7 +65,8 @@ export class ChangeWatchSession {
    * modify coalesces to the modify that describes the end state.
    */
   observe(absPath: string, status: ChangeStatus): void {
-    if (this.stopped || !this.withinWorkspace(absPath)) {
+    const relPath = this.relativePath(absPath);
+    if (this.stopped || relPath === undefined || hasIgnoredSegment(relPath)) {
       return;
     }
     this.pending.set(absPath, status);
@@ -105,11 +107,14 @@ export class ChangeWatchSession {
     this.pending.clear();
   }
 
-  /** True when the absolute path sits inside one of the open workspace folders. */
-  private withinWorkspace(absPath: string): boolean {
-    return this.options.workspaceRoots().some((root) => {
+  /** The workspace-relative path, or `undefined` when it sits outside every root. */
+  private relativePath(absPath: string): string | undefined {
+    for (const root of this.options.workspaceRoots()) {
       const rel = relativeWithin(absPath, root);
-      return rel !== undefined && rel.length > 0;
-    });
+      if (rel !== undefined && rel.length > 0) {
+        return rel;
+      }
+    }
+    return undefined;
   }
 }

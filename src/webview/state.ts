@@ -158,6 +158,8 @@ export interface AppState {
   contextSettingsEnabled: boolean;
   /** Local, next-turn-only exclusions the user set from the panel. */
   contextExclusions: string[];
+  /** Whether the file open in the editor is sent with the next turn. Default off. */
+  includeViewedFile: boolean;
   /**
    * The files the most recent turn recorded, or `undefined` when no change set
    * has been verified for the active thread. `undefined` is distinct from `[]`:
@@ -272,11 +274,19 @@ export type Action =
   | { type: 'connectionTest'; result: ConnectionTestResult }
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   /** The host's project-context read model, pushed on every relevant change. */
-  | { type: 'context'; view: ContextView; settingsEnabled: boolean; exclusions: string[] }
+  | {
+      type: 'context';
+      view: ContextView;
+      settingsEnabled: boolean;
+      exclusions: string[];
+      includeViewedFile: boolean;
+    }
   /** Toggle one item or category off for the next turn (or back on). */
   | { type: 'toggleContextExclusion'; key: string }
   /** Restore the default context set for the next turn. */
   | { type: 'resetContextExclusions' }
+  /** Include or remove the file open in the editor. */
+  | { type: 'setIncludeViewedFile'; included: boolean }
   /** Persist a per-model override; the host clamps it and echoes the result. */
   | { type: 'setModelSettings'; providerId: string; modelId: string; settings: ModelSettingOverrides }
   /** Clear every override for one model and echo the re-resolved settings. */
@@ -332,6 +342,7 @@ export const initialState: AppState = {
   modelCapabilityStatus: 'idle',
   contextSettingsEnabled: true,
   contextExclusions: [],
+  includeViewedFile: false,
   changeDeciding: false
 };
 
@@ -655,8 +666,11 @@ export function reduce(state: AppState, action: Action): AppState {
         ...state,
         contextView: action.view,
         contextSettingsEnabled: action.settingsEnabled,
-        contextExclusions: action.exclusions
+        contextExclusions: action.exclusions,
+        includeViewedFile: action.includeViewedFile
       };
+    case 'setIncludeViewedFile':
+      return { ...state, includeViewedFile: action.included };
     case 'toggleContextExclusion': {
       const next = state.contextExclusions.includes(action.key)
         ? state.contextExclusions.filter((key) => key !== action.key)

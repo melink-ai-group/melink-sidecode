@@ -195,6 +195,12 @@ export interface ContextPayload {
   snapshot?: string;
   /** A rendered delta block for this turn, when the workspace changed. */
   delta?: string;
+  /**
+   * The file the user is viewing, recomputed every turn. Present even when they
+   * have not attached it, as a short notice, so a stale session prefix cannot
+   * name a different file.
+   */
+  attachedFile?: string;
   /** A plain-language notice when context is unavailable. */
   notice?: string;
   /**

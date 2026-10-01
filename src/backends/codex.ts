@@ -490,7 +490,13 @@ export class CodexBackend implements AgentBackend {
     // Mode instructions exist on thread/start only. This turn's provider input
     // carries the current mode so a later switch still reaches the model.
     // The stored user message stays `request.text`.
-    const input: UserInput[] = [{ type: 'text', text: providerTurnText(mode, request.text), text_elements: [] }];
+    const input: UserInput[] = [
+      {
+        type: 'text',
+        text: providerTurnText(mode, request.text, request.context?.attachedFile),
+        text_elements: []
+      }
+    ];
 
     // A level change applies to this turn and subsequent ones, and both the
     // approval policy and the sandbox policy are overridden together so a level
@@ -1057,9 +1063,12 @@ export class CodexBackend implements AgentBackend {
  * `undefined`, which leaves the CLI default untouched.
  */
 /** Provider-only turn text. Mode instructions are not written into the transcript. */
-function providerTurnText(mode: DefaultMode, text: string): string {
+function providerTurnText(mode: DefaultMode, text: string, attachedFile?: string): string {
   const instructions = modeInstructions(mode);
-  return instructions ? `${instructions}\n\n${text}` : text;
+  const parts = [instructions, attachedFile, text].filter(
+    (part): part is string => Boolean(part && part.trim().length > 0)
+  );
+  return parts.join('\n\n');
 }
 
 function combineInstructions(mode: string | undefined, snapshot: string | undefined): string | undefined {

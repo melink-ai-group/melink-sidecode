@@ -60,6 +60,18 @@ test('the persisted history array is never mutated', () => {
   assert.equal(history.some((message) => message.content === 'SNAPSHOT' || message.content === 'DELTA'), false);
 });
 
+test('the attached file is a system message immediately before the user turn', () => {
+  const messages = buildContextMessages([], 'how can we reduce the size of this file?', {
+    snapshot: 'SNAPSHOT',
+    attachedFile: 'Path: frontend/src/styles/global.css'
+  });
+  assert.deepEqual(
+    messages.map((message) => message.content),
+    ['SNAPSHOT', 'Path: frontend/src/styles/global.css', 'how can we reduce the size of this file?']
+  );
+  assert.equal(messages[1].role, 'system');
+});
+
 test('with no context the message list is exactly the history plus the turn', () => {
   const messages = buildContextMessages([{ role: 'user', content: 'a' }], 'b');
   assert.deepEqual(messages, [

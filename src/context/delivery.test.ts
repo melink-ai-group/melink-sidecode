@@ -5,7 +5,8 @@ import type {
   GetSnapshotInput,
   ProjectContextReads,
   ProjectDelta,
-  ProjectSnapshot
+  ProjectSnapshot,
+  ViewedFileAttachment
 } from './projectContext.ts';
 
 function snapshot(files: string[] = ['src/index.ts'], selectionText: string | null = null): ProjectSnapshot {
@@ -63,6 +64,11 @@ class FakeReads implements ProjectContextReads {
   includeSelection = true;
   /** A counter so a test can prove the snapshot was actually rebuilt. */
   snapshotReads = 0;
+  attachment?: ViewedFileAttachment;
+
+  async viewedFileAttachment(): Promise<ViewedFileAttachment | undefined> {
+    return this.attachment;
+  }
 
   async getSnapshot(_input?: GetSnapshotInput): Promise<ProjectSnapshot> {
     this.snapshotReads += 1;
@@ -200,24 +206,60 @@ test('a context-setting change re-primes an open thread so the next turn drops t
   const reads = new FakeReads();
   const delivery = new ContextDelivery({ reads });
 
-  // A session is opened and primed with selection sharing on.
+  // The viewed file is attached, so the selection rides on the per-turn block
+  // and never in the stable prefix.
   reads.includeSelection = true;
+  reads.attachment = {
+    path: 'src/index.ts',
+    languageId: 'typescript',
+    excluded: false,
+    text: 'const value = 1;',
+    selection: 'const secret = 1;'
+  };
+  delivery.setIncludeViewedFile(true);
   delivery.begin('ollama:t9', await delivery.snapshot(), false);
   const before = await delivery.forTurn('ollama:t9');
-  assert.match(before.snapshot!, /const secret = 1;/);
+  assert.match(before.attachedFile!, /const secret = 1;/);
+  assert.doesNotMatch(before.snapshot!, /const secret = 1;/);
 
-  // The user turns selection sharing off and saves. Without invalidation the
-  // cached prefix would be re-sent and the selected text would still ship.
+  // The user turns selection sharing off and saves. The next turn must not
+  // keep shipping the selected text, and the prefix is rebuilt.
   reads.includeSelection = false;
+  reads.attachment = { ...reads.attachment, selection: undefined };
+  reads.files = ['src/index.ts', 'src/after.ts'];
   delivery.invalidateAll();
 
   const after = await delivery.forTurn('ollama:t9');
-  assert.match(after.snapshot!, /Selection: none|Active file|Project name/);
+  assert.match(after.snapshot!, /Project name/);
+  assert.doesNotMatch(after.attachedFile ?? '', /const secret = 1;/);
   assert.doesNotMatch(after.snapshot!, /const secret = 1;/);
   assert.equal(after.priming, true);
 
   // The prefix really was rebuilt, not merely re-sent.
   assert.notEqual(after.snapshot, before.snapshot);
+});
+
+test('the viewed file stays out of the snapshot until the user attaches it', async () => {
+  const reads = new FakeReads();
+  reads.includeSelection = true;
+  reads.attachment = {
+    path: 'frontend/src/styles/global.css',
+    languageId: 'css',
+    excluded: false,
+    text: 'body { margin: 0; }'
+  };
+  const delivery = new ContextDelivery({ reads });
+  const prime = await delivery.snapshot();
+  assert.match(prime.payload.snapshot!, /not attached/i);
+  assert.doesNotMatch(prime.payload.snapshot!, /global\.css/);
+  assert.match(prime.payload.attachedFile!, /not attached/i);
+
+  delivery.setIncludeViewedFile(true);
+  const turned = await delivery.forTurn('ollama:viewed');
+  assert.match(turned.attachedFile!, /frontend\/src\/styles\/global\.css/);
+  assert.match(turned.attachedFile!, /body \{ margin: 0; \}/);
+  assert.match(turned.snapshot!, /separate block/);
+  assert.doesNotMatch(turned.snapshot!, /global\.css/);
 });
 
 test('invalidateAll re-arms every thread and is safe when no thread is open', async () => {
