@@ -113,11 +113,11 @@
           "enum": ["read-only", "default", "unrestricted"],
           "enumDescriptions": [
             "Read-only: Codex runs read-only; anything that would write is requested.",
-            "Default: Codex runs workspace-write and asks before anything outside the sandbox.",
+            "Default: workspace writes and sandboxed commands run on their own. Anything outside the sandbox is requested.",
             "Unrestricted: no sandbox and no prompts. Selecting this requires an explicit confirmation."
           ],
           "default": "default",
-          "description": "Default permission level for a new conversation. A per-conversation choice overrides it. Unrestricted must be confirmed before it is applied."
+          "description": "Permission level used until you pick one in the chat. The picker choice is remembered for the next conversation. Unrestricted must be confirmed before it is applied."
         },
         "melink.defaults.mode": {
           "type": "string",

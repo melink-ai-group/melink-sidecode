@@ -174,10 +174,9 @@ export function opencodePermission(
       return { edit: 'allow', write: 'allow', patch: 'allow', bash: 'allow', external_directory: 'allow' };
     case 'default':
     default:
-      // `default` must never auto-approve a change: every edit and command is
-      // an `ask`, which the runtime surfaces and holds for the user. Only
-      // `unrestricted` (gated by the UI's confirmation) sends `allow`.
-      return { edit: 'ask', write: 'ask', patch: 'ask', bash: 'ask' };
+      // Ordinary workspace work is allowed. Leaving the project directory still
+      // asks. Only `unrestricted` also allows `external_directory`.
+      return { edit: 'allow', write: 'allow', patch: 'allow', bash: 'allow', external_directory: 'ask' };
   }
 }
 

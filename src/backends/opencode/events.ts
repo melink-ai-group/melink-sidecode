@@ -70,6 +70,14 @@ export interface OpencodeToolEvent {
   output?: string;
   /** Short title opencode assigned the call. */
   title?: string;
+  /** Unified diff of a file edit, when the tool reported one. */
+  diff?: string;
+  /** Exact text an edit tool replaced, when it reported both sides. */
+  replacement?: { before: string; after: string };
+  /** Full pre-edit file text, when the tool reported it next to the post-edit text. */
+  beforeText?: string;
+  /** Full post-edit file text paired with `beforeText`. */
+  afterText?: string;
   /** Structured todo list reported by OpenCode's todowrite tool. */
   todos?: Array<{ text: string; status: 'pending' | 'inProgress' | 'completed' }>;
 }
@@ -216,6 +224,7 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
       const title = asString(state?.title);
       const todos = tool.toLowerCase() === 'todowrite' ? parseTodos(input?.todos) : undefined;
       const target = targetForTool(tool, input, metadata);
+      const edit = isFileTool(tool) ? editFacts(input, metadata, output) : undefined;
       return {
         kind: 'tool',
         sessionId,
@@ -228,7 +237,11 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
         fileExists,
         output,
         title,
-        todos
+        todos,
+        ...(edit?.diff ? { diff: edit.diff } : {}),
+        ...(edit?.replacement ? { replacement: edit.replacement } : {}),
+        ...(edit?.beforeText !== undefined ? { beforeText: edit.beforeText } : {}),
+        ...(edit?.afterText !== undefined ? { afterText: edit.afterText } : {})
       };
     }
     case 'step_finish': {
@@ -292,14 +305,74 @@ export function isFileTool(tool: string): boolean {
  * deliberately not inferred from its command line: the host watcher catches
  * those as `watched`, which is honest about how they were learned.
  */
-export function reportedChangeOfTool(event: OpencodeToolEvent): { absPath: string; status: 'created' | 'modified' } | undefined {
+export function reportedChangeOfTool(event: OpencodeToolEvent): {
+  absPath: string;
+  status: 'created' | 'modified';
+  diff?: string;
+  replacement?: { before: string; after: string };
+  beforeText?: string;
+  afterText?: string;
+} | undefined {
   if (!isFileTool(event.tool) || !event.filePath) {
     return undefined;
   }
-  if (event.tool === 'write' && event.fileExists === false) {
-    return { absPath: event.filePath, status: 'created' };
+  const status = event.tool === 'write' && event.fileExists === false ? 'created' : 'modified';
+  return {
+    absPath: event.filePath,
+    status,
+    ...(event.diff ? { diff: event.diff } : {}),
+    ...(event.replacement ? { replacement: event.replacement } : {}),
+    ...(event.beforeText !== undefined ? { beforeText: event.beforeText } : {}),
+    ...(event.afterText !== undefined ? { afterText: event.afterText } : {})
+  };
+}
+
+/** Pull a unified diff or an old/new pair out of a file-tool payload. */
+function editFacts(
+  input: Record<string, unknown> | undefined,
+  metadata: Record<string, unknown> | undefined,
+  output: string | undefined
+): { diff?: string; replacement?: { before: string; after: string }; beforeText?: string; afterText?: string } {
+  const filediff = asRecord(metadata?.filediff);
+  const diff =
+    unifiedDiff(metadata?.diff) ??
+    unifiedDiff(metadata?.patch) ??
+    unifiedDiff(metadata?.unifiedDiff) ??
+    unifiedDiff(metadata?.unified_diff) ??
+    unifiedDiff(input?.diff) ??
+    unifiedDiff(input?.patch) ??
+    unifiedDiff(filediff?.diff) ??
+    unifiedDiff(filediff?.patch) ??
+    unifiedDiff(output);
+  const oldString = asString(input?.oldString) ?? asString(input?.old_string);
+  const newString = asString(input?.newString) ?? asString(input?.new_string);
+  const replacement =
+    oldString !== undefined && newString !== undefined && oldString !== newString
+      ? { before: oldString, after: newString }
+      : undefined;
+  const beforeText = asString(filediff?.before);
+  const afterText = asString(filediff?.after);
+  return {
+    ...(diff ? { diff } : {}),
+    ...(replacement ? { replacement } : {}),
+    ...(beforeText !== undefined && afterText !== undefined ? { beforeText, afterText } : {})
+  };
+}
+
+/** A string that contains a real added or removed diff line, not a status sentence. */
+function unifiedDiff(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return undefined;
   }
-  return { absPath: event.filePath, status: 'modified' };
+  for (const raw of value.replace(/\r\n?/g, '\n').split('\n')) {
+    if (raw.startsWith('+++') || raw.startsWith('---') || raw.startsWith('@@') || raw.startsWith('diff ')) {
+      continue;
+    }
+    if (raw.startsWith('+') || raw.startsWith('-')) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   REVEAL_CHANGE_IN_SCM_COMMAND,
   changesViewRow,
   diffSides,
+  hasBaseline,
   parseVirtualDocument,
   resolveVirtualContent,
   virtualUriParts,
@@ -114,8 +115,10 @@ export class NativeDiffService implements vscode.Disposable {
   /**
    * Open one file's diff: the journal's pre-turn content on the left and the
    * working file on the right. A created file has an empty left; a deleted file
-   * has an empty right; a file whose before content was not stored falls back to
-   * an empty left. When the turn is gone, the working file is opened instead.
+   * has an empty right. A modification with no stored pre-turn snapshot is not
+   * opened against an empty left (that paints the whole file as added); the
+   * working file is opened instead. When the turn is gone, the working file is
+   * opened instead.
    */
   async openChangeDiff(input: OpenChangeDiffInput): Promise<NativeDiffResult> {
     const entry = this.entryFor(input.turnId, input.relPath);
@@ -130,7 +133,18 @@ export class NativeDiffService implements vscode.Disposable {
       return this.report('That change is no longer recorded, so its diff cannot be opened.');
     }
 
-    const sides = diffSides(entry);
+    const sideInput = { status: entry.status, hasBefore: entry.hasBefore, hasAfter: entry.hasAfter };
+    if (!hasBaseline(sideInput)) {
+      if (entry.absPath) {
+        await this.openWorkingFile(entry.absPath);
+      }
+      return {
+        ok: true,
+        message: 'No pre-change snapshot was recorded, so the file was opened instead of a diff that would mark every line as added.'
+      };
+    }
+
+    const sides = diffSides(sideInput);
     const left = this.toUri(input.turnId, entry.relPath, sides.left, entry.absPath);
     const right = this.toUri(input.turnId, entry.relPath, sides.right, entry.absPath);
     const title = diffTitle(entry.relPath, entry.status);
@@ -152,14 +166,24 @@ export class NativeDiffService implements vscode.Disposable {
       return this.report('That turn has no recorded changes to open.');
     }
 
-    const rows = turn.files.map((entry) => ({
-      input: {
-        status: entry.status,
-        hasBefore: entry.hasBefore,
-        hasAfter: entry.hasAfter
-      },
-      entry
-    }));
+    const rows = turn.files
+      .filter((entry) =>
+        hasBaseline({ status: entry.status, hasBefore: entry.hasBefore, hasAfter: entry.hasAfter })
+      )
+      .map((entry) => ({
+        input: {
+          status: entry.status,
+          hasBefore: entry.hasBefore,
+          hasAfter: entry.hasAfter
+        },
+        entry
+      }));
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        message: 'No pre-change snapshot was recorded, so the files were not opened as whole-file additions.'
+      };
+    }
     const resources: [vscode.Uri, vscode.Uri, vscode.Uri][] = rows.map(({ input: sideInput, entry }) => {
       const row = changesViewRow(sideInput);
       return [

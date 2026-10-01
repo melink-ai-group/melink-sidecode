@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AgentEvent, DefaultMode, TodoStep, TranscriptItem } from './types';
+import { PERMISSION_LEVELS, type AgentEvent, type DefaultMode, type PermissionLevel, type TodoStep, type TranscriptItem } from './types';
 
 /**
  * Persists the small amount of state needed to reconnect after a window reload:
@@ -66,6 +66,7 @@ const ACTIVE_THREAD_KEY = 'melink.activeThread';
 const THREAD_INDEX_KEY = 'melink.threadIndex';
 const TRANSCRIPTS_KEY = 'melink.transcripts';
 const LAST_USED_MODEL_KEY = 'melink.lastUsedModel';
+const LAST_PERMISSION_LEVEL_KEY = 'melink.lastPermissionLevel';
 const PLANS_KEY = 'melink.plans';
 
 /** Bounds so persisted state cannot grow without limit. */
@@ -328,6 +329,22 @@ export class ThreadStore implements vscode.Disposable {
 
   async setLastUsedModel(model: LastUsedModel): Promise<void> {
     await this.context.globalState.update(LAST_USED_MODEL_KEY, model);
+  }
+
+  /**
+   * The permission level last chosen in the picker. Shared across chats and
+   * windows, so a new conversation keeps the selection instead of falling back
+   * to the settings default. `undefined` when the user has never chosen.
+   */
+  getLastPermissionLevel(): PermissionLevel | undefined {
+    const value = this.context.globalState.get<string>(LAST_PERMISSION_LEVEL_KEY);
+    return (PERMISSION_LEVELS as readonly string[]).includes(value ?? '')
+      ? (value as PermissionLevel)
+      : undefined;
+  }
+
+  async setLastPermissionLevel(level: PermissionLevel): Promise<void> {
+    await this.context.globalState.update(LAST_PERMISSION_LEVEL_KEY, level);
   }
 
   /**

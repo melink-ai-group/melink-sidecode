@@ -202,11 +202,7 @@ function ContextMeter({
       className={`context-meter is-${level}${busy ? ' is-busy' : ''}`}
       role="img"
       aria-label={label}
-      title={
-        busy
-          ? label
-          : `${label}. Compaction is available above 25% when the agent is idle.`
-      }
+      title={label}
     >
       {ring}
     </span>

@@ -20,6 +20,35 @@ interface Hunk {
   lines: HunkLine[];
 }
 
+/**
+ * The file text before a series of exact replacements, or `undefined` when
+ * none of them can be undone uniquely.
+ *
+ * Replacements are undone last-to-first. A new string that occurs more than
+ * once is skipped rather than applied at a guess, so a wrong baseline is not
+ * stored as the pre-change snapshot.
+ */
+export function contentBeforeReplacements(
+  after: string,
+  replacements: readonly { before: string; after: string }[]
+): string | undefined {
+  let current = after;
+  let changed = false;
+  for (let index = replacements.length - 1; index >= 0; index -= 1) {
+    const piece = replacements[index];
+    if (!piece || piece.after.length === 0 || piece.before === piece.after) {
+      continue;
+    }
+    const at = current.indexOf(piece.after);
+    if (at < 0 || at !== current.lastIndexOf(piece.after)) {
+      continue;
+    }
+    current = current.slice(0, at) + piece.before + current.slice(at + piece.after.length);
+    changed = true;
+  }
+  return changed && current !== after ? current : undefined;
+}
+
 /** The file text before `diffs` were applied, or `undefined` when none apply. */
 export function contentBeforePatches(after: string, diffs: readonly string[]): string | undefined {
   const unique: string[] = [];

@@ -981,7 +981,16 @@ export class OllamaBackend implements AgentBackend {
             type: 'changes/reported',
             backendId: this.id,
             threadId,
-            changes: [{ absPath: isAbsolute(reported.absPath) ? reported.absPath : resolve(cwd, reported.absPath), status: reported.status }]
+            changes: [
+              {
+                absPath: isAbsolute(reported.absPath) ? reported.absPath : resolve(cwd, reported.absPath),
+                status: reported.status,
+                ...(reported.diff ? { diff: reported.diff } : {}),
+                ...(reported.replacement ? { replacement: reported.replacement } : {}),
+                ...(reported.beforeText !== undefined ? { beforeText: reported.beforeText } : {}),
+                ...(reported.afterText !== undefined ? { afterText: reported.afterText } : {})
+              }
+            ]
           });
         }
         const target =

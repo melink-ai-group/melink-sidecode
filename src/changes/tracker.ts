@@ -103,7 +103,11 @@ export class ChangeTracker {
       return;
     }
     for (const change of changes) {
-      void this.journal.observe(active.turnId, change.absPath, 'reported', change.status, change.diff);
+      void this.journal.observe(active.turnId, change.absPath, 'reported', change.status, change.diff, {
+        ...(change.replacement ? { replacement: change.replacement } : {}),
+        ...(change.beforeText !== undefined ? { beforeText: change.beforeText } : {}),
+        ...(change.afterText !== undefined ? { afterText: change.afterText } : {})
+      });
     }
   }
 

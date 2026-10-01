@@ -272,7 +272,7 @@ export function ChangesReview({
             <span>
               {rejectConfirm.scope === 'all'
                 ? `Reject all ${rejectPaths.length} file${rejectPaths.length === 1 ? '' : 's'}? The pre-turn content is written back to disk.`
-                : 'Reject this file? The pre-turn content is written back to disk.'}
+                : discardCopy(review, rejectPaths, 'prompt')}
             </span>
             {rejectPaths.length > 0 ? (
               <ul className="changes-review__confirm-paths">
@@ -292,7 +292,7 @@ export function ChangesReview({
             <button className="btn btn--danger" type="button" onClick={onConfirmReject}>
               {rejectConfirm.scope === 'all'
                 ? `Reject ${rejectPaths.length} file${rejectPaths.length === 1 ? '' : 's'}`
-                : 'Reject file'}
+                : discardCopy(review, rejectPaths, 'confirm')}
             </button>
           </span>
         </div>
@@ -396,16 +396,23 @@ function ChangeRow({
               >
                 Keep
               </button>
-              <button
-                className="btn btn--danger"
-                type="button"
-                aria-pressed={decision === 'rejected'}
-                disabled={locked || decision === 'rejected'}
-                aria-label={`Reject changes to ${file.path}`}
-                onClick={onReject}
-              >
-                Reject
-              </button>
+              {decision === 'accepted' && file.restorable !== true ? null : (
+                <button
+                  className="btn btn--danger"
+                  type="button"
+                  aria-pressed={decision === 'rejected'}
+                  disabled={locked || decision === 'rejected'}
+                  aria-label={`${file.restorable === true ? 'Undo' : 'Reject'} changes to ${file.path}`}
+                  title={
+                    file.restorable === true
+                      ? 'Restore this file to its pre-change snapshot.'
+                      : 'Discard this unaccepted edit.'
+                  }
+                  onClick={onReject}
+                >
+                  {file.restorable === true ? 'Undo' : 'Reject'}
+                </button>
+              )}
             </>
           ) : null}
         </span>
@@ -473,7 +480,22 @@ function StatusChip({ file }: { file: ChangeFileView }): JSX.Element {
   );
 }
 
-/** Decision state as text plus an icon: legible with colour removed. */
+/**
+ * The per-file discard word. A restorable file puts the pre-change snapshot
+ * back, which is the same operation as the header's Undo. Without that
+ * snapshot the action only discards an unaccepted edit, so it stays Reject.
+ */
+function discardCopy(review: ChangeView, paths: readonly string[], kind: 'prompt' | 'confirm'): string {
+  const file = review.files.find((entry) => entry.path === paths[0]);
+  const undo = file?.restorable === true;
+  if (kind === 'confirm') {
+    return undo ? 'Undo' : 'Reject file';
+  }
+  return undo
+    ? 'Undo this file? The pre-change snapshot is written back to disk.'
+    : 'Reject this file? The unaccepted edit is discarded.';
+}
+
 function DecisionState({
   decision,
   conflicted,

@@ -70,11 +70,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   /** Guards against a second restore if `ready` is re-sent by the webview. */
   private restored = false;
   /**
-   * The permission level the active conversation runs at. Seeded from the
-   * stored default and only ever raised to `unrestricted` through an explicit
-   * confirmation in the webview; the host stores the label it was told.
+   * The permission level the next turn and the next chat run at. Seeded from
+   * the last picker choice, then from the settings default. A new conversation
+   * keeps it. `unrestricted` arrives only after the webview's confirmation.
    */
   private permissionLevel: PermissionLevel = readDefaultPermissionLevel();
+  /** Bumped whenever the selection is stored, so a late snapshot cannot revert it. */
+  private permissionEpoch = 0;
   /**
    * The mode the active conversation runs at. Seeded from the stored default,
    * then from the thread's persisted mode on resume. A change applies to the
@@ -268,6 +270,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         void this.mergeTodoProgressFromReply(event.backendId, event.threadId);
       }
     });
+    const storedPermission = this.store.getLastPermissionLevel();
+    if (storedPermission) {
+      this.permissionLevel = storedPermission;
+    }
   }
 
   private get store(): ThreadStore {
@@ -693,6 +699,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'getPermissions':
         await this.postPermissions(message.backendId);
         break;
+      case 'selectPermission':
+        await this.selectPermissionLevel(message.level);
+        break;
       case 'getModes':
         this.post({ type: 'modes', modes: this.modeSnapshot(message.backendId) });
         break;
@@ -892,6 +901,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         };
       }),
       selected: this.permissionLevel,
+      epoch: this.permissionEpoch,
       rules: backend ? await this.registry.listApprovalRules(backendId) : []
     };
   }
@@ -990,6 +1000,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const snapshot = await this.settingsSnapshot();
     if (!result.ok) {
       snapshot.saveErrors = result.errors;
+    }
+    if (patch.permissionLevel && result.errors.permissionLevel === undefined) {
+      const backendId = this.activeThread?.backendId ?? this.defaultBackendId();
+      await this.rememberPermission(this.resolvePermission(backendId, patch.permissionLevel));
+      await this.postPermissions(backendId);
     }
     this.post({ type: 'settings', settings: snapshot });
     this.post({ type: 'snapshot', availability: await this.registry.refresh() });
@@ -1215,11 +1230,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'notice', level: 'error', message: `Backend ${backendId} is not registered.` });
       return;
     }
-    // Re-read the stored defaults at start, so a default saved in the settings
-    // screen applies to the next conversation without a reload; an explicit
-    // value from the caller still wins. The mode is resolved against what the
-    // backend can honour, so a mode it cannot enforce degrades to `agent`.
-    const level = this.resolvePermission(backendId, permissionLevel ?? readDefaultPermissionLevel());
+    // An explicit level wins. Otherwise keep the last picker choice, which is
+    // seeded from the settings default until the user picks one. A new chat
+    // does not drop that choice. The mode still falls back to its stored default.
+    const level = this.resolvePermission(backendId, permissionLevel ?? this.permissionLevel);
     const mode = this.resolveMode(backendId, requestedMode ?? readDefaultMode());
     // The effective per-model settings are resolved and clamped here, in the
     // host, against the provider's own descriptor. The webview never computes a
@@ -1249,7 +1263,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       });
       this.activeThread = handle;
       this.contextDelivery.begin(ContextDelivery.key(backendId, handle.threadId), prime, Boolean(handle.contextPrimed));
-      this.permissionLevel = level;
+      await this.rememberPermission(level);
       this.mode = mode;
       await this.store.setActiveThread({
         backendId,
@@ -1304,6 +1318,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * selected it; it can never be reached as a fallback. An unknown level, or a
    * level the backend does not offer, degrades to the safest supported one.
    */
+  /**
+   * Store the level the picker, a turn, or the settings screen just confirmed.
+   * The next chat reads it back instead of the settings default.
+   */
+  private async rememberPermission(level: PermissionLevel): Promise<void> {
+    this.permissionLevel = level;
+    this.permissionEpoch += 1;
+    await this.store.setLastPermissionLevel(level);
+  }
+
+  /** Apply a picker choice and echo it so the panel matches what the next chat will use. */
+  private async selectPermissionLevel(requested: PermissionLevel): Promise<void> {
+    const backendId = this.activeThread?.backendId ?? this.defaultBackendId();
+    await this.rememberPermission(this.resolvePermission(backendId, requested));
+    await this.postPermissions(backendId);
+  }
+
   private resolvePermission(backendId: string, requested?: PermissionLevel): PermissionLevel {
     const supported = this.registry.permissionLevels(backendId);
     if (requested && supported.includes(requested)) {
@@ -1536,7 +1567,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const persisted = persistableAttachments(attachments);
     const resolvedModel = model ?? this.activeThread.model;
     const level = this.resolvePermission(activeBackendId, permissionLevel ?? this.permissionLevel);
-    this.permissionLevel = level;
+    await this.rememberPermission(level);
     // The mode is resolved and re-applied on every turn. Ask forces read-only;
     // Plan and Agent honor the selected permission level.
     const mode = this.resolveMode(activeBackendId, this.mode);

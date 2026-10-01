@@ -701,6 +701,39 @@ body {
   font-size: 11px;
 }
 
+.reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reasoning-toggle__hint {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+/* Collapsed reasoning shows the last two lines. scrollTop is pinned to the end. */
+.reasoning-clamp {
+  max-height: calc(2 * 1.45em + 16px);
+  overflow: hidden;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.turn--reasoning .turn-body {
+  cursor: pointer;
+}
+
 /* ---- Streaming affordances: brand hue job 2 ---- */
 
 .stream-status {
