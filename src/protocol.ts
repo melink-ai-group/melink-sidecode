@@ -276,6 +276,11 @@ export type HostToWebviewMessage =
   | { type: 'connectionTest'; result: ConnectionTestResult }
   /** Result of `opencode upgrade`. `pending` is true while the CLI is still running. */
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
+  /**
+   * Result of downloading the opencode CLI. `path` is the installed binary when
+   * the install succeeded, so the settings field can adopt it.
+   */
+  | { type: 'opencodeInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   /** The capability descriptor + effective settings for one provider+model. */
   | { type: 'modelCapability'; capability: ModelCapabilitySnapshot }
   /**
@@ -446,6 +451,8 @@ export type WebviewToHostMessage =
   | { type: 'testConnection'; backendId: string }
   /** Run `opencode upgrade` when the CLI is connected. */
   | { type: 'upgradeOpencode' }
+  /** Download and install the opencode CLI when it was not detected. */
+  | { type: 'installOpencode' }
   /** A decision on a pending approval. Never sent by a timer or a retry. */
   | { type: 'decideApproval'; backendId: string; threadId: string; requestId: string; decision: ApprovalDecision }
   /** Read the permission options + stored rules for one backend. */

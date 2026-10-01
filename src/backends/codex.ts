@@ -30,6 +30,7 @@ import {
 } from './types';
 import { codexCapabilities, codexNativeRequest } from './capabilities';
 import { ruleFor, ruleScopeFor, describeApproval } from './approvals';
+import { APPROVAL_TIMEOUT_REASON, APPROVAL_WAIT_MS } from './approvalWait';
 import { codexPermissionMapping, codexSandboxPolicy, DEFAULT_PERMISSION_LEVEL } from './permissions';
 import {
   effectivePermissionLevel,
@@ -107,6 +108,8 @@ interface PendingApproval {
   settled: boolean;
   /** True when this request is a `permissions/requestApproval` grant profile. */
   permissions?: RequestPermissionProfile;
+  /** Refuses the request when the user has not answered within {@link APPROVAL_WAIT_MS}. */
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 /** Cap for spawn + handshake, so a wedged server cannot block the sidebar. */
@@ -182,14 +185,16 @@ export class CodexBackend implements AgentBackend {
   /**
    * Answer a pending approval. The map is the single source of truth: a request
    * id that is unknown, or already settled, is ignored, so a double click and a
-   * late click after a reload can never answer twice. There is deliberately no
-   * timeout path here — nothing in this adapter decides on its own.
+   * late click after the wait can never answer twice. The only automatic answer
+   * is a refusal after {@link APPROVAL_WAIT_MS}, which lets the agent try a
+   * different approach instead of leaving the turn blocked.
    */
   decideApproval(threadId: string, requestId: string, decision: ApprovalDecision): void {
     const pending = this.pendingApprovals.get(requestId);
     if (!pending || pending.settled || pending.threadId !== threadId) {
       return;
     }
+    this.clearApprovalTimer(pending);
     pending.settled = true;
     this.pendingApprovals.delete(requestId);
     this.answerApproval(pending, decision);
@@ -383,6 +388,9 @@ export class CodexBackend implements AgentBackend {
         // user is asked. `never` is reached only for `unrestricted`, and never
         // in Ask mode.
         approvalPolicy: mapping.approvalPolicy,
+        // Route every approval to this sidebar. An automatic reviewer would
+        // decide without showing a prompt.
+        approvalsReviewer: 'user',
         sandbox: mapping.sandbox,
         // The pinned Codex schema exposes a native `developerInstructions` field
         // on `thread/start` (verified against codex-cli 0.156.1 bindings in
@@ -424,7 +432,8 @@ export class CodexBackend implements AgentBackend {
         threadId,
         // Prefer the snapshot service's root as cwd, mirroring `startThread`.
         cwd: options?.context?.workspaceRoot ?? this.cwd,
-        developerInstructions: options?.context?.snapshot ?? null
+        developerInstructions: options?.context?.snapshot ?? null,
+        approvalsReviewer: 'user'
       })
       .catch((error: unknown) => {
         const failure = this.toBackendError(error);
@@ -466,6 +475,9 @@ export class CodexBackend implements AgentBackend {
 
   cancel(): void {
     const pending = this.pendingTurn;
+    if (pending) {
+      this.refuseOpenApprovals(pending.threadId, 'The turn was stopped.');
+    }
     const connection = this.connection;
     if (!pending || !connection || !pending.turnId) {
       return;
@@ -529,6 +541,7 @@ export class CodexBackend implements AgentBackend {
           input,
           model: model || null,
           approvalPolicy: mapping.approvalPolicy,
+          approvalsReviewer: 'user',
           sandboxPolicy: codexSandboxPolicy(level, this.cwd),
           // The host resolved and clamped the thinking level; the pure,
           // unit-tested `codexNativeRequest` maps it onto Codex's own tier. `off`
@@ -616,6 +629,9 @@ export class CodexBackend implements AgentBackend {
     this.threads.clear();
     this.announcedThreads.clear();
     this.openedItems.clear();
+    for (const approval of this.pendingApprovals.values()) {
+      this.clearApprovalTimer(approval);
+    }
     this.pendingApprovals.clear();
     this.threadPermissions.clear();
     this.events.dispose();
@@ -987,10 +1003,10 @@ export class CodexBackend implements AgentBackend {
 
   /**
    * The app-server asks the client to make a decision (an approval). The request
-   * is held open and surfaced as a pending decision; the turn is blocked until
-   * `decideApproval` answers. There is deliberately no timeout and no automatic
-   * answer: if the user never decides, the request stays pending rather than
-   * being silently allowed or refused.
+   * is held open and surfaced as a pending decision; the turn stays blocked until
+   * `decideApproval` answers or {@link APPROVAL_WAIT_MS} elapses. A timeout
+   * refuses the action so the agent can try a different approach. Nothing is
+   * allowed automatically except a stored rule the user already chose.
    *
    * A request that is already covered by a stored rule is answered immediately
    * with the same native shape a manual allow would use — that is the *only*
@@ -1074,7 +1090,51 @@ export class CodexBackend implements AgentBackend {
     }
 
     this.pendingApprovals.set(approval.id, pending);
+    pending.timer = setTimeout(() => {
+      this.refuseApproval(pending, APPROVAL_TIMEOUT_REASON);
+    }, APPROVAL_WAIT_MS);
     this.events.fire({ type: 'approval/requested', backendId: this.id, threadId, approval });
+  }
+
+  /** Refuse one still-open approval and tell the agent why. */
+  private refuseApproval(pending: PendingApproval, reason: string): void {
+    if (pending.settled || !this.pendingApprovals.has(pending.requestId)) {
+      return;
+    }
+    this.clearApprovalTimer(pending);
+    pending.settled = true;
+    this.pendingApprovals.delete(pending.requestId);
+    this.answerApproval(pending, 'reject');
+    const subject = describeApproval(pending.request);
+    this.events.fire({
+      type: 'approval/decided',
+      backendId: this.id,
+      threadId: pending.threadId,
+      outcome: { requestId: pending.requestId, decision: 'reject', subject }
+    });
+    this.events.fire({
+      type: 'approval/denied',
+      backendId: this.id,
+      threadId: pending.threadId,
+      requestId: pending.requestId,
+      subject,
+      reason
+    });
+  }
+
+  private refuseOpenApprovals(threadId: string, reason: string): void {
+    for (const pending of [...this.pendingApprovals.values()]) {
+      if (pending.threadId === threadId) {
+        this.refuseApproval(pending, reason);
+      }
+    }
+  }
+
+  private clearApprovalTimer(pending: PendingApproval): void {
+    if (pending.timer) {
+      clearTimeout(pending.timer);
+      pending.timer = undefined;
+    }
   }
 
   /**

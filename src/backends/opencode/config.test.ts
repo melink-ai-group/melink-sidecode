@@ -8,7 +8,8 @@ import {
   opencodeAgentForMode,
   opencodeBaseUrl,
   opencodePermission,
-  opencodeReasoningEffort
+  opencodeReasoningEffort,
+  opencodeRequiresApproval
 } from './config.ts';
 import { UNKNOWN_CAPABILITIES } from '../capabilities.ts';
 import { THINKING_LEVELS, type ModelCapabilities } from '../types.ts';
@@ -61,8 +62,8 @@ test('read-only and default levels never auto-approve edits or commands', () => 
     patch: 'deny',
     bash: 'deny'
   });
-  // Default asks for every edit and command; it never sends `allow`, so a
-  // headless run cannot silently write. Only `unrestricted` allows.
+  // Default asks for every edit and command; it never sends `allow`.
+  // Only `unrestricted` allows.
   const standard = opencodePermission('default', 'agent');
   assert.equal(standard.edit, 'ask');
   assert.equal(standard.bash, 'ask');
@@ -72,6 +73,11 @@ test('read-only and default levels never auto-approve edits or commands', () => 
   const unrestricted = opencodePermission('unrestricted', 'agent');
   assert.equal(unrestricted.edit, 'allow');
   assert.equal(unrestricted.bash, 'allow');
+  assert.equal(opencodeRequiresApproval('default', 'agent'), true);
+  assert.equal(opencodeRequiresApproval('default', 'plan'), true);
+  assert.equal(opencodeRequiresApproval('read-only', 'agent'), false);
+  assert.equal(opencodeRequiresApproval('unrestricted', 'agent'), false);
+  assert.equal(opencodeRequiresApproval('unrestricted', 'ask'), false);
 });
 
 test('the generated config points at the configured base URL and the live model ids', () => {

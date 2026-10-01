@@ -6,6 +6,7 @@ import {
   type OpencodeEvent
 } from './events.ts';
 import { OPENCODE_CONFIG_ENV } from './config.ts';
+import type { OpencodePermissionAsk, OpencodePermissionReply } from './approval.ts';
 
 export type { OpencodeEvent } from './events.ts';
 
@@ -62,6 +63,13 @@ export interface OpencodeRunOptions {
   token: string;
   /** Aborted by `cancel()`; terminates the child process tree. */
   signal?: AbortSignal;
+  /**
+   * When set, the turn is driven through `opencode serve` and every `ask`
+   * permission is handed here. The promise must not resolve before the user
+   * decides or {@link APPROVAL_WAIT_MS} elapses. Absent means `opencode run`,
+   * which cannot show a prompt.
+   */
+  decidePermission?: (ask: OpencodePermissionAsk, signal: AbortSignal) => Promise<OpencodePermissionReply>;
 }
 
 export interface OpencodeRunResult {
@@ -96,6 +104,14 @@ export async function runOpencodeTurn(
       terminal: false,
       detail: 'The generated opencode config would contain the credential, so it was not started.'
     };
+  }
+
+  if (options.decidePermission) {
+    const { runOpencodeServerTurn } = await import('./interactive.ts');
+    return runOpencodeServerTurn(
+      { ...options, decidePermission: options.decidePermission },
+      onEvent
+    );
   }
 
   let child: OpencodeChild;
@@ -308,7 +324,7 @@ function describeSpawnFailure(cause: unknown): string {
  * `taskkill /T` walks the tree. On POSIX the child gets a SIGKILL, since the
  * turn is being abandoned rather than asked to stop gracefully.
  */
-export function killProcessTree(child: OpencodeChild): void {
+export function killProcessTree(child: ChildProcess): void {
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
     return;
   }

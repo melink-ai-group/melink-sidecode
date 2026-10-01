@@ -2,10 +2,15 @@ import * as vscode from 'vscode';
 import { createId, Emitter } from './base';
 import { OLLAMA_TOKEN_SECRET_KEY } from './secrets';
 import { ThreadStore } from './threadStore';
+import { describeApproval, ruleFor, ruleScopeFor } from './approvals';
+import { ApprovalStore } from './approvalStore';
+import { APPROVAL_TIMEOUT_REASON, awaitUserDecision } from './approvalWait';
+import { approvalFromOpencode, opencodeReplyFor, type OpencodePermissionAsk } from './opencode/approval';
 import {
   AgentBackend,
   AgentEvent,
   ApprovalDecision,
+  ApprovalRequest,
   ApprovalRule,
   BackendError,
   BackendModel,
@@ -178,19 +183,13 @@ export class OllamaBackend implements AgentBackend {
   readonly badge = 'Ollama';
 
   /**
-   * Ollama Cloud has no approval channel of its own: `/api/chat` cannot ask the
-   * user for a decision and has no sandbox to configure. It therefore reports
-   * exactly one level and never emits an approval request, rather than faking a
-   * prompt it cannot answer.
-   *
-   * With the optional opencode runtime enabled, the runtime's own permission
-   * config is the second gate the ticket asks for, but a headless `opencode run`
-   * auto-rejects an `ask` rather than prompting, so there is still no interactive
-   * approval channel to surface. `hasApprovalChannel` stays false and a level is
-   * mapped to allow/deny; the runtime's enforcement never opens a prompt the user
-   * cannot answer.
+   * The direct `/api/chat` path cannot ask the user for a decision. With the
+   * opencode runtime enabled, `ask` permissions are held open and surfaced, so
+   * the channel exists only on that path.
    */
-  readonly hasApprovalChannel = false;
+  get hasApprovalChannel(): boolean {
+    return this.opencodeEnabled;
+  }
 
   /**
    * Permission levels this path can serve. The direct `/api/chat` adapter serves
@@ -211,27 +210,42 @@ export class OllamaBackend implements AgentBackend {
     return ['agent', 'plan', 'ask'];
   }
 
-  /** No approval channel, so there are never stored rules to list. */
+  /** Stored `always` rules for this backend. */
   async listApprovalRules(): Promise<ApprovalRule[]> {
-    return [];
+    return this.approvals?.listGlobalRules().filter((rule) => rule.backendId === this.id) ?? [];
   }
 
-  /** No approval channel, so there is nothing to revoke. */
-  async revokeApprovalRule(_ruleId: string): Promise<void> {}
+  /** Removes one stored `always` rule. */
+  async revokeApprovalRule(ruleId: string): Promise<void> {
+    await this.approvals?.revokeRule(ruleId);
+  }
 
   /**
-   * No approval channel: a decision can never arrive for a request this backend
-   * never raises. Ignoring the call is honest, not a silent success.
+   * Answer a pending opencode permission. An unknown or already settled id is
+   * ignored, so a double click cannot answer twice. The wait itself lives in
+   * `decideOpencodePermission`.
    */
-  decideApproval(_threadId: string, _requestId: string, _decision: ApprovalDecision): void {}
+  decideApproval(threadId: string, requestId: string, decision: ApprovalDecision): void {
+    const pending = this.pendingApprovals.get(requestId);
+    if (!pending || pending.threadId !== threadId) {
+      return;
+    }
+    this.pendingApprovals.delete(requestId);
+    pending.settle(decision);
+  }
 
   private readonly events = new Emitter<AgentEvent>();
   private readonly threads = new Set<string>();
+  private readonly pendingApprovals = new Map<
+    string,
+    { threadId: string; request: ApprovalRequest; settle: (decision: ApprovalDecision) => void }
+  >();
   private inFlight?: AbortController;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly store?: ThreadStore
+    private readonly store?: ThreadStore,
+    private readonly approvals?: ApprovalStore
   ) {}
 
   private get baseUrl(): string {
@@ -690,7 +704,7 @@ export class OllamaBackend implements AgentBackend {
     // Dynamically imported so the direct `/api/chat` path never loads the
     // runtime module at all: with the setting off there is no opencode code on
     // the path and no child process is ever spawned.
-    const { buildOpencodeConfig } = await import('./opencode/config.ts');
+    const { buildOpencodeConfig, opencodeRequiresApproval } = await import('./opencode/config.ts');
     const { runOpencodeTurn } = await import('./opencode/runtime.ts');
 
     const built = buildOpencodeConfig({
@@ -753,7 +767,10 @@ export class OllamaBackend implements AgentBackend {
           prompt: promptFor(fresh),
           sessionId,
           token,
-          signal: controller.signal
+          signal: controller.signal,
+          decidePermission: opencodeRequiresApproval(permissionLevel, request.mode ?? 'agent')
+            ? (ask, signal) => this.decideOpencodePermission(handle.threadId, ask, signal)
+            : undefined
         },
         (event) => this.handleOpencodeEvent(event, handle.threadId, opencodeCwd)
       );
@@ -824,6 +841,98 @@ export class OllamaBackend implements AgentBackend {
         this.inFlight = undefined;
       }
     }
+  }
+
+  /**
+   * Hold one opencode `ask` until the user answers, or for {@link APPROVAL_WAIT_MS}.
+   * A stored session or always rule is applied immediately, with the same reply
+   * a manual choice of that scope would send. A timeout refuses the action so
+   * the agent can try something else; it does not end the turn.
+   */
+  private decideOpencodePermission(
+    threadId: string,
+    ask: OpencodePermissionAsk,
+    signal: AbortSignal
+  ): Promise<'once' | 'always' | 'reject'> {
+    const request = approvalFromOpencode(ask, this.cwd);
+    const matched = this.approvals?.match(this.id, threadId, request);
+    if (matched) {
+      const decision: ApprovalDecision = matched.scope === 'session' ? 'allow-session' : 'allow-always';
+      this.events.fire({
+        type: 'approval/decided',
+        backendId: this.id,
+        threadId,
+        outcome: { requestId: request.id, decision, subject: describeApproval(request) }
+      });
+      return Promise.resolve(opencodeReplyFor(decision));
+    }
+    return awaitUserDecision<'once' | 'always' | 'reject'>({
+      signal,
+      onRequest: (settle) => {
+        this.pendingApprovals.set(request.id, {
+          threadId,
+          request,
+          settle: (decision) => {
+            this.rememberApproval(threadId, request, decision);
+            const subject = describeApproval(request);
+            this.events.fire({
+              type: 'approval/decided',
+              backendId: this.id,
+              threadId,
+              outcome: { requestId: request.id, decision, subject }
+            });
+            if (decision === 'reject') {
+              this.events.fire({
+                type: 'approval/denied',
+                backendId: this.id,
+                threadId,
+                requestId: request.id,
+                subject,
+                reason: 'The user denied this request.'
+              });
+            }
+            settle(opencodeReplyFor(decision));
+          }
+        });
+        this.events.fire({ type: 'approval/requested', backendId: this.id, threadId, approval: request });
+      },
+      onTimeout: () => {
+        this.pendingApprovals.delete(request.id);
+        this.publishRefusal(threadId, request, APPROVAL_TIMEOUT_REASON);
+        return 'reject';
+      },
+      onAbort: () => {
+        this.pendingApprovals.delete(request.id);
+        this.publishRefusal(threadId, request, 'The turn was stopped.');
+        return 'reject';
+      }
+    });
+  }
+
+  private rememberApproval(threadId: string, request: ApprovalRequest, decision: ApprovalDecision): void {
+    const scope = ruleScopeFor(decision);
+    if (scope === 'none' || !this.approvals) {
+      return;
+    }
+    void this.approvals.addRule(ruleFor(request, this.id), scope, threadId);
+  }
+
+  private publishRefusal(threadId: string, request: ApprovalRequest, reason: string): void {
+    const subject = describeApproval(request);
+    this.events.fire({
+      type: 'approval/decided',
+      backendId: this.id,
+      threadId,
+      outcome: { requestId: request.id, decision: 'reject', subject }
+    });
+    this.events.fire({
+      type: 'approval/denied',
+      backendId: this.id,
+      threadId,
+      requestId: request.id,
+      subject,
+      reason
+    });
   }
 
   /** Translate one opencode event into the normalized union. */

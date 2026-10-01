@@ -58,7 +58,7 @@ export class BackendRegistry implements Disposable {
     this.approvals = new ApprovalStore(context);
     this.settings = new ModelSettingsStore(context.globalState);
     this.backends = [
-      new OllamaBackend(context, this.store),
+      new OllamaBackend(context, this.store, this.approvals),
       new CodexBackend(this.store, this.approvals)
     ];
     for (const backend of this.backends) {

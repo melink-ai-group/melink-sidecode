@@ -749,6 +749,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case 'installOpencode': {
+        this.post({ type: 'opencodeInstall', pending: true });
+        const installed = await this.settings.installOpencode();
+        if (installed.ok && installed.executablePath) {
+          this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        }
+        this.post({
+          type: 'opencodeInstall',
+          pending: false,
+          ok: installed.ok,
+          message: installed.message,
+          ...(installed.executablePath ? { path: installed.executablePath } : {})
+        });
+        break;
+      }
       case 'getModelCapability':
         await this.postModelCapability(message.providerId, message.modelId);
         break;
