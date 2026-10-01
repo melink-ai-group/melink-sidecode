@@ -18,18 +18,22 @@ test('every offered mode has a descriptor and is recognised', () => {
   assert.deepEqual([...DEFAULT_MODES], ['agent', 'plan', 'ask']);
 });
 
-test('only the modes that change behavior carry developer instructions', () => {
-  // `agent` is the CLI default, so it must add nothing rather than a no-op.
-  assert.equal(modeInstructions('agent'), undefined);
-  // `plan` and `ask` are real instructions, not placeholders.
-  assert.match(modeInstructions('plan') ?? '', /plan/i);
-  assert.match(modeInstructions('ask') ?? '', /question|answer/i);
+test('every mode carries the shared plan-document contract', () => {
+  const agent = modeInstructions('agent') ?? '';
+  const plan = modeInstructions('plan') ?? '';
+  const ask = modeInstructions('ask') ?? '';
+  assert.match(agent, /checkbox/i);
+  assert.match(agent, /do not rewrite the plan prose/i);
+  assert.match(plan, /## Steps/);
+  assert.match(plan, /unless the user asked you to update or revise it/i);
+  assert.match(ask, /do not run commands/i);
+  assert.match(ask, /write or revise the plan/i);
 });
 
 test('an unknown mode degrades to the agent default', () => {
   assert.equal(isDefaultMode('not-a-mode'), false);
   assert.equal(modeDescriptor('not-a-mode' as never).mode, 'agent');
-  assert.equal(modeInstructions('not-a-mode' as never), undefined);
+  assert.equal(modeInstructions('not-a-mode' as never), modeInstructions('agent'));
 });
 
 test('plan and agent honor permission levels; ask enforces read-only', () => {

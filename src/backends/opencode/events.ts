@@ -22,6 +22,8 @@
  *   stream error, not a successful turn.
  */
 
+import { targetForTool } from '../toolLabel.ts';
+
 export interface OpencodeStepStartEvent {
   kind: 'step-start';
   sessionId?: string;
@@ -53,6 +55,11 @@ export interface OpencodeToolEvent {
   /** write/edit/patch: the file the tool touched. */
   filePath?: string;
   /**
+   * The path, command, pattern, or query this call actually used.
+   * Never a lifecycle word such as "completed".
+   */
+  target?: string;
+  /**
    * write/patch: whether the target file already existed, from the tool's own
    * metadata. `false` means the tool created it, so a late before snapshot
    * cannot prove the create and this hint is used instead. Absent when the
@@ -71,6 +78,8 @@ export interface OpencodeStepFinishEvent {
   kind: 'step-finish';
   sessionId?: string;
   reason: string;
+  /** Tokens occupying the window at the end of this step, when the runtime reported them. */
+  usedTokens?: number;
 }
 
 export interface OpencodeErrorEvent {
@@ -109,6 +118,26 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Tokens in the window at step end. `total` already includes input, output,
+ * and cache reads, so those fields are only a fallback when `total` is absent.
+ */
+function usedTokensOf(part: Record<string, unknown> | undefined): number | undefined {
+  const tokens = asRecord(part?.tokens);
+  if (!tokens) {
+    return undefined;
+  }
+  if (typeof tokens.total === 'number' && Number.isFinite(tokens.total) && tokens.total > 0) {
+    return Math.round(tokens.total);
+  }
+  const cache = asRecord(tokens.cache);
+  const input = typeof tokens.input === 'number' ? tokens.input : 0;
+  const output = typeof tokens.output === 'number' ? tokens.output : 0;
+  const cacheRead = typeof cache?.read === 'number' ? cache.read : 0;
+  const sum = input + output + cacheRead;
+  return sum > 0 ? Math.round(sum) : undefined;
 }
 
 /** The `part` object of an event, when present. */
@@ -176,11 +205,17 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
           ? status
           : 'running';
       const command = asString(input?.command);
-      const filePath = asString(metadata?.filepath) ?? asString(input?.filePath);
+      const filePath =
+        asString(metadata?.filepath) ??
+        asString(metadata?.filePath) ??
+        asString(input?.filePath) ??
+        asString(input?.file_path) ??
+        asString(input?.filepath);
       const fileExists = typeof metadata?.exists === 'boolean' ? metadata.exists : undefined;
       const output = asString(state?.output);
       const title = asString(state?.title);
       const todos = tool.toLowerCase() === 'todowrite' ? parseTodos(input?.todos) : undefined;
+      const target = targetForTool(tool, input, metadata);
       return {
         kind: 'tool',
         sessionId,
@@ -189,6 +224,7 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
         status: normalizedStatus,
         command,
         filePath,
+        target,
         fileExists,
         output,
         title,
@@ -197,7 +233,7 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
     }
     case 'step_finish': {
       const reason = asString(part?.reason) ?? 'unknown';
-      return { kind: 'step-finish', sessionId, reason };
+      return { kind: 'step-finish', sessionId, reason, usedTokens: usedTokensOf(part) };
     }
     case 'error': {
       const error = asRecord(record.error);

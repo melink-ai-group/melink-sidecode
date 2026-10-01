@@ -68,8 +68,16 @@ body {
 
 .view-title__actions {
   display: flex;
+  align-items: center;
   gap: 2px;
   margin-left: auto;
+}
+
+.view-title__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 6px;
+  background: var(--vscode-panel-border);
 }
 
 /* Collapsed trigger always shows the current selection. */
@@ -763,10 +771,57 @@ body {
   }
 }
 
+/* WhatsApp-style typing row. Neutral foreground: brand hue stays on the caret. */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  height: 18px;
+  padding: 2px 0;
+}
+
+.typing-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground);
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .caret,
-  .spinner {
+  .spinner,
+  .typing-dots span {
     animation: none;
+  }
+
+  .typing-dots span {
+    opacity: 0.7;
+    transform: none;
   }
 }
 
@@ -858,6 +913,9 @@ body {
 /* ---- Item cards ---- */
 
 .item-card {
+  /* Same reason as .panel: overflow:hidden makes the flex minimum size 0, so
+   * the transcript column would crush a closed row into a sliver. */
+  flex: 0 0 auto;
   min-width: 0;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
@@ -867,6 +925,10 @@ body {
 
 .item-card--command > summary { list-style: none; cursor: pointer; }
 .item-card--command > summary::-webkit-details-marker { display: none; }
+.item-card--command:not([open]),
+.item-card--command:not([open]) > .item-head {
+  min-height: 32px;
+}
 .item-card--command:not([open]) .item-path { white-space: normal; }
 .item-card--command[open] .item-path { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
 .item-card--command[open] .item-head { border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
@@ -1201,6 +1263,24 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
+.icon-btn.icon-btn--new-chat {
+  width: auto;
+  min-width: 28px;
+  padding: 0 8px;
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+.icon-btn.icon-btn--new-chat .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.icon-btn.icon-btn--new-chat:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
 /* ---- Composer ---- */
 
 .composer {
@@ -1269,6 +1349,30 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
+/* An empty chat keeps the mark visible and gives the draft the rest of the
+ * sidebar so the first message can be written in a tall field. */
+.app--chat-empty .transcript {
+  flex: 0 1 auto;
+  min-height: 148px;
+}
+
+.app--chat-empty .composer.composer--expanded {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.app--chat-empty .composer.composer--expanded .composer-box {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app--chat-empty .composer.composer--expanded .composer-input {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .composer-row {
   display: flex;
   flex-wrap: wrap;
@@ -1278,8 +1382,96 @@ body {
 }
 
 .composer-row .btn,
-.composer-row .control-trigger {
+.composer-row .control-trigger,
+.composer-row .mode-menu {
   flex: 0 0 auto;
+}
+
+/* Mode list opens upward from the composer trigger, only as wide as the names. */
+.mode-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.mode-menu__list {
+  position: absolute;
+  z-index: 16;
+  left: 0;
+  bottom: calc(100% + 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 108px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
+}
+
+.mode-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mode-menu__option .control-check {
+  margin-left: auto;
+  margin-top: 0;
+}
+
+.mode-menu__option--plan,
+.control-trigger.control-trigger--plan {
+  color: var(--melink-yellow);
+}
+
+.mode-menu__option--agent,
+.control-trigger.control-trigger--agent {
+  color: var(--melink-shell);
+}
+
+.mode-menu__option--ask,
+.control-trigger.control-trigger--ask {
+  color: var(--melink-success);
+}
+
+.mode-menu__option:hover,
+.mode-menu__option:focus-visible,
+.mode-menu__option[aria-selected='true'] {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.mode-menu__option:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.control-trigger--mode:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.control-trigger--plan:hover:not(:disabled) {
+  color: var(--melink-yellow);
+}
+
+.control-trigger--agent:hover:not(:disabled) {
+  color: var(--melink-shell);
+}
+
+.control-trigger--ask:hover:not(:disabled) {
+  color: var(--melink-success);
 }
 
 .composer-row .spacer {
@@ -1392,52 +1584,51 @@ body {
   color: var(--vscode-badge-foreground);
 }
 
+.empty-state--welcome {
+  flex: 1 1 auto;
+  justify-content: center;
+  gap: 12px;
+}
+
+.empty-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .empty-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--vscode-foreground);
 }
 
-.empty-text {
-  max-width: 32ch;
-  font-size: 13px;
-}
-
-.divider {
-  width: 100%;
-  height: 1px;
+.empty-state--welcome .empty-title,
+.empty-state--welcome .empty-text,
+.empty-state--welcome .empty-slogan {
   margin: 0;
-  border: 0;
-  background: var(--vscode-panel-border);
 }
 
-.suggestions {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
+.empty-slogan {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--vscode-foreground);
+}
+
+.empty-state--welcome .empty-slogan {
   margin-top: 4px;
 }
 
-.suggestion {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: var(--melink-radius-md, 6px);
-  background: var(--vscode-editorWidget-background);
-  color: var(--vscode-foreground);
-  font: inherit;
+.empty-title--brand {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.empty-text {
+  max-width: 32ch;
   font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.suggestion:hover {
-  background: var(--vscode-list-hoverBackground);
-}
-
-.suggestion:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
 }
 
 /* ---- Utilities ---- */
@@ -2588,6 +2779,7 @@ body {
 
 .prompt {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   min-width: 0;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
@@ -3273,6 +3465,78 @@ code.key {
   font-size: 12px;
   line-height: 1.4;
   color: var(--vscode-descriptionForeground);
+}
+
+.context-meter {
+  position: relative;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vscode-foreground);
+}
+
+.context-meter.is-ok {
+  color: var(--vscode-charts-blue, var(--vscode-progressBar-background));
+}
+
+.context-meter.is-warn {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.context-meter.is-high {
+  color: var(--vscode-errorForeground);
+}
+
+button.context-meter {
+  cursor: pointer;
+}
+
+button.context-meter:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.context-meter.is-busy {
+  opacity: 0.85;
+}
+
+.context-meter__ring {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.context-meter__track,
+.context-meter__value {
+  fill: none;
+  stroke-width: 3;
+}
+
+.context-meter__track {
+  stroke: var(--vscode-widget-border, var(--vscode-editorWidget-border));
+}
+
+.context-meter__value {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 18px 18px;
+}
+
+.context-meter__pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--vscode-foreground);
 }
 
 .context-strip.is-open {
@@ -4265,51 +4529,6 @@ code.key {
   font-size: 13px;
   color: var(--vscode-foreground);
   overflow-wrap: anywhere;
-}
-
-/* ---- Mode affordance ---- */
-
-.mode-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 8px 8px 0;
-  padding: 8px 10px;
-  line-height: 1.4;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-left-width: 3px;
-  border-radius: var(--melink-radius-sm, 4px);
-  background: var(--vscode-editorWidget-background);
-  font-size: 11px;
-  color: var(--vscode-foreground);
-  overflow-wrap: anywhere;
-}
-
-.mode-note--thread {
-  margin: 4px 0 0;
-}
-
-.mode-note__icon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  margin-top: 1px;
-  color: var(--vscode-descriptionForeground);
-}
-
-.mode-note--plan {
-  border-left-color: var(--vscode-textLink-foreground);
-}
-
-.mode-note--ask {
-  border-left-color: var(--vscode-editorWarning-foreground);
-}
-
-.mode-note--ask .mode-note__icon {
-  color: var(--vscode-editorWarning-foreground);
-}
-
-.composer--ask {
-  border-top-color: var(--vscode-editorWarning-foreground);
 }
 
 @media (max-width: 340px) {

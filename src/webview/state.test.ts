@@ -92,6 +92,41 @@ test('a settled approval collapses to a decided card and clears the pending requ
   assert.equal(decided.transcript[0].approvalDecision, 'reject');
 });
 
+test('a later tool start fills the command without opening a second card', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 't' });
+  const started = reduce(active, {
+    type: 'agentEvent',
+    event: {
+      type: 'item/started',
+      backendId: 'ollama',
+      threadId: 't',
+      item: { id: 'tool_1', kind: 'tool', title: 'glob', detail: 'completed' }
+    }
+  });
+  assert.equal(started.transcript.length, 1);
+  assert.equal(started.transcript[0]?.detail, undefined);
+  const updated = reduce(started, {
+    type: 'agentEvent',
+    event: {
+      type: 'item/started',
+      backendId: 'ollama',
+      threadId: 't',
+      item: {
+        id: 'tool_1',
+        kind: 'tool',
+        title: 'Finding files **/*.ts',
+        command: '**/*.ts',
+        text: 'a.ts'
+      }
+    }
+  });
+  assert.equal(updated.transcript.length, 1);
+  assert.equal(updated.transcript[0]?.command, '**/*.ts');
+  assert.equal(updated.transcript[0]?.title, 'Finding files **/*.ts');
+  assert.equal(updated.transcript[0]?.text, 'a.ts');
+  assert.notEqual(updated.transcript[0]?.command, 'completed');
+});
+
 test('a finished turn drops any lingering pending request', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't' });
   const state = reduce(active, {
@@ -491,6 +526,7 @@ test('a native plan update keeps the artifact summary and built flag', () => {
     path: '.melink/plans/t.md',
     title: 'Fix the bug',
     summary: 'Make buildContext read the live model.',
+    body: 'Make buildContext read the live model.\n\nTouch buildContext.ts only.',
     built: true,
     steps: [{ text: 'a', status: 'completed' as const }],
     updatedAt: 1
@@ -508,6 +544,7 @@ test('a native plan update keeps the artifact summary and built flag', () => {
     }
   });
   assert.equal(updated.plan?.summary, 'Make buildContext read the live model.');
+  assert.equal(updated.plan?.body, 'Make buildContext read the live model.\n\nTouch buildContext.ts only.');
   assert.equal(updated.plan?.built, true);
   assert.equal(updated.plan?.steps.length, 2);
 });
@@ -727,4 +764,35 @@ test('Ollama keeps Agent, Plan, and Ask when the host snapshot is missing or bel
     visibleModeSnapshot(stale)?.options.map((option) => option.mode),
     ['agent', 'plan', 'ask']
   );
+});
+
+test('streamed text moves the context fill and a provider count replaces it', () => {
+  const started = reduce(
+    { ...initialState, selectedBackendId: 'ollama', activeThreadId: 'thread_1' },
+    { type: 'localUserMessage', text: 'abcd' }
+  );
+  assert.equal(started.contextUsedTokens, 1);
+  const streamed = reduce(started, {
+    type: 'agentEvent',
+    event: {
+      type: 'item/delta',
+      backendId: 'ollama',
+      threadId: 'thread_1',
+      itemId: 'item_1',
+      delta: 'abcdefgh'
+    }
+  });
+  assert.equal(streamed.contextUsedTokens, 3);
+  const reported = reduce(streamed, {
+    type: 'agentEvent',
+    event: {
+      type: 'context/usage',
+      backendId: 'ollama',
+      threadId: 'thread_1',
+      usedTokens: 1040,
+      windowTokens: 8192
+    }
+  });
+  assert.equal(reported.contextUsedTokens, 1040);
+  assert.equal(reported.contextWindowTokens, 8192);
 });

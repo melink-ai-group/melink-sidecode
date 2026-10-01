@@ -1,3 +1,4 @@
+import { userAsksToRevisePlan } from './plan.ts';
 import type { DefaultMode } from './types.ts';
 
 /**
@@ -10,6 +11,11 @@ export function inferRequestedMode(text: string): DefaultMode | undefined {
   if (!normalized) return undefined;
 
   const action = '(?:fix|change|edit|implement|build|create|write|add|remove|update|refactor|run|execute|install|delete)';
+  // Revising a plan stays in Plan mode. "update the plan" would otherwise
+  // match the action pattern and switch the turn to Agent.
+  if (userAsksToRevisePlan(normalized)) {
+    return 'plan';
+  }
   if (/\b(make|write|create|draft|propose)\s+(me\s+)?(a\s+)?plan\b|\bplan\s+(this|the work|the changes|how to)\b/.test(normalized)) {
     return 'plan';
   }

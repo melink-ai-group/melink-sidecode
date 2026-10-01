@@ -122,8 +122,8 @@ instead of spinning forever.
   in-flight turn. A canceled turn keeps whatever was already generated and is
   marked *Stopped*, not as an error.
 
-The empty state offers a few one-click suggestions (e.g. *"Explain the selected
-code"*) that send immediately.
+An empty chat shows the meLink mark and the name **meLink SideCode**. The composer
+opens tall so the first message has room to be written.
 
 ### Automatic mode selection
 

@@ -598,10 +598,15 @@ export interface PlanArtifact {
   path: string;
   title: string;
   /**
-   * The plan's "what it will do" paragraph, when one was written. Rendered above
-   * the bullet list on the review card; absent for a plan with no summary.
+   * The plan's "what it will do" paragraph, when one was written. Used for the
+   * collapsed reference; absent for a plan with no summary.
    */
   summary?: string;
+  /**
+   * The plan document between the title and the `## Steps` list. The review
+   * card renders this, then the todo list. Absent when the plan is only a list.
+   */
+  body?: string;
   steps: TodoStep[];
   /**
    * True once the plan has been built (the thread moved to execution). Drives
@@ -871,6 +876,21 @@ export interface NoticeEvent {
   message: string;
 }
 
+/**
+ * How full the model's context window is.
+ *
+ * `usedTokens` is the occupancy of the current window, not a lifetime total.
+ * `windowTokens` is present when the provider named the window itself; the
+ * ring still prefers the resolved max-context setting when one exists.
+ */
+export interface ContextUsageEvent {
+  type: 'context/usage';
+  backendId: string;
+  threadId: string;
+  usedTokens: number;
+  windowTokens?: number;
+}
+
 export interface ErrorEvent {
   type: 'error';
   backendId: string;
@@ -898,6 +918,7 @@ export type AgentEvent =
   | ApprovalDeniedEvent
   | PlanUpdatedEvent
   | NoticeEvent
+  | ContextUsageEvent
   | ErrorEvent;
 
 export type AgentEventType = AgentEvent['type'];
@@ -925,6 +946,21 @@ export class BackendError extends Error {
       (this as { cause?: unknown }).cause = cause;
     }
   }
+}
+
+/** What a backend needs in order to compact one thread. */
+export interface CompactRequest {
+  model?: string;
+  modelSettings?: ModelSettingOverrides;
+  /** Stored turns, for a backend that has to summarize them itself. */
+  transcript: TranscriptItem[];
+  /** Effective context window, so a summary request can be kept inside it. */
+  maxTokens?: number;
+}
+
+/** The outcome of a compaction. An absent transcript means the provider kept its own. */
+export interface CompactResult {
+  transcript?: TranscriptItem[];
 }
 
 export interface AgentBackend {
@@ -1017,6 +1053,13 @@ export interface AgentBackend {
 
   /** Sends a turn and streams its result through `onEvent`. */
   sendTurn(handle: ThreadHandle, request: SendTurnRequest): Promise<void>;
+
+  /**
+   * Shrink the thread's context. Codex asks the app-server to compact in
+   * place. Ollama summarizes the stored transcript and returns the replacement
+   * the host persists. Safe to call only while no turn is running.
+   */
+  compact(handle: ThreadHandle, request: CompactRequest): Promise<CompactResult>;
 
   /** Adds a user message to the active turn when the provider supports steering. */
   steerTurn?(handle: ThreadHandle, text: string, clientUserMessageId?: string): Promise<void>;

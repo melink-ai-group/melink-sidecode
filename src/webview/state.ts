@@ -15,6 +15,9 @@ import type {
   TranscriptItem,
   TranscriptItemKind
 } from '../backends/types';
+import { cleanToolTarget, isStatusText } from '../backends/toolLabel.ts';
+import { tokensFromText } from '../backends/contextUsage.ts';
+import { estimateConversationTokens } from './modelControls.ts';
 import type {
   ConnectionTestResult,
   ContextView,
@@ -94,6 +97,14 @@ export interface AppState {
   /** Host-side conversation id, present once a thread exists. */
   activeThreadId?: string;
   transcript: TranscriptItemView[];
+  /**
+   * Tokens currently occupying the context window. Provider counts replace this;
+   * streamed text adds to it between those counts so the ring moves while a
+   * turn is running.
+   */
+  contextUsedTokens?: number;
+  /** Window the live provider reported, used when the model setting is unknown. */
+  contextWindowTokens?: number;
   busy: boolean;
   /** True while a turn is in flight and no assistant item has started yet. */
   startingTurn: boolean;
@@ -474,6 +485,7 @@ export function reduce(state: AppState, action: Action): AppState {
         ...state,
         attachments: [],
         attachmentError: undefined,
+        contextUsedTokens: (state.contextUsedTokens ?? 0) + tokensFromText(action.text),
         transcript: [
           ...state.transcript,
           {
@@ -501,6 +513,7 @@ export function reduce(state: AppState, action: Action): AppState {
         action.threadId,
         action.pendingApproval
       );
+      const nextTranscript = pendingUser ? [...transcript, pendingUser] : transcript;
       const nextModel = action.model ?? state.selectedModel;
       const activityKey = action.threadId ? `${action.backendId}:${action.threadId}` : undefined;
       const changedModel = nextModel !== state.selectedModel;
@@ -532,7 +545,9 @@ export function reduce(state: AppState, action: Action): AppState {
           : undefined,
         // A replay replaces the transcript; a fresh conversation clears it.
         // A send that just opened this thread keeps the optimistic user line.
-        transcript: pendingUser ? [...transcript, pendingUser] : transcript,
+        transcript: nextTranscript,
+        contextUsedTokens: estimateConversationTokens(nextTranscript),
+        contextWindowTokens: changedModel ? undefined : state.contextWindowTokens,
         // A plan is carried with the conversation so a resumed thread reopens it.
         plan: action.plan,
         // A change set belongs to the thread it was recorded for; a switch drops
@@ -878,6 +893,42 @@ function reconcilePendingItems(
   return [...withoutPending, card];
 }
 
+function preferDetail(current: string | undefined, incoming: string | undefined): string | undefined {
+  const next = incoming?.trim();
+  if (next && !isStatusText(next)) {
+    return next;
+  }
+  if (current && !isStatusText(current)) {
+    return current;
+  }
+  return undefined;
+}
+
+/** Keep the fuller tool output when a later event restates the same call. */
+function preferText(current: string, incoming: string | undefined): string {
+  if (!incoming) {
+    return current;
+  }
+  if (!current || incoming.startsWith(current)) {
+    return incoming;
+  }
+  if (current.startsWith(incoming)) {
+    return current;
+  }
+  return incoming.length >= current.length ? incoming : current;
+}
+
+function mergeToolItem(item: TranscriptItemView, incoming: TranscriptItem): TranscriptItemView {
+  return {
+    ...item,
+    title: incoming.title || item.title,
+    command: cleanToolTarget(incoming.command) ?? cleanToolTarget(item.command),
+    detail: preferDetail(item.detail, incoming.detail),
+    files: incoming.files && incoming.files.length > 0 ? incoming.files : item.files,
+    text: preferText(item.text, incoming.text)
+  };
+}
+
 function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
   switch (event.type) {
     case 'thread/started':
@@ -904,10 +955,20 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         changeRejectConfirm: undefined,
         changeDeciding: false
       };
-    case 'item/started':
-      // Idempotent per id: a re-sent `item.started` must not open a second card.
-      if (state.transcript.some((item) => item.id === event.item.id)) {
-        return state;
+    case 'item/started': {
+      // One card per id. A later tool event can fill in the real command or
+      // output once the runtime reports it; it must not open a second card.
+      const existing = state.transcript.find((item) => item.id === event.item.id);
+      if (existing) {
+        if (existing.kind !== 'tool' && existing.kind !== 'file-change') {
+          return state;
+        }
+        return {
+          ...state,
+          transcript: state.transcript.map((item) =>
+            item.id === event.item.id ? mergeToolItem(item, event.item) : item
+          )
+        };
       }
       return {
         ...state,
@@ -920,21 +981,29 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
             backendId: event.backendId,
             role: event.item.role,
             title: event.item.title,
-            detail: event.item.detail,
-            command: event.item.command,
+            detail: preferDetail(undefined, event.item.detail),
+            command: cleanToolTarget(event.item.command),
             files: event.item.files,
             approval: event.item.approval,
-            text: '',
+            text: event.item.kind === 'tool' ? (event.item.text ?? '') : '',
             status: 'streaming'
           }
         ]
       };
+    }
     case 'item/delta':
       return {
         ...state,
+        contextUsedTokens: (state.contextUsedTokens ?? 0) + tokensFromText(event.delta),
         transcript: state.transcript.map((item) =>
           item.id === event.itemId ? { ...item, text: item.text + event.delta } : item
         )
+      };
+    case 'context/usage':
+      return {
+        ...state,
+        contextUsedTokens: event.usedTokens,
+        contextWindowTokens: event.windowTokens ?? state.contextWindowTokens
       };
     case 'item/completed':
       return {
@@ -1042,6 +1111,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
           path: state.plan?.path ?? '',
           title: state.plan?.title ?? 'Plan',
           summary: state.plan?.summary,
+          body: state.plan?.body,
           steps: event.steps,
           built: state.plan?.built,
           updatedAt: Date.now()

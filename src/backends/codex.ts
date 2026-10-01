@@ -11,6 +11,8 @@ import {
   AuthStatusReport,
   BackendError,
   BackendModel,
+  CompactRequest,
+  CompactResult,
   ConnectionTestResult,
   DefaultMode,
   Disposable,
@@ -67,6 +69,9 @@ import type { ApplyPatchApprovalParams } from '../../schemas/ApplyPatchApprovalP
 import type { ThreadStartedNotification } from '../../schemas/v2/ThreadStartedNotification';
 import type { ThreadStatusChangedNotification } from '../../schemas/v2/ThreadStatusChangedNotification';
 import type { ErrorNotification } from '../../schemas/v2/ErrorNotification';
+import type { ThreadTokenUsageUpdatedNotification } from '../../schemas/v2/ThreadTokenUsageUpdatedNotification';
+import type { ContextCompactedNotification } from '../../schemas/v2/ContextCompactedNotification';
+import { codexContextUsed, finiteTokenCount } from './contextUsage';
 import type { FileChangePatchUpdatedNotification } from '../../schemas/v2/FileChangePatchUpdatedNotification';
 import type { PermissionsRequestApprovalParams } from '../../schemas/v2/PermissionsRequestApprovalParams';
 import type { RequestPermissionProfile } from '../../schemas/v2/RequestPermissionProfile';
@@ -83,6 +88,8 @@ interface PendingTurn {
   threadId: string;
   /** Server-assigned turn id, filled from the response or from `turn/started`. */
   turnId?: string;
+  /** True when this wait is a compaction rather than a user turn. */
+  compact?: boolean;
   resolve: () => void;
   reject: (error: unknown) => void;
 }
@@ -541,6 +548,37 @@ export class CodexBackend implements AgentBackend {
     return turnDone;
   }
 
+  /**
+   * Ask the app-server to compact this thread. The call starts a compact turn;
+   * this waits until that turn finishes so the host stays busy for the whole
+   * shrink. Token-usage notifications during the turn update the ring.
+   */
+  async compact(handle: ThreadHandle, _request: CompactRequest): Promise<CompactResult> {
+    const connection = await this.connect();
+    const turnDone = new Promise<void>((resolve, reject) => {
+      this.pendingTurn = { threadId: handle.threadId, resolve, reject, compact: true };
+    });
+    const timer = setTimeout(() => {
+      if (this.pendingTurn?.compact && this.pendingTurn.threadId === handle.threadId) {
+        const pending = this.pendingTurn;
+        this.pendingTurn = undefined;
+        pending.reject(new BackendError('provider', 'Compaction did not finish.'));
+      }
+    }, 120_000);
+    try {
+      await connection.compactThread({ threadId: handle.threadId }).catch((error: unknown) => this.fail(error));
+      await turnDone;
+    } catch (error) {
+      if (this.pendingTurn?.threadId === handle.threadId && this.pendingTurn.compact) {
+        this.pendingTurn = undefined;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    return {};
+  }
+
   async steerTurn(handle: ThreadHandle, text: string, clientUserMessageId?: string): Promise<void> {
     const pending = this.pendingTurn;
     if (!pending || pending.threadId !== handle.threadId || !pending.turnId) {
@@ -811,6 +849,33 @@ export class CodexBackend implements AgentBackend {
         // journal (the approval path is untouched and unchanged).
         const notification = params as FileChangePatchUpdatedNotification;
         this.reportChanges(notification.threadId, notification.turnId, changesFromPatchUpdated(notification, this.cwd));
+        break;
+      }
+      case 'thread/tokenUsage/updated': {
+        const notification = params as ThreadTokenUsageUpdatedNotification;
+        const used = codexContextUsed(notification.tokenUsage);
+        if (used === undefined) {
+          break;
+        }
+        const windowTokens = finiteTokenCount(notification.tokenUsage.modelContextWindow);
+        this.events.fire({
+          type: 'context/usage',
+          backendId: this.id,
+          threadId: notification.threadId,
+          usedTokens: used,
+          ...(windowTokens ? { windowTokens } : {})
+        });
+        break;
+      }
+      case 'thread/compacted': {
+        // A compact turn ends on this notification when the server does not
+        // also emit `turn/completed`. Either signal releases the waiter.
+        const notification = params as ContextCompactedNotification;
+        const pending = this.pendingTurn;
+        if (pending?.compact && pending.threadId === notification.threadId) {
+          this.pendingTurn = undefined;
+          pending.resolve();
+        }
         break;
       }
       case 'error': {

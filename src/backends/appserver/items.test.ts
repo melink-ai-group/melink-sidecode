@@ -73,6 +73,7 @@ test('commandExecution maps to a tool item and is terminal once finished', () =>
   const translated = translateItem(done);
   assert.equal(translated.item.kind, 'tool');
   assert.equal(translated.item.command, 'ls');
+  assert.equal(translated.item.title, 'Running ls');
   assert.equal(translated.item.status, 'completed');
   assert.equal(translated.terminal, true);
 
@@ -120,6 +121,26 @@ test('translateTurnItems skips user messages so a replay cannot double them', ()
   assert.equal(transcript.length, 1);
   assert.equal(transcript[0]?.id, 'a1');
   assert.equal(transcript[0]?.status, 'completed');
+});
+
+test('dynamicToolCall labels the tool and keeps the real argument, not the status', () => {
+  const item: ThreadItem = {
+    type: 'dynamicToolCall',
+    id: 'd1',
+    namespace: null,
+    tool: 'glob',
+    arguments: { pattern: '**/*.ts' },
+    status: 'completed',
+    contentItems: null,
+    success: true,
+    durationMs: null
+  };
+  const translated = translateItem(item);
+  assert.equal(translated.item.kind, 'tool');
+  assert.equal(translated.item.command, '**/*.ts');
+  assert.equal(translated.item.title, 'Finding files **/*.ts');
+  assert.notEqual(translated.item.detail, 'completed');
+  assert.notEqual(translated.item.command, 'completed');
 });
 
 test('parsePatch drops hunk headers and keeps only classifiable lines', () => {

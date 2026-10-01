@@ -37,6 +37,8 @@ import type { ThreadListResponse } from '../../../schemas/v2/ThreadListResponse'
 import type { TurnStartParams } from '../../../schemas/v2/TurnStartParams';
 import type { TurnStartResponse } from '../../../schemas/v2/TurnStartResponse';
 import type { TurnInterruptParams } from '../../../schemas/v2/TurnInterruptParams';
+import type { ThreadCompactStartParams } from '../../../schemas/v2/ThreadCompactStartParams';
+import type { ThreadCompactStartResponse } from '../../../schemas/v2/ThreadCompactStartResponse';
 import type { TurnSteerParams } from '../../../schemas/v2/TurnSteerParams';
 import type { TurnSteerResponse } from '../../../schemas/v2/TurnSteerResponse';
 import type { ModelListParams } from '../../../schemas/v2/ModelListParams';
@@ -533,6 +535,10 @@ export class AppServerConnection implements Disposable {
 
   steerTurn(params: TurnSteerParams): Promise<TurnSteerResponse> {
     return this.request<TurnSteerResponse>('turn/steer', params);
+  }
+
+  compactThread(params: ThreadCompactStartParams): Promise<ThreadCompactStartResponse> {
+    return this.request<ThreadCompactStartResponse>('thread/compact/start', params);
   }
 
   interruptTurn(params: TurnInterruptParams): Promise<unknown> {

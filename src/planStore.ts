@@ -2,8 +2,7 @@ import * as vscode from 'vscode';
 import type { PlanArtifact, TodoStep } from './backends/types';
 import {
   PLAN_DIRECTORY,
-  parsePlanSteps,
-  parsePlanTitle,
+  planArtifactFromMarkdown,
   planRelativePath,
   renderPlanMarkdown
 } from './backends/plan';
@@ -36,12 +35,14 @@ export class PlanStore {
     threadId: string;
     title: string;
     summary?: string;
+    body?: string;
     steps: readonly TodoStep[];
   }): Promise<PlanArtifact> {
     const relative = planRelativePath(input.threadId);
     const markdown = renderPlanMarkdown({
       title: input.title,
       summary: input.summary,
+      body: input.body,
       steps: input.steps
     });
     const root = this.root;
@@ -51,13 +52,12 @@ export class PlanStore {
       await vscode.workspace.fs.createDirectory(dirUri);
       await vscode.workspace.fs.writeFile(fileUri, Buffer.from(markdown, 'utf8'));
     }
-    return {
+    return planArtifactFromMarkdown({
       path: relative,
-      title: parsePlanTitle(markdown, input.title),
-      summary: input.summary?.trim() || undefined,
-      steps: [...input.steps],
+      markdown,
+      fallbackTitle: input.title,
       updatedAt: Date.now()
-    };
+    });
   }
 
   /**
@@ -75,12 +75,12 @@ export class PlanStore {
     try {
       const bytes = await vscode.workspace.fs.readFile(fileUri);
       const markdown = Buffer.from(bytes).toString('utf8');
-      return {
+      return planArtifactFromMarkdown({
         path: relative,
-        title: parsePlanTitle(markdown, 'Plan'),
-        steps: parsePlanSteps(markdown),
+        markdown,
+        fallbackTitle: 'Plan',
         updatedAt: Date.now()
-      };
+      });
     } catch {
       return undefined;
     }

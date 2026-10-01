@@ -1,17 +1,15 @@
-import { useMemo, useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
 import { Markdown } from './Markdown';
 import {
   AlertIcon,
   ArrowIcon,
-  AskIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CrossIcon,
   FileIcon,
   InfoIcon,
-  PlanIcon,
   RefreshIcon
 } from './Icons';
 
@@ -144,9 +142,9 @@ function PlanCard({
       ) : null}
 
       <div className="plan-doc" tabIndex={0} aria-label="Plan contents">
-        {plan.summary ? (
+        {plan.body || plan.summary ? (
           <div className="plan-doc__summary">
-            <Markdown text={plan.summary} />
+            <Markdown text={plan.body || plan.summary || ''} />
           </div>
         ) : null}
         {plan.steps.length > 0 ? (
@@ -431,47 +429,4 @@ function statusLabel(status: TodoStepStatus, running: boolean): string {
     default:
       return 'Pending';
   }
-}
-
-/**
- * The mode affordance shown on the thread and in the composer. Agent is the
- * default and carries no marker; Plan and Ask are stated plainly so an Ask turn
- * never reads as a silently broken Agent turn.
- */
-export function ModeIndicator({
-  mode,
-  variant
-}: {
-  mode: 'agent' | 'plan' | 'ask';
-  variant: 'composer' | 'thread';
-}): JSX.Element | null {
-  const copy = useMemo(() => {
-    if (mode === 'plan') {
-      return {
-        label: 'Plan mode.',
-        note: 'Writes a plan for you to review.'
-      };
-    }
-    if (mode === 'ask') {
-      return {
-        label: 'Ask mode.',
-        note: 'Answers questions only. This turn will not change files.'
-      };
-    }
-    return undefined;
-  }, [mode]);
-
-  if (!copy) {
-    return null;
-  }
-  return (
-    <p className={`mode-note mode-note--${mode} mode-note--${variant}`} role="status">
-      <span className="mode-note__icon" aria-hidden="true">
-        {mode === 'plan' ? <PlanIcon className="ico ico--xs" /> : <AskIcon className="ico ico--xs" />}
-      </span>
-      <span>
-        <strong>{copy.label}</strong> {copy.note}
-      </span>
-    </p>
-  );
 }

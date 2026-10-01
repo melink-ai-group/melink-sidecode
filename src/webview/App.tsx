@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX } from 'react';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -8,6 +8,7 @@ import type {
   FileChange,
   ThreadSummary
 } from '../backends/types';
+import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
 import {
   AlertIcon,
@@ -21,8 +22,8 @@ import {
   FileIcon,
   HistoryIcon,
   InfoIcon,
-  NewChatIcon,
   PaperclipIcon,
+  PlusIcon,
   RefreshIcon,
   RestoreIcon,
   SearchIcon,
@@ -38,7 +39,7 @@ import { TabList, type TabItem } from './Tabs';
 import { ContextStrip } from './ContextStrip';
 import { ChangesReview } from './ChangesReview';
 import { ChangedFilesStrip } from './ChangedFilesStrip';
-import { ModeIndicator, PlanSurface } from './PlanSurface';
+import { PlanSurface } from './PlanSurface';
 import { backendStatusView, incompatibleBackends, authMismatchBackends } from './backendStatus';
 import {
   MODEL_SETTING_LABELS,
@@ -67,6 +68,8 @@ import {
   type ItemStatus,
   type TranscriptItemView
 } from './state';
+import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
+import { resolveContextMax } from '../backends/contextUsage.ts';
 import type {
   CheckpointView,
   ConflictResolution,
@@ -92,6 +95,8 @@ export function App(): JSX.Element {
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  /** Follow new transcript content only while the reader is already at the bottom. */
+  const stickToBottomRef = useRef(true);
   /**
    * The in-flight attach request. A late `attachmentsPicked` from a superseded
    * pick is ignored, so an old response cannot repopulate cleared chips.
@@ -261,9 +266,31 @@ export function App(): JSX.Element {
     }
   }, [state.selectedBackendId, state.selectedModel]);
 
-  useEffect(() => {
-    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
-  }, [state.transcript, state.notice, state.startingTurn]);
+  const onTranscriptScroll = (): void => {
+    const el = transcriptRef.current;
+    if (!el) {
+      return;
+    }
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distance <= 48;
+  };
+
+  useLayoutEffect(() => {
+    const el = transcriptRef.current;
+    if (!el || !stickToBottomRef.current) {
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+  }, [
+    state.transcript,
+    state.notice,
+    state.startingTurn,
+    state.busy,
+    state.plan,
+    state.restoreResult,
+    state.settingsOpen,
+    state.rulesOpen
+  ]);
 
   // Read the review snapshot for a turn the host recorded. The host pushes the
   // authoritative change set (and reposts the latest one on reload); the review
@@ -581,6 +608,13 @@ export function App(): JSX.Element {
   // change is posted to the host, which clamps and echoes it back as a fresh
   // snapshot, so the panel always shows the value that will be sent.
   const modelSettings = state.modelCapability ? modelSettingsView(state.modelCapability) : undefined;
+  const contextMax = resolveContextMax({
+    settingsWindow: state.modelCapability?.settings.contextWindow,
+    capabilityMax: state.modelCapability?.capabilities?.contextWindow.max,
+    capabilityDefault: state.modelCapability?.capabilities?.contextWindow.default,
+    reportedWindow: state.contextWindowTokens
+  });
+
   const conversationTokens = useMemo(
     () => estimateConversationTokens(state.transcript),
     [state.transcript]
@@ -624,18 +658,6 @@ export function App(): JSX.Element {
     });
   };
 
-  const toggleContextExclusion = (key: string): void => {
-    dispatch({ type: 'toggleContextExclusion', key });
-    const next = state.contextExclusions.includes(key)
-      ? state.contextExclusions.filter((entry) => entry !== key)
-      : [...state.contextExclusions, key];
-    bridge.post({ type: 'setContextExclusions', keys: next });
-  };
-
-  const resetContextExclusions = (): void => {
-    dispatch({ type: 'resetContextExclusions' });
-    bridge.post({ type: 'resetContextExclusions' });
-  };
   const setIncludeViewedFile = (included: boolean): void => {
     dispatch({ type: 'setIncludeViewedFile', included });
     bridge.post({ type: 'setIncludeViewedFile', included });
@@ -645,10 +667,6 @@ export function App(): JSX.Element {
     if (path) {
       bridge.post({ type: 'openContextFile', path });
     }
-  };
-
-  const refreshContext = (): void => {
-    bridge.post({ type: 'refreshContext' });
   };
 
   const retryModelCapability = (): void => {
@@ -740,7 +758,8 @@ export function App(): JSX.Element {
       text,
       backendId: state.selectedBackendId,
       model: state.selectedModel,
-      permissionLevel: state.permissionLevel
+      permissionLevel: state.permissionLevel,
+      updatePlan: true
     });
   };
 
@@ -892,8 +911,10 @@ export function App(): JSX.Element {
     );
   }
 
+  const chatEmpty = state.transcript.length === 0 && !state.restoring;
+
   return (
-    <main className="app">
+    <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
       <header className="view-title">
         <button
           className="model-trigger"
@@ -912,15 +933,16 @@ export function App(): JSX.Element {
         </button>
         <span className="view-title__actions">
           <button
-            className="icon-btn"
+            className="icon-btn icon-btn--new-chat"
             type="button"
             aria-label="New conversation"
             title="New conversation"
             disabled={!active}
             onClick={newConversation}
           >
-            <NewChatIcon />
+            <PlusIcon />
           </button>
+          <span className="view-title__sep" aria-hidden="true" />
           <button
             className="icon-btn"
             type="button"
@@ -997,7 +1019,13 @@ export function App(): JSX.Element {
       ) : null}
 
 
-      <div className="transcript" ref={transcriptRef} role="log" aria-label="Conversation transcript">
+      <div
+        className="transcript"
+        ref={transcriptRef}
+        role="log"
+        aria-label="Conversation transcript"
+        onScroll={onTranscriptScroll}
+      >
         {state.restoring ? (
           <div className="restoring" role="status">
             <span className="spinner" aria-hidden="true" />
@@ -1006,13 +1034,11 @@ export function App(): JSX.Element {
         ) : state.transcript.length === 0 && !state.startingTurn && !state.notice ? (
           <EmptyState state={state} dispatch={dispatch} hasAvailable={available.length > 0} />
         ) : (
-          state.transcript.map((item, index) => (
+          state.transcript.map((item) => (
             <TranscriptRow
               key={item.id}
               item={item}
               providerId={item.backendId ?? active?.id ?? 'ollama'}
-              mode={state.mode}
-              showMode={index === lastAssistantIndex(state.transcript)}
               pendingId={pending?.id}
               checkpoint={state.checkpoints?.find((entry) => entry.messageId === item.id)}
               onDecide={decide}
@@ -1060,9 +1086,17 @@ export function App(): JSX.Element {
             onUndo={() => undoRestore(state.restoreResult?.undoPointId)}
           />
         ) : null}
+
+        {state.busy ? (
+          <div className="typing-dots" role="status" aria-label="Agent is working">
+            <span />
+            <span />
+            <span />
+          </div>
+        ) : null}
       </div>
 
-      <footer className={`composer${state.mode === 'ask' ? ' composer--ask' : ''}`}>
+      <footer className={chatEmpty ? 'composer composer--expanded' : 'composer'}>
         {state.plan?.built ? (
           <div className="todo-floating">
             <PlanSurface
@@ -1093,26 +1127,11 @@ export function App(): JSX.Element {
             onCancel={() => dispatch({ type: 'cancelPermissionConfirmation' })}
           />
         ) : null}
-        {state.mode === 'ask' ? <ModeIndicator mode={state.mode} variant="composer" /> : null}
         {pending ? (
           <p className="composer-wait" role="status">
             <span className="spinner" aria-hidden="true" />
             The agent is paused until you answer above.
           </p>
-        ) : null}
-        {modePanelOpen && modeSnapshot ? (
-          <ModePanel
-            snapshot={modeSnapshot}
-            disabled={state.busy}
-            onSelect={(mode) => {
-              setModePanelOpen(false);
-              dispatch({ type: 'selectMode', mode });
-              if (state.selectedBackendId) {
-                bridge.post({ type: 'selectMode', mode, backendId: state.selectedBackendId });
-              }
-            }}
-            onClose={() => setModePanelOpen(false)}
-          />
         ) : null}
         {permissionPanelOpen ? (
           <PermissionPanel
@@ -1176,12 +1195,21 @@ export function App(): JSX.Element {
           settingsEnabled={state.contextSettingsEnabled}
           exclusions={state.contextExclusions}
           busy={state.busy}
-          onToggle={toggleContextExclusion}
-          onResetExclusions={resetContextExclusions}
-          onRefresh={refreshContext}
           onOpenFile={openContextFile}
           includeViewedFile={state.includeViewedFile}
           onSetIncludeViewedFile={setIncludeViewedFile}
+          usedTokens={state.contextUsedTokens ?? 0}
+          maxTokens={contextMax}
+          onCompact={() => {
+            if (contextMax === undefined) {
+              return;
+            }
+            bridge.post({
+              type: 'compactContext',
+              usedTokens: state.contextUsedTokens ?? 0,
+              maxTokens: contextMax
+            });
+          }}
         />
         <div className="composer-box">
           {state.attachments.length > 0 ? (
@@ -1257,16 +1285,32 @@ export function App(): JSX.Element {
               <PaperclipIcon />
             </button>
             {modeSnapshot ? (
-              <ModeTrigger
-                snapshot={modeSnapshot}
-                open={modePanelOpen}
-                disabled={Boolean(pending) || state.busy}
-                onToggle={() => {
-                  setModePanelOpen((value) => !value);
-                  setPermissionPanelOpen(false);
-                  setModelPanelOpen(false);
-                }}
-              />
+              <div className="mode-menu">
+                <ModeTrigger
+                  snapshot={modeSnapshot}
+                  open={modePanelOpen}
+                  disabled={Boolean(pending) || state.busy}
+                  onToggle={() => {
+                    setModePanelOpen((value) => !value);
+                    setPermissionPanelOpen(false);
+                    setModelPanelOpen(false);
+                  }}
+                />
+                {modePanelOpen ? (
+                  <ModeMenu
+                    snapshot={modeSnapshot}
+                    disabled={state.busy}
+                    onSelect={(mode) => {
+                      setModePanelOpen(false);
+                      dispatch({ type: 'selectMode', mode });
+                      if (state.selectedBackendId) {
+                        bridge.post({ type: 'selectMode', mode, backendId: state.selectedBackendId });
+                      }
+                    }}
+                    onClose={() => setModePanelOpen(false)}
+                  />
+                ) : null}
+              </div>
             ) : null}
             {hasApprovalChannel && permissionOptions.length > 0 ? (
               <PermissionTrigger
@@ -1842,30 +1886,13 @@ function EmptyState({
   }
 
   return (
-    <div className="empty-state">
-      <span className="empty-icon" aria-hidden="true">
-        <SparkIcon />
-      </span>
-      <p className="empty-title">Ask the agent about this workspace</p>
+    <div className="empty-state empty-state--welcome">
+      <img className="empty-logo" src={logoUrl} alt="" />
+      <p className="empty-title empty-title--brand">meLink SideCode</p>
       <p className="empty-text">
-        It can read files, run commands, and propose edits. Nothing is applied without your review.
+        On your side, privacy first. Edit, plan, or ask anything.
       </p>
-      <hr className="divider" />
-      <div className="suggestions">
-        <button className="suggestion" type="button" onClick={() => runSuggestion(dispatch, 'Explain the selected code', state.selectedBackendId)}>
-          Explain the selected code
-        </button>
-        <button className="suggestion" type="button" onClick={() => runSuggestion(dispatch, 'Find and fix a failing test', state.selectedBackendId)}>
-          Find and fix a failing test
-        </button>
-        <button
-          className="suggestion"
-          type="button"
-          onClick={() => runSuggestion(dispatch, 'Add a retry with backoff to the Ollama client', state.selectedBackendId)}
-        >
-          Add a retry with backoff to the Ollama client
-        </button>
-      </div>
+      <p className="empty-slogan">You've got this</p>
     </div>
   );
 }
@@ -1878,12 +1905,6 @@ function runTokenAction(dispatch: Dispatch<Action>, state: AppState): void {
     message: needsToken?.detail ?? 'Enter a token to continue.',
     action: 'setToken'
   });
-}
-
-function runSuggestion(dispatch: Dispatch<Action>, text: string, backendId?: string): void {
-  dispatch({ type: 'localUserMessage', text });
-  dispatch({ type: 'dismissNotice' });
-  bridge.post({ type: 'sendTurn', text, backendId });
 }
 
 function NoticeBanner({
@@ -1971,8 +1992,6 @@ function RestoreResultStrip({
 function TranscriptRow({
   item,
   providerId,
-  mode,
-  showMode,
   pendingId,
   checkpoint,
   onDecide,
@@ -1981,9 +2000,6 @@ function TranscriptRow({
 }: {
   item: TranscriptItemView;
   providerId: string;
-  mode: DefaultMode;
-  /** True only for the latest assistant turn, so the mode note is not repeated. */
-  showMode: boolean;
   pendingId?: string;
   /** The checkpoint this message opened, when its turn touched files. */
   checkpoint?: CheckpointView;
@@ -2126,7 +2142,6 @@ function TranscriptRow({
           </span>
         ) : null}
       </div>
-      {mode !== 'agent' && showMode ? <ModeIndicator mode={mode} variant="thread" /> : null}
       <div className="turn-body md">
         <Markdown
           text={item.text}
@@ -2159,6 +2174,8 @@ function TranscriptRow({
 }
 
 function ToolCard({ item }: { item: TranscriptItemView }): JSX.Element {
+  const presentation = toolCardPresentation(item);
+  const output = toolOutput(item, presentation.detail);
   return (
     <details className="item-card item-card--command">
       <summary className="item-head" aria-label="Command item">
@@ -2166,22 +2183,35 @@ function ToolCard({ item }: { item: TranscriptItemView }): JSX.Element {
           <TerminalIcon />
         </span>
         <span className="item-main">
-          <span className="item-kind">{item.title ?? 'Command'}</span>
-          {item.command ? (
-            <span className="item-path" title={item.command}>
-              {item.command}
+          <span className="item-kind">{presentation.title}</span>
+          {presentation.detail ? (
+            <span className="item-path" title={presentation.detail}>
+              {presentation.detail}
             </span>
           ) : null}
         </span>
         <StatusChip status={item.status} doneLabel="Passed" />
       </summary>
-      {item.text || item.detail ? (
+      {output ? (
         <div className="item-body">
-          <code>{item.text || item.detail}</code>
+          <code>{output}</code>
         </div>
       ) : null}
     </details>
   );
+}
+
+/** Expanded tool output. Status words and the summary target are not output. */
+function toolOutput(item: TranscriptItemView, summary?: string): string | undefined {
+  const text = item.text.trim();
+  if (text && !isStatusText(text) && text !== summary) {
+    return text;
+  }
+  const detail = item.detail?.trim();
+  if (detail && !isStatusText(detail) && detail !== summary) {
+    return detail;
+  }
+  return undefined;
 }
 
 /**
@@ -2354,6 +2384,11 @@ function ApprovalResolvedCard({
 function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
   const files = item.files ?? [];
   const diffs = files.filter((file) => file.lines && file.lines.length > 0);
+  const rawTitle = item.title?.trim();
+  const title =
+    rawTitle && isRawToolName(rawTitle)
+      ? friendlyToolTitle(rawTitle, files[0]?.path)
+      : rawTitle || 'Edited';
   return (
     <div className="item-card" aria-label="File change item">
       <div className="item-head">
@@ -2361,7 +2396,7 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
           <FileIcon />
         </span>
         <span className="item-main">
-          <span className="item-kind">{item.title ?? 'Edited'}</span>
+          <span className="item-kind">{title}</span>
           <span className="item-path" title={filePathLabel(files)}>
             {filePathLabel(files)}
           </span>
@@ -2492,21 +2527,6 @@ function diffStatsLabel(files: FileChange[]): string {
 
 function copyText(text: string): void {
   void navigator.clipboard?.writeText(text);
-}
-
-/**
- * Index of the latest assistant turn, or -1. The mode note is attached only to
- * that turn, so a mode indicator is stated once rather than repeated on every
- * assistant card in a long thread.
- */
-function lastAssistantIndex(transcript: TranscriptItemView[]): number {
-  for (let index = transcript.length - 1; index >= 0; index -= 1) {
-    const item = transcript[index];
-    if (item.kind === 'message' && item.role === 'assistant') {
-      return index;
-    }
-  }
-  return -1;
 }
 
 /** Largest pasted/attached file accepted client-side, matching the host cap. */
@@ -2765,7 +2785,7 @@ function PermissionPanel({
   );
 }
 
-/** The compact mode trigger; its panel mirrors the permission panel exactly. */
+/** Compact mode trigger. The menu opens upward from this button. */
 function ModeTrigger({
   snapshot,
   open,
@@ -2778,13 +2798,14 @@ function ModeTrigger({
   onToggle: () => void;
 }): JSX.Element {
   const current = snapshot.options.find((option) => option.mode === snapshot.selected) ?? snapshot.options[0];
+  const mode = current?.mode ?? snapshot.selected;
   return (
     <button
-      className="control-trigger"
+      className={`control-trigger control-trigger--mode control-trigger--${mode}`}
       type="button"
       aria-haspopup="listbox"
       aria-expanded={open}
-      aria-controls="mode-panel"
+      aria-controls="mode-menu"
       aria-label={`Mode: ${current?.label ?? snapshot.selected}`}
       disabled={disabled}
       onClick={onToggle}
@@ -2795,8 +2816,8 @@ function ModeTrigger({
   );
 }
 
-/** The mode panel; floating above the composer, matching the permission panel. */
-function ModePanel({
+/** Short mode list anchored above the trigger. Names only, colored by mode. */
+function ModeMenu({
   snapshot,
   disabled,
   onSelect,
@@ -2807,15 +2828,15 @@ function ModePanel({
   onSelect: (mode: DefaultMode) => void;
   onClose: () => void;
 }): JSX.Element {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    panelRef.current?.querySelector<HTMLButtonElement>('.control-option')?.focus();
+    menuRef.current?.querySelector<HTMLButtonElement>('.mode-menu__option')?.focus();
   }, []);
   return (
     <div
-      className="control-panel"
-      id="mode-panel"
-      ref={panelRef}
+      className="mode-menu__list"
+      id="mode-menu"
+      ref={menuRef}
       role="listbox"
       aria-label="Mode"
       onKeyDown={(event) => {
@@ -2825,14 +2846,9 @@ function ModePanel({
         }
       }}
     >
-      <div className="control-panel__head">
-        <span>Mode</span>
-        <span className="spacer" />
-        <span className="control-panel__note">Applies to the next turn</span>
-      </div>
       {snapshot.options.map((option) => (
         <button
-          className="control-option"
+          className={`mode-menu__option mode-menu__option--${option.mode}`}
           type="button"
           role="option"
           aria-selected={option.mode === snapshot.selected}
@@ -2840,10 +2856,7 @@ function ModePanel({
           key={option.mode}
           onClick={() => onSelect(option.mode)}
         >
-          <span className="control-option__body">
-            <span className="control-option__name">{option.label}</span>
-            <span className="control-option__desc">{option.description}</span>
-          </span>
+          <span>{option.label}</span>
           {option.mode === snapshot.selected ? <CheckIcon className="control-check" /> : null}
         </button>
       ))}
