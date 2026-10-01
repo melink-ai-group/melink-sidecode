@@ -22,14 +22,12 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 clean=0
-package=0
 for arg in "$@"; do
   case "$arg" in
     --clean | -clean) clean=1 ;;
-    --package | -package) package=1 ;;
     *)
       echo "error: unknown option: $arg" >&2
-      echo "usage: ./build.sh [--clean] [--package]" >&2
+      echo "usage: ./build.sh [--clean]" >&2
       exit 2
       ;;
   esac
@@ -45,12 +43,10 @@ fi
 echo "==> npm run build"
 npm run build
 
-if [ "$package" -eq 1 ]; then
-  echo "==> npm run package"
-  npm run package
+echo "==> npm run package"
+npm run package
 
-  vsix="$(ls -1t ./*.vsix 2>/dev/null | head -n 1 || true)"
-  if [ -n "$vsix" ]; then
-    echo "==> created ${vsix#./}"
-  fi
+vsix="$(ls -1t ./*.vsix 2>/dev/null | head -n 1 || true)"
+if [ -n "$vsix" ]; then
+  echo "==> created ${vsix#./}"
 fi

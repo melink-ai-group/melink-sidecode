@@ -1,4 +1,4 @@
-# Agent sidebar
+# SideCode
 
 One agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud and
 the OpenAI Codex CLI.
@@ -57,12 +57,12 @@ effects, and the storage/pruning behaviour are documented in
 
 ### Option A — from a packaged `.vsix`
 
-1. Build the package (or obtain a released `melink-agent-sidebar-0.1.0.vsix`) —
+1. Build the package (or obtain a released `melink-sidecode-0.1.0.vsix`) —
    see [Build from source](#build-from-source) if you need to make one.
 2. Install it:
    - **VS Code CLI:**
      ```sh
-     code --install-extension ./melink-agent-sidebar-0.1.0.vsix
+     code --install-extension ./melink-sidecode-0.1.0.vsix
      ```
    - **Any host (including Open VSX consumers):** open the Extensions view, click
      the `...` menu in its title bar, choose **Install from VSIX…**, and pick the
@@ -81,7 +81,7 @@ npm run build
 with:
 
 ```sh
-npm run package   # produces melink-agent-sidebar-0.1.0.vsix
+npm run package   # produces melink-sidecode-0.1.0.vsix
 ```
 
 Then install the `.vsix` as in Option A.
@@ -90,7 +90,7 @@ Then install the `.vsix` as in Option A.
 
 If you do not know the npm scripts by heart, run the wrapper for your platform
 from anywhere in the checkout — each script resolves the repo root itself and
-runs the same flow (install if needed, then build):
+runs the same flow (install if needed, then build, then package):
 
 ```sh
 ./build.sh                 # macOS / Linux
@@ -101,19 +101,17 @@ build.bat                  REM Windows
 ```
 
 Both scripts check that **Node.js 20+** and npm are on `PATH` first, run
-`npm install` only when `node_modules` is missing, then run `npm run build`.
+`npm install` only when `node_modules` is missing, then run `npm run build`
+and `npm run package`, and print the generated `.vsix` filename.
 Rerunning without flags skips the install. Pass `--clean` (`-Clean` on Windows)
-to force a fresh `npm install`, and `--package` (`-Package`) to also run
-`npm run package` and print the generated `.vsix` filename:
+to force a fresh `npm install` before the build and package steps:
 
 ```sh
-./build.sh --package       # build and package
-./build.sh --clean         # force a fresh npm install, then build
+./build.sh --clean         # force a fresh npm install, then build and package
 ```
 
 ```bat
-build.bat -Package         REM build and package
-build.bat -Clean           REM force a fresh npm install, then build
+build.bat -Clean           REM force a fresh npm install, then build and package
 ```
 
 For a quick dev loop, `npm run watch` rebuilds on change; press `F5` in VS Code
@@ -127,26 +125,26 @@ npm test           # pure unit tests (node --experimental-strip-types)
 
 ## Set up a provider
 
-Open the sidebar (Activity Bar → **Agent**) once to activate the extension, then
+Open the sidebar (Activity Bar → **SideCode**) once to activate the extension, then
 set up whichever provider you have.
 
 ### Ollama Cloud
 
 1. Create an API token at <https://ollama.com>.
-2. Command Palette → **Agent: Set Ollama Cloud token**.
+2. Command Palette → **SideCode: Set Ollama Cloud token**.
 3. Paste the token and press Enter.
 
 The token is stored in VS Code **secret storage** and sent only as a bearer
 credential to the configured base URL. It never appears in `settings.json`,
-output channels, or logs. To remove it, run **Agent: Clear Ollama Cloud token**.
+output channels, or logs. To remove it, run **SideCode: Clear Ollama Cloud token**.
 
-Optional settings (`Settings → search "melink"`, or **Agent: Open settings**):
+Optional settings (`Settings → search "melink"`, or **SideCode: Open settings**):
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. |
 | `melink.ollama.defaultModel` | *(empty)* | Default model; empty uses the first one the backend reports. |
-| `melink.ollama.opencode.enabled` | `false` | Run Ollama Cloud turns through the optional **opencode** agentic runtime instead of the direct adapter. |
+| `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the **opencode** agentic runtime. Turn it off to use the direct adapter. |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI used when the runtime is enabled. |
 
 `Ollama Cloud` lists exactly the models the live server returns from
@@ -154,15 +152,12 @@ Optional settings (`Settings → search "melink"`, or **Agent: Open settings**):
 
 #### Optional opencode agentic runtime
 
-By default the Ollama path is a direct HTTP streaming adapter: `GET /api/tags`
-for models and `POST /api/chat` with `stream: true`. It streams chat, but it has
-no tool execution, no file edits, and no session of its own beyond the
-replayed transcript.
-
-Setting **`melink.ollama.opencode.enabled`** to `true` makes Ollama Cloud run
-its turns through [opencode](https://opencode.ai), a terminal coding agent that
-can read the project, edit files, and run commands. Provider identity stays
-**Ollama**: no new provider, badge, or dot is added.
+By default Ollama Cloud runs through [opencode](https://opencode.ai), a terminal
+coding agent that can read the project, edit files, and run commands. Provider
+identity stays **Ollama**: no new provider, badge, or dot is added. Turning
+**`melink.ollama.opencode.enabled`** off uses the direct HTTP adapter instead
+(`GET /api/tags` for models and `POST /api/chat` with `stream: true`), which
+streams chat and does not spawn opencode.
 
 - **Path.** `melink.ollama.opencode.path` defaults to `opencode`, resolved from
   `PATH` when it is a bare name, exactly like `melink.codex.path`.
@@ -393,7 +388,7 @@ The `"jsonrpc":"2.0"` field is omitted on the wire, matching the app-server.
 The CLI is spawned as one long-lived child process per workspace. It tries
 `app-server --listen stdio://` first and, if a newer CLI rejects that argument,
 retries once with the bare `codex app-server` (stdio is the default); whichever
-form starts is logged to the **Agent sidebar (Codex)** output channel. A missing
+form starts is logged to the **SideCode (Codex)** output channel. A missing
 binary is reported as `unavailable` before anything is written, so an Ollama-only
 sidebar never shows Codex noise.
 

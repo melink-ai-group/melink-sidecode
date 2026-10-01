@@ -472,7 +472,6 @@ export class CodexBackend implements AgentBackend {
   async sendTurn(handle: ThreadHandle, request: SendTurnRequest): Promise<void> {
     const connection = await this.connect();
     const model = request.model ?? this.defaultModel;
-    const input: UserInput[] = [{ type: 'text', text: request.text, text_elements: [] }];
 
     // Project context. The pinned Codex app-server (verified against the
     // `schemas/` bindings for codex-cli 0.156.1) exposes native
@@ -488,6 +487,10 @@ export class CodexBackend implements AgentBackend {
 
     const mode = isDefaultMode(request.mode) ? request.mode : this.threadModes.get(handle.threadId) ?? 'agent';
     this.threadModes.set(handle.threadId, mode);
+    // Mode instructions exist on thread/start only. This turn's provider input
+    // carries the current mode so a later switch still reaches the model.
+    // The stored user message stays `request.text`.
+    const input: UserInput[] = [{ type: 'text', text: providerTurnText(mode, request.text), text_elements: [] }];
 
     // A level change applies to this turn and subsequent ones, and both the
     // approval policy and the sandbox policy are overridden together so a level
@@ -1053,6 +1056,12 @@ export class CodexBackend implements AgentBackend {
  * synthetic first turn. Either part may be absent; both absent yields
  * `undefined`, which leaves the CLI default untouched.
  */
+/** Provider-only turn text. Mode instructions are not written into the transcript. */
+function providerTurnText(mode: DefaultMode, text: string): string {
+  const instructions = modeInstructions(mode);
+  return instructions ? `${instructions}\n\n${text}` : text;
+}
+
 function combineInstructions(mode: string | undefined, snapshot: string | undefined): string | undefined {
   const parts = [mode, snapshot].filter((part): part is string => Boolean(part && part.trim().length > 0));
   return parts.length > 0 ? parts.join('\n\n') : undefined;

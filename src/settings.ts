@@ -8,7 +8,13 @@ import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from
 import { isThinkingLevel } from './backends/capabilities';
 import type { SettingsPatch, SettingsSnapshot } from './protocol';
 import { existsSync } from 'node:fs';
-import { opencodePathError, probeOpencode, type OpencodeProbeResult } from './backends/opencode/status';
+import {
+  opencodePathError,
+  probeOpencode,
+  upgradeOpencode,
+  type OpencodeProbeResult,
+  type OpencodeUpgradeResult
+} from './backends/opencode/status';
 import {
   CONTEXT_SECTION,
   DEFAULT_CONTEXT_SETTINGS,
@@ -258,9 +264,9 @@ export class SettingsService {
     };
   }
 
-  /** Whether the optional opencode agentic runtime is enabled. Default off. */
+  /** Whether the opencode agentic runtime is enabled. Default on. */
   private opencodeEnabled(config: vscode.WorkspaceConfiguration): boolean {
-    return config.get<boolean>(`${OLLAMA_OPENCODE_SECTION}.enabled`, false) === true;
+    return config.get<boolean>(`${OLLAMA_OPENCODE_SECTION}.enabled`, true) !== false;
   }
 
   /** Executable path for the runtime; a bare name is resolved from PATH. */
@@ -304,6 +310,24 @@ export class SettingsService {
    * probe when a backend has no bespoke test, so the action never silently
    * no-ops.
    */
+  /**
+   * Run `opencode upgrade` when the runtime is on and the CLI probe succeeded.
+   * A missing or disabled CLI is not started.
+   */
+  async upgradeOpencode(): Promise<OpencodeUpgradeResult> {
+    const config = vscode.workspace.getConfiguration();
+    const enabled = this.opencodeEnabled(config);
+    const path = this.opencodePath(config);
+    if (!enabled) {
+      return { ok: false, message: 'Turn on opencode before updating it.' };
+    }
+    const probe = await probeOpencode(path);
+    if (probe.status !== 'detected') {
+      return { ok: false, message: 'opencode is not connected. Check the path, then try again.' };
+    }
+    return upgradeOpencode(path);
+  }
+
   async testConnection(backendId: string): Promise<ConnectionTestResult> {
     const backend = this.registry.get(backendId);
     if (!backend) {

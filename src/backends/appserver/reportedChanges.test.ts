@@ -79,19 +79,27 @@ test('a patchUpdated notification maps each change kind', () => {
     changes: [
       { path: abs('a.ts'), kind: { type: 'add' }, diff: '' },
       { path: abs('b.ts'), kind: { type: 'delete' }, diff: '' },
-      { path: abs('c.ts'), kind: { type: 'update', move_path: null }, diff: '' }
+      { path: abs('c.ts'), kind: { type: 'update', move_path: null }, diff: '' },
+      { path: abs('d.ts'), kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-old\n+new\n' }
     ]
   };
   assert.deepEqual(changesFromPatchUpdated(notification, ORIGIN), [
     { absPath: abs('a.ts'), status: 'created' },
     { absPath: abs('b.ts'), status: 'deleted' },
-    { absPath: abs('c.ts'), status: 'modified' }
+    { absPath: abs('d.ts'), status: 'modified' }
   ]);
 });
 
 test('a threaded item change list maps through the same path', () => {
-  const changes: FileUpdateChange[] = [{ path: abs('x.ts'), kind: { type: 'update', move_path: null }, diff: '' }];
+  const changes: FileUpdateChange[] = [
+    { path: abs('x.ts'), kind: { type: 'update', move_path: null }, diff: '@@\n-old\n+new\n' }
+  ];
   assert.deepEqual(changesFromThreadItem(changes, ORIGIN), [{ absPath: abs('x.ts'), status: 'modified' }]);
+});
+
+test('an update with an empty diff is a read and is not recorded', () => {
+  const changes: FileUpdateChange[] = [{ path: abs('read.ts'), kind: { type: 'update', move_path: null }, diff: '' }];
+  assert.deepEqual(changesFromThreadItem(changes, ORIGIN), []);
 });
 
 test('an unknown change kind is skipped, not guessed', () => {

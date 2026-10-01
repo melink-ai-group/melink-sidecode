@@ -1,7 +1,7 @@
 {
-  "name": "melink-agent-sidebar",
-  "displayName": "Agent sidebar",
-  "description": "One agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud and the OpenAI Codex CLI.",
+  "name": "melink-sidecode",
+  "displayName": "SideCode",
+  "description": "SideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud and the OpenAI Codex CLI.",
   "version": "0.1.0",
   "publisher": "melink",
   "icon": "media/melink-logo.png",
@@ -32,7 +32,7 @@
       "activitybar": [
         {
           "id": "melinkAgent",
-          "title": "Agent",
+          "title": "SideCode",
           "icon": "media/melink-logo.png"
         }
       ]
@@ -41,29 +41,29 @@
       "melinkAgent": [
         {
           "id": "melinkAgent.chat",
-          "name": "Agent chat",
+          "name": "SideCode",
           "type": "webview",
-          "contextualTitle": "Agent sidebar"
+          "contextualTitle": "SideCode"
         }
       ]
     },
     "commands": [
       {
         "command": "melink.setOllamaToken",
-        "title": "Agent: Set Ollama Cloud token"
+        "title": "SideCode: Set Ollama Cloud token"
       },
       {
         "command": "melink.clearOllamaToken",
-        "title": "Agent: Clear Ollama Cloud token"
+        "title": "SideCode: Clear Ollama Cloud token"
       },
       {
         "command": "melink.refreshBackends",
-        "title": "Agent: Refresh backend availability",
+        "title": "SideCode: Refresh backend availability",
         "icon": "$(refresh)"
       },
       {
         "command": "melink.openSettings",
-        "title": "Agent: Open settings"
+        "title": "SideCode: Open settings"
       }
     ],
     "menus": {
@@ -76,12 +76,12 @@
       ]
     },
     "configuration": {
-      "title": "Agent sidebar",
+      "title": "SideCode",
       "properties": {
         "melink.ollama.baseUrl": {
           "type": "string",
           "default": "https://ollama.com",
-          "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **Agent: Set Ollama Cloud token** is sent as a bearer credential to this host."
+          "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **SideCode: Set Ollama Cloud token** is sent as a bearer credential to this host."
         },
         "melink.ollama.defaultModel": {
           "type": "string",
@@ -90,8 +90,8 @@
         },
         "melink.ollama.opencode.enabled": {
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "Run Ollama Cloud turns through the optional **opencode** agentic runtime (tool execution, file edits, session resume) instead of the direct `/api/chat` streaming adapter. Off by default; when off, no opencode process is spawned and the direct adapter is used unchanged."
+          "default": true,
+          "markdownDescription": "Run Ollama Cloud turns through the **opencode** agentic runtime (tool execution, file edits, session resume) instead of the direct `/api/chat` streaming adapter. On by default. Turn it off to use the direct adapter and spawn no opencode process."
         },
         "melink.ollama.opencode.path": {
           "type": "string",

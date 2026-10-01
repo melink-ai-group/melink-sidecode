@@ -73,6 +73,8 @@ export interface ChangesReviewProps {
   onResolveConflict: (path: string, resolution: ConflictResolution) => void;
   /** Open the existing checkpoint restore confirmation for this turn. */
   onRestoreCheckpoint: (checkpoint: CheckpointView) => void;
+  /** Load hunk lines for one expanded file. The snapshot omits them until then. */
+  onLoadHunks: (path: string) => void;
 }
 
 export function ChangesReview({
@@ -92,7 +94,8 @@ export function ChangesReview({
   onConfirmReject,
   onKeepAll,
   onResolveConflict,
-  onRestoreCheckpoint
+  onRestoreCheckpoint,
+  onLoadHunks
 }: ChangesReviewProps): JSX.Element {
   const [visibleFileCount, setVisibleFileCount] = useState(24);
   const [openPaths, setOpenPaths] = useState<ReadonlySet<string>>(() => new Set());
@@ -106,12 +109,30 @@ export function ChangesReview({
   const outcomeTurnRef = useRef<string | undefined>(undefined);
   const panelRef = useRef<HTMLElement>(null);
   const focusedTurnRef = useRef<string | undefined>(undefined);
+  const requestedHunksRef = useRef(new Set<string>());
 
   // Focus lands on the panel when it first opens, matching the approval-prompt
   // precedent. A repaint of the same turn does not steal focus back.
   useEffect(() => {
     setVisibleFileCount(24);
+    requestedHunksRef.current.clear();
   }, [review.turnId]);
+
+  useEffect(() => {
+    for (const path of [...requestedHunksRef.current]) {
+      const file = review.files.find((entry) => entry.path === path);
+      if (!file?.linesOmitted) {
+        requestedHunksRef.current.delete(path);
+      }
+    }
+    for (const path of openPaths) {
+      const file = review.files.find((entry) => entry.path === path);
+      if (file?.linesOmitted && !requestedHunksRef.current.has(path)) {
+        requestedHunksRef.current.add(path);
+        onLoadHunks(path);
+      }
+    }
+  }, [openPaths, review.files, onLoadHunks]);
 
   useEffect(() => {
     if (focusedTurnRef.current === review.turnId) {
@@ -216,7 +237,7 @@ export function ChangesReview({
           <span>Keep</span>
         </button>
         <button
-          className="btn"
+          className="btn btn--secondary"
           type="button"
           title="Review every changed file in the workbench changes editor."
           onClick={onOpenAllInEditor}
@@ -481,6 +502,7 @@ function ChangeRow({
 
       {reviewable && open ? (
         <div className="change-row__diff" id={diffId} tabIndex={0} role="group" aria-label={`Diff for ${file.path}`}>
+          {file.linesOmitted ? <p className="change-row__note">Loading diff…</p> : null}
           {file.hunks.map((hunk) => (
             <section className="change-hunk" key={hunk.id}>
               <span className="change-hunk__head">{hunk.header}</span>

@@ -1,4 +1,4 @@
-# Manual test script — Agent sidebar v0.1
+# Manual test script — SideCode v0.1
 
 Runnable checklist for signing off v0.1. Work top to bottom; tick `[x]` for pass,
 leave `[ ]` and record the failure (or promote it to a known limitation) for a miss.
@@ -6,7 +6,7 @@ leave `[ ]` and record the failure (or promote it to a known limitation) for a m
 Run every step in both hosts (see [Per-host pass](#5-per-host-pass)) unless a step
 names a single host.
 
-- Extension under test: `melink-agent-sidebar` 0.1.0 (`melink` publisher)
+- Extension under test: `melink-sidecode` 0.1.0 (`melink` publisher)
 - Build under test: `npm run build` output in `dist/`
 - Tester: ............................  Date: ............
 - Host A (plain VS Code): version ............
@@ -36,7 +36,7 @@ reload mid-review, approval interaction, and journal pruning, on both providers.
 ## 0. Setup
 
 - [ ] 0.1 Install the build: `npm run build`, then install the produced `.vsix` in
-      each host (`code -n --install-extension ./melink-agent-sidebar-0.1.0.vsix` for
+      each host (`code -n --install-extension ./melink-sidecode-0.1.0.vsix` for
       VS Code; for Cursor use the Extensions view → `...` → *Install from VSIX*).
 - [ ] 0.2 Restart the host so `deactivate`/`activate` run against a clean state.
 - [ ] 0.3 Record the Codex CLI version: `codex --version`
@@ -48,7 +48,7 @@ reload mid-review, approval interaction, and journal pruning, on both providers.
       (expected: `Logged in using ChatGPT`).
 - [ ] 0.6 Open a **fresh, empty scratch workspace** so `workspaceState` from an
       earlier run cannot mask a failure.
-- [ ] 0.7 Open the Agent sidebar once (Activity Bar → **Agent**) to force
+- [ ] 0.7 Open SideCode once (Activity Bar → **SideCode**) to force
       activation, then close it again.
 
 ### Making the Codex CLI unresolvable (reversible)
@@ -107,10 +107,10 @@ the same workspace.
 - [ ] 1. Make the Codex CLI unresolvable with Method A (leave the Codex login in
       place — this pass proves that an unusable provider is isolated even when a
       credential exists).
-- [ ] 2. Set the Ollama token: Command Palette → **Agent: Set Ollama Cloud token**,
+- [ ] 2. Set the Ollama token: Command Palette → **SideCode: Set Ollama Cloud token**,
       paste a valid `ollama.com` bearer token, Enter.
 - [ ] 3. Command Palette → **Developer: Reload Window**.
-- [ ] 4. Open the sidebar (Activity Bar → **Agent**).
+- [ ] 4. Open the sidebar (Activity Bar → **SideCode**).
 - [ ] 5. **Expected sidebar state:** transcript reaches the empty state
       *“Ask the agent about this workspace”* with the three suggestion buttons;
       composer placeholder reads `Ask the agent...` and is enabled (input not
@@ -127,7 +127,7 @@ the same workspace.
 
 ### Pass B — Codex only
 
-- [ ] 8. **Agent: Clear Ollama Cloud token**, then reload the window.
+- [ ] 8. **SideCode: Clear Ollama Cloud token**, then reload the window.
 - [ ] 9. Ensure the CLI is resolvable again (step 0.5 restored) and signed in.
 - [ ] 10. Open the sidebar, open the **Model** trigger.
       - **Expected sidebar state:** empty state *“Ask the agent about this
@@ -151,7 +151,7 @@ the same workspace.
 
 ### Pass D — neither
 
-- [ ] 13. **Agent: Clear Ollama Cloud token**; make the CLI unresolvable
+- [ ] 13. **SideCode: Clear Ollama Cloud token**; make the CLI unresolvable
       (Method A/B); reload; open the sidebar; open the **Model** trigger.
       - **Expected sidebar state:** empty state with title *“No backend is ready”*
         and text *“Ollama Cloud needs a token before you can chat.”*, with
@@ -228,17 +228,17 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       turn → a distinct *CLI missing* notice, not a crash. Restore it. Set
       `melink.ollama.baseUrl` to an endpoint returning 401 and send a turn → a
       distinct *token rejected* notice with a **Set token** action. Restart.
-- [ ] 14l. **Remove** the `melink.ollama.opencode.enabled` key before the next
-      pass.
+- [ ] 14l. Set `melink.ollama.opencode.enabled` to `false` before the next
+      pass. The setting defaults to on, so removing the key leaves opencode on.
 
 ### Pass F — Ollama fallback (runtime disabled)
 
-- [ ] 14m. Confirm `melink.ollama.opencode.enabled` is absent or `false`. Reload
+- [ ] 14m. Confirm `melink.ollama.opencode.enabled` is `false`. Reload
       and open the sidebar.
 - [ ] 14n. Send a turn and wait for completion. **Expected:** the direct
-      `/api/chat` adapter streams the reply; the mode picker offers **Agent**
-      only and the permission picker a single level, exactly as before this
-      ticket.
+      `/api/chat` adapter streams the reply. The mode picker still offers
+      **Agent**, **Plan**, and **Ask**. The permission picker stays hidden,
+      because the direct adapter has no approval channel.
 - [ ] 14o. **No child process on the off path.** Immediately after sending the
       turn (and again after it completes), run the listing command:
       ```powershell
@@ -377,7 +377,7 @@ specified criteria.`; pgrep exits non-zero with no output).
 Use a distinctive, non-real token so it is easy to grep for, e.g.
 `TEST-ONLY-should-never-appear-7f3a`. Never use a real credential for this check.
 
-- [ ] 34. Command Palette → **Agent: Set Ollama Cloud token**, enter the distinctive
+- [ ] 34. Command Palette → **SideCode: Set Ollama Cloud token**, enter the distinctive
       token.
 - [ ] 35. **settings.json:** open both *User Settings (JSON)* and *Workspace Settings
       (JSON)* and search for the token substring. **Expected: absent.** The
@@ -399,7 +399,7 @@ Use a distinctive, non-real token so it is easy to grep for, e.g.
       and confirm the only uses are `secrets.store` / `secrets.get` against
       `OLLAMA_TOKEN_SECRET_KEY`. Confirm the token is only ever read into the
       `Authorization` header and never interpolated into an error string.
-- [ ] 39b. **Clear:** **Agent: Clear Ollama Cloud token**, then confirm a subsequent
+- [ ] 39b. **Clear:** **SideCode: Clear Ollama Cloud token**, then confirm a subsequent
       turn reports *unauthenticated* (not a raw 401) with a **Set token** action.
 
 ---
@@ -419,7 +419,7 @@ it inherited from the environment. These checks confirm it end to end.
       the host. Send a Codex turn. **Expected:** the turn succeeds, and the
       Output channel shows no request carrying that key. (If the turn instead
       401s with *Incorrect API key provided*, the scrub did not take effect;
-      record it as a failure with the spawn args from the *(Agent sidebar
+      record it as a failure with the spawn args from the *(SideCode
       (Codex))* output channel.)
 - [ ] 39l. **Config independence.** Add `forced_login_method = "api"` to
       `~/.codex/config.toml`, reload, and send a Codex turn. **Expected:** the
@@ -854,7 +854,7 @@ Where the journal lives:
   `melink.changeJournal`.
 - **Blobs** (recorded before/after content): under the workspace-scoped
   extension storage root, `context.storageUri` — typically
-  `%APPDATA%\<Host>\User\workspaceStorage\<hash>\melink.melink-agent-sidebar\`.
+  `%APPDATA%\<Host>\User\workspaceStorage\<hash>\melink.melink-sidecode\`.
 
 - [ ] 58. **Observe the blob budget and index cap.** Open the journal index and
       confirm it carries only hashes/keys and no file content, and that its
@@ -991,7 +991,7 @@ These were run from the repo during authoring, without a GUI host:
       (queried best-effort), never the generic `unavailable` state.
 - [x] **Spawn-arg drift tolerated.** A rejected `--listen stdio://` exits early;
       the adapter retries once with the bare `codex app-server` and records which
-      form started in the **Agent sidebar (Codex)** output channel.
+      form started in the **SideCode (Codex)** output channel.
 - [x] **No experimental feature probe.** No call to `experimentalFeature/list`
       or an enablement set exists; only the documented `initialize` capability
       flag is opted into (static guard in `src/backends/protocolHygiene.test.ts`).

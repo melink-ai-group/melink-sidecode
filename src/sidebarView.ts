@@ -33,6 +33,7 @@ import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from
 import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
 import { anyCategoryEnabled } from './context/contextView';
+import type { ChangeHunkView } from './changes/changeStore';
 import { VscodeChangeJournal } from './changes/vscodeJournal';
 import { VscodeChangeStore } from './changes/vscodeChangeStore';
 import { VscodeCheckpointStore } from './changes/vscodeCheckpoint';
@@ -61,6 +62,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'melinkAgent.chat';
 
   private view?: vscode.WebviewView;
+  /** True once the webview script has posted `ready`. A missed post means the host document never finished loading. */
+  private webviewMounted = false;
+  private webviewMountTimers: ReturnType<typeof setTimeout>[] = [];
   private activeThread?: ThreadHandle;
   /** Guards against a second restore if `ready` is re-sent by the webview. */
   private restored = false;
@@ -379,7 +383,32 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!review) {
       return;
     }
-    this.post({ type: 'changes/review', review });
+    this.post({
+      type: 'changes/review',
+      review: {
+        ...review,
+        files: review.files.map((file) =>
+          file.hunks.length === 0
+            ? file
+            : {
+                ...file,
+                linesOmitted: true,
+                hunks: file.hunks.map((hunk) => ({ ...hunk, lines: [] }))
+              }
+        )
+      }
+    });
+  }
+
+  /** Hunk lines for one expanded row, capped so a large file cannot fill the sidebar. */
+  private async postChangeHunks(backendId: string, threadId: string, turnId: string, path: string): Promise<void> {
+    const review = await this.changeStore.view(backendId, threadId, turnId);
+    const file = review?.files.find((entry) => entry.path === path);
+    if (!file) {
+      return;
+    }
+    const capped = capReviewLines(file.hunks, 120);
+    this.post({ type: 'changes/hunks', turnId, path, hunks: capped.hunks, truncated: capped.truncated });
   }
 
   /**
@@ -493,17 +522,51 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  resolveWebviewView(view: vscode.WebviewView): void {
+  resolveWebviewView(
+    view: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    token: vscode.CancellationToken
+  ): void {
     this.view = view;
+    this.webviewMounted = false;
+    this.clearWebviewMountTimers();
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')]
     };
-    view.webview.html = this.render(view.webview);
-
-    view.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
+    // Listen before the document is written so a fast `ready` is not missed.
+    const messages = view.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
+      if (message.type === 'ready') {
+        this.webviewMounted = true;
+        this.clearWebviewMountTimers();
+      }
       void this.handle(message);
     });
+    view.onDidDispose(() => {
+      messages.dispose();
+      this.clearWebviewMountTimers();
+    });
+
+    // VS Code registers a service worker in the webview iframe before our HTML
+    // is shown. Writing the document on this same turn navigates that iframe
+    // while registration is in flight, and Chromium then rejects the worker
+    // with InvalidStateError ("The document is in an invalid state"). Wait
+    // until the host document exists, and replace it once more if the script
+    // never reports ready.
+    const mount = (): void => {
+      if (token.isCancellationRequested || this.webviewMounted || this.view !== view) {
+        return;
+      }
+      view.webview.html = this.render(view.webview);
+    };
+    this.webviewMountTimers.push(setTimeout(mount, 0), setTimeout(mount, 750));
+  }
+
+  private clearWebviewMountTimers(): void {
+    for (const timer of this.webviewMountTimers) {
+      clearTimeout(timer);
+    }
+    this.webviewMountTimers = [];
   }
 
   private post(message: HostToWebviewMessage): void {
@@ -586,7 +649,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.model,
           message.permissionLevel,
           message.modelSettings,
-          message.attachments
+          message.attachments,
+          message.backendId
         );
         break;
       case 'steerTurn':
@@ -611,7 +675,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'modes', modes: this.modeSnapshot(message.backendId) });
         break;
       case 'selectMode':
-        await this.selectMode(message.mode);
+        await this.selectMode(message.mode, false, message.backendId);
         break;
       case 'buildPlan':
         await this.buildPlan();
@@ -649,6 +713,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'testConnection':
         this.post({ type: 'connectionTest', result: await this.settings.testConnection(message.backendId) });
         break;
+      case 'upgradeOpencode': {
+        this.post({ type: 'opencodeUpgrade', pending: true });
+        const upgraded = await this.settings.upgradeOpencode();
+        this.post({
+          type: 'opencodeUpgrade',
+          pending: false,
+          ok: upgraded.ok,
+          message: upgraded.message
+        });
+        if (upgraded.ok) {
+          this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        }
+        break;
+      }
       case 'getModelCapability':
         await this.postModelCapability(message.providerId, message.modelId);
         break;
@@ -663,6 +741,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'changes/list':
         await this.postChangeReview(message.backendId, message.threadId, message.turnId);
+        break;
+      case 'changes/hunks':
+        await this.postChangeHunks(message.backendId, message.threadId, message.turnId, message.path);
         break;
       case 'changes/decide':
         await this.decideChange(message);
@@ -815,16 +896,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * nothing here touches the transcript. The mode is persisted with the thread
    * index so a resumed thread keeps it.
    */
-  private async selectMode(requested: DefaultMode, fromInitialRequest = false): Promise<void> {
+  private async selectMode(requested: DefaultMode, fromInitialRequest = false, backendId?: string): Promise<void> {
     if (this.turnInProgress && !fromInitialRequest) {
       this.post({ type: 'notice', level: 'info', message: 'Mode changes apply after the current request finishes.' });
       return;
     }
-    const backendId = this.activeThread?.backendId ?? this.defaultBackendId();
-    const mode = this.resolveMode(backendId, requested);
+    const target = backendId ?? this.activeThread?.backendId ?? this.defaultBackendId();
+    const mode = this.resolveMode(target, requested);
     this.mode = mode;
     const thread = this.activeThread;
-    if (thread) {
+    if (thread && thread.backendId === target) {
       await this.store.setActiveThread({
         backendId: thread.backendId,
         threadId: thread.threadId,
@@ -834,7 +915,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         updatedAt: Date.now()
       });
     }
-    this.post({ type: 'modes', modes: this.modeSnapshot(backendId) });
+    this.post({ type: 'modes', modes: this.modeSnapshot(target) });
   }
 
   /** The settings read model plus the live model lists, so the default-model
@@ -1089,7 +1170,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     permissionLevel?: PermissionLevel,
     requestedMode?: DefaultMode,
     notify = true,
-    requestedSettings?: import('./backends/types').ModelSettingOverrides
+    requestedSettings?: import('./backends/types').ModelSettingOverrides,
+    keepPendingUserMessage = false
   ): Promise<void> {
     const backend = this.registry.get(backendId);
     if (!backend) {
@@ -1147,7 +1229,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           threadId: handle.threadId,
           model: model ?? handle.model,
           permissionLevel: level,
-          mode
+          mode,
+          ...(keepPendingUserMessage ? { keepPendingUserMessage: true } : {})
         });
       }
     } catch (error) {
@@ -1255,7 +1338,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     model?: string,
     permissionLevel?: PermissionLevel,
     requestedSettings?: import('./backends/types').ModelSettingOverrides,
-    attachments?: Attachment[]
+    attachments?: Attachment[],
+    backendId?: string
   ): Promise<void> {
     if (this.turnInProgress) {
       this.post({ type: 'notice', level: 'info', message: 'A request is already in progress. Wait for it to finish before sending another.' });
@@ -1263,7 +1347,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     this.turnInProgress = true;
     try {
-      await this.sendTurnCore(text, model, permissionLevel, requestedSettings, attachments);
+      await this.sendTurnCore(text, model, permissionLevel, requestedSettings, attachments, backendId);
     } finally {
       this.turnInProgress = false;
     }
@@ -1293,9 +1377,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     model?: string,
     permissionLevel?: PermissionLevel,
     requestedSettings?: import('./backends/types').ModelSettingOverrides,
-    attachments?: Attachment[]
+    attachments?: Attachment[],
+    backendId?: string
   ): Promise<void> {
-    const candidateBackend = this.activeThread?.backendId ??
+    const candidateBackend = backendId ?? this.activeThread?.backendId ??
       this.registry.snapshot().find((backend) => backend.status === 'available')?.id;
     if (candidateBackend) {
       const currentMode = this.resolveMode(candidateBackend, this.mode);
@@ -1317,9 +1402,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           selectedMode = choice === 'Switch and continue' ? suggestedMode : undefined;
         }
         if (selectedMode) {
-          this.mode = selectedMode;
-          if (this.activeThread) await this.selectMode(selectedMode, true);
-          else this.post({ type: 'modes', modes: this.modeSnapshot(candidateBackend) });
+          await this.selectMode(selectedMode, true, candidateBackend);
           this.post({
             type: 'notice',
             level: 'info',
@@ -1328,19 +1411,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         }
       }
     }
-    if (!this.activeThread) {
-      const firstAvailable = this.registry.snapshot().find((backend) => backend.status === 'available');
-      if (!firstAvailable) {
-        this.post({ type: 'notice', level: 'warning', message: 'No available backend to send the turn.' });
-        return;
-      }
-      await this.startThread(firstAvailable.id, model, permissionLevel, this.mode, false, requestedSettings);
-    }
-    if (!this.activeThread) {
+    if (!candidateBackend) {
+      this.post({ type: 'notice', level: 'warning', message: 'No available backend to send the turn.' });
       return;
     }
-    const { backendId, threadId } = this.activeThread;
-    const backend = this.registry.get(backendId);
+    // A model pick only updates the webview. Open a thread on the selected
+    // backend before the turn, and tell the webview which thread the events
+    // belong to, so a reply is not dropped for a backend mismatch.
+    if (this.activeThread?.backendId !== candidateBackend) {
+      await this.startThread(candidateBackend, model, permissionLevel, this.mode, true, requestedSettings, true);
+    }
+    if (!this.activeThread || this.activeThread.backendId !== candidateBackend) {
+      return;
+    }
+    const { backendId: activeBackendId, threadId } = this.activeThread;
+    const backend = this.registry.get(activeBackendId);
     if (!backend) {
       return;
     }
@@ -1348,21 +1433,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // transcript keeps names and sizes, never file contents.
     const persisted = persistableAttachments(attachments);
     const resolvedModel = model ?? this.activeThread.model;
-    const level = this.resolvePermission(backendId, permissionLevel ?? this.permissionLevel);
+    const level = this.resolvePermission(activeBackendId, permissionLevel ?? this.permissionLevel);
     this.permissionLevel = level;
     // The mode is resolved and re-applied on every turn. Ask forces read-only;
     // Plan and Agent honor the selected permission level.
-    const mode = this.resolveMode(backendId, this.mode);
+    const mode = this.resolveMode(activeBackendId, this.mode);
     this.mode = mode;
     // The per-model settings are resolved and clamped in the host, so a stale
     // value can never be sent.
-    const modelSettings = await this.resolveTurnSettings(backendId, resolvedModel, requestedSettings);
+    const modelSettings = await this.resolveTurnSettings(activeBackendId, resolvedModel, requestedSettings);
     // Context for this turn: the queued snapshot on the first turn (unless an
     // adapter consumed it natively at start), otherwise a compact delta. It is
     // read before the user message is appended so it never touches the stored
     // transcript, and a failed snapshot degrades to a notice rather than
     // blocking the turn.
-    const context = await this.turnContext(backendId, threadId);
+    const context = await this.turnContext(activeBackendId, threadId);
     // The exclusions shaped the snapshot this turn carries, so they are cleared
     // now: the next turn defaults back to the full set unless the user excludes
     // again, and nothing is re-added on its own mid-turn.
@@ -1370,24 +1455,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.contextDelivery.setExclusions([]);
       void this.postContextView();
     }
-    const messageId = await this.store.appendUserMessage(backendId, threadId, text, persisted);
+    const messageId = await this.store.appendUserMessage(activeBackendId, threadId, text, persisted);
     await this.store.setActiveThread({
-      backendId,
+      backendId: activeBackendId,
       threadId,
       modelId: resolvedModel,
       mode,
       title: this.store.getActiveThread()?.title ?? ThreadStore.titleFromText(text),
       updatedAt: Date.now()
     });
-    await this.store.setLastUsedModel({ backendId, modelId: resolvedModel ?? '' });
-    this.post({ type: 'busy', value: true, backendId, threadId });
+    await this.store.setLastUsedModel({ backendId: activeBackendId, modelId: resolvedModel ?? '' });
+    this.post({ type: 'busy', value: true, backendId: activeBackendId, threadId });
     // Bind the next turn boundary to this user message, so the turn's pre-state
     // snapshot becomes this message's checkpoint. `turn/started` consumes it;
     // a send that never starts a turn must not strand it on a later turn.
-    this.pendingTurnMessage = { messageId, backendId, threadId };
+    this.pendingTurnMessage = { messageId, backendId: activeBackendId, threadId };
     try {
       await backend.sendTurn(
-        { backendId, threadId, model: resolvedModel },
+        { backendId: activeBackendId, threadId, model: resolvedModel },
         { text, model: resolvedModel, permissionLevel: level, mode, modelSettings, context, attachments }
       );
     } catch (error) {
@@ -1399,7 +1484,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
     } finally {
       await this.store.flush();
-      this.post({ type: 'busy', value: false, backendId, threadId });
+      this.post({ type: 'busy', value: false, backendId: activeBackendId, threadId });
     }
   }
 
@@ -1957,6 +2042,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       `img-src ${webview.cspSource} https: data:`,
       `style-src ${webview.cspSource}`,
       `script-src 'nonce-${nonce}'`,
+      // The host loads webview resources through its own worker. `default-src
+      // 'none'` would block that worker unless it is named here.
+      `worker-src ${webview.cspSource}`,
       `font-src ${webview.cspSource}`
     ].join('; ');
 
@@ -2078,6 +2166,26 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ps1: 'text/x-powershell',
   sql: 'text/x-sql'
 };
+
+/** Keep the inline review to the first lines of an expanded file. */
+function capReviewLines(hunks: ChangeHunkView[], limit: number): { hunks: ChangeHunkView[]; truncated: boolean } {
+  let remaining = limit;
+  let truncated = false;
+  const capped: ChangeHunkView[] = [];
+  for (const hunk of hunks) {
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+    const lines = hunk.lines.slice(0, remaining);
+    if (lines.length < hunk.lines.length) {
+      truncated = true;
+    }
+    remaining -= lines.length;
+    capped.push({ ...hunk, lines });
+  }
+  return { hunks: capped, truncated };
+}
 
 /** Provider-neutral mime for a filename; `application/octet-stream` when unknown. */
 function mimeForName(name: string): string {

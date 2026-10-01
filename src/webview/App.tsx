@@ -60,6 +60,7 @@ import {
   pendingApproval,
   reduce,
   requestMessage,
+  visibleModeSnapshot,
   type Action,
   type AppState,
   type HostBridge,
@@ -123,7 +124,8 @@ export function App(): JSX.Element {
             mode: message.mode,
             replay: message.replay,
             pendingApproval: message.pendingApproval,
-            plan: message.plan
+            plan: message.plan,
+            keepPendingUserMessage: message.keepPendingUserMessage
           });
           break;
         case 'restoring':
@@ -150,6 +152,14 @@ export function App(): JSX.Element {
         case 'connectionTest':
           dispatch({ type: 'connectionTest', result: message.result });
           break;
+        case 'opencodeUpgrade':
+          dispatch({
+            type: 'opencodeUpgrade',
+            pending: message.pending,
+            ok: message.ok,
+            message: message.message
+          });
+          break;
         case 'context':
           dispatch({
             type: 'context',
@@ -172,6 +182,15 @@ export function App(): JSX.Element {
           break;
         case 'changes/review':
           dispatch({ type: 'changeReview', review: message.review });
+          break;
+        case 'changes/hunks':
+          dispatch({
+            type: 'changeHunks',
+            turnId: message.turnId,
+            path: message.path,
+            hunks: message.hunks,
+            truncated: message.truncated
+          });
           break;
         case 'changes/decisionResult':
           dispatch({ type: 'changeDecision', results: message.results, message: message.message });
@@ -361,6 +380,11 @@ export function App(): JSX.Element {
     bridge.post({ type: 'clearOllamaToken' });
   };
 
+  const upgradeOpencode = (): void => {
+    dispatch({ type: 'opencodeUpgrade', pending: true });
+    bridge.post({ type: 'upgradeOpencode' });
+  };
+
   const testConnection = (backendId: string): void => {
     dispatch({ type: 'connectionTestPending', backendId });
     bridge.post({ type: 'testConnection', backendId });
@@ -371,6 +395,7 @@ export function App(): JSX.Element {
   // reports one level and the picker is absent.
   const permissionOptions: PermissionOption[] = state.permissions?.options ?? [];
   const hasApprovalChannel = state.permissions?.hasApprovalChannel ?? false;
+  const modeSnapshot = visibleModeSnapshot(state);
   // Stored `always` rules: each shows what it actually allows and can be
   // revoked here, so a lasting rule is never invisible.
   const storedRules = state.permissions?.rules ?? [];
@@ -431,6 +456,7 @@ export function App(): JSX.Element {
     bridge.post({
       type: 'sendTurn',
       text,
+      backendId: state.selectedBackendId,
       model: state.selectedModel,
       permissionLevel: state.permissionLevel,
       attachments: state.attachments
@@ -704,7 +730,13 @@ export function App(): JSX.Element {
     }
     dispatch({ type: 'planRevising' });
     dispatch({ type: 'localUserMessage', text });
-    bridge.post({ type: 'sendTurn', text, model: state.selectedModel, permissionLevel: state.permissionLevel });
+    bridge.post({
+      type: 'sendTurn',
+      text,
+      backendId: state.selectedBackendId,
+      model: state.selectedModel,
+      permissionLevel: state.permissionLevel
+    });
   };
 
   // ---- Change review ------------------------------------------------------
@@ -795,6 +827,16 @@ export function App(): JSX.Element {
     postChangeDecision({ kind: 'all' }, 'accepted');
   };
 
+  const loadChangeHunks = (path: string): void => {
+    const backendId = state.selectedBackendId;
+    const threadId = state.activeThreadId;
+    const turnId = state.changeReview?.turnId ?? state.changesTurnId;
+    if (!backendId || !threadId || !turnId) {
+      return;
+    }
+    bridge.post({ type: 'changes/hunks', backendId, threadId, turnId, path });
+  };
+
   /**
    * Confirm the pending destructive reject. The scope was captured when the
    * confirmation opened, so the action matches exactly what the user confirmed.
@@ -829,6 +871,8 @@ export function App(): JSX.Element {
         onSaveToken={saveOllamaToken}
         onClearToken={clearOllamaToken}
         onTestConnection={testConnection}
+        opencodeUpgrade={state.opencodeUpgrade}
+        onUpgradeOpencode={upgradeOpencode}
       />
     );
   }
@@ -1051,13 +1095,16 @@ export function App(): JSX.Element {
             The agent is paused until you answer above.
           </p>
         ) : null}
-        {modePanelOpen && state.modeOptions ? (
+        {modePanelOpen && modeSnapshot ? (
           <ModePanel
-            snapshot={state.modeOptions}
+            snapshot={modeSnapshot}
             disabled={state.busy}
             onSelect={(mode) => {
               setModePanelOpen(false);
-              bridge.post({ type: 'selectMode', mode });
+              dispatch({ type: 'selectMode', mode });
+              if (state.selectedBackendId) {
+                bridge.post({ type: 'selectMode', mode, backendId: state.selectedBackendId });
+              }
             }}
             onClose={() => setModePanelOpen(false)}
           />
@@ -1092,7 +1139,7 @@ export function App(): JSX.Element {
         {state.changes && state.changes.length > 0 ? (
           <ChangedFilesStrip
             entries={state.changes}
-            files={state.changeReview?.turnId === state.changesTurnId ? state.changeReview.files : []}
+            files={state.changeReview && state.changeReview.turnId === state.changesTurnId ? state.changeReview.files : []}
             onOpenFile={openChangeFile}
           >
             {state.changeReview && state.changeReview.files.length > 0 ? (
@@ -1114,6 +1161,7 @@ export function App(): JSX.Element {
                 onKeepAll={keepAll}
                 onResolveConflict={resolveConflict}
                 onRestoreCheckpoint={(entry) => restoreCheckpoint(entry.messageId, entry.fileCount, entry.paths)}
+                onLoadHunks={loadChangeHunks}
               />
             ) : null}
           </ChangedFilesStrip>
@@ -1201,9 +1249,9 @@ export function App(): JSX.Element {
             >
               <PaperclipIcon />
             </button>
-            {state.modeOptions && state.modeOptions.options.length > 1 ? (
+            {modeSnapshot ? (
               <ModeTrigger
-                snapshot={state.modeOptions}
+                snapshot={modeSnapshot}
                 open={modePanelOpen}
                 disabled={Boolean(pending) || state.busy}
                 onToggle={() => {
@@ -1496,7 +1544,7 @@ function ModelPanel({
           <span>
             {providers.length > 0
               ? 'Providers without a usable integration are hidden until they are installed.'
-              : 'Set up provider opens the Agent sidebar settings.'}
+              : 'Set up provider opens the SideCode settings.'}
           </span>
         </div>
       </div>
@@ -1797,16 +1845,16 @@ function EmptyState({
       </p>
       <hr className="divider" />
       <div className="suggestions">
-        <button className="suggestion" type="button" onClick={() => runSuggestion(dispatch, 'Explain the selected code')}>
+        <button className="suggestion" type="button" onClick={() => runSuggestion(dispatch, 'Explain the selected code', state.selectedBackendId)}>
           Explain the selected code
         </button>
-        <button className="suggestion" type="button" onClick={() => runSuggestion(dispatch, 'Find and fix a failing test')}>
+        <button className="suggestion" type="button" onClick={() => runSuggestion(dispatch, 'Find and fix a failing test', state.selectedBackendId)}>
           Find and fix a failing test
         </button>
         <button
           className="suggestion"
           type="button"
-          onClick={() => runSuggestion(dispatch, 'Add a retry with backoff to the Ollama client')}
+          onClick={() => runSuggestion(dispatch, 'Add a retry with backoff to the Ollama client', state.selectedBackendId)}
         >
           Add a retry with backoff to the Ollama client
         </button>
@@ -1825,10 +1873,10 @@ function runTokenAction(dispatch: Dispatch<Action>, state: AppState): void {
   });
 }
 
-function runSuggestion(dispatch: Dispatch<Action>, text: string): void {
+function runSuggestion(dispatch: Dispatch<Action>, text: string, backendId?: string): void {
   dispatch({ type: 'localUserMessage', text });
   dispatch({ type: 'dismissNotice' });
-  bridge.post({ type: 'sendTurn', text });
+  bridge.post({ type: 'sendTurn', text, backendId });
 }
 
 function NoticeBanner({

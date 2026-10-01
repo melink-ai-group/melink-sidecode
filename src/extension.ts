@@ -16,7 +16,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Diagnostics only, and never a credential: this records which spawn form
   // started so an argument drift is visible instead of falling silently into
   // `unavailable`. Installed once, before any backend can spawn a child.
-  const diagnostics = vscode.window.createOutputChannel('Agent sidebar (Codex)');
+  const diagnostics = vscode.window.createOutputChannel('SideCode (Codex)');
   context.subscriptions.push(diagnostics);
   setDiagnosticSink((message) => diagnostics.appendLine(message));
 

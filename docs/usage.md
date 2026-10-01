@@ -1,11 +1,11 @@
-# Using the Agent sidebar
+# Using SideCode
 
 A tour of what the sidebar does and how to drive it. For installation, see the
 [README](../README.md).
 
 ## Opening the sidebar
 
-Click the **Agent** icon in the Activity Bar, or run **View: Show Agent** from the
+Click the **SideCode** icon in the Activity Bar, or run **View: Show SideCode** from the
 Command Palette. The view is a single chat column: a title bar for provider/model
 controls, the transcript, and a composer at the bottom.
 
@@ -47,13 +47,14 @@ transcript. When at least one provider is available, only available providers ar
 listed in the picker; the others are surfaced only when they are the whole story,
 so the picker is never empty.
 
-### Optional opencode agentic runtime
+### opencode agentic runtime
 
-Ollama Cloud is, by default, a direct streaming adapter: it answers in the
-transcript but cannot edit files, run commands, or keep a tool-driven session.
-Turning on **`melink.ollama.opencode.enabled`** routes its turns through
-[opencode](https://opencode.ai), a terminal coding agent, so Ollama models can
-read the project, edit files, and run commands.
+Ollama Cloud runs through [opencode](https://opencode.ai) by default, so those
+models can read the project, edit files, and run commands. Turning
+**`melink.ollama.opencode.enabled`** off uses the direct streaming adapter
+instead: it answers in the transcript but cannot edit files, run commands, or
+keep a tool-driven session. When opencode is connected, Settings offers
+**Update opencode**, which runs `opencode upgrade`.
 
 - **Identity is unchanged.** There is still one **Ollama Cloud** provider with
   the same badge and dot; opencode is a runtime behind it, not a new provider.
@@ -83,7 +84,7 @@ not resolve), the turn reports a distinct, actionable notice — the missing CLI
 a spawn failure, a rejected generated config, and a rejected token each read
 differently — and never blocks the direct path.
 
-You can set all of this from **Agent: Open settings** without editing JSON: the
+You can set all of this from **SideCode: Open settings** without editing JSON: the
 Ollama region carries a **Use opencode as the agentic runtime** switch (off by
 default) and, while it is on, an **opencode CLI path** field. The status line
 shows one of three distinct states — detected (with the CLI version), missing or
@@ -187,16 +188,16 @@ useful, an action:
 The title bar's **Refresh backends** button re-probes every provider and drops
 cached model lists, so a model added or removed on the server shows up after a
 refresh. The **gear** button opens the extension's settings
-(**Agent: Open settings**).
+(**SideCode: Open settings**).
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| **Agent: Set Ollama Cloud token** | Prompt for the bearer token, store it in secret storage. |
-| **Agent: Clear Ollama Cloud token** | Delete the stored token. |
-| **Agent: Refresh backend availability** | Re-probe both providers. |
-| **Agent: Open settings** | Open the `melink` settings. |
+| **SideCode: Set Ollama Cloud token** | Prompt for the bearer token, store it in secret storage. |
+| **SideCode: Clear Ollama Cloud token** | Delete the stored token. |
+| **SideCode: Refresh backend availability** | Re-probe both providers. |
+| **SideCode: Open settings** | Open the `melink` settings. |
 
 ## Settings reference
 
@@ -204,7 +205,7 @@ refresh. The **gear** button opens the extension's settings
 |---|---|---|
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. The token is sent only to this host. |
 | `melink.ollama.defaultModel` | *(empty)* | Default Ollama model; empty uses the first model reported. |
-| `melink.ollama.opencode.enabled` | `false` | Run Ollama Cloud turns through the optional opencode agentic runtime (tool execution, file edits, session resume). Off uses the direct `/api/chat` adapter and spawns no opencode process. |
+| `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the opencode agentic runtime (tool execution, file edits, session resume). Off uses the direct `/api/chat` adapter and spawns no opencode process. |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI used when the runtime is enabled; a bare name is resolved from `PATH`. |
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
 | `melink.codex.defaultModel` | *(empty)* | Default model for Codex; empty uses the CLI default. |
@@ -228,7 +229,7 @@ that fails validation shows an inline message and is not saved.
 
 ## The settings screen
 
-Open it from the gear in the title bar (or **Agent: Open settings**). It opens
+Open it from the gear in the title bar (or **SideCode: Open settings**). It opens
 inline in the sidebar — the same panel pattern as the model switcher, never a
 floating popover — and groups the settings as **Providers** above **Defaults**.
 

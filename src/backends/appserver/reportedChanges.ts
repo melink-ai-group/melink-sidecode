@@ -87,10 +87,28 @@ function fromUpdateChange(change: FileUpdateChange, origin: string): ReportedCha
           { absPath: absolute(kind.move_path, origin), status: 'modified' }
         ];
       }
+      // An update with no added or removed lines named the file without changing
+      // it (a read). It is not a workspace edit.
+      if (!patchHasEdits(change.diff)) {
+        return [];
+      }
       return [{ absPath, status: 'modified' }];
     default:
       return [];
   }
+}
+
+/** True when a unified diff contains at least one added or removed line. */
+function patchHasEdits(diff: string): boolean {
+  for (const raw of diff.replace(/\r\n?/g, '\n').split('\n')) {
+    if (raw.startsWith('+++') || raw.startsWith('---') || raw.startsWith('@@') || raw.startsWith('diff ')) {
+      continue;
+    }
+    if (raw.startsWith('+') || raw.startsWith('-')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Resolve a payload path (absolute or cwd-relative) to an absolute path. */

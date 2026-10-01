@@ -1,6 +1,7 @@
 import type { ContextView } from './context/contextView';
 import type {
   ChangeDecisionResult,
+  ChangeHunkView,
   ChangeView,
   ConflictResolution
 } from './changes/changeStore';
@@ -260,6 +261,11 @@ export type HostToWebviewMessage =
       pendingApproval?: ApprovalRequest;
       /** The thread's plan, so a resumed thread reopens its plan surface. */
       plan?: PlanArtifact;
+      /**
+       * A send that had to open a thread keeps the optimistic user line. A
+       * normal conversation switch still replaces the transcript.
+       */
+      keepPendingUserMessage?: boolean;
     }
   | { type: 'threads'; backendId: string; threads: ThreadSummary[] }
   | { type: 'settings'; settings: SettingsSnapshot }
@@ -268,6 +274,8 @@ export type HostToWebviewMessage =
   /** The active conversation's plan, whenever it is created or revised. */
   | { type: 'plan'; plan: PlanArtifact }
   | { type: 'connectionTest'; result: ConnectionTestResult }
+  /** Result of `opencode upgrade`. `pending` is true while the CLI is still running. */
+  | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   /** The capability descriptor + effective settings for one provider+model. */
   | { type: 'modelCapability'; capability: ModelCapabilitySnapshot }
   /**
@@ -318,6 +326,11 @@ export type HostToWebviewMessage =
    * webview only consumes this; the review UI itself is a later ticket.
    */
   | { type: 'changes/review'; review: ChangeView }
+  /**
+   * Hunk lines for one expanded file. The review snapshot omits line bodies so
+   * a large turn does not paint every diff up front.
+   */
+  | { type: 'changes/hunks'; turnId: string; path: string; hunks: ChangeHunkView[]; truncated: boolean }
   /**
    * The result of a decision request. Carries one outcome per file, so a
    * partial failure (a refused write, a conflict) is surfaced rather than
@@ -379,6 +392,8 @@ export type WebviewToHostMessage =
   | {
       type: 'sendTurn';
       text: string;
+      /** Backend the composer has selected. The host opens a thread there when the active one differs. */
+      backendId?: string;
       model?: string;
       permissionLevel?: PermissionLevel;
       /** Effective per-model settings, already clamped by the host. */
@@ -406,6 +421,8 @@ export type WebviewToHostMessage =
   | { type: 'setOllamaToken'; value: string }
   | { type: 'clearOllamaToken' }
   | { type: 'testConnection'; backendId: string }
+  /** Run `opencode upgrade` when the CLI is connected. */
+  | { type: 'upgradeOpencode' }
   /** A decision on a pending approval. Never sent by a timer or a retry. */
   | { type: 'decideApproval'; backendId: string; threadId: string; requestId: string; decision: ApprovalDecision }
   /** Read the permission options + stored rules for one backend. */
@@ -417,11 +434,11 @@ export type WebviewToHostMessage =
   /** Revoke one stored `always` rule. */
   | { type: 'revokeApprovalRule'; backendId: string; ruleId: string }
   /**
-   * Select the mode for the active conversation. Applies to the next turn only:
-   * the existing transcript is never mutated or invalidated. Persisted per
-   * thread so a resumed thread keeps its mode.
+   * Select the mode for the backend the user is driving. Applies to the next
+   * turn only: the existing transcript is never mutated or invalidated.
+   * Persisted on the active thread when that thread belongs to `backendId`.
    */
-  | { type: 'selectMode'; mode: DefaultMode }
+  | { type: 'selectMode'; mode: DefaultMode; backendId?: string }
   /**
    * Build the plan. Moves the thread into execution (mode returns to `agent`)
    * and seeds the todo list from the plan's bullet list. This is the only route
@@ -462,6 +479,8 @@ export type WebviewToHostMessage =
    * and an on-demand read can never disagree.
    */
   | { type: 'changes/list'; backendId: string; threadId: string; turnId: string }
+  /** Load hunk lines for one expanded file. The host answers with `changes/hunks`. */
+  | { type: 'changes/hunks'; backendId: string; threadId: string; turnId: string; path: string }
   /**
    * Decide one file, or one hunk of it. Never sent by a timer: the host records
    * the decision and, for a reject, writes the workspace file. An explicit
