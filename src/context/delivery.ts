@@ -24,6 +24,7 @@ import {
   renderAttachedFile,
   renderDelta,
   renderSnapshotResult,
+  renderViewedFileNotice,
   CONTEXT_UNAVAILABLE_NOTICE,
   VIEWED_FILE_NONE_OPEN,
   VIEWED_FILE_NOT_ATTACHED,
@@ -249,11 +250,11 @@ export class ContextDelivery {
    */
   private async viewedFileTurnBlock(): Promise<string> {
     if (!this.includeViewedFile) {
-      return VIEWED_FILE_NOT_ATTACHED;
+      return renderViewedFileNotice(VIEWED_FILE_NOT_ATTACHED);
     }
     const file = await this.reads.viewedFileAttachment?.();
     if (!file) {
-      return VIEWED_FILE_NONE_OPEN;
+      return renderViewedFileNotice(VIEWED_FILE_NONE_OPEN);
     }
     return renderAttachedFile(file);
   }

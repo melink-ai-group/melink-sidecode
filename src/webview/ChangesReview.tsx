@@ -159,6 +159,7 @@ export function ChangesReview({
   const countLabel = fileCountLabel(review.files);
 
   const locked = busy || deciding;
+  const allKept = review.files.length > 0 && review.files.every((file) => file.decision === 'accepted');
 
   const rejectPaths =
     rejectConfirm?.scope === 'all'
@@ -192,16 +193,18 @@ export function ChangesReview({
           ) : null}
         </button>
         <span className="spacer" />
-        <button
-          className="btn btn--primary"
-          type="button"
-          disabled={locked || review.files.length === 0}
-          title="Keep all changes from this turn."
-          onClick={onKeepAll}
-        >
-          <CheckIcon className="ico ico--xs" />
-          <span>Keep</span>
-        </button>
+        {allKept ? null : (
+          <button
+            className="btn btn--primary"
+            type="button"
+            disabled={locked || review.files.length === 0}
+            title="Keep all changes from this turn."
+            onClick={onKeepAll}
+          >
+            <CheckIcon className="ico ico--xs" />
+            <span>Keep</span>
+          </button>
+        )}
         <button
           className="btn changes-review__review"
           type="button"
@@ -386,16 +389,17 @@ function ChangeRow({
             </>
           ) : reviewable ? (
             <>
-              <button
-                className="btn"
-                type="button"
-                aria-pressed={decision === 'accepted'}
-                disabled={locked || decision === 'accepted'}
-                aria-label={`Keep changes to ${file.path}`}
-                onClick={onKeep}
-              >
-                Keep
-              </button>
+              {decision === 'accepted' ? null : (
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={locked}
+                  aria-label={`Keep changes to ${file.path}`}
+                  onClick={onKeep}
+                >
+                  Keep
+                </button>
+              )}
               {decision === 'accepted' && file.restorable !== true ? null : (
                 <button
                   className="btn btn--danger"

@@ -77,6 +77,19 @@ export function renderPlanMarkdown(input: {
   return lines.join('\n');
 }
 
+/**
+ * A plan document opens itself in the rendered preview once: the first time it
+ * exists, still has steps, and has not been built. Later revisions and step
+ * updates refresh an open preview without taking focus again.
+ */
+export function shouldAutoOpenPlanDocument(input: {
+  built?: boolean;
+  stepCount: number;
+  alreadyOpened: boolean;
+}): boolean {
+  return input.built !== true && input.stepCount > 0 && !input.alreadyOpened;
+}
+
 /** The markdown checkbox for a step status. */
 export function stepMarker(status: TodoStepStatus): string {
   switch (status) {

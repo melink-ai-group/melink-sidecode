@@ -31,6 +31,8 @@ import type {
   ThreadSummary,
   TodoStep,
   TodoStepStatus,
+  QuestionAnswer,
+  QuestionRequest,
   TranscriptItem
 } from './backends/types';
 
@@ -53,6 +55,7 @@ export type { PermissionLevel } from './backends/types';
 /** The one mode enum, re-exported so every surface names it once. */
 export type { DefaultMode } from './backends/types';
 export type { PlanArtifact, TodoStep, TodoStepStatus } from './backends/types';
+export type { QuestionAnswer, QuestionRequest } from './backends/types';
 /**
  * The provider-agnostic model capability vocabulary, re-exported so the webview
  * names the descriptor without reaching into the backend contract for it.
@@ -265,6 +268,11 @@ export type HostToWebviewMessage =
        * or a stale duplicate.
        */
       pendingApproval?: ApprovalRequest;
+      /**
+       * The clarifying question still waiting on this thread. A reload repaints
+       * the card above the composer instead of losing it.
+       */
+      pendingQuestion?: QuestionRequest;
       /** The thread's plan, so a resumed thread reopens its plan surface. */
       plan?: PlanArtifact;
       /**
@@ -368,7 +376,11 @@ export type HostToWebviewMessage =
    * operation was complete, partial, or aborted. Restoring reverts files only;
    * the transcript is never altered, which the UI copy must state explicitly.
    */
-  | { type: 'changes/restoreResult'; result: RestoreCheckpointResult };
+  | { type: 'changes/restoreResult'; result: RestoreCheckpointResult }
+  /** A Plan or Agent question card. Replaces any card already on screen. */
+  | { type: 'question/asked'; request: QuestionRequest }
+  /** The card was answered, skipped, or the turn that raised it was stopped. */
+  | { type: 'question/cleared' };
 
 
 export type WebviewToHostMessage =
@@ -461,6 +473,11 @@ export type WebviewToHostMessage =
   | { type: 'installOpencode' }
   /** A decision on a pending approval. Never sent by a timer or a retry. */
   | { type: 'decideApproval'; backendId: string; threadId: string; requestId: string; decision: ApprovalDecision }
+  /**
+   * The finished choice card. One entry per question, in ask order. The host
+   * either continues the turn or answers the native request.
+   */
+  | { type: 'answerQuestion'; requestId: string; answers: QuestionAnswer[] }
   /** Read the permission options + stored rules for one backend. */
   | { type: 'getPermissions'; backendId: string }
   /** Read the mode options + current mode for one backend. */

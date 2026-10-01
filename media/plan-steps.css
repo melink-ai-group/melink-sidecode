@@ -1,0 +1,86 @@
+/* Status icons for plan steps. The marker text is replaced by an empty span;
+ * the shape is drawn here so it survives the markdown preview sanitizer. */
+
+.melink-step-item {
+  list-style: none;
+}
+
+.melink-step {
+  display: inline-block;
+  position: relative;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-right: 0.45em;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  vertical-align: -0.15em;
+  flex: 0 0 auto;
+}
+
+.melink-step--todo {
+  color: var(--vscode-descriptionForeground);
+}
+
+.melink-step--progress {
+  color: var(--vscode-progressBar-background, var(--vscode-textLink-foreground));
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: melink-step-spin 0.9s linear infinite;
+}
+
+.melink-step--done {
+  color: var(--vscode-testing-iconPassed, var(--vscode-charts-green, var(--melink-success, #4caf50)));
+  background: currentColor;
+  border-color: currentColor;
+}
+
+.melink-step--done::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--vscode-editor-background, #fff);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.melink-step--denied {
+  color: var(--vscode-errorForeground);
+}
+
+.melink-step--denied::before,
+.melink-step--denied::after {
+  content: '';
+  position: absolute;
+  left: 5.5px;
+  top: 2px;
+  width: 1.5px;
+  height: 8px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.melink-step--denied::before {
+  transform: rotate(45deg);
+}
+
+.melink-step--denied::after {
+  transform: rotate(-45deg);
+}
+
+@keyframes melink-step-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .melink-step--progress {
+    animation: none;
+    border-color: currentColor;
+    background: conic-gradient(currentColor 0 25%, transparent 0);
+  }
+}

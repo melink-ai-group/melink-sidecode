@@ -1,4 +1,7 @@
 import type { JSX, ReactNode } from 'react';
+import { statusForMarker } from '../backends/plan';
+import type { TodoStepStatus } from '../backends/types';
+import { stepStatusKind, stepStatusLabel } from '../planStepIcon';
 
 /**
  * Minimal markdown renderer for agent output.
@@ -97,6 +100,16 @@ function parseBlocks(source: string): Block[] {
   return blocks;
 }
 
+const LEADING_STEP = /^\[([ xX~-])\]\s*/;
+
+function parseLeadingStep(text: string): { status: TodoStepStatus; text: string } | undefined {
+  const match = LEADING_STEP.exec(text);
+  if (!match) {
+    return undefined;
+  }
+  return { status: statusForMarker(match[1]), text: text.slice(match[0].length) };
+}
+
 const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\[[^\]]+\]\([^)\s]+\))/g;
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
@@ -185,9 +198,22 @@ export function Markdown({ text, renderCodeHeader }: MarkdownProps): JSX.Element
               </blockquote>
             );
           case 'list': {
-            const items = block.items.map((item, itemIndex) => (
-              <li key={`${key}-l${itemIndex}`}>{renderInline(item, `${key}-l${itemIndex}`)}</li>
-            ));
+            const items = block.items.map((item, itemIndex) => {
+              const step = parseLeadingStep(item);
+              if (!step) {
+                return <li key={`${key}-l${itemIndex}`}>{renderInline(item, `${key}-l${itemIndex}`)}</li>;
+              }
+              return (
+                <li className={`md__step md__step--${stepStatusKind(step.status)}`} key={`${key}-l${itemIndex}`}>
+                  <span
+                    className={`melink-step melink-step--${stepStatusKind(step.status)}`}
+                    role="img"
+                    aria-label={stepStatusLabel(step.status)}
+                  />
+                  <span className="md__step-text">{renderInline(step.text, `${key}-l${itemIndex}`)}</span>
+                </li>
+              );
+            });
             return block.ordered ? (
               <ol className="md__list" key={key}>
                 {items}

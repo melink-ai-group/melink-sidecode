@@ -83,6 +83,8 @@ import type {
   ThinkingLevel
 } from '../protocol';
 import type { Attachment, DefaultMode, PermissionLevel } from '../backends/types';
+import { formatQuestionAnswers } from '../questions';
+import { QuestionCard } from './QuestionCard';
 
 const bridge: HostBridge = createHostBridge();
 
@@ -98,6 +100,10 @@ export function App(): JSX.Element {
   const transcriptRef = useRef<HTMLDivElement>(null);
   /** Follow new transcript content only while the reader is already at the bottom. */
   const stickToBottomRef = useRef(true);
+  /** Thread last painted with its messages visible, so a restore or history switch can jump to the end. */
+  const pinnedThreadRef = useRef<string | undefined>(undefined);
+  /** Ignore the scroll event fired by our own jump to the bottom. */
+  const ignoreTranscriptScrollRef = useRef(false);
   /**
    * The in-flight attach request. A late `attachmentsPicked` from a superseded
    * pick is ignored, so an old response cannot repopulate cleared chips.
@@ -120,6 +126,12 @@ export function App(): JSX.Element {
         case 'agentEvent':
           dispatch({ type: 'agentEvent', event: message.event });
           break;
+        case 'question/asked':
+          dispatch({ type: 'questionAsked', request: message.request });
+          break;
+        case 'question/cleared':
+          dispatch({ type: 'questionCleared' });
+          break;
         case 'conversation':
           dispatch({
             type: 'conversation',
@@ -130,6 +142,7 @@ export function App(): JSX.Element {
             mode: message.mode,
             replay: message.replay,
             pendingApproval: message.pendingApproval,
+            pendingQuestion: message.pendingQuestion,
             plan: message.plan,
             keepPendingUserMessage: message.keepPendingUserMessage
           });
@@ -277,6 +290,9 @@ export function App(): JSX.Element {
   }, [state.selectedBackendId, state.selectedModel]);
 
   const onTranscriptScroll = (): void => {
+    if (ignoreTranscriptScrollRef.current) {
+      return;
+    }
     const el = transcriptRef.current;
     if (!el) {
       return;
@@ -285,14 +301,43 @@ export function App(): JSX.Element {
     stickToBottomRef.current = distance <= 48;
   };
 
-  useLayoutEffect(() => {
+  const scrollTranscriptToBottom = (): void => {
     const el = transcriptRef.current;
-    if (!el || !stickToBottomRef.current) {
+    if (!el) {
       return;
     }
+    ignoreTranscriptScrollRef.current = true;
     el.scrollTop = el.scrollHeight;
+    ignoreTranscriptScrollRef.current = false;
+  };
+
+  useLayoutEffect(() => {
+    // While restoring, the transcript shows a placeholder instead of the
+    // messages. Scrolling then would pin the short placeholder; wait until the
+    // conversation is actually on screen.
+    if (state.restoring) {
+      return;
+    }
+    const threadChanged = pinnedThreadRef.current !== state.activeThreadId;
+    pinnedThreadRef.current = state.activeThreadId;
+    if (threadChanged) {
+      stickToBottomRef.current = true;
+    }
+    if (!stickToBottomRef.current) {
+      return;
+    }
+    scrollTranscriptToBottom();
+    // Markdown and code blocks can grow after the first layout pass.
+    const frame = requestAnimationFrame(() => {
+      if (stickToBottomRef.current) {
+        scrollTranscriptToBottom();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
   }, [
     state.transcript,
+    state.restoring,
+    state.activeThreadId,
     state.notice,
     state.startingTurn,
     state.busy,
@@ -373,11 +418,16 @@ export function App(): JSX.Element {
   };
 
   const resumeThread = (threadId: string): void => {
-    if (!active || threadId === state.activeThreadId) {
+    if (!active) {
       setHistoryOpen(false);
       return;
     }
     setHistoryOpen(false);
+    stickToBottomRef.current = true;
+    if (threadId === state.activeThreadId) {
+      scrollTranscriptToBottom();
+      return;
+    }
     dispatch({ type: 'dismissNotice' });
     bridge.post({ type: 'resumeThread', backendId: active.id, threadId });
   };
@@ -488,7 +538,7 @@ export function App(): JSX.Element {
 
   const send = (): void => {
     const text = draft.trim();
-    if ((!text && state.attachments.length === 0) || state.restoring || pending) {
+    if ((!text && state.attachments.length === 0) || state.restoring || pending || state.pendingQuestion) {
       return;
     }
     if (state.busy) {
@@ -594,10 +644,12 @@ export function App(): JSX.Element {
 
   // While an approval is pending the turn is blocked at the backend, so the
   // composer and Send are locked until a decision arrives.
+  const asking = Boolean(state.pendingQuestion);
   const canSend =
     (Boolean(draft.trim()) || state.attachments.length > 0) &&
     !state.restoring &&
     !pending &&
+    !asking &&
     active?.status === 'available' &&
     (!state.busy || (active.id === 'codex' && Boolean(draft.trim()) && state.attachments.length === 0));
 
@@ -1060,6 +1112,7 @@ export function App(): JSX.Element {
             <TranscriptRow
               key={item.id}
               item={item}
+              hideQuestions={state.mode !== 'ask'}
               providerId={item.backendId ?? active?.id ?? 'ollama'}
               pendingId={pending?.id}
               checkpoint={state.checkpoints?.find((entry) => entry.messageId === item.id)}
@@ -1233,6 +1286,21 @@ export function App(): JSX.Element {
             });
           }}
         />
+        {state.pendingQuestion ? (
+          <QuestionCard
+            key={state.pendingQuestion.id}
+            request={state.pendingQuestion}
+            onSubmit={(answers) => {
+              const request = state.pendingQuestion;
+              if (!request) {
+                return;
+              }
+              dispatch({ type: 'questionCleared' });
+              dispatch({ type: 'localUserMessage', text: formatQuestionAnswers(request.questions, answers) });
+              bridge.post({ type: 'answerQuestion', requestId: request.id, answers });
+            }}
+          />
+        ) : null}
         <div className="composer-box">
           {state.attachments.length > 0 ? (
             <ul className="attachments" aria-label="Attachments">
@@ -1279,13 +1347,13 @@ export function App(): JSX.Element {
             placeholder={
               state.restoring
                 ? 'Restoring conversation...'
-                : pending
+                : pending || asking
                   ? 'Waiting for your decision above...'
                   : active?.status === 'available'
                     ? 'Ask the agent...'
                     : 'No backend available'
             }
-            disabled={active?.status !== 'available' || state.restoring || Boolean(pending)}
+            disabled={active?.status !== 'available' || state.restoring || Boolean(pending) || asking}
             rows={1}
             onChange={(event) => setDraft(event.target.value)}
             onPaste={onComposerPaste}
@@ -1301,7 +1369,7 @@ export function App(): JSX.Element {
               className="icon-btn"
               type="button"
               aria-label="Attach files"
-              disabled={active?.status !== 'available' || state.restoring || Boolean(pending)}
+              disabled={active?.status !== 'available' || state.restoring || Boolean(pending) || asking}
               onClick={openFilePicker}
             >
               <PaperclipIcon />
@@ -1311,7 +1379,7 @@ export function App(): JSX.Element {
                 <ModeTrigger
                   snapshot={modeSnapshot}
                   open={modePanelOpen}
-                  disabled={Boolean(pending) || state.busy}
+                  disabled={Boolean(pending) || asking || state.busy}
                   onToggle={() => {
                     setModePanelOpen((value) => !value);
                     setPermissionPanelOpen(false);
@@ -1339,7 +1407,7 @@ export function App(): JSX.Element {
                 options={permissionOptions}
                 selected={state.permissionLevel}
                 open={permissionPanelOpen}
-                disabled={Boolean(pending)}
+                disabled={Boolean(pending) || asking}
                 onToggle={() => {
                   setPermissionPanelOpen((value) => !value);
                   setModePanelOpen(false);
@@ -1356,7 +1424,7 @@ export function App(): JSX.Element {
                 aria-expanded={modelSettingsOpen}
                 aria-controls="model-settings-panel"
                 aria-label="Model settings"
-                disabled={Boolean(pending)}
+                disabled={Boolean(pending) || asking}
                 onClick={() => {
                   setModelSettingsOpen((value) => !value);
                   setModePanelOpen(false);
@@ -2014,6 +2082,7 @@ function RestoreResultStrip({
 function TranscriptRow({
   item,
   providerId,
+  hideQuestions,
   pendingId,
   checkpoint,
   onDecide,
@@ -2022,6 +2091,8 @@ function TranscriptRow({
 }: {
   item: TranscriptItemView;
   providerId: string;
+  /** Plan and Agent hide a sidecode-question fence. Ask leaves it as text. */
+  hideQuestions?: boolean;
   pendingId?: string;
   /** The checkpoint this message opened, when its turn touched files. */
   checkpoint?: CheckpointView;
@@ -2116,7 +2187,7 @@ function TranscriptRow({
   }
 
   // Assistant message: markdown output with a streaming caret.
-  const assistantText = visibleTranscriptText(item.text);
+  const assistantText = visibleTranscriptText(item.text, { hideQuestions });
   if (!assistantText && item.status !== 'failed') {
     return null;
   }

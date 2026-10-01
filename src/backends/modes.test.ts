@@ -28,6 +28,10 @@ test('every mode carries the shared plan-document contract', () => {
   assert.match(plan, /unless the user asked you to update or revise it/i);
   assert.match(ask, /do not run commands/i);
   assert.match(ask, /write or revise the plan/i);
+  assert.match(agent, /sidecode-question/);
+  assert.match(plan, /sidecode-question/);
+  assert.match(plan, /do not write the plan yet/i);
+  assert.match(ask, /do not emit a sidecode-question/i);
 });
 
 test('an unknown mode degrades to the agent default', () => {

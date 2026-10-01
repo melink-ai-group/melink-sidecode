@@ -19,6 +19,7 @@ import {
   ModelSettingField,
   ModelSettingOverrides,
   PermissionLevel,
+  QuestionAnswer,
   ResolvedModelSettings,
   ThreadSummary
 } from './types';
@@ -314,6 +315,11 @@ export class BackendRegistry implements Disposable {
   /** Answers a pending approval on the owning backend. Never called on a timer. */
   decideApproval(id: string, threadId: string, requestId: string, decision: ApprovalDecision): void {
     this.get(id)?.decideApproval(threadId, requestId, decision);
+  }
+
+  /** Answers a pending clarifying question on the owning backend. */
+  answerQuestion(id: string, threadId: string, requestId: string, answers: QuestionAnswer[]): void {
+    this.get(id)?.answerQuestion(threadId, requestId, answers);
   }
 
   /** Aborts the in-flight turn on the given backend, if any. */

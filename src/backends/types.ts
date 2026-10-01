@@ -6,6 +6,10 @@
  * an implementation detail that is normalized into the event union below.
  */
 
+import type { QuestionAnswer, QuestionRequest } from '../questions.ts';
+
+export type { ClarifyingQuestion, QuestionAnswer, QuestionRequest } from '../questions.ts';
+
 /** Structural stand-in for `vscode.Disposable`, so this module stays host-free. */
 export interface Disposable {
   dispose(): void | Promise<void>;
@@ -795,6 +799,14 @@ export interface ChangesReportedEvent {
  * blocked at the backend, not the UI: without an answer the request would hang,
  * so nothing here is ever auto-decided.
  */
+/** A Plan or Agent turn is blocked until the user answers this question set. */
+export interface QuestionRequestedEvent {
+  type: 'question/requested';
+  backendId: string;
+  threadId: string;
+  request: QuestionRequest;
+}
+
 export interface ApprovalRequestedEvent {
   type: 'approval/requested';
   backendId: string;
@@ -931,6 +943,7 @@ export type AgentEvent =
   | TurnCompletedEvent
   | TurnInterruptedEvent
   | ChangesReportedEvent
+  | QuestionRequestedEvent
   | ApprovalRequestedEvent
   | ApprovalDecidedEvent
   | ApprovalDeniedEvent
@@ -1018,6 +1031,12 @@ export interface AgentBackend {
    * so a double click cannot answer twice. Never called on a timer.
    */
   decideApproval(threadId: string, requestId: string, decision: ApprovalDecision): void;
+
+  /**
+   * Answers a pending clarifying question. Must be called exactly once per
+   * `question/requested`. An unknown or already settled id is a no-op.
+   */
+  answerQuestion(threadId: string, requestId: string, answers: QuestionAnswer[]): void;
 
   /**
    * Resolves whether the backend has a usable credential.

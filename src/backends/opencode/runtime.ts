@@ -7,6 +7,14 @@ import {
 } from './events.ts';
 import { OPENCODE_CONFIG_ENV } from './config.ts';
 import type { OpencodePermissionAsk, OpencodePermissionReply } from './approval.ts';
+import type { ClarifyingQuestion } from '../../questions.ts';
+
+/** One OpenCode question request, already reduced to the shared card shape. */
+export interface OpencodeQuestionAsk {
+  id: string;
+  sessionId?: string;
+  questions: ClarifyingQuestion[];
+}
 
 export type { OpencodeEvent } from './events.ts';
 
@@ -70,6 +78,16 @@ export interface OpencodeRunOptions {
    * which cannot show a prompt.
    */
   decidePermission?: (ask: OpencodePermissionAsk, signal: AbortSignal) => Promise<OpencodePermissionReply>;
+  /**
+   * Whether a new session may raise `question.asked`. Ask mode denies it.
+   * Existing sessions keep the permission they were created with.
+   */
+  questionPermission?: 'ask' | 'deny';
+  /**
+   * When set, a `question.asked` event waits here instead of being rejected.
+   * `'reject'` tells the server to drop the question.
+   */
+  answerQuestion?: (ask: OpencodeQuestionAsk, signal: AbortSignal) => Promise<string[][] | 'reject'>;
 }
 
 export interface OpencodeRunResult {

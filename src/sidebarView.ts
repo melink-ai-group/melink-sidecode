@@ -21,15 +21,24 @@ import {
 } from './backends/types';
 import { permissionDescriptor } from './backends/permissions';
 import { modeDescriptor, supportedModes } from './backends/modes';
+import {
+  extractSidecodeQuestions,
+  formatQuestionAnswers,
+  type QuestionAnswer,
+  type QuestionRequest
+} from './questions';
 import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import {
   mergeCheckboxStatuses,
   planDocumentFromReply,
   planRelativePath,
+  shouldAutoOpenPlanDocument,
   updateStepStatus,
   userAsksToRevisePlan
 } from './backends/plan';
+import { PlanPreview, planPreviewState } from './planPreview';
+import { shouldAutoShowPlanPreview } from './planStepMarkdown';
 import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from './backends/defaults';
 import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
@@ -91,6 +100,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private pendingApproval?: ApprovalRequest;
   /**
+   * The clarifying question card for one thread. A fence ask is answered by
+   * sending the next turn; a native ask is answered on the backend that raised it.
+   */
+  private pendingQuestion?: { source: 'fence' | 'native'; request: QuestionRequest };
+  /**
    * True once a native `turn/plan/updated` has arrived for the current turn. It
    * suppresses the reply-derived fallback so a native plan is never overwritten
    * by a looser parse of the same reply.
@@ -105,6 +119,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private revisePlanThisTurn = false;
   private readonly settings: SettingsService;
   private readonly plans = new PlanStore();
+  /** Rendered plan document in the editor area. Build on that view runs the plan. */
+  private readonly planPreview: PlanPreview;
+  /** Thread whose plan was already auto-opened, so a revision does not steal focus. */
+  private planPreviewOpenedFor?: string;
+  /** Thread the open preview belongs to. A thread change closes a stale document. */
+  private planPreviewThreadId?: string;
+  /** Plan files already sent to Markdown Preview, so focusing the source does not loop. */
+  private readonly shownPlanPreviews = new Set<string>();
+  /** True while Preview is being opened, so that open does not trigger another one. */
+  private showingPlanPreview = false;
   /**
    * The per-turn change journal: the host-owned record of what each turn
    * changed. Owned here so it shares the turn lifecycle the view already drives
@@ -184,7 +208,28 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // inline summary. It registers its own content provider and command ids; a
     // dispose on deactivate removes both.
     this.nativeDiff = new NativeDiffService(this.changeJournal);
-    context.subscriptions.push(this.nativeDiff);
+    this.planPreview = new PlanPreview(this.extensionUri, () => {
+      void this.buildPlan();
+    });
+    context.subscriptions.push(
+      this.nativeDiff,
+      { dispose: () => this.planPreview.close() },
+      vscode.window.onDidChangeActiveTextEditor((editor) => {
+        if (!editor || this.showingPlanPreview) {
+          return;
+        }
+        const uri = editor.document.uri;
+        if (!shouldAutoShowPlanPreview(uri.fsPath, this.shownPlanPreviews.has(uri.toString()))) {
+          return;
+        }
+        void this.showPlanMarkdownPreview(uri);
+      }),
+      vscode.workspace.onDidCloseTextDocument((document) => {
+        if (!this.showingPlanPreview) {
+          this.shownPlanPreviews.delete(document.uri.toString());
+        }
+      })
+    );
     this.registry.onDidChangeAvailability((availability) => this.post({ type: 'snapshot', availability }));
     this.registry.onEvent((event) => {
       // `changes/reported` is internal turn bookkeeping, not transcript content:
@@ -192,6 +237,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       // which only ever receives the final `changes/changed` snapshot.
       if (event.type === 'changes/reported') {
         this.changeTracker.reportChanges(event.changes, event.threadId);
+        return;
+      }
+      if (event.type === 'question/requested') {
+        this.holdNativeQuestion(event.request);
         return;
       }
       this.post({ type: 'agentEvent', event });
@@ -214,6 +263,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // the user just created, rather than waiting for a reload or a backend
         // switch.
         void this.postPermissions(event.backendId);
+      }
+      if (
+        (event.type === 'turn/interrupted' || event.type === 'error') &&
+        this.pendingQuestion?.source === 'native' &&
+        event.threadId &&
+        this.pendingQuestion.request.threadId === event.threadId
+      ) {
+        this.pendingQuestion = undefined;
+        this.post({ type: 'question/cleared' });
       }
       if (event.type === 'turn/completed' || event.type === 'turn/interrupted' || event.type === 'error') {
         // A finished, interrupted, or failed turn cannot still be blocked on a
@@ -255,6 +313,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // selected permission level.
         this.nativePlanThisTurn = true;
         void this.recordNativePlan(event.backendId, event.threadId, event.steps, event.explanation);
+      }
+      if (event.type === 'turn/completed' && event.threadId && (this.mode === 'plan' || this.mode === 'agent')) {
+        // Strip a question fence before the plan is read from the same reply.
+        this.captureFenceQuestions(event.backendId, event.threadId);
       }
       if (event.type === 'turn/completed' && this.mode === 'plan' && event.threadId) {
         // Derive the plan document from the reply. Native step updates that
@@ -696,6 +758,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'decideApproval':
         this.decideApproval(message.backendId, message.threadId, message.requestId, message.decision);
         break;
+      case 'answerQuestion':
+        await this.answerQuestion(message.requestId, message.answers);
+        break;
       case 'getPermissions':
         await this.postPermissions(message.backendId);
         break;
@@ -1044,6 +1109,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           mode: this.mode,
           replay: this.store.getTranscript(backendId, threadId),
           pendingApproval: this.pendingApproval,
+          pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
           plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
         });
       }
@@ -1070,6 +1136,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         const prime = await this.contextDelivery.snapshot();
         const result = await backend.resumeThread(ref.threadId, { context: prime.payload });
         this.activeThread = result.handle;
+        this.syncPlanPreviewThread(result.handle.threadId);
         this.contextDelivery.begin(
           ContextDelivery.key(ref.backendId, ref.threadId),
           prime,
@@ -1095,6 +1162,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           mode: this.mode,
           replay: this.store.mergeApprovalMarkers(ref.backendId, ref.threadId, result.items),
           pendingApproval: this.pendingApproval,
+          pendingQuestion: this.pendingQuestionPayload(ref.backendId, ref.threadId),
           plan: this.store.getPlanState(ref.backendId, ref.threadId)
             ? this.planArtifact(ref.backendId, ref.threadId)
             : undefined
@@ -1151,6 +1219,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async degradeToFresh(backendId: string, error: unknown): Promise<void> {
     await this.store.clearActiveThread();
     this.activeThread = undefined;
+    this.syncPlanPreviewThread(undefined);
     if (error instanceof BackendError && error.code === 'provider') {
       this.post({
         type: 'notice',
@@ -1262,6 +1331,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         context: prime.payload
       });
       this.activeThread = handle;
+      this.syncPlanPreviewThread(handle.threadId);
       this.contextDelivery.begin(ContextDelivery.key(backendId, handle.threadId), prime, Boolean(handle.contextPrimed));
       await this.rememberPermission(level);
       this.mode = mode;
@@ -1281,6 +1351,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           model: model ?? handle.model,
           permissionLevel: level,
           mode,
+          pendingQuestion: this.pendingQuestionPayload(backendId, handle.threadId),
           ...(keepPendingUserMessage ? { keepPendingUserMessage: true } : {})
         });
       }
@@ -1356,6 +1427,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       const prime = await this.contextDelivery.snapshot();
       const result = await backend.resumeThread(threadId, { context: prime.payload });
       this.activeThread = result.handle;
+      this.syncPlanPreviewThread(result.handle.threadId);
       this.contextDelivery.begin(
         ContextDelivery.key(backendId, threadId),
         prime,
@@ -1381,6 +1453,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         mode: this.mode,
         replay: this.store.mergeApprovalMarkers(backendId, threadId, result.items),
         pendingApproval: this.pendingApproval,
+        pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
         plan: this.store.getPlanState(backendId, threadId)
           ? this.planArtifact(backendId, threadId)
           : undefined
@@ -1465,6 +1538,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           permissionLevel: this.permissionLevel,
           mode: this.mode,
           replay: result.transcript,
+          pendingQuestion: this.pendingQuestionPayload(active.backendId, active.threadId),
           plan: this.store.getPlanState(active.backendId, active.threadId)
             ? this.planArtifact(active.backendId, active.threadId)
             : undefined
@@ -1762,6 +1836,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!this.activeThread) {
       return;
     }
+    if (
+      this.pendingQuestion?.source === 'native' &&
+      this.pendingQuestion.request.threadId === this.activeThread.threadId
+    ) {
+      this.pendingQuestion = undefined;
+      this.post({ type: 'question/cleared' });
+    }
     this.registry.cancel(this.activeThread.backendId);
   }
 
@@ -1872,9 +1953,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Open the active thread's plan file in the editor. The stored path is
-   * workspace-relative, so it is resolved against the open folder here rather
-   * than trusted as an absolute path.
+   * Open the active thread's plan in the built-in Markdown Preview.
    */
   private async openPlanFile(): Promise<void> {
     if (!this.activeThread) {
@@ -1885,19 +1964,89 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!state?.path) {
       return;
     }
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    const uri = folder
-      ? vscode.Uri.joinPath(folder.uri, state.path)
-      : vscode.Uri.file(state.path);
-    try {
-      const document = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(document, { preview: true });
-    } catch {
-      this.post({
-        type: 'notice',
-        level: 'warning',
-        message: 'The plan file could not be opened. It may have been moved or deleted.'
+    this.publishPlanDocument(this.planArtifact(backendId, threadId), true);
+  }
+
+  /**
+   * Drop the rendered plan when the visible thread changes, so a document from
+   * the previous conversation is not left up as if it belonged to the new one.
+   */
+  private syncPlanPreviewThread(threadId: string | undefined): void {
+    if (threadId === this.planPreviewThreadId) {
+      return;
+    }
+    this.planPreview.close();
+    this.planPreviewOpenedFor = undefined;
+    this.planPreviewThreadId = threadId;
+  }
+
+  /**
+   * Push the plan into the rendered preview. The first unbuilt plan opens on
+   * its own. Later writes refresh an open preview without taking focus, unless
+   * `reveal` is set because the user asked to open it.
+   */
+  private publishPlanDocument(plan: PlanArtifact, reveal: boolean): void {
+    const threadId = this.activeThread?.threadId;
+    if (!threadId) {
+      return;
+    }
+    const autoOpen =
+      !reveal &&
+      shouldAutoOpenPlanDocument({
+        built: plan.built,
+        stepCount: plan.steps.length,
+        alreadyOpened: this.planPreviewOpenedFor === threadId
       });
+    const open = reveal || autoOpen;
+    if (open) {
+      this.planPreviewOpenedFor = threadId;
+      void this.showPlanMarkdownPreviewForPlan(plan);
+    }
+    if (this.planPreview.isOpen) {
+      this.planPreview.show(planPreviewState(plan), false);
+    }
+  }
+
+  /**
+   * Show a plan file in Markdown Preview. Called when a plan is first created
+   * and when the user opens the plan from the sidebar.
+   */
+  private showPlanMarkdownPreviewForPlan(plan: PlanArtifact): void {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder || !plan.path) {
+      return;
+    }
+    void this.showPlanMarkdownPreview(vscode.Uri.joinPath(folder.uri, plan.path));
+  }
+
+  /**
+   * Switch a plan document to Preview mode. The uri is remembered first so the
+   * text editor that Preview opens does not immediately request Preview again.
+   */
+  private async showPlanMarkdownPreview(uri: vscode.Uri): Promise<void> {
+    const key = uri.toString();
+    if (this.showingPlanPreview || this.shownPlanPreviews.has(key)) {
+      return;
+    }
+    this.shownPlanPreviews.add(key);
+    this.showingPlanPreview = true;
+    try {
+      await vscode.commands.executeCommand('markdown.showPreview', uri);
+    } catch {
+      try {
+        const document = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(document, { preview: true, viewColumn: vscode.ViewColumn.Active });
+        await vscode.commands.executeCommand('markdown.showPreview');
+      } catch {
+        this.shownPlanPreviews.delete(key);
+        this.post({
+          type: 'notice',
+          level: 'warning',
+          message: 'The plan could not be opened in Preview.'
+        });
+      }
+    } finally {
+      this.showingPlanPreview = false;
     }
   }
 
@@ -1934,8 +2083,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       title: this.store.getActiveThread()?.title,
       updatedAt: Date.now()
     });
-    this.post({ type: 'plan', plan: this.planArtifact(backendId, threadId) });
+    const builtPlan = this.planArtifact(backendId, threadId);
+    this.post({ type: 'plan', plan: builtPlan });
     this.post({ type: 'modes', modes: this.modeSnapshot(backendId) });
+    this.publishPlanDocument(builtPlan, false);
     // Kick off execution as the next turn, now that the mode is `agent`.
     await this.sendTurn(buildTurnInstruction(state.steps));
   }
@@ -1991,6 +2142,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       updatedAt: plan.updatedAt
     });
     this.post({ type: 'plan', plan });
+    this.publishPlanDocument(plan, false);
   }
 
   /**
@@ -2033,10 +2185,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         built,
         updatedAt: artifact.updatedAt
       });
-      this.post({
-        type: 'plan',
-        plan: { ...artifact, body: existing?.body ? artifact.body : undefined, built }
-      });
+      const visible = { ...artifact, body: existing?.body ? artifact.body : undefined, built };
+      this.post({ type: 'plan', plan: visible });
+      this.publishPlanDocument(visible, false);
       return;
     }
     await this.store.setPlanState(backendId, threadId, {
@@ -2161,6 +2312,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       updatedAt: plan.updatedAt
     });
     this.post({ type: 'plan', plan });
+    this.publishPlanDocument(plan, false);
   }
 
   /**
@@ -2219,6 +2371,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     });
     if (this.activeThread?.backendId === backendId && this.activeThread?.threadId === threadId) {
       this.post({ type: 'plan', plan });
+      this.publishPlanDocument(plan, false);
     }
   }
 
@@ -2246,6 +2399,89 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * action in the webview: there is no timer, no retry, and no reconnect path
    * that calls it. A rejected request is therefore never retried by us.
    */
+  /** The open question card when it belongs to this thread. */
+  private pendingQuestionPayload(backendId: string, threadId?: string): QuestionRequest | undefined {
+    const pending = this.pendingQuestion;
+    if (!pending || !threadId) {
+      return undefined;
+    }
+    if (pending.request.backendId !== backendId || pending.request.threadId !== threadId) {
+      return undefined;
+    }
+    return pending.request;
+  }
+
+  /** Show a native question on the active thread and remember it for a reload. */
+  private holdNativeQuestion(request: QuestionRequest): void {
+    this.pendingQuestion = { source: 'native', request };
+    if (this.activeThread?.backendId === request.backendId && this.activeThread.threadId === request.threadId) {
+      this.post({ type: 'question/asked', request });
+    }
+  }
+
+  /**
+   * If the latest assistant reply ended with a question fence, remove it from
+   * the stored transcript and open the card. Ask mode never calls this.
+   */
+  private captureFenceQuestions(backendId: string, threadId: string): void {
+    if (this.pendingQuestion) {
+      return;
+    }
+    const items = this.store.getTranscript(backendId, threadId);
+    let index = -1;
+    for (let cursor = items.length - 1; cursor >= 0; cursor -= 1) {
+      const item = items[cursor];
+      if (item?.kind === 'message' && item.role === 'assistant') {
+        index = cursor;
+        break;
+      }
+    }
+    if (index < 0) {
+      return;
+    }
+    const item = items[index];
+    if (!item) {
+      return;
+    }
+    const extracted = extractSidecodeQuestions(item.text ?? '');
+    if (!extracted.questions || extracted.questions.length === 0) {
+      return;
+    }
+    const next = items.slice();
+    next[index] = { ...item, text: extracted.text };
+    this.store.setTranscript(backendId, threadId, next);
+    const request: QuestionRequest = {
+      id: `fence_${item.id}`,
+      backendId,
+      threadId,
+      itemId: item.id,
+      strippedText: extracted.text,
+      questions: extracted.questions
+    };
+    this.pendingQuestion = { source: 'fence', request };
+    this.post({ type: 'question/asked', request });
+  }
+
+  /**
+   * Apply the card's answers. A fence ask continues as the next turn. A native
+   * ask is returned to the backend that is still waiting, and the same text is
+   * kept in the transcript.
+   */
+  private async answerQuestion(requestId: string, answers: QuestionAnswer[]): Promise<void> {
+    const pending = this.pendingQuestion;
+    if (!pending || pending.request.id !== requestId) {
+      return;
+    }
+    this.pendingQuestion = undefined;
+    const text = formatQuestionAnswers(pending.request.questions, answers);
+    if (pending.source === 'native') {
+      this.registry.answerQuestion(pending.request.backendId, pending.request.threadId, requestId, answers);
+      await this.store.appendUserMessage(pending.request.backendId, pending.request.threadId, text);
+      return;
+    }
+    await this.sendTurn(text);
+  }
+
   private decideApproval(
     backendId: string,
     threadId: string,
