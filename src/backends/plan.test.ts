@@ -15,6 +15,7 @@ import {
   planSummaryFromReply,
   renderPlanMarkdown,
   sanitizeThreadId,
+  shouldAutoOpenPlanDocument,
   stepMarker,
   statusForMarker,
   todoStepsFromNative,
@@ -32,6 +33,14 @@ test('a plan lives at one path derived from the thread id, never the prompt', ()
   assert.equal(first, planRelativePath('thread-abc'));
   // A different thread gets a different file.
   assert.notEqual(first, planRelativePath('thread-def'));
+});
+
+test('a new unbuilt plan opens once; a built plan or a repeat does not', () => {
+  assert.equal(shouldAutoOpenPlanDocument({ stepCount: 2, alreadyOpened: false }), true);
+  assert.equal(shouldAutoOpenPlanDocument({ built: false, stepCount: 2, alreadyOpened: false }), true);
+  assert.equal(shouldAutoOpenPlanDocument({ built: true, stepCount: 2, alreadyOpened: false }), false);
+  assert.equal(shouldAutoOpenPlanDocument({ stepCount: 0, alreadyOpened: false }), false);
+  assert.equal(shouldAutoOpenPlanDocument({ stepCount: 2, alreadyOpened: true }), false);
 });
 
 test('a thread id with path characters is sanitized into a safe, stable file name', () => {

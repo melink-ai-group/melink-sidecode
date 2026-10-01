@@ -36,3 +36,37 @@ test('a real answer that mentions the tag later is kept', () => {
 test('a user message without instructions is unchanged', () => {
   assert.equal(visibleTranscriptText('widen the autopilot modal'), 'widen the autopilot modal');
 });
+
+test('an echoed viewed-file notice is hidden and the reply remains', () => {
+  const text = [
+    'Current file: not attached. The user did not include the file they are viewing. Do not treat any other file as "this file".',
+    '',
+    'For the Ideas creation, project ideas should only show on the projects page.'
+  ].join('\n');
+  assert.equal(
+    visibleTranscriptText(text),
+    'For the Ideas creation, project ideas should only show on the projects page.'
+  );
+});
+
+test('a tagged attached-file block is hidden even when the model echoes it', () => {
+  const text = [
+    '<attached-file>',
+    'Current file: not attached. The user did not include the file they are viewing. Do not treat any other file as "this file".',
+    '</attached-file>',
+    '',
+    'Here is the plan.'
+  ].join('\n');
+  assert.equal(visibleTranscriptText(text), 'Here is the plan.');
+});
+
+test('plan and agent hide a question fence; ask leaves it as text', () => {
+  const text = 'Before the plan.\n```sidecode-question\n{"questions":[{"prompt":"Which?","options":["A","B"]}]}\n```';
+  assert.equal(visibleTranscriptText(text, { hideQuestions: true }), 'Before the plan.');
+  assert.match(visibleTranscriptText(text), /sidecode-question/);
+});
+
+test('a real answer that says "this file" is kept', () => {
+  const text = 'Open this file in the editor and check the layout.';
+  assert.equal(visibleTranscriptText(text), text);
+});

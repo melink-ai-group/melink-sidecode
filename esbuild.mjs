@@ -37,7 +37,21 @@ const webviewOptions = {
   define: { 'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development') }
 };
 
-const targets = [extensionOptions, webviewOptions];
+/** Plan document view: rendered markdown plus the Build action. */
+/** @type {import('esbuild').BuildOptions} */
+const planPreviewOptions = {
+  ...shared,
+  entryPoints: ['src/webview/planPreview.tsx'],
+  outfile: 'dist/planPreview.js',
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2020',
+  jsx: 'automatic',
+  loader: { '.css': 'css' },
+  define: { 'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development') }
+};
+
+const targets = [extensionOptions, webviewOptions, planPreviewOptions];
 
 if (watch) {
   const contexts = await Promise.all(targets.map((options) => context(options)));
@@ -45,5 +59,5 @@ if (watch) {
   console.log('[esbuild] watching extension host and webview');
 } else {
   await Promise.all(targets.map((options) => build(options)));
-  console.log(`[esbuild] built dist/extension.js and dist/webview.{js,css} (${production ? 'production' : 'development'})`);
+  console.log(`[esbuild] built dist/extension.js, dist/webview.{js,css}, and dist/planPreview.{js,css} (${production ? 'production' : 'development'})`);
 }

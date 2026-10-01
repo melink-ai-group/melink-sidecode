@@ -8,8 +8,9 @@
  *
  * ## Host-free by construction
  *
- * This module imports only the snapshot types and `cutToBytes` from
- * `projectContext.ts`. It never imports `vscode` and never touches a provider,
+ * This module imports the snapshot types and `cutToBytes` from
+ * `projectContext.ts`, plus the provider sentences from `providerCopy.ts`.
+ * It never imports `vscode` and never touches a provider,
  * so its output is deterministic and `npm test`-able headlessly.
  *
  * ## Invariants
@@ -23,12 +24,26 @@
  */
 
 import {
+  ATTACHED_FILE_REFERENT,
+  ATTACHED_FILE_SNAPSHOT_LINE,
+  VIEWED_FILE_NONE_OPEN,
+  VIEWED_FILE_NOT_ATTACHED
+} from './providerCopy.ts';
+import {
   cutToBytes,
   type ExclusionReason,
   type ProjectDelta,
   type ProjectSnapshot,
   type ViewedFileAttachment
 } from './projectContext.ts';
+
+export {
+  ATTACHED_FILE_REFERENT,
+  ATTACHED_FILE_SNAPSHOT_LINE,
+  PROVIDER_ONLY_LINES,
+  VIEWED_FILE_NONE_OPEN,
+  VIEWED_FILE_NOT_ATTACHED
+} from './providerCopy.ts';
 
 /** Byte caps for the rendered blocks. Snapshots are large; deltas are tiny. */
 export interface RenderBudget {
@@ -59,14 +74,6 @@ export const DELTA_OPEN = '<project-context-update>';
 export const DELTA_CLOSE = '</project-context-update>';
 export const ATTACHED_FILE_OPEN = '<attached-file>';
 export const ATTACHED_FILE_CLOSE = '</attached-file>';
-
-/** Sent on every turn until the user adds the file they are viewing. */
-export const VIEWED_FILE_NOT_ATTACHED =
-  'Current file: not attached. The user did not include the file they are viewing. Do not treat any other file as "this file".';
-
-/** Sent when the user attached a file but no editor is open. */
-export const VIEWED_FILE_NONE_OPEN =
-  'Current file: the user asked to include the file they are viewing, but no file is open in the editor.';
 
 const ATTACH_REASON: Record<ExclusionReason, string> = {
   secret: 'it looks like a secret store',
@@ -327,6 +334,11 @@ function renderLayout(snapshot: ProjectSnapshot, lines: string[], budget: Render
   }
 }
 
+/** Wrap a viewed-file status line in the same block the transcript already hides. */
+export function renderViewedFileNotice(notice: string): string {
+  return [ATTACHED_FILE_OPEN, notice, ATTACHED_FILE_CLOSE].join('\n');
+}
+
 /**
  * The per-turn block for the file the user explicitly attached. This is not
  * part of the stable snapshot, so a later file switch is what the next turn sees.
@@ -334,7 +346,7 @@ function renderLayout(snapshot: ProjectSnapshot, lines: string[], budget: Render
 export function renderAttachedFile(file: ViewedFileAttachment): string {
   const lines = [
     ATTACHED_FILE_OPEN,
-    'The user attached the file they are viewing in the editor. When they say "this file", they mean this path and these contents. Do not substitute another file.',
+    ATTACHED_FILE_REFERENT,
     `Path: ${file.path} (${file.languageId}).`
   ];
   if (file.excluded) {
@@ -360,9 +372,7 @@ export function renderAttachedFile(file: ViewedFileAttachment): string {
 function renderEditor(snapshot: ProjectSnapshot, lines: string[]): void {
   const editor = snapshot.editor;
   if (editor.activeFileAttached === true) {
-    lines.push(
-      'Current file: attached for this turn in a separate block. When the user says "this file", use that attached file and not another path in this project.'
-    );
+    lines.push(ATTACHED_FILE_SNAPSHOT_LINE);
   } else if (editor.activeFileAttached === false) {
     lines.push(VIEWED_FILE_NOT_ATTACHED);
   } else if (editor.active) {

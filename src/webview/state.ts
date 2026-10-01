@@ -32,6 +32,7 @@ import type {
   ModelSettingField,
   PermissionSnapshot,
   PlanArtifact,
+  QuestionRequest,
   SettingsSnapshot,
   WebviewToHostMessage
 } from '../protocol';
@@ -121,6 +122,11 @@ export interface AppState {
    * nothing may auto-decide it.
    */
   pendingApproval?: { backendId: string; threadId: string; request: ApprovalRequest };
+  /**
+   * The clarifying question card above the composer. While set, the composer
+   * stays locked so a free-text send cannot race the choice.
+   */
+  pendingQuestion?: QuestionRequest;
   /** True while the labelled confirmation for an unrestricted level is shown. */
   permissionConfirmationOpen: boolean;
   /** True while the always-allow rules surface is open for review/revocation. */
@@ -249,10 +255,13 @@ export type Action =
        * shown as idle and a settled request is never resurrected.
        */
       pendingApproval?: ApprovalRequest;
+      pendingQuestion?: QuestionRequest;
       plan?: PlanArtifact;
       /** Keep the optimistic user line when a send opens a new thread. */
       keepPendingUserMessage?: boolean;
     }
+  | { type: 'questionAsked'; request: QuestionRequest }
+  | { type: 'questionCleared' }
   | { type: 'restoring'; value: boolean }
   | { type: 'busy'; value: boolean; backendId?: string; threadId?: string }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string; action?: NoticeAction }
@@ -553,6 +562,7 @@ export function reduce(state: AppState, action: Action): AppState {
         pendingApproval: action.pendingApproval
           ? { backendId: action.backendId, threadId: action.threadId ?? '', request: action.pendingApproval }
           : undefined,
+        pendingQuestion: action.pendingQuestion,
         // A replay replaces the transcript; a fresh conversation clears it.
         // A send that just opened this thread keeps the optimistic user line.
         transcript: nextTranscript,
@@ -579,6 +589,20 @@ export function reduce(state: AppState, action: Action): AppState {
         restoreConfirmation: undefined
       };
     }
+    case 'questionAsked':
+      return {
+        ...state,
+        pendingQuestion: action.request,
+        transcript: action.request.itemId
+          ? state.transcript.map((item) =>
+              item.id === action.request.itemId && action.request.strippedText !== undefined
+                ? { ...item, text: action.request.strippedText }
+                : item
+            )
+          : state.transcript
+      };
+    case 'questionCleared':
+      return { ...state, pendingQuestion: undefined };
     case 'restoring':
       return { ...state, restoring: action.value };
     case 'busy':

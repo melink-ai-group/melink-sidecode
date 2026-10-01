@@ -253,6 +253,7 @@ test('the viewed file stays out of the snapshot until the user attaches it', asy
   assert.match(prime.payload.snapshot!, /not attached/i);
   assert.doesNotMatch(prime.payload.snapshot!, /global\.css/);
   assert.match(prime.payload.attachedFile!, /not attached/i);
+  assert.match(prime.payload.attachedFile!, /<attached-file>/);
 
   delivery.setIncludeViewedFile(true);
   const turned = await delivery.forTurn('ollama:viewed');

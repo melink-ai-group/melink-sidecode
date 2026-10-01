@@ -66,6 +66,9 @@
         "title": "SideCode: Open settings"
       }
     ],
+    "markdown.previewStyles": [
+      "./media/plan-steps.css"
+    ],
     "menus": {
       "view/title": [
         {

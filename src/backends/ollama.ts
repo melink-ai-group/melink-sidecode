@@ -6,6 +6,8 @@ import { describeApproval, ruleFor, ruleScopeFor } from './approvals';
 import { ApprovalStore } from './approvalStore';
 import { APPROVAL_TIMEOUT_REASON, awaitUserDecision } from './approvalWait';
 import { approvalFromOpencode, opencodeReplyFor, type OpencodePermissionAsk } from './opencode/approval';
+import type { OpencodeQuestionAsk } from './opencode/runtime';
+import { SKIPPED_ANSWER, type QuestionAnswer, type QuestionRequest } from '../questions';
 import {
   AgentBackend,
   AgentEvent,
@@ -225,6 +227,20 @@ export class OllamaBackend implements AgentBackend {
    * ignored, so a double click cannot answer twice. The wait itself lives in
    * `decideOpencodePermission`.
    */
+  answerQuestion(threadId: string, requestId: string, answers: QuestionAnswer[]): void {
+    const pending = this.pendingQuestions.get(requestId);
+    if (!pending || pending.threadId !== threadId) {
+      return;
+    }
+    this.pendingQuestions.delete(requestId);
+    pending.settle(
+      pending.questions.map((question) => {
+        const found = answers.find((entry) => entry.questionId === question.id);
+        return [found?.text.trim() || SKIPPED_ANSWER];
+      })
+    );
+  }
+
   decideApproval(threadId: string, requestId: string, decision: ApprovalDecision): void {
     const pending = this.pendingApprovals.get(requestId);
     if (!pending || pending.threadId !== threadId) {
@@ -239,6 +255,14 @@ export class OllamaBackend implements AgentBackend {
   private readonly pendingApprovals = new Map<
     string,
     { threadId: string; request: ApprovalRequest; settle: (decision: ApprovalDecision) => void }
+  >();
+  private readonly pendingQuestions = new Map<
+    string,
+    {
+      threadId: string;
+      questions: QuestionRequest['questions'];
+      settle: (answers: string[][] | 'reject') => void;
+    }
   >();
   private inFlight?: AbortController;
 
@@ -770,7 +794,12 @@ export class OllamaBackend implements AgentBackend {
           signal: controller.signal,
           decidePermission: opencodeRequiresApproval(permissionLevel, request.mode ?? 'agent')
             ? (ask, signal) => this.decideOpencodePermission(handle.threadId, ask, signal)
-            : undefined
+            : undefined,
+          questionPermission: (request.mode ?? 'agent') === 'ask' ? 'deny' : 'ask',
+          answerQuestion:
+            (request.mode ?? 'agent') === 'ask'
+              ? undefined
+              : (ask, signal) => this.decideOpencodeQuestion(handle.threadId, ask, signal)
         },
         (event) => this.handleOpencodeEvent(event, handle.threadId, opencodeCwd)
       );
@@ -906,6 +935,43 @@ export class OllamaBackend implements AgentBackend {
         this.publishRefusal(threadId, request, 'The turn was stopped.');
         return 'reject';
       }
+    });
+  }
+
+  /**
+   * Hold one opencode question until the card is answered or the turn is
+   * stopped. There is no timer: Skip on the card is what unblocks a question
+   * the user does not want to answer.
+   */
+  private decideOpencodeQuestion(
+    threadId: string,
+    ask: OpencodeQuestionAsk,
+    signal: AbortSignal
+  ): Promise<string[][] | 'reject'> {
+    if (signal.aborted) {
+      return Promise.resolve('reject');
+    }
+    const request: QuestionRequest = {
+      id: ask.id,
+      backendId: this.id,
+      threadId,
+      questions: ask.questions
+    };
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value: string[][] | 'reject'): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        this.pendingQuestions.delete(ask.id);
+        resolve(value);
+      };
+      const onAbort = (): void => finish('reject');
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.pendingQuestions.set(ask.id, { threadId, questions: ask.questions, settle: finish });
+      this.events.fire({ type: 'question/requested', backendId: this.id, threadId, request });
     });
   }
 

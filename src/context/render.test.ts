@@ -7,6 +7,7 @@ import {
   SNAPSHOT_OPEN,
   renderAttachedFile,
   renderDelta,
+  renderViewedFileNotice,
   renderSnapshot,
   renderSnapshotResult
 } from './render.ts';
@@ -211,6 +212,14 @@ test('a delta is bounded by the delta budget', () => {
   const text = renderDelta(delta, snapshot(), { budget });
   assert.ok(text);
   assert.ok(Buffer.byteLength(text!, 'utf8') <= 256);
+});
+
+test('a viewed-file notice is wrapped so an echo can be hidden with the attachment block', () => {
+  const text = renderViewedFileNotice(
+    'Current file: not attached. The user did not include the file they are viewing. Do not treat any other file as "this file".'
+  );
+  assert.match(text, /^<attached-file>\n/);
+  assert.match(text, /<\/attached-file>$/);
 });
 
 test('an attached file names that path and tells the model not to substitute another', () => {

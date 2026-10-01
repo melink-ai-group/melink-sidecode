@@ -10,6 +10,7 @@ import {
   type OpencodePermissionAsk,
   type OpencodePermissionReply
 } from './approval.ts';
+import { questionAskFromBus } from '../../questions.ts';
 import type { OpencodeRunOptions, OpencodeRunResult } from './runtime.ts';
 
 /**
@@ -153,7 +154,7 @@ async function createSession(baseUrl: string, options: OpencodeRunOptions): Prom
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       permission: [
-        { permission: 'question', action: 'deny', pattern: '*' },
+        { permission: 'question', action: options.questionPermission ?? 'deny', pattern: '*' },
         { permission: 'plan_enter', action: 'deny', pattern: '*' },
         { permission: 'plan_exit', action: 'deny', pattern: '*' }
       ]
@@ -248,9 +249,35 @@ async function handleBusMessage(
     return;
   }
 
-  const question = questionIdFromBus(payload);
-  if (question && (!question.sessionId || question.sessionId === sessionId)) {
-    await serverFetch(baseUrl, options.cwd, `/question/${encodeURIComponent(question.id)}/reject`, {
+  const question = questionAskFromBus(payload);
+  if (question && (!question.threadId || question.threadId === sessionId)) {
+    const answers = options.answerQuestion
+      ? await options.answerQuestion(
+          { id: question.id, sessionId: question.threadId || undefined, questions: question.questions },
+          options.signal ?? new AbortController().signal
+        ).catch(() => 'reject' as const)
+      : 'reject';
+    if (answers === 'reject') {
+      await serverFetch(baseUrl, options.cwd, `/question/${encodeURIComponent(question.id)}/reject`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+        signal: options.signal
+      }).catch(() => undefined);
+    } else {
+      await serverFetch(baseUrl, options.cwd, `/question/${encodeURIComponent(question.id)}/reply`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ answers }),
+        signal: options.signal
+      }).catch(() => undefined);
+    }
+    return;
+  }
+
+  const bareQuestion = questionIdFromBus(payload);
+  if (bareQuestion && (!bareQuestion.sessionId || bareQuestion.sessionId === sessionId) && !question) {
+    await serverFetch(baseUrl, options.cwd, `/question/${encodeURIComponent(bareQuestion.id)}/reject`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',

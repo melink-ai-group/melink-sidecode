@@ -3,6 +3,7 @@ import { BackendRegistry } from './backends/registry';
 import { setDiagnosticSink } from './backends/diagnostics';
 import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
 import { VscodeProjectContext } from './context/vscodeHost';
+import { planStepMarkdownPlugin } from './planStepMarkdown';
 import { SidebarViewProvider } from './sidebarView';
 
 /**
@@ -12,7 +13,7 @@ import { SidebarViewProvider } from './sidebarView';
  */
 let registry: BackendRegistry | undefined;
 
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(md: MarkdownItLike): MarkdownItLike } {
   // Diagnostics only, and never a credential: this records which spawn form
   // started so an argument drift is visible instead of falling silently into
   // `unavailable`. Installed once, before any backend can spawn a child.
@@ -74,6 +75,25 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   void activeRegistry.refresh();
+
+  // The built-in markdown preview calls this so plan steps render as status
+  // icons instead of `[ ]`, `[~]`, and `[x]`.
+  return {
+    extendMarkdownIt(md) {
+      md.use(planStepMarkdownPlugin);
+      return md;
+    }
+  };
+}
+
+/** The slice of markdown-it the preview hands to `extendMarkdownIt`. */
+interface MarkdownItLike {
+  use(plugin: (md: MarkdownItLike) => void): MarkdownItLike;
+  core: {
+    ruler: {
+      push: (name: string, fn: (state: { tokens: import('./planStepMarkdown').StepToken[]; env?: unknown }) => void) => void;
+    };
+  };
 }
 
 export function deactivate(): Promise<void> {

@@ -822,3 +822,33 @@ test('streamed text moves the context fill and a provider count replaces it', ()
   assert.equal(reported.contextUsedTokens, 1040);
   assert.equal(reported.contextWindowTokens, 8192);
 });
+
+test('a question request replaces the fenced assistant text and stays pending', () => {
+  const seeded: AppState = {
+    ...initialState,
+    transcript: [
+      {
+        id: 'a1',
+        kind: 'message',
+        role: 'assistant',
+        text: 'Hello\n```sidecode-question\n{}\n```',
+        status: 'completed'
+      }
+    ]
+  };
+  const asked = reduce(seeded, {
+    type: 'questionAsked',
+    request: {
+      id: 'fence_a1',
+      backendId: 'ollama',
+      threadId: 'thread_1',
+      itemId: 'a1',
+      strippedText: 'Hello',
+      questions: [{ id: 'q1', prompt: 'Which layout?', options: ['Two columns', 'Single column'] }]
+    }
+  });
+  assert.equal(asked.pendingQuestion?.id, 'fence_a1');
+  assert.equal(asked.transcript[0]?.text, 'Hello');
+  const cleared = reduce(asked, { type: 'questionCleared' });
+  assert.equal(cleared.pendingQuestion, undefined);
+});

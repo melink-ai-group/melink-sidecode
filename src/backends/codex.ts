@@ -39,6 +39,7 @@ import {
   modeInstructions,
   modeRefusalReason
 } from './modes';
+import { questionRequestFromToolParams, SKIPPED_ANSWER, type QuestionAnswer } from '../questions';
 import { todoStepsFromNative } from './plan';
 import { readDefaultMode, readDefaultPermissionLevel } from './defaults';
 import { isItemTerminal, translateItem, translateTurnItems } from './appserver/items';
@@ -155,6 +156,10 @@ export class CodexBackend implements AgentBackend {
   private readonly openedItems = new Set<string>();
   /** Server requests held open until the user decides, keyed by request id. */
   private readonly pendingApprovals = new Map<string, PendingApproval>();
+  private readonly pendingQuestions = new Map<
+    string,
+    { threadId: string; rpcId: number; questionIds: string[]; settled: boolean }
+  >();
   /** The permission level each thread runs at, keyed by thread id. */
   private readonly threadPermissions = new Map<string, PermissionLevel>();
   /** Mode each live thread was started in, so a turn re-applies it. */
@@ -189,6 +194,16 @@ export class CodexBackend implements AgentBackend {
    * is a refusal after {@link APPROVAL_WAIT_MS}, which lets the agent try a
    * different approach instead of leaving the turn blocked.
    */
+  answerQuestion(threadId: string, requestId: string, answers: QuestionAnswer[]): void {
+    const pending = this.pendingQuestions.get(requestId);
+    if (!pending || pending.settled || pending.threadId !== threadId) {
+      return;
+    }
+    pending.settled = true;
+    this.pendingQuestions.delete(requestId);
+    this.connection?.respond(pending.rpcId, userInputResponse(pending.questionIds, answers));
+  }
+
   decideApproval(threadId: string, requestId: string, decision: ApprovalDecision): void {
     const pending = this.pendingApprovals.get(requestId);
     if (!pending || pending.settled || pending.threadId !== threadId) {
@@ -474,6 +489,7 @@ export class CodexBackend implements AgentBackend {
   }
 
   cancel(): void {
+    this.refuseOpenQuestions('The turn was stopped.');
     const pending = this.pendingTurn;
     if (pending) {
       this.refuseOpenApprovals(pending.threadId, 'The turn was stopped.');
@@ -1014,6 +1030,10 @@ export class CodexBackend implements AgentBackend {
    * "always" or "session" for exactly this request.
    */
   private handleServerRequest(request: { id: number; method: string; params?: unknown }): void {
+    if (request.method === 'item/tool/requestUserInput') {
+      this.handleUserInputRequest(request.id, request.params);
+      return;
+    }
     const origin = this.cwd;
     const translated = translateApprovalRequest(request.method, request.params, origin);
     if (!translated) {
@@ -1094,6 +1114,38 @@ export class CodexBackend implements AgentBackend {
       this.refuseApproval(pending, APPROVAL_TIMEOUT_REASON);
     }, APPROVAL_WAIT_MS);
     this.events.fire({ type: 'approval/requested', backendId: this.id, threadId, approval });
+  }
+
+  /**
+   * Hold a Codex user-input request on the same card as a reply fence.
+   * Ask mode declines it so the turn is not left waiting.
+   */
+  private handleUserInputRequest(rpcId: number, params: unknown): void {
+    const request = questionRequestFromToolParams(this.id, `input_${rpcId}`, params);
+    if (!request) {
+      this.connection?.respond(rpcId, { answers: {} });
+      return;
+    }
+    const mode = this.threadModes.get(request.threadId) ?? 'agent';
+    const questionIds = request.questions.map((question) => question.id);
+    if (mode === 'ask') {
+      this.connection?.respond(rpcId, userInputResponse(questionIds, [], modeRefusalReason('ask')));
+      return;
+    }
+    this.pendingQuestions.set(request.id, { threadId: request.threadId, rpcId, questionIds, settled: false });
+    this.events.fire({ type: 'question/requested', backendId: this.id, threadId: request.threadId, request });
+  }
+
+  /** Unblock every open user-input request so a stopped turn cannot stay hung. */
+  private refuseOpenQuestions(reason: string): void {
+    for (const [requestId, pending] of [...this.pendingQuestions.entries()]) {
+      if (pending.settled) {
+        continue;
+      }
+      pending.settled = true;
+      this.pendingQuestions.delete(requestId);
+      this.connection?.respond(pending.rpcId, userInputResponse(pending.questionIds, [], reason));
+    }
   }
 
   /** Refuse one still-open approval and tell the agent why. */
@@ -1194,6 +1246,21 @@ function providerTurnText(mode: DefaultMode, text: string, attachedFile?: string
     (part): part is string => Boolean(part && part.trim().length > 0)
   );
   return parts.join('\n\n');
+}
+
+/** One answer string per question id, in the Codex user-input response shape. */
+function userInputResponse(
+  questionIds: readonly string[],
+  answers: readonly QuestionAnswer[],
+  fallback = SKIPPED_ANSWER
+): { answers: Record<string, { answers: string[] }> } {
+  const body: Record<string, { answers: string[] }> = {};
+  for (const id of questionIds) {
+    const found = answers.find((entry) => entry.questionId === id);
+    const text = found?.text.trim() || fallback;
+    body[id] = { answers: [text] };
+  }
+  return { answers: body };
 }
 
 function combineInstructions(mode: string | undefined, snapshot: string | undefined): string | undefined {

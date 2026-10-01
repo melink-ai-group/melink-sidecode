@@ -3,7 +3,6 @@ import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
 import { Markdown } from './Markdown';
 import {
   AlertIcon,
-  ArrowIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -127,11 +126,20 @@ function PlanCard({
         </span>
         <span className="spacer" />
         {plan.path ? (
-          <button className="plan-card__path" type="button" title="Open the plan file in the editor" onClick={onOpenPlan}>
+          <button className="plan-card__path" type="button" title="Open the rendered plan" onClick={onOpenPlan}>
             <FileIcon className="ico ico--xs" />
             <span className="plan-card__path-text">{plan.path}</span>
           </button>
         ) : null}
+        <button
+          className="btn btn--primary plan-card__build"
+          type="button"
+          disabled={revising || stepCount === 0}
+          title={stepCount === 0 ? 'Build is disabled until the plan has at least one step.' : 'Build this plan in Agent mode'}
+          onClick={onBuild}
+        >
+          Build
+        </button>
       </header>
 
       {revising ? (
@@ -216,15 +224,6 @@ function PlanCard({
       ) : null}
 
       <div className="plan-actions" aria-label="Plan actions">
-        <button
-          className="btn btn--primary"
-          type="button"
-          disabled={revising || stepCount === 0}
-          onClick={onBuild}
-        >
-          <ArrowIcon />
-          Build
-        </button>
         <button
           className="btn"
           type="button"

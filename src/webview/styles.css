@@ -9,6 +9,7 @@
  */
 
 @import '../../tokens.css';
+@import '../../media/plan-steps.css';
 
 * {
   box-sizing: border-box;
@@ -887,6 +888,23 @@ body {
   margin: 2px 0;
 }
 
+.md__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  list-style: none;
+}
+
+.md__step-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.melink-step {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 .md__quote {
   margin: 0 0 8px;
   padding: 0 10px;
@@ -1515,6 +1533,161 @@ body {
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
+}
+
+/* Clarifying question, in the composer column, in the plan yellow. */
+.question-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--melink-yellow) 55%, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: color-mix(in srgb, var(--melink-yellow) 12%, var(--vscode-sideBar-background));
+}
+
+.question-card:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.question-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.question-card__title {
+  color: var(--melink-yellow);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.question-card__count,
+.question-card__header {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.question-card__prompt {
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.question-card__options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.question-card__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--melink-radius-sm, 4px);
+  cursor: pointer;
+}
+
+.question-card__option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--melink-yellow) 70%, transparent);
+  background: color-mix(in srgb, var(--melink-yellow) 18%, transparent);
+}
+
+.question-card__option input {
+  margin-top: 2px;
+  accent-color: var(--melink-yellow);
+}
+
+.question-card__option-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.question-card__chip {
+  flex: 0 0 auto;
+  color: var(--melink-yellow);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.question-card__custom {
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--melink-yellow) 45%, var(--vscode-input-border, var(--vscode-panel-border)));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.question-card__custom:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.question-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.question-card__skip {
+  margin-right: auto;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.question-card__skip:hover,
+.question-card__skip:focus-visible {
+  color: var(--vscode-foreground);
+}
+
+.question-card__continue {
+  min-height: 28px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--melink-yellow);
+  color: #1a1604;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.question-card__continue:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--melink-yellow) 85%, black);
+}
+
+.question-card__continue:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.question-card__continue:focus-visible,
+.question-card__skip:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
 }
 
 /* ---- Attachments (composer chips + sent-message list) ---- */
@@ -4183,6 +4356,21 @@ button.context-meter:hover {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.plan-card__build {
+  flex: 0 0 auto;
+  min-height: 22px;
+  padding: 2px 12px;
+  border-color: var(--melink-primary-blue);
+  background: var(--melink-primary-blue);
+  color: var(--melink-surface);
+  font-size: 12px;
+}
+
+.plan-card__build:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
+  background: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
 }
 
 .plan-revising {
