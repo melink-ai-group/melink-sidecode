@@ -142,8 +142,8 @@ const STDIN_EXIT_GRACE_MS = 1_500;
 const TERM_EXIT_GRACE_MS = 2_000;
 
 const DEFAULT_CLIENT_INFO = {
-  name: 'melink-agent-sidebar',
-  title: 'Agent sidebar',
+  name: 'melink-sidecode',
+  title: 'SideCode',
   version: '0.1.0'
 };
 

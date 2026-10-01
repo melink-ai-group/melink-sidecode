@@ -36,21 +36,15 @@ test('the UI thinking ladder maps onto OpenAI-compatible reasoning efforts', () 
   assert.equal(opencodeReasoningEffort('extra high'), 'high');
 });
 
-test('modes map onto opencode primitives: build, plan, and a read-only ask agent', () => {
+test('modes map onto opencode primitives: build for agent and plan, and a read-only ask agent', () => {
   assert.equal(opencodeAgentForMode('agent'), 'build');
-  assert.equal(opencodeAgentForMode('plan'), 'plan');
+  assert.equal(opencodeAgentForMode('plan'), 'build');
   assert.equal(opencodeAgentForMode('ask'), OPENCODE_ASK_AGENT);
 });
 
-test('a read-only mode denies edit/write/patch/bash whatever level was picked', () => {
-  for (const mode of ['plan', 'ask'] as const) {
-    assert.deepEqual(opencodePermission('unrestricted', mode), {
-      edit: 'deny',
-      write: 'deny',
-      patch: 'deny',
-      bash: 'deny'
-    });
-    assert.deepEqual(opencodePermission('default', mode), {
+test('ask denies edit/write/patch/bash whatever level was picked', () => {
+  for (const level of ['unrestricted', 'default', 'read-only'] as const) {
+    assert.deepEqual(opencodePermission(level, 'ask'), {
       edit: 'deny',
       write: 'deny',
       patch: 'deny',

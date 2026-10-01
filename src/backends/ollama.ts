@@ -24,7 +24,7 @@ import {
 } from './types';
 import { ollamaCapabilities, ollamaNativeRequest } from './capabilities';
 import { buildContextMessages } from './contextMessages';
-import { effectivePermissionLevel } from './modes';
+import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './modes';
 // Type-only imports are erased at compile time, so the off path loads neither
 // the runtime module nor any child-process code; the runtime is dynamically
 // imported inside the enabled branch only. `isFileTool` is a pure predicate
@@ -98,10 +98,10 @@ function opencodePrompt(request: SendTurnRequest, freshSession: boolean): string
   const block = freshSession
     ? context?.snapshot ?? context?.notice
     : context?.delta ?? context?.notice;
-  if (!block) {
-    return request.text;
-  }
-  return `${block}\n\n${request.text}`;
+  const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
+  const instructions = modeInstructions(mode);
+  const body = block ? `${block}\n\n${request.text}` : request.text;
+  return instructions ? `${instructions}\n\n${body}` : body;
 }
 
 /**
@@ -181,14 +181,13 @@ export class OllamaBackend implements AgentBackend {
   }
 
   /**
-   * Modes this path can honour. The direct `/api/chat` adapter is a plain
-   * completion endpoint with no sandbox and no plan tracking, so only `agent`.
-   * With the opencode runtime enabled, Plan honors the selected permission
-   * level and Ask maps to a read-only agent, so all three can be enforced and
-   * are advertised.
+   * Modes this path can honour. Agent, Plan, and Ask are advertised on every
+   * path. The direct `/api/chat` adapter applies them as per-turn instructions
+   * and cannot edit files. With the opencode runtime enabled, Plan honors the
+   * selected permission level and Ask maps to a read-only agent.
    */
   get modes(): readonly DefaultMode[] {
-    return this.opencodeEnabled ? ['agent', 'plan', 'ask'] : ['agent'];
+    return ['agent', 'plan', 'ask'];
   }
 
   /** No approval channel, so there are never stored rules to list. */
@@ -218,9 +217,9 @@ export class OllamaBackend implements AgentBackend {
     return normalizeBaseUrl(vscode.workspace.getConfiguration('melink.ollama').get<string>('baseUrl', 'https://ollama.com'));
   }
 
-  /** Whether the optional opencode agentic runtime is enabled. Default `false`. */
+  /** Whether the opencode agentic runtime is enabled. Default `true`. */
   private get opencodeEnabled(): boolean {
-    return vscode.workspace.getConfiguration('melink.ollama.opencode').get<boolean>('enabled', false) === true;
+    return vscode.workspace.getConfiguration('melink.ollama.opencode').get<boolean>('enabled', true) !== false;
   }
 
   /** Executable path for the runtime; a bare name is resolved from `PATH`. */
@@ -520,7 +519,7 @@ export class OllamaBackend implements AgentBackend {
         body: JSON.stringify({
           model,
           stream: true,
-          messages: this.messagesFor(handle.threadId, request.text, request.context),
+          messages: this.messagesFor(handle.threadId, request.text, request.context, request.mode),
           // The adapter is the only place that knows Ollama spells the context
           // window `options.num_ctx` and reasoning effort `think`; the mapping is
           // the pure, unit-tested `ollamaNativeRequest`.
@@ -877,7 +876,8 @@ export class OllamaBackend implements AgentBackend {
   private messagesFor(
     threadId: string,
     text: string,
-    context?: ContextPayload
+    context?: ContextPayload,
+    mode?: DefaultMode
   ): Array<{ role: string; content: string }> {
     const history = (this.store?.getTranscript(this.id, threadId) ?? [])
       .filter((item) => item.kind === 'message' && (item.role === 'user' || item.role === 'assistant'))
@@ -890,7 +890,12 @@ export class OllamaBackend implements AgentBackend {
     if (last && last.role === 'user' && last.content === text) {
       history.pop();
     }
-    return buildContextMessages(history, text, context);
+    const messages = buildContextMessages(history, text, context);
+    const instructions = modeInstructions(isDefaultMode(mode) ? mode : 'agent');
+    if (instructions) {
+      messages.unshift({ role: 'system', content: instructions });
+    }
+    return messages;
   }
 
   /** Emit the failed item + interruption pair that leaves the transcript coherent. */

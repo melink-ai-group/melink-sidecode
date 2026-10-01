@@ -60,7 +60,12 @@ export interface FileDiff {
   hunks: DiffHunk[];
   additions: number;
   deletions: number;
+  /** Set when the file is too large to diff inline. Hunks are then empty. */
+  tooLarge?: boolean;
 }
+
+/** Files longer than this are reviewed in the editor instead of inline. */
+export const MAX_INLINE_DIFF_LINES = 2_000;
 
 /**
  * Bound the Myers trace by its actual memory cost. A product-based cutoff makes
@@ -366,6 +371,9 @@ export function diffLines(
 ): FileDiff {
   const a = splitLines(before);
   const b = splitLines(after);
+  if (a.length > MAX_INLINE_DIFF_LINES || b.length > MAX_INLINE_DIFF_LINES) {
+    return { path, hunks: [], additions: 0, deletions: 0, tooLarge: true };
+  }
   const hunks = computeHunks(toRows(editScript(a, b), a, b), Math.max(0, context)).map(toPublicHunk);
   const additions = hunks.reduce((sum, hunk) => sum + hunk.additions, 0);
   const deletions = hunks.reduce((sum, hunk) => sum + hunk.deletions, 0);

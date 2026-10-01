@@ -24,7 +24,6 @@ if errorlevel 1 (
 )
 
 set "CLEAN=0"
-set "PACKAGE=0"
 
 :parse
 if "%~1"=="" goto parsed
@@ -38,18 +37,8 @@ if /i "%~1"=="-clean" (
   shift
   goto parse
 )
-if /i "%~1"=="--package" (
-  set "PACKAGE=1"
-  shift
-  goto parse
-)
-if /i "%~1"=="-package" (
-  set "PACKAGE=1"
-  shift
-  goto parse
-)
 echo error: unknown option: %~1 1>&2
-echo usage: build.bat [--clean] [--package] 1>&2
+echo usage: build.bat [--clean] 1>&2
 exit /b 2
 
 :parsed
@@ -68,7 +57,6 @@ echo ==^> npm run build
 call npm run build
 if errorlevel 1 exit /b %errorlevel%
 
-if not "%PACKAGE%"=="1" goto done
 echo ==^> npm run package
 call npm run package
 if errorlevel 1 exit /b %errorlevel%

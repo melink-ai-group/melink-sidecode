@@ -18,6 +18,12 @@ export interface OpencodeProbeResult {
   version?: string;
 }
 
+/** Outcome of `opencode upgrade`. The message is CLI text, truncated for the settings screen. */
+export interface OpencodeUpgradeResult {
+  ok: boolean;
+  message: string;
+}
+
 /**
  * Whether a value names a concrete filesystem location rather than a bare
  * command name. A bare name is resolved from PATH, so its absence is a status
@@ -118,4 +124,87 @@ export function probeOpencode(
       finish(version ? { status: 'detected', version } : { status: 'not-runnable' });
     });
   });
+}
+
+/** How long `opencode upgrade` may run before it is stopped. Downloads can be slow. */
+const UPGRADE_TIMEOUT_MS = 120_000;
+
+/**
+ * Run `opencode upgrade` against the configured executable.
+ *
+ * Direct spawn, no shell. The CLI's own upgrade command installs the latest
+ * release. Output is truncated so a long log cannot fill the settings screen.
+ */
+export function upgradeOpencode(
+  executable: string,
+  options: { timeoutMs?: number; cwd?: string } = {}
+): Promise<OpencodeUpgradeResult> {
+  const exe = executable.trim() || 'opencode';
+  const timeoutMs = options.timeoutMs ?? UPGRADE_TIMEOUT_MS;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    let stdout = '';
+    let stderr = '';
+    let child: ChildProcess | undefined;
+
+    const finish = (result: OpencodeUpgradeResult): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      try {
+        child?.kill();
+      } catch {
+        // The child already exited.
+      }
+      resolve(result);
+    };
+
+    try {
+      child = spawn(exe, ['upgrade'], {
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        shell: false
+      });
+    } catch {
+      resolve({ ok: false, message: 'The opencode CLI could not be started.' });
+      return;
+    }
+
+    timer = setTimeout(() => finish({ ok: false, message: 'The opencode update timed out.' }), timeoutMs);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      finish({
+        ok: false,
+        message: error.code === 'ENOENT' ? 'The opencode CLI was not found.' : 'The opencode CLI could not be started.'
+      });
+    });
+    child.on('close', (code) => {
+      const text = clipUpgradeOutput(`${stdout}\n${stderr}`);
+      if (code === 0) {
+        finish({ ok: true, message: text || 'opencode updated.' });
+        return;
+      }
+      finish({ ok: false, message: text || `opencode upgrade exited with code ${code ?? 'unknown'}.` });
+    });
+  });
+}
+
+function clipUpgradeOutput(value: string): string {
+  const text = value.replace(/\s+/g, ' ').trim();
+  if (text.length <= 400) {
+    return text;
+  }
+  return `${text.slice(0, 400)}…`;
 }

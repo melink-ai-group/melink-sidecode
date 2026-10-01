@@ -48,6 +48,8 @@ export interface SettingsScreenProps {
   onSaveToken: (value: string) => void;
   onClearToken: () => void;
   onTestConnection: (backendId: string) => void;
+  opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
+  onUpgradeOpencode: () => void;
 }
 
 /** Local draft state; the host snapshot is the source of truth on save. */
@@ -100,7 +102,9 @@ export function SettingsScreen({
   onSave,
   onSaveToken,
   onClearToken,
-  onTestConnection
+  onTestConnection,
+  opencodeUpgrade,
+  onUpgradeOpencode
 }: SettingsScreenProps): JSX.Element {
   const [draft, setDraft] = useState<Draft | undefined>(undefined);
   const [errors, setErrors] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
@@ -516,6 +520,28 @@ export function SettingsScreen({
                   <span>{runtimeView.label}</span>
                   {runtimeView.version ? <span className="runtime-version">{runtimeView.version}</span> : null}
                 </p>
+
+                {settings.opencode.enabled && settings.opencode.status === 'detected' ? (
+                  <div className="runtime-actions">
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      disabled={opencodeUpgrade?.pending}
+                      title="Run opencode upgrade"
+                      onClick={onUpgradeOpencode}
+                    >
+                      {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
+                    </button>
+                    {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
+                      <p
+                        className={`field-msg ${opencodeUpgrade.ok ? '' : 'field-msg--error'}`}
+                        role="status"
+                      >
+                        <span>{opencodeUpgrade.message}</span>
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <p className="field-help">Applies from the next turn.</p>
               </div>

@@ -18,6 +18,14 @@ export function ChangedFilesStrip({ entries, files = [], onOpenFile, children }:
   }
 
   const details = new Map(files.map((file) => [file.absPath, file]));
+  if (children) {
+    return (
+      <section className="changed-files" aria-label="Changed files">
+        <div className="changed-files__review">{children}</div>
+      </section>
+    );
+  }
+
   return (
     <section className={`changed-files${open ? ' is-open' : ''}`} aria-label="Changed files">
       <button
@@ -31,8 +39,7 @@ export function ChangedFilesStrip({ entries, files = [], onOpenFile, children }:
       </button>
       {open ? (
         <div className="changed-files__panel">
-          {children}
-        {!children ? <ul className="changed-files__list" aria-label="Files changed in the latest turn">
+        <ul className="changed-files__list" aria-label="Files changed in the latest turn">
           {entries.map((entry) => {
             const file = details.get(entry.absPath);
             const status = file?.status ?? entry.status;
@@ -59,7 +66,7 @@ export function ChangedFilesStrip({ entries, files = [], onOpenFile, children }:
               </li>
             );
           })}
-        </ul> : null}
+        </ul>
         </div>
       ) : null}
     </section>

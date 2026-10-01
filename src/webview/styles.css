@@ -1122,6 +1122,22 @@ body {
   border-color: var(--melink-primary);
   background: var(--melink-primary);
   color: var(--melink-surface);
+  min-height: 30px;
+  padding: 6px 16px;
+  font-weight: 650;
+}
+
+.btn--secondary {
+  min-height: 30px;
+  padding: 6px 14px;
+  border-color: var(--melink-primary);
+  background: transparent;
+  color: var(--melink-primary);
+  font-weight: 600;
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--melink-primary) 14%, transparent);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -1240,9 +1256,15 @@ body {
 
 .composer-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 4px 6px 6px 8px;
+}
+
+.composer-row .btn,
+.composer-row .control-trigger {
+  flex: 0 0 auto;
 }
 
 .composer-row .spacer {
@@ -1950,6 +1972,14 @@ body {
   gap: 5px;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.runtime-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .runtime-dot {
@@ -2712,7 +2742,9 @@ body {
   border-color: var(--melink-primary);
   background: var(--melink-primary);
   color: var(--melink-surface);
-  font-weight: 600;
+  min-height: 28px;
+  padding: 5px 12px;
+  font-weight: 650;
 }
 
 .decision--primary:hover {
@@ -3121,19 +3153,23 @@ code.key {
 }
 
 .changed-files__panel {
-  position: absolute;
-  z-index: 30;
-  right: 8px;
-  bottom: calc(100% + 6px);
-  left: 8px;
-  max-height: min(62vh, 520px);
+  position: static;
+  z-index: 1;
+  max-height: min(40vh, 320px);
+  margin: 0 8px 8px;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
   background: var(--vscode-editorWidget-background);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--vscode-widget-shadow, #000) 24%, transparent);
+}
+
+.changed-files__review {
+  min-width: 0;
+  max-height: min(46vh, 440px);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .changed-files__panel .changes-review {
@@ -4221,7 +4257,7 @@ code.key {
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
   background: var(--vscode-editorWidget-background);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .changes-review:focus-visible {
@@ -4324,6 +4360,7 @@ code.key {
 
 .change-row__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -4387,7 +4424,7 @@ code.key {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  direction: rtl;
+  direction: ltr;
   text-align: left;
   color: var(--vscode-descriptionForeground);
 }
@@ -4398,7 +4435,8 @@ code.key {
 }
 
 .change-row__tags {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4439,11 +4477,10 @@ code.key {
   color: var(--vscode-errorForeground);
 }
 
-/* Diffs share the floating panel's scroll container so wheel scrolling never
-   gets trapped inside one expanded file. */
+/* Each expanded diff scrolls on its own so a large file cannot stretch the sidebar. */
 .change-row__diff {
-  max-height: none;
-  overflow: visible;
+  max-height: 180px;
+  overflow: auto;
   min-width: 0;
   border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   background: color-mix(in srgb, var(--vscode-textCodeBlock-background) 60%, transparent);

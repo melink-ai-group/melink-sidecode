@@ -7,6 +7,7 @@ import {
   initialState,
   pendingApproval,
   reduce,
+  visibleModeSnapshot,
   type AppState
 } from './state.ts';
 import type { ApprovalRequest } from '../backends/types.ts';
@@ -92,7 +93,8 @@ test('a settled approval collapses to a decided card and clears the pending requ
 });
 
 test('a finished turn drops any lingering pending request', () => {
-  const state = reduce(initialState, {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't' });
+  const state = reduce(active, {
     type: 'agentEvent',
     event: { type: 'approval/requested', backendId: 'codex', threadId: 't', approval: request() }
   });
@@ -207,6 +209,21 @@ test('a background thread change set never replaces the visible one', () => {
   });
   assert.equal(background.changesTurnId, 'turn_1');
   assert.equal(background.changes?.length, 1);
+});
+
+test('a send that opens a thread keeps the optimistic user line and binds the new thread', () => {
+  const drafted = reduce(initialState, { type: 'selectBackend', backendId: 'ollama' });
+  const sent = reduce(drafted, { type: 'localUserMessage', text: 'hello from ollama' });
+  const bound = reduce(sent, {
+    type: 'conversation',
+    backendId: 'ollama',
+    threadId: 'ollama_thread',
+    keepPendingUserMessage: true
+  });
+  assert.equal(bound.selectedBackendId, 'ollama');
+  assert.equal(bound.activeThreadId, 'ollama_thread');
+  assert.equal(bound.transcript.length, 1);
+  assert.equal(bound.transcript[0].text, 'hello from ollama');
 });
 
 test('switching conversation drops the previous thread change set', () => {
@@ -387,7 +404,8 @@ test('a revision marks the plan card in flight and a fresh plan settles it', () 
 });
 
 test('a finished turn clears an in-flight revision that never echoed a plan', () => {
-  const revising = reduce(initialState, { type: 'planRevising' });
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't' });
+  const revising = reduce(active, { type: 'planRevising' });
   const done = reduce(revising, {
     type: 'agentEvent',
     event: { type: 'turn/completed', backendId: 'codex', threadId: 't', turnId: 'turn_1' }
@@ -464,7 +482,8 @@ test('a native plan update keeps the artifact summary and built flag', () => {
     steps: [{ text: 'a', status: 'completed' as const }],
     updatedAt: 1
   };
-  const withPlan = reduce(initialState, { type: 'plan', plan });
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't' });
+  const withPlan = reduce(active, { type: 'plan', plan });
   const updated = reduce(withPlan, {
     type: 'agentEvent',
     event: {
@@ -669,4 +688,30 @@ test('a repaint of the same turn keeps the current review instead of clearing it
     entries: []
   });
   assert.equal(repaint.changeReview?.turnId, 'turn_1', 'the same turn keeps its review across a repaint');
+});
+
+test('Ollama keeps Agent, Plan, and Ask when the host snapshot is missing or belongs to Codex', () => {
+  const ollama = reduce(initialState, { type: 'selectBackend', backendId: 'ollama' });
+  const offered = visibleModeSnapshot(ollama);
+  assert.deepEqual(
+    offered?.options.map((option) => option.mode),
+    ['agent', 'plan', 'ask']
+  );
+  const stale = reduce(ollama, {
+    type: 'modes',
+    modes: {
+      backendId: 'codex',
+      options: [
+        { mode: 'agent', label: 'Agent', description: 'Acts.' },
+        { mode: 'plan', label: 'Plan', description: 'Plans.' },
+        { mode: 'ask', label: 'Ask', description: 'Answers.' }
+      ],
+      selected: 'plan'
+    }
+  });
+  assert.equal(stale.mode, 'agent', 'a Codex snapshot does not change the Ollama mode');
+  assert.deepEqual(
+    visibleModeSnapshot(stale)?.options.map((option) => option.mode),
+    ['agent', 'plan', 'ask']
+  );
 });

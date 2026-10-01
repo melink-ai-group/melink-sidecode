@@ -1,3 +1,4 @@
+import { MODE_DESCRIPTORS } from '../backends/modes.ts';
 import type {
   AgentEvent,
   ApprovalDecision,
@@ -18,6 +19,7 @@ import type {
   ConnectionTestResult,
   ContextView,
   ChangeView,
+  ChangeHunkView,
   ChangeDecisionResult,
   CheckpointView,
   RestoreCheckpointResult,
@@ -141,6 +143,8 @@ export interface AppState {
     pending: boolean;
     result?: ConnectionTestResult;
   };
+  /** Result of the last opencode upgrade, or a pending marker while it runs. */
+  opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
   /**
    * The project-context read model the composer renders. Built and pushed by the
    * host; the webview never recomputes it. `undefined` until the first push, so
@@ -226,6 +230,8 @@ export type Action =
        */
       pendingApproval?: ApprovalRequest;
       plan?: PlanArtifact;
+      /** Keep the optimistic user line when a send opens a new thread. */
+      keepPendingUserMessage?: boolean;
     }
   | { type: 'restoring'; value: boolean }
   | { type: 'busy'; value: boolean; backendId?: string; threadId?: string }
@@ -264,6 +270,7 @@ export type Action =
   | { type: 'closeRules' }
   | { type: 'connectionTestPending'; backendId: string }
   | { type: 'connectionTest'; result: ConnectionTestResult }
+  | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   /** The host's project-context read model, pushed on every relevant change. */
   | { type: 'context'; view: ContextView; settingsEnabled: boolean; exclusions: string[] }
   /** Toggle one item or category off for the next turn (or back on). */
@@ -284,6 +291,7 @@ export type Action =
   | { type: 'changesChanged'; backendId: string; threadId: string; turnId: string; entries: ChangeEntry[] }
   /** The host's post-hoc review snapshot for a turn. */
   | { type: 'changeReview'; review: ChangeView }
+  | { type: 'changeHunks'; turnId: string; path: string; hunks: ChangeHunkView[]; truncated: boolean }
   /** The outcome of a decision request, so a partial failure is surfaced. */
   | { type: 'changeDecision'; results: ChangeDecisionResult[]; message?: string }
   /** The per-message checkpoints the host offers for the active thread. */
@@ -326,6 +334,34 @@ export const initialState: AppState = {
   contextExclusions: [],
   changeDeciding: false
 };
+
+/**
+ * The mode list the composer shows for the selected backend.
+ *
+ * The host snapshot is used when it belongs to that backend and lists more
+ * than Agent. Until that arrives, and whenever a snapshot is for a different
+ * backend, Agent, Plan, and Ask stay available. Both Ollama and Codex honour
+ * those three modes.
+ */
+export function visibleModeSnapshot(state: AppState): ModeSnapshot | undefined {
+  const backendId = state.selectedBackendId;
+  if (!backendId) {
+    return undefined;
+  }
+  const hosted = state.modeOptions;
+  if (hosted?.backendId === backendId && hosted.options.length > 1) {
+    return hosted;
+  }
+  return {
+    backendId,
+    options: MODE_DESCRIPTORS.map((descriptor) => ({
+      mode: descriptor.mode,
+      label: descriptor.label,
+      description: descriptor.description
+    })),
+    selected: hosted?.backendId === backendId ? hosted.selected : state.mode
+  };
+}
 
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -441,6 +477,10 @@ export function reduce(state: AppState, action: Action): AppState {
       };
     case 'conversation': {
       const replay = action.replay ? action.replay.map(toTranscriptItemView(action.backendId)) : [];
+      const pendingUser =
+        action.keepPendingUserMessage && replay.length === 0
+          ? [...state.transcript].reverse().find((item) => item.kind === 'message' && item.role === 'user' && item.id.startsWith('local_'))
+          : undefined;
       // Exactly one pending prompt per request: drop any replayed
       // `approval-requested` card that is not the still-open request, then
       // re-inject the live one so a reload can never show none or two.
@@ -480,7 +520,8 @@ export function reduce(state: AppState, action: Action): AppState {
           ? { backendId: action.backendId, threadId: action.threadId ?? '', request: action.pendingApproval }
           : undefined,
         // A replay replaces the transcript; a fresh conversation clears it.
-        transcript,
+        // A send that just opened this thread keeps the optimistic user line.
+        transcript: pendingUser ? [...transcript, pendingUser] : transcript,
         // A plan is carried with the conversation so a resumed thread reopens it.
         plan: action.plan,
         // A change set belongs to the thread it was recorded for; a switch drops
@@ -552,12 +593,17 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'closeSettings':
       // Leaving the screen discards a transient test result so re-opening it
       // never shows a stale success or failure.
-      return { ...state, settingsOpen: false, connectionTest: undefined };
+      return { ...state, settingsOpen: false, connectionTest: undefined, opencodeUpgrade: undefined };
     case 'settings':
       return { ...state, settings: action.settings };
     case 'permissions':
       return { ...state, permissions: action.permissions, permissionLevel: action.permissions.selected };
     case 'modes':
+      // A snapshot belongs to one backend. Applying a Codex list while Ollama
+      // is selected would hide or replace the mode the user is about to use.
+      if (state.selectedBackendId && action.modes.backendId !== state.selectedBackendId) {
+        return state;
+      }
       return { ...state, modeOptions: action.modes, mode: action.modes.selected };
     case 'selectMode':
       // Changing mode applies to the next turn; the transcript is untouched.
@@ -594,6 +640,11 @@ export function reduce(state: AppState, action: Action): AppState {
       return {
         ...state,
         connectionTest: { backendId: action.result.backendId, pending: false, result: action.result }
+      };
+    case 'opencodeUpgrade':
+      return {
+        ...state,
+        opencodeUpgrade: { pending: action.pending, ok: action.ok, message: action.message }
       };
     case 'context':
       // The host is the single source of truth for both the view and the
@@ -648,6 +699,23 @@ export function reduce(state: AppState, action: Action): AppState {
         changeRejectConfirm: undefined,
         changeDeciding: false
       };
+    case 'changeHunks': {
+      const review = state.changeReview;
+      if (!review || review.turnId !== action.turnId) {
+        return state;
+      }
+      return {
+        ...state,
+        changeReview: {
+          ...review,
+          files: review.files.map((file) =>
+            file.path === action.path
+              ? { ...file, hunks: action.hunks, linesOmitted: false, detail: action.truncated ? 'Showing the first lines. Open the diff to see the rest.' : file.detail }
+              : file
+          )
+        }
+      };
+    }
     case 'changeDecision':
       return {
         ...state,

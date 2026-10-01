@@ -520,8 +520,8 @@ export function ollamaToolSupport(
 
 /**
  * Build the provider-neutral descriptor for one Ollama model from its
- * `/api/show` body. `modes` is supplied by the adapter (Ollama serves `agent`
- * only), so the descriptor names no provider field itself.
+ * `/api/show` body. `modes` is supplied by the adapter (Ollama serves Agent,
+ * Plan, and Ask), so the descriptor names no provider field itself.
  */
 export function ollamaCapabilities(show: unknown, modes: readonly DefaultMode[]): ModelCapabilities {
   const capabilities = parseOllamaCapabilities(show);

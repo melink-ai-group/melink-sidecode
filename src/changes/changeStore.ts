@@ -69,6 +69,11 @@ export interface ChangeFileView {
   deletions: number;
   decision: ChangeDecision;
   hunks: ChangeHunkView[];
+  /**
+   * True when the snapshot lists hunks but omits their lines. The review loads
+   * lines for one file when that row is expanded.
+   */
+  linesOmitted?: boolean;
   /** Plain-language reason a diff is unavailable, when it is. */
   detail?: string;
 }
@@ -458,6 +463,10 @@ export class ChangeStore {
       const after = entry.hasAfter ? await this.artifacts.getAfter(turnId, entry.relPath) : undefined;
       if ((entry.hasBefore ? before !== undefined : true) && (entry.hasAfter ? after !== undefined : true)) {
         const diff = diffLines(decode(before), decode(after), entry.relPath);
+        if (diff.tooLarge) {
+          detail = 'This file is too large to diff here. Open it in the editor to review it.';
+          diffable = false;
+        } else {
         hunks = diff.hunks.map((hunk) => {
           // A hunk's own decision wins; otherwise a whole-file decision cascades
           // to it, so accepting a file accepts each of its hunks and the review
@@ -469,6 +478,7 @@ export class ChangeStore {
         additions = diff.additions;
         deletions = diff.deletions;
         diffable = true;
+        }
       } else {
         detail = 'The stored content is no longer available, so no diff can be shown.';
       }
