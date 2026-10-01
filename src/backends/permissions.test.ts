@@ -17,7 +17,15 @@ test('every shared permission level maps to a native Codex sandbox and approval 
   });
   assert.deepEqual(codexPermissionMapping('default'), {
     sandbox: 'workspace-write',
-    approvalPolicy: 'on-request'
+    approvalPolicy: {
+      granular: {
+        sandbox_approval: false,
+        rules: false,
+        skill_approval: true,
+        request_permissions: true,
+        mcp_elicitations: true
+      }
+    }
   });
   assert.deepEqual(codexPermissionMapping('unrestricted'), {
     sandbox: 'danger-full-access',
@@ -26,14 +34,17 @@ test('every shared permission level maps to a native Codex sandbox and approval 
 });
 
 test('the mapping uses native generated values and never a deprecated policy', () => {
-  // The deprecated `untrusted` policy must not appear anywhere in the mapping:
-  // it prompts only on untrusted commands, so building on it would silently
-  // widen what runs without a prompt.
+  // The deprecated `untrusted` policy must not appear anywhere in the mapping.
   const policies = Object.values(CODEX_PERMISSION_MAP).map((entry) => entry.approvalPolicy);
   assert.ok(!policies.includes('untrusted' as never));
   for (const entry of Object.values(CODEX_PERMISSION_MAP)) {
     assert.ok(['read-only', 'workspace-write', 'danger-full-access'].includes(entry.sandbox));
-    assert.ok(['untrusted', 'on-request', 'never'].includes(entry.approvalPolicy as never));
+    const policy = entry.approvalPolicy;
+    const native =
+      policy === 'on-request' ||
+      policy === 'never' ||
+      (typeof policy === 'object' && policy !== null && 'granular' in policy);
+    assert.equal(native, true);
   }
 });
 

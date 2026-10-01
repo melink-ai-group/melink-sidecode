@@ -78,6 +78,11 @@ export interface AppState {
   selectedModel?: string;
   /** Permission level the active conversation runs at. */
   permissionLevel: PermissionLevel;
+  /**
+   * Host selection generation last applied. A permissions snapshot with a
+   * lower epoch cannot replace the level.
+   */
+  permissionEpoch: number;
   /** Mode the active conversation runs at; applies to the next turn. */
   mode: DefaultMode;
   /** The permission read model for the selected backend. */
@@ -342,6 +347,7 @@ export const initialState: AppState = {
   threadActivity: {},
   threadLoading: {},
   permissionLevel: 'default',
+  permissionEpoch: 0,
   mode: 'agent',
   transcript: [],
   busy: false,
@@ -530,6 +536,7 @@ export function reduce(state: AppState, action: Action): AppState {
         modelCapabilityStatus: changedModel ? 'loading' : state.modelCapabilityStatus,
         modelCapabilityError: changedModel ? undefined : state.modelCapabilityError,
         permissionLevel: action.permissionLevel ?? state.permissionLevel,
+        permissionEpoch: action.permissionLevel !== undefined ? state.permissionEpoch + 1 : state.permissionEpoch,
         mode: action.mode ?? state.mode,
         activeThreadId: action.threadId,
         busy: activityKey ? Boolean(state.threadActivity[activityKey]?.busy) : false,
@@ -631,8 +638,15 @@ export function reduce(state: AppState, action: Action): AppState {
       };
     case 'settings':
       return { ...state, settings: action.settings };
-    case 'permissions':
-      return { ...state, permissions: action.permissions, permissionLevel: action.permissions.selected };
+    case 'permissions': {
+      const applySelected = action.permissions.epoch >= state.permissionEpoch;
+      return {
+        ...state,
+        permissions: action.permissions,
+        permissionLevel: applySelected ? action.permissions.selected : state.permissionLevel,
+        permissionEpoch: applySelected ? action.permissions.epoch : state.permissionEpoch
+      };
+    }
     case 'modes':
       // A snapshot belongs to one backend. Applying a Codex list while Ollama
       // is selected would hide or replace the mode the user is about to use.
@@ -657,10 +671,16 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'cancelRejectConfirmation':
       return { ...state, rejectConfirmationOpen: false };
     case 'selectPermission':
-      // Selecting a level only updates the working value. The host persists it
-      // when the next turn is sent; the UI is what gates `unrestricted` behind
-      // an explicit confirmation before this action is ever dispatched.
-      return { ...state, permissionLevel: action.level, permissionConfirmationOpen: false };
+      // The host is told in the same gesture and stores the level for the next
+      // chat. Bumping the epoch drops a permissions snapshot that was already
+      // in flight with the previous level. `unrestricted` is only dispatched
+      // after the labelled confirmation.
+      return {
+        ...state,
+        permissionLevel: action.level,
+        permissionConfirmationOpen: false,
+        permissionEpoch: state.permissionEpoch + 1
+      };
     case 'requestPermissionConfirmation':
       return { ...state, permissionConfirmationOpen: true };
     case 'cancelPermissionConfirmation':

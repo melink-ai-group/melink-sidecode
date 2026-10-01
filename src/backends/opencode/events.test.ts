@@ -135,6 +135,21 @@ test('a write tool reports a modification when the file already existed', () => 
   assert.deepEqual(reportedChangeOfTool(event), { absPath: '/ws/a.ts', status: 'modified' });
 });
 
+test('an edit tool carries the old/new pair and a unified diff', () => {
+  const line =
+    '{"type":"tool_use","sessionID":"s","part":{"callID":"c","tool":"edit","state":{"status":"completed","input":{"filePath":"/ws/b.ts","oldString":"gamma","newString":"GAMMA"},"metadata":{"filepath":"/ws/b.ts","diff":"@@ -3,1 +3,1 @@\\n-gamma\\n+GAMMA\\n"}}}}';
+  const event = parseOpencodeEvent(line);
+  assert.equal(event.kind, 'tool');
+  if (event.kind !== 'tool') {
+    return;
+  }
+  const reported = reportedChangeOfTool(event);
+  assert.equal(reported?.status, 'modified');
+  assert.equal(reported?.replacement?.before, 'gamma');
+  assert.equal(reported?.replacement?.after, 'GAMMA');
+  assert.match(reported?.diff ?? '', /\+GAMMA/);
+});
+
 test('an edit tool reports a modification and a bash tool reports nothing', () => {
   const edit =
     '{"type":"tool_use","sessionID":"s","part":{"callID":"c","tool":"edit","state":{"status":"completed","metadata":{"filepath":"/ws/b.ts"}}}}';

@@ -54,25 +54,24 @@ test('ask denies edit/write/patch/bash whatever level was picked', () => {
   }
 });
 
-test('read-only and default levels never auto-approve edits or commands', () => {
-  // Read-only denies outright.
+test('default auto-allows workspace edits and commands, and still asks to leave the project', () => {
   assert.deepEqual(opencodePermission('read-only', 'agent'), {
     edit: 'deny',
     write: 'deny',
     patch: 'deny',
     bash: 'deny'
   });
-  // Default asks for every edit and command; it never sends `allow`.
-  // Only `unrestricted` allows.
-  const standard = opencodePermission('default', 'agent');
-  assert.equal(standard.edit, 'ask');
-  assert.equal(standard.bash, 'ask');
-  assert.equal(Object.values(standard).includes('allow'), false);
-  // Only unrestricted removes the guard — and the UI gates it behind a labelled
-  // confirmation before this value can be selected.
+  assert.deepEqual(opencodePermission('default', 'agent'), {
+    edit: 'allow',
+    write: 'allow',
+    patch: 'allow',
+    bash: 'allow',
+    external_directory: 'ask'
+  });
   const unrestricted = opencodePermission('unrestricted', 'agent');
   assert.equal(unrestricted.edit, 'allow');
   assert.equal(unrestricted.bash, 'allow');
+  assert.equal(unrestricted.external_directory, 'allow');
   assert.equal(opencodeRequiresApproval('default', 'agent'), true);
   assert.equal(opencodeRequiresApproval('default', 'plan'), true);
   assert.equal(opencodeRequiresApproval('read-only', 'agent'), false);
@@ -203,7 +202,13 @@ test('ask mode defines a read-only agent and plan mode follows the selected perm
     permissionLevel: 'default'
   });
   assert.equal(plan.agent, 'build');
-  assert.deepEqual(plan.config.permission, { edit: 'ask', write: 'ask', patch: 'ask', bash: 'ask' });
+  assert.deepEqual(plan.config.permission, {
+    edit: 'allow',
+    write: 'allow',
+    patch: 'allow',
+    bash: 'allow',
+    external_directory: 'ask'
+  });
 
   const writablePlan = buildOpencodeConfig({
     baseUrl: 'https://ollama.com',

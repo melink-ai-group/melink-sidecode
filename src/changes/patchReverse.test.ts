@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { contentBeforePatches } from './patchReverse.ts';
+import { contentBeforePatches, contentBeforeReplacements } from './patchReverse.ts';
 import { diffLines } from './diff.ts';
 
 const original = ['alpha', 'beta', 'gamma', 'delta', 'epsilon'].join('\n') + '\n';
@@ -48,6 +48,15 @@ test('an apply_patch wrapper around one hunk is ignored', () => {
 
 test('a patch that does not match the file is refused', () => {
   assert.equal(contentBeforePatches(edited, ['@@\n-missing\n+nope\n']), undefined);
+});
+
+test('an exact old/new pair restores that span and leaves the rest of the file', () => {
+  const before = contentBeforeReplacements(edited, [{ before: 'gamma', after: 'GAMMA' }]);
+  assert.equal(before, original);
+});
+
+test('a replacement that occurs twice is skipped instead of guessing', () => {
+  assert.equal(contentBeforeReplacements('a\na\n', [{ before: 'b', after: 'a' }]), undefined);
 });
 
 test('a repeated copy of the same patch is applied once', () => {

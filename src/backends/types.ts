@@ -411,6 +411,18 @@ export interface ReportedChange {
    * one-line edit is not reviewed as a whole-file addition.
    */
   diff?: string;
+  /**
+   * The exact text an edit tool replaced, when it reported both sides. Used the
+   * same way as `diff`: recover the pre-edit file instead of diffing against
+   * empty content.
+   */
+  replacement?: { before: string; after: string };
+  /**
+   * Full pre-edit and post-edit file text, when the tool reported both. Trusted
+   * only when the post-edit text still matches the file on disk.
+   */
+  beforeText?: string;
+  afterText?: string;
 }
 
 /** One changed file attached to a `file-change` item. */

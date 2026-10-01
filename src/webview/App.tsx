@@ -10,6 +10,7 @@ import type {
 } from '../backends/types';
 import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
+import { visibleTranscriptText } from './visibleTranscript';
 import {
   AlertIcon,
   ArrowIcon,
@@ -443,6 +444,11 @@ export function App(): JSX.Element {
   const storedRules = state.permissions?.rules ?? [];
   const pending = pendingApproval(state);
 
+  const applyPermission = (level: PermissionLevel): void => {
+    dispatch({ type: 'selectPermission', level });
+    bridge.post({ type: 'selectPermission', level });
+  };
+
   const selectPermission = (option: PermissionOption): void => {
     // A widening level is never applied as a side effect: it opens the labelled
     // confirmation and only an explicit confirm dispatches the change.
@@ -450,13 +456,13 @@ export function App(): JSX.Element {
       dispatch({ type: 'requestPermissionConfirmation' });
       return;
     }
-    dispatch({ type: 'selectPermission', level: option.level });
+    applyPermission(option.level);
   };
 
   const confirmPermissionChange = (): void => {
     const target = permissionOptions.find((option) => option.requiresConfirmation);
     if (target) {
-      dispatch({ type: 'selectPermission', level: target.level });
+      applyPermission(target.level);
     }
     dispatch({ type: 'cancelPermissionConfirmation' });
   };
@@ -2024,6 +2030,10 @@ function TranscriptRow({
   onRestore: (messageId: string, fileCount: number, paths: string[]) => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
+    const text = visibleTranscriptText(item.text);
+    if (!text && !(item.attachments && item.attachments.length > 0)) {
+      return null;
+    }
     return (
       <article className="turn turn--user">
         <div className="turn-meta">
@@ -2058,7 +2068,7 @@ function TranscriptRow({
               ))}
             </ul>
           ) : null}
-          {item.text ? <p>{item.text}</p> : null}
+          {text ? <p>{text}</p> : null}
         </div>
       </article>
     );
@@ -2102,37 +2112,14 @@ function TranscriptRow({
   }
 
   if (item.kind === 'reasoning') {
-    return (
-      <article className="turn turn--reasoning" aria-live="polite">
-        <div className="turn-meta">
-          <span className="meta-strong">{item.title || 'Thinking'}</span>
-          {item.status === 'streaming' ? (
-            <span className="stream-status" role="status">
-              <span className="spinner" aria-hidden="true" />
-              Thinking
-            </span>
-          ) : null}
-        </div>
-        <div className="turn-body md">
-          {item.text.trim() ? (
-            <Markdown text={item.text} />
-          ) : item.status === 'streaming' ? (
-            <p className="reasoning-pending">Waiting for a reasoning summary…</p>
-          ) : item.status === 'failed' || item.status === 'canceled' || item.status === 'warning' ? null : (
-            <p className="reasoning-pending">No reasoning summary was provided for this step.</p>
-          )}
-          {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
-          {item.status === 'failed' || item.status === 'canceled' || item.status === 'warning' ? (
-            <p className="reasoning-incomplete" role="status">
-              Thinking stopped early; this section may be incomplete.
-            </p>
-          ) : null}
-        </div>
-      </article>
-    );
+    return <ReasoningCard item={item} />;
   }
 
   // Assistant message: markdown output with a streaming caret.
+  const assistantText = visibleTranscriptText(item.text);
+  if (!assistantText && item.status !== 'failed') {
+    return null;
+  }
   return (
     <article className="turn turn--agent" aria-live="polite">
       <div className="turn-meta">
@@ -2159,14 +2146,16 @@ function TranscriptRow({
         ) : null}
       </div>
       <div className="turn-body md">
+        {assistantText ? (
         <Markdown
-          text={item.text}
+          text={assistantText}
           renderCodeHeader={(_language, code) => (
             <button className="icon-btn" type="button" aria-label="Copy code" onClick={() => copyText(code)}>
               <CopyIcon />
             </button>
           )}
         />
+        ) : null}
         {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
         {item.status === 'failed' ? (
           <div className="banner banner--error" role="alert">
@@ -2183,6 +2172,57 @@ function TranscriptRow({
               </div>
             </div>
           </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const clampRef = useRef<HTMLDivElement>(null);
+  const text = item.text.trim();
+
+  useLayoutEffect(() => {
+    const node = clampRef.current;
+    if (!node || expanded) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  }, [expanded, item.text]);
+
+  const toggle = (): void => setExpanded((value) => !value);
+
+  return (
+    <article className="turn turn--reasoning" aria-live="polite">
+      <button type="button" className="reasoning-toggle" aria-expanded={expanded} onClick={toggle}>
+        <span className="meta-strong">{item.title || 'Thinking'}</span>
+        {item.status === 'streaming' ? (
+          <span className="stream-status" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Thinking
+          </span>
+        ) : (
+          <span className="reasoning-toggle__hint">{expanded ? 'Hide' : 'Show'}</span>
+        )}
+      </button>
+      <div
+        className={`turn-body md${expanded || !text ? '' : ' reasoning-clamp'}`}
+        ref={clampRef}
+        onClick={toggle}
+      >
+        {text ? (
+          <Markdown text={item.text} />
+        ) : item.status === 'streaming' ? (
+          <p className="reasoning-pending">Waiting for a reasoning summary…</p>
+        ) : item.status === 'failed' || item.status === 'canceled' || item.status === 'warning' ? null : (
+          <p className="reasoning-pending">No reasoning summary was provided for this step.</p>
+        )}
+        {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
+        {item.status === 'failed' || item.status === 'canceled' || item.status === 'warning' ? (
+          <p className="reasoning-incomplete" role="status">
+            Thinking stopped early; this section may be incomplete.
+          </p>
         ) : null}
       </div>
     </article>

@@ -4,6 +4,7 @@ import {
   MELINK_CHANGES_SCHEME,
   changesViewRow,
   diffSides,
+  hasBaseline,
   parseVirtualDocument,
   resolveVirtualContent,
   virtualUriParts
@@ -32,6 +33,12 @@ test('a deleted file has an empty right side', () => {
   const sides = diffSides({ status: 'deleted', hasBefore: true, hasAfter: false });
   assert.deepEqual(sides.left, { kind: 'virtual', side: 'before' });
   assert.deepEqual(sides.right, { kind: 'virtual', side: 'empty' });
+});
+
+test('a modified file without a before snapshot is not a baseline', () => {
+  assert.equal(hasBaseline({ status: 'modified', hasBefore: false, hasAfter: true }), false);
+  assert.equal(hasBaseline({ status: 'created', hasBefore: false, hasAfter: true }), true);
+  assert.equal(hasBaseline({ status: 'modified', hasBefore: true, hasAfter: true }), true);
 });
 
 test('a modified file whose before blob was not stored degrades to an empty left, never a missing URI', () => {

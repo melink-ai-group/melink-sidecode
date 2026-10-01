@@ -77,6 +77,13 @@ export interface ChangeFileView {
   linesOmitted?: boolean;
   /** Plain-language reason a diff is unavailable, when it is. */
   detail?: string;
+  /**
+   * True when rejecting this file restores a real pre-change snapshot: the
+   * stored before bytes, or deletion of a file this turn created. A modified
+   * file with no before snapshot is not restorable — rejecting it cannot put
+   * the old bytes back.
+   */
+  restorable?: boolean;
 }
 
 /** The whole review snapshot the host pushes to the webview. */
@@ -465,7 +472,13 @@ export class ChangeStore {
       (entry.hasBefore ? entry.beforeHash !== undefined : true) &&
       (entry.hasAfter ? entry.afterHash !== undefined : true);
 
-    if (canDiff) {
+    // A modification with no stored before side used to diff the finished file
+    // against empty content, so every unchanged line reviewed as an addition.
+    const missingBaseline = !entry.hasBefore && entry.status !== 'created';
+    if (missingBaseline) {
+      detail = 'No pre-change snapshot was recorded, so unchanged lines are not shown as additions.';
+      diffable = entry.inlineable && !entry.binary;
+    } else if (canDiff) {
       const before = entry.hasBefore ? await this.artifacts.getBefore(turnId, entry.relPath) : undefined;
       const after = entry.hasAfter ? await this.artifacts.getAfter(turnId, entry.relPath) : undefined;
       if ((entry.hasBefore ? before !== undefined : true) && (entry.hasAfter ? after !== undefined : true)) {
@@ -507,6 +520,7 @@ export class ChangeStore {
       deletions,
       decision,
       hunks,
+      restorable: entry.status === 'created' || entry.hasBefore,
       ...(detail ? { detail } : {})
     };
   }

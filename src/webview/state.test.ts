@@ -150,7 +150,7 @@ test('the rules surface opens and closes without touching the transcript', () =>
 test('a freshly stored always rule appears in the read model the rules surface uses', () => {
   const before = reduce(initialState, {
     type: 'permissions',
-    permissions: { backendId: 'codex', hasApprovalChannel: true, options: [], selected: 'default', rules: [] }
+    permissions: { backendId: 'codex', hasApprovalChannel: true, options: [], selected: 'default', epoch: 0, rules: [] }
   });
   // What RulesScreen reads: `state.permissions?.rules`.
   assert.deepEqual(before.permissions?.rules, []);
@@ -171,10 +171,36 @@ test('a freshly stored always rule appears in the read model the rules surface u
       hasApprovalChannel: true,
       options: [],
       selected: 'default',
+      epoch: 0,
       rules: [stored]
     }
   });
   assert.deepEqual(after.permissions?.rules, [stored]);
+});
+
+test('a permission pick survives a stale permissions snapshot and a new conversation keeps it', () => {
+  const picked = reduce(initialState, { type: 'selectPermission', level: 'read-only' });
+  assert.equal(picked.permissionLevel, 'read-only');
+  const stale = reduce(picked, {
+    type: 'permissions',
+    permissions: {
+      backendId: 'ollama',
+      hasApprovalChannel: true,
+      options: [],
+      selected: 'default',
+      epoch: 0,
+      rules: []
+    }
+  });
+  assert.equal(stale.permissionLevel, 'read-only');
+  assert.equal(stale.permissions?.selected, 'default');
+  const nextChat = reduce(stale, {
+    type: 'conversation',
+    backendId: 'ollama',
+    permissionLevel: 'read-only',
+    mode: 'agent'
+  });
+  assert.equal(nextChat.permissionLevel, 'read-only');
 });
 
 test('attachments accumulate, dedupe by path, and remove one chip at a time', () => {

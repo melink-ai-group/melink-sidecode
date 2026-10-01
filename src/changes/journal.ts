@@ -1,7 +1,7 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import { hashBytes } from './hash.ts';
 import { isIgnoredRelPath } from './ignore.ts';
-import { contentBeforePatches } from './patchReverse.ts';
+import { contentBeforePatches, contentBeforeReplacements } from './patchReverse.ts';
 
 /**
  * The per-turn file snapshot journal.
@@ -257,11 +257,28 @@ interface FileSnapshot {
   bytes: Uint8Array;
 }
 
+interface TextReplacement {
+  before: string;
+  after: string;
+}
+
 interface Observation {
   source: ChangeSource;
   status?: ChangeStatus;
   /** Unified diffs reported for this path, in the order they were applied. */
   diffs: string[];
+  /** Exact old/new strings a tool reported, in the order they were applied. */
+  replacements: TextReplacement[];
+  /** Full pre-edit text, trusted only when `afterText` matches the file on disk. */
+  beforeText?: string;
+  afterText?: string;
+}
+
+/** Extra facts a structured report can attach so a missing snapshot can be recovered. */
+export interface ObservationDetail {
+  replacement?: TextReplacement;
+  beforeText?: string;
+  afterText?: string;
 }
 
 interface PendingTurn {
@@ -388,7 +405,8 @@ export class ChangeJournal {
     absPath: string,
     source: ChangeSource = 'watched',
     status?: ChangeStatus,
-    diff?: string
+    diff?: string,
+    detail?: ObservationDetail
   ): Promise<void> {
     return this.run(async () => {
       const pending = this.pending.get(turnId);
@@ -400,22 +418,54 @@ export class ChangeJournal {
       }
       // Never snapshot here: a watcher fires after the write, so snapshotting
       // now would record the post-change content as the "before". A path with no
-      // pre-turn candidate is diffed from the observation's own status instead.
+      // pre-turn candidate is recovered from the reported diff or replacement.
       const existing = pending.observations.get(absPath);
       const diffs = existing?.diffs.slice() ?? [];
       if (diff && diff.trim().length > 0 && diffs[diffs.length - 1] !== diff) {
         diffs.push(diff);
       }
-      if (source === 'reported' || existing === undefined) {
+      const replacements = existing?.replacements.slice() ?? [];
+      const replacement = detail?.replacement;
+      if (
+        replacement &&
+        replacement.after.length > 0 &&
+        replacement.before !== replacement.after &&
+        !replacements.some((item) => item.before === replacement.before && item.after === replacement.after)
+      ) {
+        replacements.push({ before: replacement.before, after: replacement.after });
+      }
+      const nextSource = source === 'reported' || existing === undefined ? source : existing.source;
+      // A reported status may refine the hint. A later watcher event must not
+      // overwrite a status that was already named.
+      const nextStatus =
+        status !== undefined && (existing === undefined || source === 'reported' || existing.status === undefined)
+          ? status
+          : existing?.status;
+      const changed =
+        !existing ||
+        existing.source !== nextSource ||
+        existing.status !== nextStatus ||
+        existing.diffs.length !== diffs.length ||
+        existing.replacements.length !== replacements.length ||
+        (detail?.beforeText !== undefined && detail.beforeText !== existing.beforeText) ||
+        (detail?.afterText !== undefined && detail.afterText !== existing.afterText);
+      if (changed) {
         pending.observations.set(absPath, {
-          source,
-          ...(status !== undefined ? { status } : existing?.status !== undefined ? { status: existing.status } : {}),
-          diffs
+          source: nextSource,
+          ...(nextStatus !== undefined ? { status: nextStatus } : {}),
+          diffs,
+          replacements,
+          ...(detail?.beforeText !== undefined
+            ? { beforeText: detail.beforeText }
+            : existing?.beforeText !== undefined
+              ? { beforeText: existing.beforeText }
+              : {}),
+          ...(detail?.afterText !== undefined
+            ? { afterText: detail.afterText }
+            : existing?.afterText !== undefined
+              ? { afterText: existing.afterText }
+              : {})
         });
-      } else if (status !== undefined && existing.status === undefined) {
-        pending.observations.set(absPath, { source: existing.source, status, diffs });
-      } else if (existing && diffs.length !== existing.diffs.length) {
-        pending.observations.set(absPath, { ...existing, diffs });
       }
       pending.observed = true;
     });
@@ -825,8 +875,8 @@ export class ChangeJournal {
       // file against empty content, so one changed line reviewed as the whole
       // file. Reverse the reported patch onto the post-edit bytes when it
       // applies, and keep that recovered text as the before side.
-      if (status === 'modified' && a && !a.binary && observation && observation.diffs.length > 0) {
-        const recovered = contentBeforePatches(new TextDecoder().decode(a.bytes), observation.diffs);
+      if (status === 'modified' && a && !a.binary && observation) {
+        const recovered = recoverObservedBefore(new TextDecoder().decode(a.bytes), observation);
         if (recovered !== undefined) {
           const beforeBytes = new TextEncoder().encode(recovered);
           const beforeSnap: FileSnapshot = {
@@ -1036,6 +1086,43 @@ function copyRestorePoint(point: JournalRestorePoint): JournalRestorePoint {
  * candidate that the turn neither reported nor watched was still a pre-turn
  * snapshot of a path we were told to expect, which is the watcher's remit.
  */
+/**
+ * The pre-edit text of a file that had no turn-start snapshot.
+ *
+ * A full before/after pair is used only when the reported after text still
+ * matches disk. Otherwise the tool's old/new strings, then its unified diff,
+ * are reversed onto the finished file. An empty result is refused: that is a
+ * patch that claims the whole file was added, which would review as a green wash.
+ */
+function recoverObservedBefore(afterText: string, observation: Observation): string | undefined {
+  if (
+    observation.beforeText !== undefined &&
+    observation.afterText !== undefined &&
+    observation.beforeText.length > 0 &&
+    observation.beforeText !== observation.afterText &&
+    sameFileText(observation.afterText, afterText)
+  ) {
+    return observation.beforeText;
+  }
+  if (observation.replacements.length > 0) {
+    const replaced = contentBeforeReplacements(afterText, observation.replacements);
+    if (replaced !== undefined && replaced.length > 0) {
+      return replaced;
+    }
+  }
+  if (observation.diffs.length > 0) {
+    const patched = contentBeforePatches(afterText, observation.diffs);
+    if (patched !== undefined && patched.length > 0) {
+      return patched;
+    }
+  }
+  return undefined;
+}
+
+function sameFileText(reported: string, onDisk: string): boolean {
+  return reported.replace(/\r\n/g, '\n') === onDisk.replace(/\r\n/g, '\n');
+}
+
 function sourceOf(pending: PendingTurn, ...paths: string[]): ChangeSource {
   for (const path of paths) {
     if (pending.observations.get(path)?.source === 'reported') {

@@ -111,6 +111,20 @@ export interface DiffSideInput {
  *   file. A file whose before blob was not stored falls back to an empty left
  *   rather than a missing-URI error.
  */
+/**
+ * True when the recorded sides are a real baseline.
+ *
+ * A created file's baseline is an empty left side. A modification, rename, or
+ * deletion without a stored pre-turn snapshot is not: opening that against an
+ * empty document paints every unchanged line as added.
+ */
+export function hasBaseline(input: DiffSideInput): boolean {
+  if (input.status === 'created') {
+    return true;
+  }
+  return input.hasBefore;
+}
+
 export function diffSides(input: DiffSideInput): { left: DiffSide; right: DiffSide } {
   if (input.status === 'created' || !input.hasBefore) {
     return { left: { kind: 'virtual', side: 'empty' }, right: { kind: 'file' } };

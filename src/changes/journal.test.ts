@@ -426,3 +426,25 @@ test('a reported one-line edit without a pre-turn snapshot reviews as that line'
   assert.equal(diff.additions, 1);
   assert.equal(diff.deletions, 1);
 });
+
+test('an edit tool old/new pair without a pre-turn snapshot reviews as that replacement', async () => {
+  const fs = new FakeFs();
+  const before = 'alpha\nbeta\ngamma\ndelta\nepsilon\n';
+  const after = 'alpha\nbeta\nGAMMA\ndelta\nepsilon\n';
+  fs.files.set('/ws/modal.tsx', text(after));
+  const store = journal(fs);
+
+  await store.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex' });
+  await store.observe('t1', '/ws/modal.tsx', 'reported', 'modified', undefined, {
+    replacement: { before: 'gamma', after: 'GAMMA' }
+  });
+  await store.endTurn('t1');
+
+  const entry = store.getTurn('t1')!.files[0];
+  assert.equal(entry.status, 'modified');
+  assert.equal(entry.hasBefore, true);
+  assert.equal(bytesToText(await store.getBefore('t1', 'modal.tsx')), before);
+  const diff = diffLines(before, after, 'modal.tsx');
+  assert.equal(diff.additions, 1);
+  assert.equal(diff.deletions, 1);
+});

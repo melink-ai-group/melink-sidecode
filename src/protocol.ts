@@ -186,6 +186,12 @@ export interface PermissionSnapshot {
   hasApprovalChannel: boolean;
   options: PermissionOption[];
   selected: PermissionLevel;
+  /**
+   * Increases every time the host stores a new selection. A snapshot older
+   * than the level the webview already applied is ignored, so a late refresh
+   * cannot put the previous level back.
+   */
+  epoch: number;
   /** Stored `always` rules, so they can be listed and revoked. */
   rules: ApprovalRule[];
 }
@@ -469,6 +475,12 @@ export type WebviewToHostMessage =
    * Persisted on the active thread when that thread belongs to `backendId`.
    */
   | { type: 'selectMode'; mode: DefaultMode; backendId?: string }
+  /**
+   * Select the permission level for the next turn and for later conversations.
+   * The host stores it, so a new chat keeps the choice. `unrestricted` is only
+   * posted after the labelled confirmation.
+   */
+  | { type: 'selectPermission'; level: PermissionLevel }
   /**
    * Build the plan. Moves the thread into execution (mode returns to `agent`)
    * and seeds the todo list from the plan's bullet list. This is the only route

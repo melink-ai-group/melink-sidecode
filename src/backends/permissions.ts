@@ -20,23 +20,38 @@ import type { AbsolutePathBuf } from '../../schemas/AbsolutePathBuf';
  * | Level          | sandbox             | approvalPolicy |
  * |----------------|---------------------|----------------|
  * | `read-only`    | `read-only`         | `on-request`   |
- * | `default`      | `workspace-write`   | `on-request`   |
+ * | `default`      | `workspace-write`   | granular auto-allow |
  * | `unrestricted` | `danger-full-access`| `never`        |
  *
- * `on-request` is used for the two sandboxed levels rather than the older
- * `untrusted` policy: `untrusted` is a documented-but-deprecated spelling that
- * only prompts on untrusted commands, so building on it would silently widen
- * what runs without a prompt. `never` is intentional only for `unrestricted`,
- * which is gated behind the labelled confirmation in the UI.
+ * `default` auto-allows ordinary sandboxed work and still asks before leaving
+ * the sandbox. `on-request` stays on `read-only`. The deprecated `untrusted`
+ * policy is not used. `never` is intentional only for `unrestricted`, which is
+ * gated behind the labelled confirmation in the UI.
  */
 export interface CodexPermissionMapping {
   sandbox: SandboxMode;
   approvalPolicy: AskForApproval;
 }
 
+/**
+ * Default approval: ordinary sandboxed work runs without a prompt. Leaving the
+ * sandbox, using a skill, or an MCP elicitation still asks. `sandbox_approval`
+ * and `rules` are the "ask for this class" flags, so both are off for normal
+ * workspace behaviour.
+ */
+const CODEX_DEFAULT_APPROVAL: CodexPermissionMapping['approvalPolicy'] = {
+  granular: {
+    sandbox_approval: false,
+    rules: false,
+    skill_approval: true,
+    request_permissions: true,
+    mcp_elicitations: true
+  }
+};
+
 export const CODEX_PERMISSION_MAP: Readonly<Record<PermissionLevel, CodexPermissionMapping>> = {
   'read-only': { sandbox: 'read-only', approvalPolicy: 'on-request' },
-  default: { sandbox: 'workspace-write', approvalPolicy: 'on-request' },
+  default: { sandbox: 'workspace-write', approvalPolicy: CODEX_DEFAULT_APPROVAL },
   unrestricted: { sandbox: 'danger-full-access', approvalPolicy: 'never' }
 };
 
@@ -94,7 +109,7 @@ export const PERMISSION_LEVEL_DESCRIPTORS: readonly PermissionLevelDescriptor[] 
   {
     level: 'default',
     label: 'Default',
-    description: 'Codex runs workspace-write and asks before anything outside the sandbox.',
+    description: 'Workspace writes and sandboxed commands run on their own. Anything outside the sandbox is requested.',
     requiresConfirmation: false
   },
   {
