@@ -165,6 +165,15 @@ export function App(): JSX.Element {
             message: message.message
           });
           break;
+        case 'opencodeInstall':
+          dispatch({
+            type: 'opencodeInstall',
+            pending: message.pending,
+            ok: message.ok,
+            message: message.message,
+            path: message.path
+          });
+          break;
         case 'context':
           dispatch({
             type: 'context',
@@ -411,6 +420,11 @@ export function App(): JSX.Element {
   const upgradeOpencode = (): void => {
     dispatch({ type: 'opencodeUpgrade', pending: true });
     bridge.post({ type: 'upgradeOpencode' });
+  };
+
+  const installOpencode = (): void => {
+    dispatch({ type: 'opencodeInstall', pending: true });
+    bridge.post({ type: 'installOpencode' });
   };
 
   const testConnection = (backendId: string): void => {
@@ -897,6 +911,8 @@ export function App(): JSX.Element {
         onTestConnection={testConnection}
         opencodeUpgrade={state.opencodeUpgrade}
         onUpgradeOpencode={upgradeOpencode}
+        opencodeInstall={state.opencodeInstall}
+        onInstallOpencode={installOpencode}
       />
     );
   }

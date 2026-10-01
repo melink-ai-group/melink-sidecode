@@ -53,8 +53,10 @@ Ollama Cloud runs through [opencode](https://opencode.ai) by default, so those
 models can read the project, edit files, and run commands. Turning
 **`melink.ollama.opencode.enabled`** off uses the direct streaming adapter
 instead: it answers in the transcript but cannot edit files, run commands, or
-keep a tool-driven session. When opencode is connected, Settings offers
-**Update opencode**, which runs `opencode upgrade`.
+keep a tool-driven session. When the CLI is not detected, Settings offers
+**Install opencode**, which downloads the current release into `~/.opencode/bin`
+and points the path setting at it. When opencode is already connected, Settings
+offers **Update opencode**, which runs `opencode upgrade`.
 
 - **Identity is unchanged.** There is still one **Ollama Cloud** provider with
   the same badge and dot; opencode is a runtime behind it, not a new provider.

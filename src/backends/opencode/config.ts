@@ -156,9 +156,9 @@ export function opencodeAgentForMode(mode: DefaultMode): string {
  *
  * The pinned opencode version (`1.1.65`) has no `--auto` flag — `opencode run
  * --help` does not list it and passing it exits with the help text — so the
- * permission config is the mechanism, not `--auto`. That is also why a headless
- * `ask` auto-rejects rather than prompting: there is no interactive channel to
- * answer it, so an `ask` is effectively a safe denial.
+ * permission config is the mechanism, not `--auto`. `ask` is a real prompt:
+ * the runtime drives `opencode serve` and waits for the user's decision.
+ * `opencode run` would auto-reject that prompt, so it is not used for `ask`.
  */
 export function opencodePermission(
   level: PermissionLevel,
@@ -175,12 +175,15 @@ export function opencodePermission(
     case 'default':
     default:
       // `default` must never auto-approve a change: every edit and command is
-      // an `ask`. The pinned opencode has no interactive prompt in `run` mode
-      // and auto-rejects an `ask`, so the safe outcome holds — a `default` turn
-      // cannot silently write. Only `unrestricted` (the level that explicitly
-      // removes the guard, gated by the UI's confirmation) sends `allow`.
+      // an `ask`, which the runtime surfaces and holds for the user. Only
+      // `unrestricted` (gated by the UI's confirmation) sends `allow`.
       return { edit: 'ask', write: 'ask', patch: 'ask', bash: 'ask' };
   }
+}
+
+/** True when this level still has an `ask` the user must answer before a tool runs. */
+export function opencodeRequiresApproval(level: PermissionLevel, mode: DefaultMode): boolean {
+  return Object.values(opencodePermission(level, mode)).includes('ask');
 }
 
 /** The custom Ask agent: it may read and answer, and cannot act at all. */

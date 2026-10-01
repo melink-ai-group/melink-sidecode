@@ -8,6 +8,7 @@ import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from
 import { isThinkingLevel } from './backends/capabilities';
 import type { SettingsPatch, SettingsSnapshot } from './protocol';
 import { existsSync } from 'node:fs';
+import { installOpencodeRelease, type OpencodeInstallResult } from './backends/opencode/install';
 import {
   opencodePathError,
   probeOpencode,
@@ -314,6 +315,42 @@ export class SettingsService {
    * Run `opencode upgrade` when the runtime is on and the CLI probe succeeded.
    * A missing or disabled CLI is not started.
    */
+  /**
+   * Download the official opencode CLI when the probe did not find one, then
+   * point the path setting at the installed binary. A CLI that is already
+   * detected is left in place.
+   */
+  async installOpencode(): Promise<OpencodeInstallResult> {
+    const config = vscode.workspace.getConfiguration();
+    const enabled = this.opencodeEnabled(config);
+    const path = this.opencodePath(config);
+    if (!enabled) {
+      return { ok: false, message: 'Turn on opencode before installing it.' };
+    }
+    const probe = await probeOpencode(path);
+    if (probe.status === 'detected') {
+      return { ok: true, message: 'opencode is already installed.' };
+    }
+    const installed = await installOpencodeRelease();
+    if (!installed.ok || !installed.executablePath) {
+      return installed;
+    }
+    const after = await probeOpencode(installed.executablePath);
+    if (after.status !== 'detected') {
+      return {
+        ok: false,
+        message: 'opencode was downloaded, but it did not start. Check the path, then try again.'
+      };
+    }
+    await config.update(`${OLLAMA_OPENCODE_SECTION}.path`, installed.executablePath, this.target);
+    const version = after.version ? ` ${after.version}` : '';
+    return {
+      ok: true,
+      message: `opencode${version} installed.`,
+      executablePath: installed.executablePath
+    };
+  }
+
   async upgradeOpencode(): Promise<OpencodeUpgradeResult> {
     const config = vscode.workspace.getConfiguration();
     const enabled = this.opencodeEnabled(config);

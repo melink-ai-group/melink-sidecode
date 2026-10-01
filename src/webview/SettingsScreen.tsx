@@ -50,6 +50,8 @@ export interface SettingsScreenProps {
   onTestConnection: (backendId: string) => void;
   opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
   onUpgradeOpencode: () => void;
+  opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
+  onInstallOpencode: () => void;
 }
 
 /** Local draft state; the host snapshot is the source of truth on save. */
@@ -104,7 +106,9 @@ export function SettingsScreen({
   onClearToken,
   onTestConnection,
   opencodeUpgrade,
-  onUpgradeOpencode
+  onUpgradeOpencode,
+  opencodeInstall,
+  onInstallOpencode
 }: SettingsScreenProps): JSX.Element {
   const [draft, setDraft] = useState<Draft | undefined>(undefined);
   const [errors, setErrors] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
@@ -132,6 +136,18 @@ export function SettingsScreen({
     }
     setErrors(settings.saveErrors ?? {});
   }, [settings]);
+
+  // A successful install writes a new absolute path on the host. Adopt it in the
+  // draft so Save does not put the previous "not found" path back.
+  useEffect(() => {
+    const installedPath = opencodeInstall?.ok ? opencodeInstall.path : undefined;
+    if (!installedPath) {
+      return;
+    }
+    setDraft((current) =>
+      current && current.opencodePath !== installedPath ? { ...current, opencodePath: installedPath } : current
+    );
+  }, [opencodeInstall]);
 
   useEffect(() => {
     backRef.current?.focus();
@@ -521,18 +537,41 @@ export function SettingsScreen({
                   {runtimeView.version ? <span className="runtime-version">{runtimeView.version}</span> : null}
                 </p>
 
-                {settings.opencode.enabled && settings.opencode.status === 'detected' ? (
+                {settings.opencode.enabled ? (
                   <div className="runtime-actions">
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      disabled={opencodeUpgrade?.pending}
-                      title="Run opencode upgrade"
-                      onClick={onUpgradeOpencode}
-                    >
-                      {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
-                    </button>
-                    {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
+                    {settings.opencode.status === 'detected' ? (
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        disabled={opencodeUpgrade?.pending}
+                        title="Run opencode upgrade"
+                        onClick={onUpgradeOpencode}
+                      >
+                        {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn--secondary"
+                        type="button"
+                        disabled={opencodeInstall?.pending}
+                        title="Download and install the opencode CLI"
+                        onClick={onInstallOpencode}
+                      >
+                        {opencodeInstall?.pending ? 'Installing...' : 'Install opencode'}
+                      </button>
+                    )}
+                    {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
+                      <p
+                        className={`field-msg ${opencodeInstall.ok ? '' : 'field-msg--error'}`}
+                        role="status"
+                      >
+                        <span>{opencodeInstall.message}</span>
+                      </p>
+                    ) : null}
+                    {settings.opencode.status === 'detected' &&
+                    opencodeUpgrade &&
+                    !opencodeUpgrade.pending &&
+                    opencodeUpgrade.message ? (
                       <p
                         className={`field-msg ${opencodeUpgrade.ok ? '' : 'field-msg--error'}`}
                         role="status"

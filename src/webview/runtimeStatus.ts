@@ -29,7 +29,7 @@ export function opencodeRuntimeView(opencode: SettingsSnapshot['opencode']): Run
     };
   }
   if (opencode.status === 'missing') {
-    return { tone: 'missing', label: 'Not found. Check the path or install the opencode CLI.' };
+    return { tone: 'missing', label: 'Not found. Install opencode, or set the CLI path.' };
   }
   return { tone: 'not-runnable', label: 'Found but not runnable. Check the path or permissions.' };
 }

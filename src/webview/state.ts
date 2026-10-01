@@ -156,6 +156,8 @@ export interface AppState {
   };
   /** Result of the last opencode upgrade, or a pending marker while it runs. */
   opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
+  /** Result of the last opencode install, or a pending marker while it downloads. */
+  opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   /**
    * The project-context read model the composer renders. Built and pushed by the
    * host; the webview never recomputes it. `undefined` until the first push, so
@@ -284,6 +286,7 @@ export type Action =
   | { type: 'connectionTestPending'; backendId: string }
   | { type: 'connectionTest'; result: ConnectionTestResult }
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
+  | { type: 'opencodeInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   /** The host's project-context read model, pushed on every relevant change. */
   | {
       type: 'context';
@@ -619,7 +622,13 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'closeSettings':
       // Leaving the screen discards a transient test result so re-opening it
       // never shows a stale success or failure.
-      return { ...state, settingsOpen: false, connectionTest: undefined, opencodeUpgrade: undefined };
+      return {
+        ...state,
+        settingsOpen: false,
+        connectionTest: undefined,
+        opencodeUpgrade: undefined,
+        opencodeInstall: undefined
+      };
     case 'settings':
       return { ...state, settings: action.settings };
     case 'permissions':
@@ -671,6 +680,11 @@ export function reduce(state: AppState, action: Action): AppState {
       return {
         ...state,
         opencodeUpgrade: { pending: action.pending, ok: action.ok, message: action.message }
+      };
+    case 'opencodeInstall':
+      return {
+        ...state,
+        opencodeInstall: { pending: action.pending, ok: action.ok, message: action.message, path: action.path }
       };
     case 'context':
       // The host is the single source of truth for both the view and the
