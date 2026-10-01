@@ -86,7 +86,7 @@ test('a patchUpdated notification maps each change kind', () => {
   assert.deepEqual(changesFromPatchUpdated(notification, ORIGIN), [
     { absPath: abs('a.ts'), status: 'created' },
     { absPath: abs('b.ts'), status: 'deleted' },
-    { absPath: abs('d.ts'), status: 'modified' }
+    { absPath: abs('d.ts'), status: 'modified', diff: '@@ -1 +1 @@\n-old\n+new\n' }
   ]);
 });
 
@@ -94,7 +94,9 @@ test('a threaded item change list maps through the same path', () => {
   const changes: FileUpdateChange[] = [
     { path: abs('x.ts'), kind: { type: 'update', move_path: null }, diff: '@@\n-old\n+new\n' }
   ];
-  assert.deepEqual(changesFromThreadItem(changes, ORIGIN), [{ absPath: abs('x.ts'), status: 'modified' }]);
+  assert.deepEqual(changesFromThreadItem(changes, ORIGIN), [
+    { absPath: abs('x.ts'), status: 'modified', diff: '@@\n-old\n+new\n' }
+  ]);
 });
 
 test('an update with an empty diff is a read and is not recorded', () => {

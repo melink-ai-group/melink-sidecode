@@ -25,8 +25,9 @@ import {
  * The change review surface: what a turn changed, with per-file keep/reject.
  *
  * A full-width inline panel inside the view, never a floating popover (the
- * switcher invariant). It renders one row per recorded file, the diff of an
- * expanded row, and a footer whose single primary action is `Keep all`.
+ * switcher invariant). It starts collapsed to a one-line count, and when open
+ * renders one compact row per recorded file. The diff itself opens in the
+ * workbench editor. The header's primary action is `Keep`.
  *
  * Decision state is carried by text and an icon, never colour alone, so it is
  * legible with colour removed. Reject (per file and all) is destructive and
@@ -94,11 +95,11 @@ export function ChangesReview({
   onConfirmReject,
   onKeepAll,
   onResolveConflict,
-  onRestoreCheckpoint,
-  onLoadHunks
+  onRestoreCheckpoint
 }: ChangesReviewProps): JSX.Element {
   const [visibleFileCount, setVisibleFileCount] = useState(24);
-  const [openPaths, setOpenPaths] = useState<ReadonlySet<string>>(() => new Set());
+  /** The file list stays closed until the user opens it. */
+  const [expanded, setExpanded] = useState(false);
   /**
    * Outcomes accumulate across decision rounds. A single `changes/decisionResult`
    * carries only the files that just resolved, so replacing the map would erase a
@@ -109,30 +110,13 @@ export function ChangesReview({
   const outcomeTurnRef = useRef<string | undefined>(undefined);
   const panelRef = useRef<HTMLElement>(null);
   const focusedTurnRef = useRef<string | undefined>(undefined);
-  const requestedHunksRef = useRef(new Set<string>());
 
   // Focus lands on the panel when it first opens, matching the approval-prompt
   // precedent. A repaint of the same turn does not steal focus back.
   useEffect(() => {
     setVisibleFileCount(24);
-    requestedHunksRef.current.clear();
+    setExpanded(false);
   }, [review.turnId]);
-
-  useEffect(() => {
-    for (const path of [...requestedHunksRef.current]) {
-      const file = review.files.find((entry) => entry.path === path);
-      if (!file?.linesOmitted) {
-        requestedHunksRef.current.delete(path);
-      }
-    }
-    for (const path of openPaths) {
-      const file = review.files.find((entry) => entry.path === path);
-      if (file?.linesOmitted && !requestedHunksRef.current.has(path)) {
-        requestedHunksRef.current.add(path);
-        onLoadHunks(path);
-      }
-    }
-  }, [openPaths, review.files, onLoadHunks]);
 
   useEffect(() => {
     if (focusedTurnRef.current === review.turnId) {
@@ -171,33 +155,8 @@ export function ChangesReview({
     return map;
   }, [review, outcomeMemory]);
 
-  const reviewableCount = review.files.reduce((count, file) => count + Number(file.diffable), 0);
-  const nonReviewableCount = review.files.length - reviewableCount;
-  const undecided = review.files.reduce((count, file) => count + Number(file.decision === 'pending'), 0);
   const visibleFiles = review.files.slice(0, visibleFileCount);
-  const summaryParts = [
-    review.additions > 0 || review.deletions > 0 ? (
-      <span className="diff-stats" aria-label="Total changes" key="diff-stats">
-        {review.additions > 0 ? <span className="add">+{review.additions}</span> : null}
-        {review.deletions > 0 ? <span className="del">-{review.deletions}</span> : null}
-      </span>
-    ) : null,
-    reviewableCount > 0 ? <span key="reviewable">{reviewableCount} to review</span> : null,
-    nonReviewableCount > 0 ? <span key="non-reviewable">{nonReviewableCount} not reviewable</span> : null,
-    undecided > 0 ? <span key="undecided">{undecided} undecided</span> : null
-  ].filter((part): part is JSX.Element => part !== null);
-
-  const togglePath = (path: string): void => {
-    setOpenPaths((current) => {
-      const next = new Set(current);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  };
+  const countLabel = fileCountLabel(review.files);
 
   const locked = busy || deciding;
 
@@ -208,23 +167,30 @@ export function ChangesReview({
 
   return (
     <section
-      className="changes-review"
+      className={`changes-review${expanded ? ' is-open' : ''}`}
       ref={panelRef}
       tabIndex={-1}
       aria-labelledby="changes-review-title"
       aria-busy={busy}
     >
       <header className="changes-review__head">
-        <span className="changes-review__title" id="changes-review-title">
-          Files changed
-        </span>
-        {!busy ? (
-          <span className="chip chip--scope">
-            {review.files.length === 1 ? '1 file' : `${review.files.length} files`}
+        <button
+          className="changes-review__collapse"
+          type="button"
+          aria-expanded={expanded}
+          aria-controls="changes-review-files"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <ChevronRightIcon className="ico ico--xs changes-review__chevron" />
+          <span className="changes-review__title" id="changes-review-title">
+            Files changed
           </span>
-        ) : (
-          <span className="chip chip--scope">Running</span>
-        )}
+          {busy ? (
+            <span className="chip chip--scope">Running</span>
+          ) : countLabel ? (
+            <span className="changes-review__counts">{countLabel}</span>
+          ) : null}
+        </button>
         <span className="spacer" />
         <button
           className="btn btn--primary"
@@ -237,7 +203,7 @@ export function ChangesReview({
           <span>Keep</span>
         </button>
         <button
-          className="btn btn--secondary"
+          className="btn changes-review__review"
           type="button"
           title="Review every changed file in the workbench changes editor."
           onClick={onOpenAllInEditor}
@@ -258,52 +224,45 @@ export function ChangesReview({
         ) : null}
       </header>
 
-      {busy ? (
-        <div className="changes-review__pending" role="status" aria-live="polite">
-          <span className="spinner" aria-hidden="true" />
-          <span>Applying edits to the workspace...</span>
-          <span className="spacer" />
-          <span className="changes-review__pending-note">Decisions stay disabled until the turn finishes.</span>
-        </div>
-      ) : summaryParts.length > 0 ? (
-        <div className="changes-review__summary">
-          {summaryParts.map((part, index) => (
-            <span className="changes-review__summary-part" key={part.key ?? index}>
-              {index > 0 ? <span className="changes-review__sep" aria-hidden="true">&middot;</span> : null}
-              {part}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      {expanded ? (
+        <div id="changes-review-files">
+          {busy ? (
+            <div className="changes-review__pending" role="status" aria-live="polite">
+              <span className="spinner" aria-hidden="true" />
+              <span>Applying edits to the workspace...</span>
+              <span className="spacer" />
+              <span className="changes-review__pending-note">Decisions stay disabled until the turn finishes.</span>
+            </div>
+          ) : null}
 
-      <ul className="changes-review__list" aria-label="Changed files">
-        {visibleFiles.map((file) => (
-          <ChangeRow
-            key={file.path}
-            file={file}
-            outcome={outcomes.get(file.path)}
-            open={openPaths.has(file.path)}
-            locked={locked}
-            busy={busy}
-            onToggle={() => togglePath(file.path)}
-            onOpenFile={() => onOpenFile(file.absPath)}
-            onOpenDiff={() => onOpenDiff(file.path)}
-            onReveal={() => onRevealInSourceControl(file.absPath)}
-            onKeep={() => onKeep(file.path)}
-            onReject={() => onRequestReject('file', [file.path])}
-            onResolveConflict={(resolution) => onResolveConflict(file.path, resolution)}
-          />
-        ))}
-      </ul>
+          <ul className="changes-review__list" aria-label="Changed files">
+            {visibleFiles.map((file) => (
+              <ChangeRow
+                key={file.path}
+                file={file}
+                outcome={outcomes.get(file.path)}
+                locked={locked}
+                busy={busy}
+                onOpenFile={() => onOpenFile(file.absPath)}
+                onOpenDiff={() => onOpenDiff(file.path)}
+                onReveal={() => onRevealInSourceControl(file.absPath)}
+                onKeep={() => onKeep(file.path)}
+                onReject={() => onRequestReject('file', [file.path])}
+                onResolveConflict={(resolution) => onResolveConflict(file.path, resolution)}
+              />
+            ))}
+          </ul>
 
-      {visibleFileCount < review.files.length ? (
-        <button
-          className="changes-review__more btn"
-          type="button"
-          onClick={() => setVisibleFileCount((count) => Math.min(count + 24, review.files.length))}
-        >
-          Show {Math.min(24, review.files.length - visibleFileCount)} more files
-        </button>
+          {visibleFileCount < review.files.length ? (
+            <button
+              className="changes-review__more btn"
+              type="button"
+              onClick={() => setVisibleFileCount((count) => Math.min(count + 24, review.files.length))}
+            >
+              Show {Math.min(24, review.files.length - visibleFileCount)} more files
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {rejectConfirm ? (
@@ -343,14 +302,12 @@ export function ChangesReview({
   );
 }
 
-/** One changed file: path, status, counts, decision state, and its diff. */
+/** One changed file, as a single compact full-width row. The diff opens in the editor. */
 function ChangeRow({
   file,
   outcome,
-  open,
   locked,
   busy,
-  onToggle,
   onOpenFile,
   onOpenDiff,
   onReveal,
@@ -360,10 +317,8 @@ function ChangeRow({
 }: {
   file: ChangeFileView;
   outcome?: ChangeDecisionResult;
-  open: boolean;
   locked: boolean;
   busy: boolean;
-  onToggle: () => void;
   onOpenFile: () => void;
   onOpenDiff: () => void;
   onReveal: () => void;
@@ -375,74 +330,28 @@ function ChangeRow({
   const failed = outcome !== undefined && !outcome.ok && !outcome.conflict;
   const reviewable = file.diffable;
   const { dir, base } = splitPath(file.path);
-  const diffId = `change-diff-${stableId(file.path)}`;
-
   const decision = busy ? 'pending' : file.decision;
 
   return (
-    <li className={`change-row${open ? ' change-row--open' : ''}${conflicted ? ' change-row--conflict' : ''}`}>
-      <div className="change-row__head">
-        {reviewable ? (
-          <button
-            className="change-row__toggle"
-            type="button"
-            aria-expanded={open}
-            aria-controls={open ? diffId : undefined}
-            aria-label={`${open ? 'Collapse' : 'Expand'} diff for ${file.path}`}
-            onClick={onToggle}
-          >
-            <ChevronRightIcon className="ico ico--xs change-row__chevron" />
-            <PathLabel dir={dir} base={base} full={file.path} />
-          </button>
-        ) : (
-          <span className="change-row__toggle change-row__toggle--static">
-            <span className="change-row__chevron-spacer" aria-hidden="true" />
-            <PathLabel dir={dir} base={base} full={file.path} />
-          </span>
-        )}
-        <span className="change-row__tags">
+    <li className={`change-row${conflicted ? ' change-row--conflict' : ''}`}>
+      <div className="change-row__line">
+        <span className="change-row__main">
+          <PathLabel dir={dir} base={base} full={file.path} />
           <StatusChip file={file} />
           <span className="diff-stats" aria-label={`${file.additions} added, ${file.deletions} removed`}>
             {file.additions > 0 ? <span className="add">+{file.additions}</span> : null}
             {file.deletions > 0 ? <span className="del">-{file.deletions}</span> : null}
           </span>
         </span>
-      </div>
-
-      {!reviewable ? (
-        <p className="change-row__note">
-          <InfoIcon className="ico ico--xs" />
-          <span>{file.detail ?? 'No inline diff is available for this file.'}</span>
-          <button
-            className="btn btn--link"
-            type="button"
-            title="Open the pre-turn content and the current file in the workbench diff editor"
-            onClick={onOpenDiff}
-          >
-            Open diff
-          </button>
-          {file.status !== 'deleted' ? (
-            <button
-              className="btn btn--link"
-              type="button"
-              title="Open this file in the editor"
-              onClick={onOpenFile}
-            >
-              Open in editor
-            </button>
-          ) : null}
-          <button
-            className="btn btn--link"
-            type="button"
-            title="Reveal this file in Source Control"
-            onClick={onReveal}
-          >
-            Reveal
-          </button>
-        </p>
-      ) : (
-        <div className="change-row__bar">
-          <DecisionState decision={decision} conflicted={conflicted} failed={failed} />
+        <span className="change-row__actions">
+          {reviewable ? (
+            <DecisionState decision={decision} conflicted={conflicted} failed={failed} />
+          ) : (
+            <span className="change-row__detail" title={file.detail ?? 'No inline diff is available for this file.'}>
+              <InfoIcon className="ico ico--xs" />
+              <span>{file.detail ?? 'No inline diff'}</span>
+            </span>
+          )}
           <button
             className="btn btn--link"
             type="button"
@@ -451,7 +360,16 @@ function ChangeRow({
           >
             Open diff
           </button>
-          <span className="spacer" />
+          {!reviewable && file.status !== 'deleted' ? (
+            <button className="btn btn--link" type="button" title="Open this file in the editor" onClick={onOpenFile}>
+              Open in editor
+            </button>
+          ) : null}
+          {!reviewable ? (
+            <button className="btn btn--link" type="button" title="Reveal this file in Source Control" onClick={onReveal}>
+              Reveal
+            </button>
+          ) : null}
           {conflicted ? (
             <>
               <button className="btn" type="button" disabled={locked} onClick={() => onResolveConflict('keep-current')}>
@@ -466,7 +384,7 @@ function ChangeRow({
                 Overwrite with pre-turn
               </button>
             </>
-          ) : (
+          ) : reviewable ? (
             <>
               <button
                 className="btn"
@@ -489,40 +407,35 @@ function ChangeRow({
                 Reject
               </button>
             </>
-          )}
-        </div>
-      )}
-
+          ) : null}
+        </span>
+      </div>
       {failed ? (
         <p className="change-row__note change-row__note--error" role="alert">
           <AlertIcon className="ico ico--xs" />
           <span>{outcome?.error ?? 'The decision could not be applied.'}</span>
         </p>
       ) : null}
-
-      {reviewable && open ? (
-        <div className="change-row__diff" id={diffId} tabIndex={0} role="group" aria-label={`Diff for ${file.path}`}>
-          {file.linesOmitted ? <p className="change-row__note">Loading diff…</p> : null}
-          {file.hunks.map((hunk) => (
-            <section className="change-hunk" key={hunk.id}>
-              <span className="change-hunk__head">{hunk.header}</span>
-              {hunk.lines.map((line, index) => (
-                <div className={`diff-line diff-line--${line.kind === 'add' ? 'add' : line.kind === 'del' ? 'del' : 'ctx'}`} key={`${index}-${line.kind}`}>
-                  <span className="sign" aria-hidden="true">
-                    {line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}
-                  </span>
-                  <span>
-                    {line.text}
-                    {line.noNewline ? <span className="change-hunk__no-newline">{'\\ No newline at end of file'}</span> : null}
-                  </span>
-                </div>
-              ))}
-            </section>
-          ))}
-        </div>
-      ) : null}
     </li>
   );
+}
+
+/** Inline counts for the collapsed header. A zero category is omitted. */
+function fileCountLabel(files: readonly ChangeFileView[]): string {
+  const changed = files.filter((file) => file.status === 'modified' || file.status === 'renamed').length;
+  const added = files.filter((file) => file.status === 'created').length;
+  const deleted = files.filter((file) => file.status === 'deleted').length;
+  const parts: string[] = [];
+  if (changed > 0) {
+    parts.push(`${changed} changed`);
+  }
+  if (added > 0) {
+    parts.push(`${added} added`);
+  }
+  if (deleted > 0) {
+    parts.push(`${deleted} deleted`);
+  }
+  return parts.join(' · ');
 }
 
 /** The relative path, middle-ellipsized: the directory truncates, the name holds. */
@@ -617,9 +530,4 @@ function splitPath(path: string): { dir: string; base: string } {
     return { dir: '', base: path };
   }
   return { dir: path.slice(0, index + 1), base: path.slice(index + 1) };
-}
-
-/** A DOM-id-safe, stable token for a path. */
-function stableId(path: string): string {
-  return path.replace(/[^a-zA-Z0-9_-]/g, '_');
 }

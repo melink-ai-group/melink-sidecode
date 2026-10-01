@@ -1,6 +1,7 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import { hashBytes } from './hash.ts';
 import { isIgnoredRelPath } from './ignore.ts';
+import { contentBeforePatches } from './patchReverse.ts';
 
 /**
  * The per-turn file snapshot journal.
@@ -256,6 +257,13 @@ interface FileSnapshot {
   bytes: Uint8Array;
 }
 
+interface Observation {
+  source: ChangeSource;
+  status?: ChangeStatus;
+  /** Unified diffs reported for this path, in the order they were applied. */
+  diffs: string[];
+}
+
 interface PendingTurn {
   turnId: string;
   threadId: string;
@@ -271,7 +279,7 @@ interface PendingTurn {
    * one. An observed path outside `before` is a change whose kind comes from the
    * hint, since there is no pre-turn side to diff against.
    */
-  observations: Map<string, { source: ChangeSource; status?: ChangeStatus }>;
+  observations: Map<string, Observation>;
   /** True once any workspace path has been observed for this turn. */
   observed: boolean;
 }
@@ -370,12 +378,17 @@ export class ChangeJournal {
    * `status` is an optional hint from the reporter (a create or delete) used
    * when the snapshot diff cannot prove the kind on its own; `source` defaults
    * to `watched` for a bare watcher observation.
+   *
+   * `diff` is the unified diff of a reported edit. It is kept so a file that
+   * was not a pre-turn candidate can still be reviewed against the bytes the
+   * edit replaced, instead of against an empty file.
    */
   async observe(
     turnId: string,
     absPath: string,
     source: ChangeSource = 'watched',
-    status?: ChangeStatus
+    status?: ChangeStatus,
+    diff?: string
   ): Promise<void> {
     return this.run(async () => {
       const pending = this.pending.get(turnId);
@@ -389,10 +402,20 @@ export class ChangeJournal {
       // now would record the post-change content as the "before". A path with no
       // pre-turn candidate is diffed from the observation's own status instead.
       const existing = pending.observations.get(absPath);
+      const diffs = existing?.diffs.slice() ?? [];
+      if (diff && diff.trim().length > 0 && diffs[diffs.length - 1] !== diff) {
+        diffs.push(diff);
+      }
       if (source === 'reported' || existing === undefined) {
-        pending.observations.set(absPath, { source, ...(status !== undefined ? { status } : {}) });
+        pending.observations.set(absPath, {
+          source,
+          ...(status !== undefined ? { status } : existing?.status !== undefined ? { status: existing.status } : {}),
+          diffs
+        });
       } else if (status !== undefined && existing.status === undefined) {
-        pending.observations.set(absPath, { source: existing.source, status });
+        pending.observations.set(absPath, { source: existing.source, status, diffs });
+      } else if (existing && diffs.length !== existing.diffs.length) {
+        pending.observations.set(absPath, { ...existing, diffs });
       }
       pending.observed = true;
     });
@@ -798,6 +821,39 @@ export class ChangeJournal {
       }
       const status: ChangeStatus = hint === 'deleted' ? 'deleted' : hint === 'created' ? 'created' : 'modified';
       const a = after.get(path) ?? undefined;
+      // A reported edit with no pre-turn snapshot used to diff the finished
+      // file against empty content, so one changed line reviewed as the whole
+      // file. Reverse the reported patch onto the post-edit bytes when it
+      // applies, and keep that recovered text as the before side.
+      if (status === 'modified' && a && !a.binary && observation && observation.diffs.length > 0) {
+        const recovered = contentBeforePatches(new TextDecoder().decode(a.bytes), observation.diffs);
+        if (recovered !== undefined) {
+          const beforeBytes = new TextEncoder().encode(recovered);
+          const beforeSnap: FileSnapshot = {
+            hash: hashBytes(beforeBytes),
+            size: beforeBytes.length,
+            binary: sniffBinary(beforeBytes),
+            bytes: beforeBytes
+          };
+          if (beforeSnap.hash !== a.hash) {
+            const relPath = workspaceRelative(path, roots)?.relPath ?? toPosix(path);
+            drafts.push({
+              entry: this.entryFor({
+                absPath: path,
+                relPath,
+                source: observation.source,
+                beforeHash: beforeSnap.hash,
+                afterHash: a.hash,
+                sizeBytes: a.size,
+                binary: beforeSnap.binary || a.binary
+              }),
+              before: beforeSnap,
+              after: a
+            });
+            continue;
+          }
+        }
+      }
       drafts.push({
         entry: {
           ...this.entryFor({
