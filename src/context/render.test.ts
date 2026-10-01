@@ -5,6 +5,7 @@ import {
   DEFAULT_RENDER_BUDGET,
   DELTA_OPEN,
   SNAPSHOT_OPEN,
+  renderAttachedFile,
   renderDelta,
   renderSnapshot,
   renderSnapshotResult
@@ -210,4 +211,30 @@ test('a delta is bounded by the delta budget', () => {
   const text = renderDelta(delta, snapshot(), { budget });
   assert.ok(text);
   assert.ok(Buffer.byteLength(text!, 'utf8') <= 256);
+});
+
+test('an attached file names that path and tells the model not to substitute another', () => {
+  const text = renderAttachedFile({
+    path: 'frontend/src/styles/global.css',
+    languageId: 'css',
+    excluded: false,
+    text: 'body { color: red; }'
+  });
+  assert.match(text, /frontend\/src\/styles\/global\.css/);
+  assert.match(text, /Do not substitute another file/);
+  assert.match(text, /body \{ color: red; \}/);
+});
+
+test('a delivery snapshot does not name the viewed file unless it is attached', () => {
+  const detached = renderSnapshot(
+    snapshot({
+      editor: {
+        ...snapshot().editor,
+        active: null,
+        activeFileAttached: false
+      }
+    })
+  );
+  assert.match(detached, /not attached/);
+  assert.doesNotMatch(detached, /Active file: src\/index\.ts/);
 });

@@ -1,4 +1,5 @@
 import type { ChangeEntry, ChangeStatus, ReportedChange } from '../backends/types';
+import { hasIgnoredSegment } from './ignore.ts';
 import type { ChangeJournal, JournalFileEntry } from './journal';
 
 /**
@@ -139,7 +140,7 @@ export class ChangeTracker {
       backendId: turn.backendId,
       threadId: turn.threadId,
       turnId: turn.turnId,
-      entries: turn.files.map(toChangeEntry)
+      entries: turn.files.filter(reviewableFile).map(toChangeEntry)
     };
   }
 
@@ -169,7 +170,7 @@ export class ChangeTracker {
       backendId: active.backendId,
       threadId: active.threadId,
       turnId: active.turnId,
-      entries: turn.files.map(toChangeEntry)
+      entries: turn.files.filter(reviewableFile).map(toChangeEntry)
     };
     for (const listener of this.listeners) {
       try {
@@ -180,6 +181,11 @@ export class ChangeTracker {
     }
     return set;
   }
+}
+
+/** Ignored directories are not part of the conversation, even on an older recorded turn. */
+function reviewableFile(file: JournalFileEntry): boolean {
+  return !hasIgnoredSegment(file.relPath);
 }
 
 /** Map the journal's stored entry onto the protocol-facing change entry. */

@@ -57,6 +57,11 @@ export interface ContextItemView {
   excluded: boolean;
   /** Plain-language reason, shown instead of a silently blank row. */
   reason?: string;
+  /**
+   * The current-file row. `off` is the ghost state; `on` means the user added it.
+   * The + / − control owns this row, separate from category exclusions.
+   */
+  attachment?: 'off' | 'on';
 }
 
 export interface ContextCategoryView {
@@ -76,10 +81,18 @@ export interface ContextView {
   status: ContextStatus;
   workspaceName?: string;
   branch?: string;
-  /** Workspace-relative path of the active file, shown in the strip. */
+  /** Workspace-relative path of the active file, shown in the strip only when it will be sent. */
   activeFile?: string;
   /** Absolute path of the active file, for the open-in-editor affordance. */
   activeFilePath?: string;
+  /** The file open in the editor, whether or not the user has attached it. */
+  viewedFile?: string;
+  /** Absolute path of the viewed file. */
+  viewedFilePath?: string;
+  /** True when the user added the viewed file to the next turn. Default is false. */
+  viewedFileIncluded: boolean;
+  /** True when the viewed file must not be read (a secret, a binary, and so on). */
+  viewedFileBlocked?: boolean;
   /** Lines in the current selection; 0 when there is none. */
   selectionLines: number;
   categories: ContextCategoryView[];
@@ -184,7 +197,7 @@ function shapeItem(shape: ProjectShape, excluded: boolean): ContextItemView {
   };
 }
 
-function editorItem(active: ActiveEditorState, excluded: boolean): ContextItemView {
+function editorItem(active: ActiveEditorState, attached: boolean, excluded: boolean): ContextItemView {
   const label = active.relativePath ?? active.absolutePath;
   if (active.excluded) {
     return {
@@ -195,12 +208,25 @@ function editorItem(active: ActiveEditorState, excluded: boolean): ContextItemVi
       reason: `The active file is excluded because ${exclusionReasonLabel(active.exclusionReason)}.`
     };
   }
+  if (!attached || excluded) {
+    return {
+      id: 'active',
+      label,
+      meta: 'not attached',
+      excluded: true,
+      attachment: 'off',
+      reason: excluded
+        ? 'Excluded for the next turn. This file is not sent.'
+        : 'Not included. Add the current file with + to send it.'
+    };
+  }
   return {
     id: 'active',
     label,
-    meta: 'active file',
+    meta: 'attached file',
     excerpt: `${label} (${active.languageId})`,
-    excluded
+    excluded: false,
+    attachment: 'on'
   };
 }
 
@@ -276,6 +302,8 @@ export interface BuildContextViewOptions {
   exclusions?: ReadonlySet<string> | readonly string[];
   /** True while a refresh is in flight, so the strip says it is building. */
   building?: boolean;
+  /** True when the user added the file they are viewing. Default is off. */
+  includeViewedFile?: boolean;
 }
 
 /**
@@ -303,6 +331,7 @@ export function buildContextView(
       includedCount: 0,
       excludedCount: 0,
       remainingGroups: 0,
+      viewedFileIncluded: false,
       message: 'No folder is open, so there is no project context to send.'
     };
   }
@@ -324,14 +353,17 @@ export function buildContextView(
 
   const editorExcluded = has(exclusions, categoryExclusionKey('editor'));
   const activeItemExcluded = editorExcluded || has(exclusions, itemExclusionKey('editor', 'active'));
+  const fileAttached =
+    options.includeViewedFile === true && Boolean(active) && !active?.excluded && !activeItemExcluded;
   // The selection is nested inside editor state, so an editor exclusion removes
-  // it from what is sent as well; the view must say so rather than showing a
-  // selection the next turn would not carry.
+  // it from what is sent as well. It is also withheld until the user attaches
+  // the current file, in which case the row is omitted rather than shown as a
+  // toggle that would not match what the next turn sends.
   const selectionExcluded =
     editorExcluded || activeItemExcluded || has(exclusions, categoryExclusionKey('selection'));
   const editorItems: ContextItemView[] = [];
   if (active) {
-    editorItems.push(editorItem(active, excludedIn('editor', 'active')));
+    editorItems.push(editorItem(active, fileAttached, excludedIn('editor', 'active')));
   }
   const activeLabel = active ? active.relativePath ?? active.absolutePath : undefined;
   for (const open of editor.openEditors) {
@@ -342,10 +374,9 @@ export function buildContextView(
     editorItems.push(openEditorItem(open, excludedIn('editor', `open:${label}`)));
   }
 
-  const selection = selectionItem(
-    active,
-    selectionExcluded || has(exclusions, itemExclusionKey('selection', 'selection'))
-  );
+  const selection = fileAttached
+    ? selectionItem(active, selectionExcluded || has(exclusions, itemExclusionKey('selection', 'selection')))
+    : undefined;
   const selectionItems = selection ? [selection] : [];
 
   const changedFilesExcluded = has(exclusions, categoryExclusionKey('changedFiles'));
@@ -413,10 +444,12 @@ export function buildContextView(
   // The strip names only what is actually sent. A per-turn exclusion on the
   // active file or the selection must remove it from the strip as well as from
   // the panel, so the strip reflects the reduced set.
-  const activeFilePath = active && !activeItemExcluded ? active.absolutePath : undefined;
-  const activeFile = active && !activeItemExcluded ? active.relativePath ?? active.absolutePath : undefined;
+  const viewedFile = active ? active.relativePath ?? active.absolutePath : undefined;
+  const viewedFilePath = active?.absolutePath;
+  const activeFile = fileAttached ? viewedFile : undefined;
+  const activeFilePath = fileAttached ? viewedFilePath : undefined;
   const selectionLines =
-    active?.selection && !active.excluded && !selectionExcluded
+    fileAttached && active?.selection && !active.excluded && !selectionExcluded
       ? active.selection.endLine - active.selection.startLine + 1
       : 0;
 
@@ -426,6 +459,10 @@ export function buildContextView(
     ...(snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {}),
     ...(activeFile ? { activeFile } : {}),
     ...(activeFilePath ? { activeFilePath } : {}),
+    ...(viewedFile ? { viewedFile } : {}),
+    ...(viewedFilePath ? { viewedFilePath } : {}),
+    viewedFileIncluded: fileAttached,
+    ...(active?.excluded ? { viewedFileBlocked: true } : {}),
     selectionLines,
     categories,
     includedCount,
@@ -499,6 +536,27 @@ function filterShape(
  * or category never adds anything back, and the filter is pure: the input
  * snapshot is untouched.
  */
+/**
+ * A snapshot safe to render as the stable prefix.
+ *
+ * The file the user is viewing is never named here. When they attach it, a
+ * separate per-turn block carries the path and contents, so a file switch
+ * cannot stay frozen in the session prefix.
+ */
+export function snapshotForDelivery(snapshot: ProjectSnapshot, attached: boolean): ProjectSnapshot {
+  return {
+    ...snapshot,
+    editor: {
+      ...snapshot.editor,
+      active: null,
+      activeFileAttached: attached,
+      openEditors: snapshot.editor.openEditors.map((editor) =>
+        editor.isActive ? { ...editor, isActive: false } : editor
+      )
+    }
+  };
+}
+
 export function applyContextExclusions(
   snapshot: ProjectSnapshot,
   exclusions: ReadonlySet<string> | readonly string[]

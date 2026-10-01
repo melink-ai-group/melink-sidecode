@@ -358,9 +358,16 @@ test('the context view is stored from the host and clears local exclusions when 
     categories: [],
     includedCount: 3,
     excludedCount: 0,
-    remainingGroups: 2
+    remainingGroups: 2,
+    viewedFileIncluded: false
   };
-  const withView = reduce(initialState, { type: 'context', view, settingsEnabled: true, exclusions: [] });
+  const withView = reduce(initialState, {
+    type: 'context',
+    view,
+    settingsEnabled: true,
+    exclusions: [],
+    includeViewedFile: false
+  });
   assert.equal(withView.contextView?.workspaceName, 'app');
   assert.equal(withView.contextSettingsEnabled, true);
 
@@ -369,7 +376,13 @@ test('the context view is stored from the host and clears local exclusions when 
 
   // The host echo is the source of truth: it carries the exclusion set actually
   // in effect, so a turn that consumed the exclusions cannot leave a stale one.
-  const restored = reduce(excluded, { type: 'context', view, settingsEnabled: true, exclusions: [] });
+  const restored = reduce(excluded, {
+    type: 'context',
+    view,
+    settingsEnabled: true,
+    exclusions: [],
+    includeViewedFile: false
+  });
   assert.deepEqual(restored.contextExclusions, []);
 });
 

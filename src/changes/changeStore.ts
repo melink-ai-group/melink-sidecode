@@ -1,4 +1,5 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
+import { hasIgnoredSegment } from './ignore.ts';
 import type { JournalFileEntry, JournalStorage, JournalTurn } from './journal';
 import { applyRejectedHunks, diffLines, type DiffLine } from './diff.ts';
 import { hashBytes } from './hash.ts';
@@ -218,6 +219,9 @@ export class ChangeStore {
     const decisions = this.validDecisions(backendId, threadId, turnId, turn);
     const files: ChangeFileView[] = [];
     for (const entry of turn.files) {
+      if (hasIgnoredSegment(entry.relPath)) {
+        continue;
+      }
       files.push(await this.fileView(turnId, entry, decisions));
     }
     const additions = files.reduce((sum, file) => sum + file.additions, 0);
@@ -270,6 +274,9 @@ export class ChangeStore {
     }
     const results: ChangeDecisionResult[] = [];
     for (const entry of turn.files) {
+      if (hasIgnoredSegment(entry.relPath)) {
+        continue;
+      }
       results.push(
         await this.decide({
           backendId: input.backendId,

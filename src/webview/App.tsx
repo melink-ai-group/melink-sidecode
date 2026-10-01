@@ -165,7 +165,8 @@ export function App(): JSX.Element {
             type: 'context',
             view: message.view,
             settingsEnabled: message.settingsEnabled,
-            exclusions: message.exclusions
+            exclusions: message.exclusions,
+            includeViewedFile: message.includeViewedFile
           });
           break;
         case 'modelCapability':
@@ -634,6 +635,10 @@ export function App(): JSX.Element {
   const resetContextExclusions = (): void => {
     dispatch({ type: 'resetContextExclusions' });
     bridge.post({ type: 'resetContextExclusions' });
+  };
+  const setIncludeViewedFile = (included: boolean): void => {
+    dispatch({ type: 'setIncludeViewedFile', included });
+    bridge.post({ type: 'setIncludeViewedFile', included });
   };
 
   const openContextFile = (path: string): void => {
@@ -1175,6 +1180,8 @@ export function App(): JSX.Element {
           onResetExclusions={resetContextExclusions}
           onRefresh={refreshContext}
           onOpenFile={openContextFile}
+          includeViewedFile={state.includeViewedFile}
+          onSetIncludeViewedFile={setIncludeViewedFile}
         />
         <div className="composer-box">
           {state.attachments.length > 0 ? (
@@ -2158,13 +2165,14 @@ function ToolCard({ item }: { item: TranscriptItemView }): JSX.Element {
         <span className="item-icon" aria-hidden="true">
           <TerminalIcon />
         </span>
-        <span className="item-kind">{item.title ?? 'Command'}</span>
-        {item.command ? (
-          <span className="item-path" title={item.command}>
-            {item.command}
-          </span>
-        ) : null}
-        <span className="spacer" />
+        <span className="item-main">
+          <span className="item-kind">{item.title ?? 'Command'}</span>
+          {item.command ? (
+            <span className="item-path" title={item.command}>
+              {item.command}
+            </span>
+          ) : null}
+        </span>
         <StatusChip status={item.status} doneLabel="Passed" />
       </summary>
       {item.text || item.detail ? (
@@ -2352,11 +2360,12 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
         <span className="item-icon" aria-hidden="true">
           <FileIcon />
         </span>
-        <span className="item-kind">{item.title ?? 'Edited'}</span>
-        <span className="item-path" title={filePathLabel(files)}>
-          {filePathLabel(files)}
+        <span className="item-main">
+          <span className="item-kind">{item.title ?? 'Edited'}</span>
+          <span className="item-path" title={filePathLabel(files)}>
+            {filePathLabel(files)}
+          </span>
         </span>
-        <span className="spacer" />
         {totals(files) ? (
           <span className="diff-stats" aria-label={diffStatsLabel(files)}>
             {totals(files)?.additions ? <span className="add">+{totals(files)?.additions}</span> : null}

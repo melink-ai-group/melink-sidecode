@@ -62,11 +62,20 @@ function snapshot(overrides: Partial<ProjectSnapshot> = {}): ProjectSnapshot {
   return { ...base, ...overrides };
 }
 
-test('the strip read model names the workspace, branch, active file and selection', () => {
+test('the strip read model names the workspace, branch, and viewed file', () => {
   const view = buildContextView(snapshot());
   assert.equal(view.status, 'ready');
   assert.equal(view.workspaceName, 'melink-sidebar');
   assert.equal(view.branch, 'main');
+  assert.equal(view.viewedFile, 'src/a.ts');
+  assert.equal(view.viewedFileIncluded, false, 'the current file is not sent until the user adds it');
+  assert.equal(view.activeFile, undefined);
+  assert.equal(view.selectionLines, 0);
+});
+
+test('attaching the viewed file names it and its selection', () => {
+  const view = buildContextView(snapshot(), { includeViewedFile: true });
+  assert.equal(view.viewedFileIncluded, true);
   assert.equal(view.activeFile, 'src/a.ts');
   assert.equal(view.selectionLines, 12, 'lines 4-15 inclusive is 12 lines');
 });
@@ -208,19 +217,31 @@ test('exclusion reasons read as plain language, never a raw enum', () => {
 });
 
 test('excluding the selection removes the strip selection indicator', () => {
-  const base = buildContextView(snapshot());
+  const base = buildContextView(snapshot(), { includeViewedFile: true });
   assert.equal(base.selectionLines, 12);
-  const excluded = buildContextView(snapshot(), { exclusions: [categoryExclusionKey('selection')] });
+  const excluded = buildContextView(snapshot(), {
+    includeViewedFile: true,
+    exclusions: [categoryExclusionKey('selection')]
+  });
   assert.equal(excluded.selectionLines, 0, 'the strip must not claim a selection the turn will not send');
 });
 
-test('excluding the active file removes it from the strip', () => {
-  const base = buildContextView(snapshot());
+test('the viewed file stays visible when editor context is excluded', () => {
+  const base = buildContextView(snapshot(), { includeViewedFile: true });
   assert.equal(base.activeFile, 'src/a.ts');
-  const byCategory = buildContextView(snapshot(), { exclusions: [categoryExclusionKey('editor')] });
+  const byCategory = buildContextView(snapshot(), {
+    includeViewedFile: true,
+    exclusions: [categoryExclusionKey('editor')]
+  });
+  assert.equal(byCategory.viewedFile, 'src/a.ts');
+  assert.equal(byCategory.viewedFileIncluded, false);
   assert.equal(byCategory.activeFile, undefined);
-  const byItem = buildContextView(snapshot(), { exclusions: [itemExclusionKey('editor', 'active')] });
+  const byItem = buildContextView(snapshot(), {
+    includeViewedFile: true,
+    exclusions: [itemExclusionKey('editor', 'active')]
+  });
   assert.equal(byItem.activeFile, undefined);
+  assert.equal(byItem.viewedFileIncluded, false);
 });
 
 test('the optimistic overlay clears the strip file and selection when toggled off', () => {

@@ -642,3 +642,19 @@ test('the user exclude patterns are additive to the built-in ignore set', async 
   assert.equal(snapshot.shape.files.includes('src/generated/api.ts'), false);
   assert.ok(snapshot.excludedPaths.some((entry) => entry.path.includes('generated')));
 });
+
+test('an attached file reads the viewed path and refuses a secret', async () => {
+  const host = fixture();
+  host.active = { path: '/work/app/src/index.ts', languageId: 'typescript' };
+  const context = new ProjectContext({ host });
+  const file = await context.viewedFileAttachment();
+  assert.equal(file?.path, 'src/index.ts');
+  assert.equal(file?.excluded, false);
+  assert.match(file?.text ?? '', /export const x = 1;/);
+
+  host.active = { path: '/work/app/.env', languageId: 'plaintext' };
+  const secret = await context.viewedFileAttachment();
+  assert.equal(secret?.excluded, true);
+  assert.equal(secret?.text, undefined);
+  assert.equal(host.readPaths.includes('/work/app/.env'), false);
+});

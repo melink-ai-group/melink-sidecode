@@ -100,8 +100,10 @@ function opencodePrompt(request: SendTurnRequest, freshSession: boolean): string
     : context?.delta ?? context?.notice;
   const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
   const instructions = modeInstructions(mode);
-  const body = block ? `${block}\n\n${request.text}` : request.text;
-  return instructions ? `${instructions}\n\n${body}` : body;
+  const parts = [instructions, block, context?.attachedFile, request.text].filter(
+    (part): part is string => Boolean(part && part.trim().length > 0)
+  );
+  return parts.join('\n\n');
 }
 
 /**

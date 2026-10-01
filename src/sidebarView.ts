@@ -598,6 +598,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'resetContextExclusions':
         this.setContextExclusions([]);
         break;
+      case 'setIncludeViewedFile':
+        this.setIncludeViewedFile(message.included);
+        break;
       case 'openContextFile':
         await this.openContextFile(message.path);
         break;
@@ -1677,6 +1680,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     void this.postContextView();
   }
 
+  /** Attach or remove the file the user is viewing. Off until they ask. */
+  private setIncludeViewedFile(included: boolean): void {
+    this.contextDelivery.setIncludeViewedFile(included);
+    void this.postContextView();
+  }
+
   /**
    * Push the context read model to the composer. `settingsEnabled` is false when
    * every context category is disabled in settings, so the strip can say context
@@ -1688,7 +1697,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       type: 'context',
       view,
       settingsEnabled: anyCategoryEnabled(this.projectContext.context.contextSettings()),
-      exclusions: this.contextDelivery.exclusionKeys()
+      exclusions: this.contextDelivery.exclusionKeys(),
+      includeViewedFile: this.contextDelivery.includeViewedFileEnabled()
     });
   }
 

@@ -21,9 +21,12 @@
 import type { ContextPayload } from '../backends/types.ts';
 import {
   DEFAULT_RENDER_BUDGET,
+  renderAttachedFile,
   renderDelta,
   renderSnapshotResult,
   CONTEXT_UNAVAILABLE_NOTICE,
+  VIEWED_FILE_NONE_OPEN,
+  VIEWED_FILE_NOT_ATTACHED,
   type RenderBudget
 } from './render.ts';
 import type {
@@ -31,8 +34,7 @@ import type {
   ProjectContextReads,
   ProjectSnapshot
 } from './projectContext.ts';
-import { applyContextExclusions, type ContextView } from './contextView.ts';
-import { buildContextView } from './contextView.ts';
+import { applyContextExclusions, buildContextView, snapshotForDelivery, type ContextView } from './contextView.ts';
 
 export interface ContextDeliveryOptions {
   /** The reads the snapshot service exposes. Never a workspace-root getter. */
@@ -71,6 +73,12 @@ export class ContextDelivery {
    * turn only and never persists silently into later ones.
    */
   private exclusions: readonly string[] = [];
+  /**
+   * The viewed file is not part of a turn until the user adds it. Default off,
+   * so a stale "active file" from session start cannot be mistaken for the
+   * file they are looking at.
+   */
+  private includeViewedFile = false;
 
   constructor(options: ContextDeliveryOptions) {
     this.reads = options.reads;
@@ -110,6 +118,23 @@ export class ContextDelivery {
    * the same reset path as a settings change, so an exclusion reaches an open
    * conversation's next turn exactly the way a settings change does.
    */
+  /** Whether the next turn includes the file the user is viewing. */
+  includeViewedFileEnabled(): boolean {
+    return this.includeViewedFile;
+  }
+
+  /**
+   * Attach or remove the viewed file. The cached prefix is dropped so the next
+   * turn is rendered against the new choice instead of a frozen active file.
+   */
+  setIncludeViewedFile(included: boolean): void {
+    if (this.includeViewedFile === included) {
+      return;
+    }
+    this.includeViewedFile = included;
+    this.resetRendered();
+  }
+
   setExclusions(keys: readonly string[]): void {
     this.exclusions = [...keys];
     this.resetRendered();
@@ -134,7 +159,11 @@ export class ContextDelivery {
   async view(building = false): Promise<ContextView> {
     try {
       const snapshot = await this.reads.getSnapshot();
-      return buildContextView(snapshot, { exclusions: this.exclusions, building });
+      return buildContextView(snapshot, {
+        exclusions: this.exclusions,
+        building,
+        includeViewedFile: this.includeViewedFile
+      });
     } catch {
       // A build that throws is reported as a distinct failure, never as an
       // empty workspace: the difference is exactly what the user needs before
@@ -146,6 +175,7 @@ export class ContextDelivery {
         includedCount: 0,
         excludedCount: 0,
         remainingGroups: 0,
+        viewedFileIncluded: false,
         message: 'Project context could not be built for this workspace.'
       };
     }
@@ -159,13 +189,17 @@ export class ContextDelivery {
   async snapshot(input: GetSnapshotInput = {}): Promise<PrimedSnapshot> {
     try {
       const snapshot = await this.reads.getSnapshot(input);
-      const filtered = applyContextExclusions(snapshot, this.exclusions);
+      const filtered = snapshotForDelivery(
+        applyContextExclusions(snapshot, this.exclusions),
+        this.includeViewedFile
+      );
       const rendered = renderSnapshotResult(filtered, { budget: this.renderBudget() });
       const workspaceRoot = filtered.workspace.roots[0];
+      const attachedFile = await this.viewedFileTurnBlock();
       if (!rendered.ok) {
-        return { payload: { notice: rendered.notice, priming: true, workspaceRoot } };
+        return { payload: { notice: rendered.notice, priming: true, workspaceRoot, attachedFile } };
       }
-      return { payload: { snapshot: rendered.text, priming: true, workspaceRoot }, snapshot };
+      return { payload: { snapshot: rendered.text, priming: true, workspaceRoot, attachedFile }, snapshot };
     } catch {
       return { payload: { notice: CONTEXT_UNAVAILABLE_NOTICE, priming: true } };
     }
@@ -203,8 +237,25 @@ export class ContextDelivery {
       ...(delta ? { delta } : {}),
       ...(!state.snapshotText && state.notice ? { notice: state.notice } : {}),
       ...(state.last ? { workspaceRoot: state.last.workspace.roots[0] } : {}),
+      attachedFile: await this.viewedFileTurnBlock(),
       priming
     };
+  }
+
+  /**
+   * The per-turn line for the viewed file. It is recomputed every turn, so it
+   * names the file open now rather than the file that was open when the
+   * session started.
+   */
+  private async viewedFileTurnBlock(): Promise<string> {
+    if (!this.includeViewedFile) {
+      return VIEWED_FILE_NOT_ATTACHED;
+    }
+    const file = await this.reads.viewedFileAttachment?.();
+    if (!file) {
+      return VIEWED_FILE_NONE_OPEN;
+    }
+    return renderAttachedFile(file);
   }
 
   /**
@@ -252,7 +303,10 @@ export class ContextDelivery {
       if (!state.last) {
         // No prior picture to diff against: the snapshot itself is the context.
         state.last = current;
-        const filtered = applyContextExclusions(current, this.exclusions);
+        const filtered = snapshotForDelivery(
+          applyContextExclusions(current, this.exclusions),
+          this.includeViewedFile
+        );
         const rendered = renderSnapshotResult(filtered, { budget: this.renderBudget() });
         if (rendered.ok) {
           state.snapshotText = rendered.text;
@@ -266,7 +320,10 @@ export class ContextDelivery {
       const delta = await this.reads.getDelta(state.last, current);
       state.last = current;
       this.states.set(threadKey, state);
-      const filtered = applyContextExclusions(current, this.exclusions);
+      const filtered = snapshotForDelivery(
+        applyContextExclusions(current, this.exclusions),
+        this.includeViewedFile
+      );
       return renderDelta(delta, filtered, { budget: this.renderBudget() }) ?? undefined;
     } catch {
       this.states.set(threadKey, state);

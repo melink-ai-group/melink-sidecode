@@ -73,18 +73,74 @@ test('a reported edit is recorded with source reported and the right relPath', a
   assert.equal(set.entries[0].source, 'reported');
 });
 
-test('a watched-only change is recorded with source watched', async () => {
+test('a watched modify of a snapshotted file is recorded when the bytes change', async () => {
   const fs = new FakeFs();
   fs.files.set('/ws/fmt.ts', text('before'));
   const change = tracker(fs);
 
-  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1', candidates: ['/ws/fmt.ts'] });
   fs.files.set('/ws/fmt.ts', text('after'));
   change.watch('/ws/fmt.ts', 'modified');
   const set = await change.endTurn();
 
   assert.ok(set);
+  assert.equal(set.entries[0].path, 'fmt.ts');
   assert.equal(set.entries[0].source, 'watched');
+  assert.equal(set.entries[0].status, 'modified');
+});
+
+test('a watched modify with no pre-turn snapshot is not a change', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/readme.md', text('hello'));
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  change.watch('/ws/readme.md', 'modified');
+  const set = await change.endTurn();
+
+  assert.ok(set, 'the turn was observed');
+  assert.deepEqual(set.entries, []);
+});
+
+test('files under ignored directories are not attributed to the turn', async () => {
+  const fs = new FakeFs();
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'ollama', threadId: 'thr', turnId: 't1' });
+  fs.files.set('/ws/.opencode/bun.lock', text('lock'));
+  fs.files.set('/ws/.opencode/node_modules/pkg/index.js', text('pkg'));
+  fs.files.set('/ws/node_modules/left-pad/index.js', text('pad'));
+  fs.files.set('/ws/src/app.ts', text('export {};'));
+  change.watch('/ws/.opencode/bun.lock', 'created');
+  change.watch('/ws/.opencode/node_modules/pkg/index.js', 'created');
+  change.watch('/ws/node_modules/left-pad/index.js', 'created');
+  change.watch('/ws/src/app.ts', 'created');
+  const set = await change.endTurn();
+
+  assert.ok(set);
+  assert.deepEqual(
+    set.entries.map((entry) => entry.path),
+    ['src/app.ts']
+  );
+});
+
+test('a root gitignore excludes matching creates', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/.gitignore', text('dist/\n'));
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  fs.files.set('/ws/dist/app.js', text('bundle'));
+  fs.files.set('/ws/src/app.ts', text('source'));
+  change.watch('/ws/dist/app.js', 'created');
+  change.watch('/ws/src/app.ts', 'created');
+  const set = await change.endTurn();
+
+  assert.ok(set);
+  assert.deepEqual(
+    set.entries.map((entry) => entry.path),
+    ['src/app.ts']
+  );
 });
 
 test('a shell-only change first seen after the write is still recorded', async () => {

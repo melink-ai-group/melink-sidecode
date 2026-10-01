@@ -1,5 +1,6 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import { hashBytes } from './hash.ts';
+import { isIgnoredRelPath } from './ignore.ts';
 
 /**
  * The per-turn file snapshot journal.
@@ -284,6 +285,8 @@ interface Draft {
 
 export class ChangeJournal {
   private readonly storage: JournalStorage;
+  /** Root `.gitignore` text, loaded once per workspace root. `null` means there is none. */
+  private readonly gitignoreCache = new Map<string, string | null>();
   private readonly fs: JournalFs;
   private readonly maxTurns: number;
   private readonly maxRestorePoints: number;
@@ -321,7 +324,7 @@ export class ChangeJournal {
       const candidates = input.candidates ?? input.candidatePaths ?? [];
       const before = new Map<string, FileSnapshot | null>();
       for (const candidate of candidates) {
-        if (!workspaceRelative(candidate, roots)) {
+        if (!workspaceRelative(candidate, roots) || (await this.ignored(candidate))) {
           continue;
         }
         before.set(candidate, await this.snapshot(candidate));
@@ -379,7 +382,7 @@ export class ChangeJournal {
       if (!pending) {
         return;
       }
-      if (!workspaceRelative(absPath, this.fs.workspaceRoots())) {
+      if (!workspaceRelative(absPath, this.fs.workspaceRoots()) || (await this.ignored(absPath))) {
         return;
       }
       // Never snapshot here: a watcher fires after the write, so snapshotting
@@ -418,7 +421,7 @@ export class ChangeJournal {
         afterKeys.add(path);
       }
       for (const path of afterPaths) {
-        if (workspaceRelative(path, roots)) {
+        if (workspaceRelative(path, roots) && !(await this.ignored(path))) {
           afterKeys.add(path);
         }
       }
@@ -621,6 +624,30 @@ export class ChangeJournal {
     return turn.files.find((file) => file.relPath === target);
   }
 
+  /**
+   * Paths the review must not attribute to the agent: ignored directories, and
+   * anything the workspace root `.gitignore` excludes. A missing gitignore
+   * ignores only the fixed directory names.
+   */
+  private async ignored(absPath: string): Promise<boolean> {
+    const located = workspaceRelative(absPath, this.fs.workspaceRoots());
+    if (!located) {
+      return false;
+    }
+    return isIgnoredRelPath(located.relPath, await this.gitignore(located.root));
+  }
+
+  private async gitignore(root: string): Promise<string | undefined> {
+    const key = toPosix(root);
+    if (this.gitignoreCache.has(key)) {
+      return this.gitignoreCache.get(key) ?? undefined;
+    }
+    const bytes = await this.fs.readFile(`${stripTrailingSlash(key)}/.gitignore`);
+    const text = bytes ? new TextDecoder().decode(bytes) : null;
+    this.gitignoreCache.set(key, text);
+    return text ?? undefined;
+  }
+
   private async snapshot(absPath: string): Promise<FileSnapshot | null> {
     const bytes = await this.fs.readFile(absPath);
     if (!bytes) {
@@ -762,9 +789,13 @@ export class ChangeJournal {
     for (const path of observedOnly) {
       const observation = observations.get(path);
       const hint = observation?.status;
-      // A delete hint with nothing present is a real delete; a create hint a
-      // create; anything else is a modification whose before side could not be
-      // captured (first seen only after the shell wrote it).
+      // A watcher `modified` with no pre-turn snapshot cannot prove the bytes
+      // changed. Recording it shows the whole file as an addition, which is
+      // what a read or a touch looks like. A structured report still counts:
+      // the tool named an edit. Creates and deletes are evidence on their own.
+      if (hint !== 'created' && hint !== 'deleted' && observation?.source !== 'reported') {
+        continue;
+      }
       const status: ChangeStatus = hint === 'deleted' ? 'deleted' : hint === 'created' ? 'created' : 'modified';
       const a = after.get(path) ?? undefined;
       drafts.push({

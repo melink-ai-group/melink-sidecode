@@ -17,10 +17,10 @@ import { AlertIcon, ChevronDownIcon, ContextIcon, FileIcon, InfoIcon } from './I
  * opens a bounded floating panel above the composer so it cannot change the
  * chat or composer dimensions.
  *
- * The strip renders only what will actually be sent: the workspace and branch,
- * the active file as a workspace-relative path that opens in the editor when
- * activated, a selection indicator only when a selection exists, and one chip
- * summarising the remaining categories. The panel lists one row per category
+ * The strip renders the workspace and branch, the file open in the editor as a
+ * chip (ghosted until the user adds it), a selection indicator only when that
+ * file is attached and a selection exists, and one chip summarising the
+ * remaining categories. The panel lists one row per category
  * with its entry count and truncation state, expanding to the exact excerpts.
  *
  * The host owns the read model; this component only renders it and reports
@@ -39,6 +39,10 @@ export interface ContextStripProps {
   onRefresh: () => void;
   /** Open the active file (or a context file) in the editor. */
   onOpenFile: (path: string) => void;
+  /** Whether the file open in the editor is included on the next turn. */
+  includeViewedFile: boolean;
+  /** Add or remove that file. Off until the user asks. */
+  onSetIncludeViewedFile: (included: boolean) => void;
 }
 
 export function ContextStrip({
@@ -49,7 +53,9 @@ export function ContextStrip({
   onToggle,
   onResetExclusions,
   onRefresh,
-  onOpenFile
+  onOpenFile,
+  includeViewedFile,
+  onSetIncludeViewedFile
 }: ContextStripProps): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -112,20 +118,46 @@ export function ContextStrip({
           </>
         ) : null}
 
-        {effective.activeFile && status !== 'empty' ? (
+        {effective.viewedFile && status !== 'empty' ? (
           <>
             <span className="context-sep" aria-hidden="true">
               ·
             </span>
-            <button
-              className="context-path"
-              type="button"
-              title={`Open ${effective.activeFile} in the editor`}
-              onClick={() => onOpenFile(effective.activeFilePath ?? '')}
+            <span
+              className={`context-file${includeViewedFile && !effective.viewedFileBlocked ? ' is-on' : ' is-ghost'}`}
             >
-              <FileIcon className="ico ico--xs" />
-              <span className="context-path-text">{effective.activeFile}</span>
-            </button>
+              <button
+                className="context-path"
+                type="button"
+                title={`Open ${effective.viewedFile} in the editor`}
+                onClick={() => onOpenFile(effective.viewedFilePath ?? '')}
+              >
+                <FileIcon className="ico ico--xs" />
+                <span className="context-path-text">{effective.viewedFile}</span>
+              </button>
+              {effective.viewedFileBlocked ? (
+                <span className="context-file-note">excluded</span>
+              ) : (
+                <button
+                  className="context-file-toggle"
+                  type="button"
+                  aria-pressed={includeViewedFile}
+                  aria-label={
+                    includeViewedFile
+                      ? `Remove ${effective.viewedFile} from context`
+                      : `Add ${effective.viewedFile} to context`
+                  }
+                  title={
+                    includeViewedFile
+                      ? 'Remove the current file from the next turn'
+                      : 'Add the current file to the next turn'
+                  }
+                  onClick={() => onSetIncludeViewedFile(!includeViewedFile)}
+                >
+                  {includeViewedFile ? '−' : '+'}
+                </button>
+              )}
+            </span>
           </>
         ) : null}
 
@@ -230,7 +262,12 @@ export function ContextStrip({
           ) : (
             <>
               {effective.categories.map((entry) => (
-                <ContextCategory key={entry.id} category={entry} onToggle={onToggle} />
+                <ContextCategory
+                  key={entry.id}
+                  category={entry}
+                  onToggle={onToggle}
+                  onAttach={onSetIncludeViewedFile}
+                />
               ))}
               <p className="context-panel__footnote">
                 <InfoIcon className="ico ico--xs" />
@@ -266,10 +303,12 @@ export function ContextStrip({
  */
 function ContextCategory({
   category,
-  onToggle
+  onToggle,
+  onAttach
 }: {
   category: ContextCategoryView;
   onToggle: (key: string) => void;
+  onAttach: (included: boolean) => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const excluded = category.excluded;
@@ -330,6 +369,7 @@ function ContextCategory({
                 categoryId={category.id}
                 item={item}
                 onToggle={onToggle}
+                onAttach={onAttach}
               />
             ))
           )}
@@ -343,11 +383,13 @@ function ContextCategory({
 function ContextItem({
   categoryId,
   item,
-  onToggle
+  onToggle,
+  onAttach
 }: {
   categoryId: ContextCategoryView['id'];
   item: ContextItemView;
   onToggle: (key: string) => void;
+  onAttach: (included: boolean) => void;
 }): JSX.Element {
   return (
     <div className={`context-item${item.excluded ? ' is-excluded' : ''}`}>
@@ -357,15 +399,29 @@ function ContextItem({
         </span>
         <span className="spacer" />
         {item.meta ? <span className="context-item__count">{item.meta}</span> : null}
-        <button
-          className="context-item__toggle"
-          type="button"
-          aria-pressed={item.excluded}
-          aria-label={item.excluded ? `Include ${item.label}` : `Exclude ${item.label} for the next turn`}
-          onClick={() => onToggle(itemExclusionKey(categoryId, item.id))}
-        >
-          {item.excluded ? 'Include' : 'Exclude'}
-        </button>
+        {item.attachment ? (
+          <button
+            className="context-file-toggle"
+            type="button"
+            aria-pressed={item.attachment === 'on'}
+            aria-label={
+              item.attachment === 'on' ? `Remove ${item.label} from context` : `Add ${item.label} to context`
+            }
+            onClick={() => onAttach(item.attachment !== 'on')}
+          >
+            {item.attachment === 'on' ? '−' : '+'}
+          </button>
+        ) : (
+          <button
+            className="context-item__toggle"
+            type="button"
+            aria-pressed={item.excluded}
+            aria-label={item.excluded ? `Include ${item.label}` : `Exclude ${item.label} for the next turn`}
+            onClick={() => onToggle(itemExclusionKey(categoryId, item.id))}
+          >
+            {item.excluded ? 'Include' : 'Exclude'}
+          </button>
+        )}
       </div>
       {item.excluded ? (
         <p className="context-excluded-note">

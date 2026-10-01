@@ -57,6 +57,15 @@ test('a burst of writes is coalesced to one observation per path', () => {
   ]);
 });
 
+test('ignored directories never reach the journal', () => {
+  const h = harness();
+  h.session.observe('/ws/.opencode/node_modules/pkg/index.js', 'created');
+  h.session.observe('/ws/node_modules/left-pad/index.js', 'created');
+  h.session.observe('/ws/src/app.ts', 'created');
+  h.runTimers();
+  assert.deepEqual(h.seen, [{ absPath: '/ws/src/app.ts', status: 'created' }]);
+});
+
 test('a path outside every workspace root is ignored', () => {
   const h = harness();
   h.session.observe('/outside/x.ts', 'created');

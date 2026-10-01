@@ -24,8 +24,10 @@
 
 import {
   cutToBytes,
+  type ExclusionReason,
   type ProjectDelta,
-  type ProjectSnapshot
+  type ProjectSnapshot,
+  type ViewedFileAttachment
 } from './projectContext.ts';
 
 /** Byte caps for the rendered blocks. Snapshots are large; deltas are tiny. */
@@ -55,6 +57,28 @@ export const SNAPSHOT_OPEN = '<project-context>';
 export const SNAPSHOT_CLOSE = '</project-context>';
 export const DELTA_OPEN = '<project-context-update>';
 export const DELTA_CLOSE = '</project-context-update>';
+export const ATTACHED_FILE_OPEN = '<attached-file>';
+export const ATTACHED_FILE_CLOSE = '</attached-file>';
+
+/** Sent on every turn until the user adds the file they are viewing. */
+export const VIEWED_FILE_NOT_ATTACHED =
+  'Current file: not attached. The user did not include the file they are viewing. Do not treat any other file as "this file".';
+
+/** Sent when the user attached a file but no editor is open. */
+export const VIEWED_FILE_NONE_OPEN =
+  'Current file: the user asked to include the file they are viewing, but no file is open in the editor.';
+
+const ATTACH_REASON: Record<ExclusionReason, string> = {
+  secret: 'it looks like a secret store',
+  'key-material': 'it looks like key material',
+  dependency: 'it is a dependency directory',
+  vcs: 'it is version-control metadata',
+  build: 'it is build output',
+  binary: 'it is a binary file',
+  lockfile: 'it is a lockfile',
+  excluded: 'it matches an exclude pattern',
+  user: 'it matches an exclude list'
+};
 
 /** The stable prefix every snapshot opens with, so the model knows its role. */
 const SNAPSHOT_INTRO =
@@ -303,9 +327,45 @@ function renderLayout(snapshot: ProjectSnapshot, lines: string[], budget: Render
   }
 }
 
+/**
+ * The per-turn block for the file the user explicitly attached. This is not
+ * part of the stable snapshot, so a later file switch is what the next turn sees.
+ */
+export function renderAttachedFile(file: ViewedFileAttachment): string {
+  const lines = [
+    ATTACHED_FILE_OPEN,
+    'The user attached the file they are viewing in the editor. When they say "this file", they mean this path and these contents. Do not substitute another file.',
+    `Path: ${file.path} (${file.languageId}).`
+  ];
+  if (file.excluded) {
+    const reason = file.exclusionReason ? ATTACH_REASON[file.exclusionReason] : 'it is excluded';
+    lines.push(`This file is excluded because ${reason}, so its contents are not included.`);
+  } else if (file.text && file.text.length > 0) {
+    lines.push('Contents:');
+    lines.push(file.text);
+    if (file.truncated) {
+      lines.push('Note: the file contents above were truncated to fit the context budget.');
+    }
+  } else {
+    lines.push('The file is empty.');
+  }
+  if (file.selection) {
+    lines.push('Selected text:');
+    lines.push(file.selection);
+  }
+  lines.push(ATTACHED_FILE_CLOSE);
+  return lines.join('\n');
+}
+
 function renderEditor(snapshot: ProjectSnapshot, lines: string[]): void {
   const editor = snapshot.editor;
-  if (editor.active) {
+  if (editor.activeFileAttached === true) {
+    lines.push(
+      'Current file: attached for this turn in a separate block. When the user says "this file", use that attached file and not another path in this project.'
+    );
+  } else if (editor.activeFileAttached === false) {
+    lines.push(VIEWED_FILE_NOT_ATTACHED);
+  } else if (editor.active) {
     lines.push(`Active file: ${activeEditorLabel(editor.active)}.`);
     if (editor.active.excluded) {
       lines.push(
