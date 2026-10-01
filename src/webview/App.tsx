@@ -1890,7 +1890,7 @@ function EmptyState({
       <img className="empty-logo" src={logoUrl} alt="" />
       <p className="empty-title empty-title--brand">meLink SideCode</p>
       <p className="empty-text">
-        On your side, privacy first. Edit, plan, or ask anything.
+        On your side. Plan, Edit, or Ask anything.
       </p>
       <p className="empty-slogan">You've got this</p>
     </div>
