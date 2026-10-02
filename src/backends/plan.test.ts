@@ -15,6 +15,8 @@ import {
   planSummaryFromReply,
   renderPlanMarkdown,
   sanitizeThreadId,
+  applyPlanDecisions,
+  hasPlanStepsHeading,
   shouldAutoOpenPlanDocument,
   stepMarker,
   statusForMarker,
@@ -333,6 +335,19 @@ test('a reply without a steps heading still uses the first list and the prose be
     { text: 'Add a retry', status: 'pending' },
     { text: 'Run the suite', status: 'pending' }
   ]);
+});
+
+test('answered questions replace a decisions section and stay ahead of later headings', () => {
+  const body = applyPlanDecisions('Ship the wording change.', ['1. Which label?: Develop']);
+  assert.equal(body, 'Ship the wording change.\n\n## Decisions\n\n- 1. Which label?: Develop');
+  const replaced = applyPlanDecisions(`${body}\n\n## Risks\n\nNone.`, ['1. Which label?: Build']);
+  assert.equal(
+    replaced,
+    'Ship the wording change.\n\n## Decisions\n\n- 1. Which label?: Build\n\n## Risks\n\nNone.'
+  );
+  assert.equal(applyPlanDecisions(undefined, []), undefined);
+  assert.equal(hasPlanStepsHeading('## Steps\n\n- [ ] Go'), true);
+  assert.equal(hasPlanStepsHeading('No steps here'), false);
 });
 
 test('a revision is recognised only when the user asks to change the plan', () => {

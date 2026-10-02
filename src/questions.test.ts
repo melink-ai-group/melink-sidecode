@@ -5,6 +5,8 @@ import {
   SKIPPED_ANSWER,
   extractSidecodeQuestions,
   formatQuestionAnswers,
+  planDecisionLines,
+  planUpdateFromAnswers,
   hideQuestionFence,
   questionAskFromBus,
   questionRequestFromToolParams,
@@ -56,6 +58,24 @@ test('answers are one numbered line per question', () => {
     ]
   );
   assert.equal(text, `Answers:\n1. Which layout?: Two columns\n2. Ship it now?: ${SKIPPED_ANSWER}`);
+  assert.deepEqual(planDecisionLines(
+    [
+      { id: 'q1', prompt: 'Which layout?', options: ['Two columns'] },
+      { id: 'q2', prompt: 'Ship it now?', options: ['Yes'] }
+    ],
+    [
+      { questionId: 'q1', text: 'Two columns' },
+      { questionId: 'q2', text: '' }
+    ]
+  ), ['1. Which layout?: Two columns', `2. Ship it now?: ${SKIPPED_ANSWER}`]);
+  assert.match(planUpdateFromAnswers(
+    [{ id: 'q1', prompt: 'Which layout?', options: ['Two columns'] }],
+    [{ questionId: 'q1', text: 'Two columns' }]
+  ), /Update the plan document/);
+  assert.match(planUpdateFromAnswers(
+    [{ id: 'q1', prompt: 'Which layout?', options: ['Two columns'] }],
+    [{ questionId: 'q1', text: 'Two columns' }]
+  ), /## Steps/);
 });
 
 test('ranked options drop a custom entry and anything past two', () => {

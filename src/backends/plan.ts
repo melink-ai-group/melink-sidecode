@@ -326,7 +326,8 @@ export interface PlanDocumentDraft {
   steps: TodoStep[];
 }
 
-function hasStepsHeading(markdown: string): boolean {
+/** True when a reply contains the plan's `## Steps` section. */
+export function hasPlanStepsHeading(markdown: string): boolean {
   return markdown.split(/\r?\n/).some((line) => {
     const heading = line.trim();
     return heading === PLAN_STEPS_HEADING || heading.toLowerCase() === PLAN_STEPS_HEADING.toLowerCase();
@@ -367,7 +368,7 @@ function proseBeforeList(reply: string): string | undefined {
  * the body. A reply with no steps yields an empty step list.
  */
 export function planDocumentFromReply(reply: string): PlanDocumentDraft {
-  if (hasStepsHeading(reply)) {
+  if (hasPlanStepsHeading(reply)) {
     const titled = replyHasTitle(reply);
     const title = titled ? parsePlanTitle(reply, '') : '';
     return {
@@ -385,6 +386,30 @@ export function planDocumentFromReply(reply: string): PlanDocumentDraft {
     summary: planSummaryFromReply(reply),
     steps: planStepsFromReply(reply)
   };
+}
+
+/**
+ * Put answered questions into the plan body. A later `## Decisions` section is
+ * replaced, so each new round of answers is what the document shows.
+ */
+export function applyPlanDecisions(body: string | undefined, lines: readonly string[]): string | undefined {
+  if (lines.length === 0) {
+    return body;
+  }
+  const section = ['## Decisions', '', ...lines.map((line) => `- ${line}`)].join('\n');
+  const prose = (body ?? '').replace(/\r\n?/g, '\n').trim();
+  if (prose.length === 0) {
+    return section;
+  }
+  const match = /^## Decisions\s*$/im.exec(prose);
+  if (!match) {
+    return `${prose}\n\n${section}`;
+  }
+  const afterHeading = prose.slice(match.index + match[0].length);
+  const nextHeading = /\n##\s+/.exec(afterHeading);
+  const tail = nextHeading ? afterHeading.slice(nextHeading.index + 1).trim() : '';
+  const head = prose.slice(0, match.index).trim();
+  return [head, section, tail].filter((part) => part.length > 0).join('\n\n');
 }
 
 /**
