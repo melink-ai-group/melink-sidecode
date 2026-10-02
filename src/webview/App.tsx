@@ -912,7 +912,9 @@ export function App(): JSX.Element {
       if (message.raw?.trim()) {
         setDraft((current) => appendDraft(current, message.raw as string));
       }
-      dispatch({ type: 'attachmentError', message: message.message });
+      if (message.message !== 'No speech was heard.') {
+        dispatch({ type: 'attachmentError', message: message.message });
+      }
       return;
     }
     if (!message.text.trim()) {
@@ -1764,7 +1766,7 @@ export function App(): JSX.Element {
                 <button
                   className={
                     micPhase === 'idle'
-                      ? 'icon-btn composer-action'
+                      ? 'icon-btn icon-btn--primary composer-action'
                       : `icon-btn composer-action composer-action--mic-${micPhase}`
                   }
                   type="button"
