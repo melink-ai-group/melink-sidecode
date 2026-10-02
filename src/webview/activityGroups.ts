@@ -1,23 +1,39 @@
 /**
  * Collapse a flat transcript into major steps.
  *
- * Consecutive lookup, change, or command items become one summary row.
- * A message, reasoning card, approval, or anything we cannot classify
- * stays its own line and ends the current run. A single tool stays a
- * single row; a group exists only when two or more items share a family.
+ * Reasoning, lookups, and commands are one investigation. They stay on a
+ * single collapsed line until a major change: an edit, a message, an
+ * approval, or a tool we cannot classify. Edits group with other edits.
+ * A single item stays the row it already is.
  */
 
 import { isRawToolName } from '../backends/toolLabel.ts';
 import type { ItemStatus, TranscriptItemView } from './state.ts';
 
-export type ActivityFamily = 'lookup' | 'change' | 'command';
+export type ActivityFamily = 'lookup' | 'change' | 'command' | 'work';
 
 export type TranscriptEntry =
   | { kind: 'item'; item: TranscriptItemView }
   | { kind: 'group'; id: string; family: ActivityFamily; items: TranscriptItemView[] };
 
+/** One reasoning highlight and the tool calls that followed it. */
+export interface ActivitySection {
+  id: string;
+  reasoning?: TranscriptItemView;
+  tools: TranscriptItemView[];
+}
+
+/** Consecutive tool calls of one family, nested under a section. */
+export interface ToolBurst {
+  id: string;
+  family: ActivityFamily;
+  items: TranscriptItemView[];
+}
+
 export interface ActivitySummary {
   label: string;
+  /** Counts, when the label is a reasoning highlight. */
+  detail?: string;
   status: ItemStatus;
 }
 
@@ -46,9 +62,81 @@ const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'strreplace', 'apply_patch
 const DELETE_TOOLS = new Set(['delete', 'remove']);
 const COMMAND_TOOLS = new Set(['bash', 'shell', 'command', 'exec', 'powershell']);
 
-/** Walk the transcript once and wrap each burst of the same family. */
+/** Walk the transcript once. Investigation stays together; an edit starts a new line. */
 export function groupTranscript(items: TranscriptItemView[]): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
+  let run: 'work' | 'change' | undefined;
+  let buffer: TranscriptItemView[] = [];
+
+  const flush = (): void => {
+    if (buffer.length === 0 || !run) {
+      buffer = [];
+      run = undefined;
+      return;
+    }
+    if (buffer.length === 1) {
+      entries.push({ kind: 'item', item: buffer[0] });
+    } else {
+      entries.push({ kind: 'group', id: buffer[0].id, family: groupFamily(buffer), items: buffer });
+    }
+    buffer = [];
+    run = undefined;
+  };
+
+  for (const item of items) {
+    const next = runOf(item);
+    if (!next) {
+      flush();
+      entries.push({ kind: 'item', item });
+      continue;
+    }
+    if (run && next !== run) {
+      flush();
+    }
+    run = next;
+    buffer.push(item);
+  }
+  flush();
+  return entries;
+}
+
+/**
+ * Pair each reasoning highlight with the tool calls that followed it,
+ * up to the next thought. Calls before the first thought stand alone.
+ */
+export function activitySections(items: TranscriptItemView[]): ActivitySection[] {
+  const sections: ActivitySection[] = [];
+  let reasoning: TranscriptItemView | undefined;
+  let tools: TranscriptItemView[] = [];
+
+  const flush = (): void => {
+    if (!reasoning && tools.length === 0) {
+      return;
+    }
+    sections.push({
+      id: reasoning?.id ?? tools[0].id,
+      ...(reasoning ? { reasoning } : {}),
+      tools
+    });
+    reasoning = undefined;
+    tools = [];
+  };
+
+  for (const item of items) {
+    if (item.kind === 'reasoning') {
+      flush();
+      reasoning = item;
+      continue;
+    }
+    tools.push(item);
+  }
+  flush();
+  return sections;
+}
+
+/** Split a section's tools into consecutive same-family bursts. */
+export function toolBursts(items: TranscriptItemView[]): ToolBurst[] {
+  const bursts: ToolBurst[] = [];
   let family: ActivityFamily | undefined;
   let buffer: TranscriptItemView[] = [];
 
@@ -58,53 +146,118 @@ export function groupTranscript(items: TranscriptItemView[]): TranscriptEntry[] 
       family = undefined;
       return;
     }
-    if (buffer.length === 1) {
-      entries.push({ kind: 'item', item: buffer[0] });
-    } else {
-      entries.push({ kind: 'group', id: buffer[0].id, family, items: buffer });
-    }
+    bursts.push({ id: buffer[0].id, family, items: buffer });
     buffer = [];
     family = undefined;
   };
 
   for (const item of items) {
     const classified = classify(item);
-    if (!classified) {
-      flush();
-      entries.push({ kind: 'item', item });
-      continue;
-    }
-    if (family && classified.family !== family) {
+    const next = classified?.family ?? 'work';
+    if (family && next !== family) {
       flush();
     }
-    family = classified.family;
+    family = next;
     buffer.push(item);
   }
   flush();
-  return entries;
+  return bursts;
 }
 
-/** One line for a burst: present while it is still running, counts once it settles. */
+/** One line for a step. A thought is the highlight; counts sit beside it. */
 export function activitySummary(items: TranscriptItemView[]): ActivitySummary {
   const status = groupStatus(items);
   const classified = items.flatMap((item) => {
     const next = classify(item);
     return next ? [next] : [];
   });
-  const family = classified[0]?.family ?? 'lookup';
+  const family = groupFamily(items);
   const running = status === 'streaming';
+  const highlight = latestThought(items);
 
-  if (family === 'lookup') {
-    return { status, label: running ? 'Exploring…' : exploredLabel(classified) };
+  if (family === 'change') {
+    const onlyDeletes = classified.length > 0 && classified.every((entry) => entry.bucket === 'delete');
+    if (running) {
+      return { status, label: onlyDeletes ? 'Deleting…' : 'Editing…' };
+    }
+    return { status, label: changedLabel(items, classified) };
   }
-  if (family === 'command') {
-    return { status, label: running ? 'Running…' : `Ran ${countPhrase(items.length, 'command', 'commands')}` };
+
+  const counts = workCountLabel(classified);
+  if (highlight) {
+    return counts ? { status, label: highlight, detail: counts } : { status, label: highlight };
   }
-  const onlyDeletes = classified.length > 0 && classified.every((entry) => entry.bucket === 'delete');
   if (running) {
-    return { status, label: onlyDeletes ? 'Deleting…' : 'Editing…' };
+    return { status, label: liveWorkLabel(classified) };
   }
-  return { status, label: changedLabel(items, classified) };
+  return { status, label: counts ?? 'Worked' };
+}
+
+function groupFamily(items: TranscriptItemView[]): ActivityFamily {
+  const families = new Set(
+    items.flatMap((item) => {
+      const classified = classify(item);
+      return classified ? [classified.family] : [];
+    })
+  );
+  if (families.size === 1) {
+    return [...families][0];
+  }
+  return 'work';
+}
+
+/** Reasoning joins lookups and commands. An edit is its own run. */
+function runOf(item: TranscriptItemView): 'work' | 'change' | undefined {
+  if (item.kind === 'reasoning') {
+    return 'work';
+  }
+  const classified = classify(item);
+  if (!classified) {
+    return undefined;
+  }
+  return classified.family === 'change' ? 'change' : 'work';
+}
+
+function latestThought(items: TranscriptItemView[]): string | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind !== 'reasoning') {
+      continue;
+    }
+    const snippet = item.text.replace(/\s+/g, ' ').trim();
+    if (snippet) {
+      return snippet;
+    }
+  }
+  return undefined;
+}
+
+function liveWorkLabel(classified: Classified[]): string {
+  const families = new Set(classified.map((entry) => entry.family));
+  if (families.size === 1 && families.has('command')) {
+    return 'Running…';
+  }
+  if (families.has('lookup') && !families.has('command')) {
+    return 'Exploring…';
+  }
+  if (families.has('command')) {
+    return 'Working…';
+  }
+  return 'Exploring…';
+}
+
+function workCountLabel(classified: Classified[]): string | undefined {
+  const lookups = classified.filter((entry) => entry.family === 'lookup');
+  const commands = classified.filter((entry) => entry.family === 'command');
+  const parts: string[] = [];
+  if (lookups.length > 0) {
+    parts.push(exploredLabel(lookups));
+  }
+  if (commands.length > 0) {
+    const phrase = `Ran ${countPhrase(commands.length, 'command', 'commands')}`;
+    parts.push(parts.length > 0 ? phrase.charAt(0).toLowerCase() + phrase.slice(1) : phrase);
+  }
+  return parts.length > 0 ? parts.join(', ') : undefined;
 }
 
 function groupStatus(items: TranscriptItemView[]): ItemStatus {

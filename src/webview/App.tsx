@@ -71,7 +71,7 @@ import {
   type TranscriptItemView
 } from './state';
 import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
-import { activitySummary, groupTranscript, type ActivityFamily } from './activityGroups.ts';
+import { activitySections, activitySummary, groupTranscript, toolBursts, type ActivityFamily } from './activityGroups.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
 import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
 import type {
@@ -783,6 +783,7 @@ export function App(): JSX.Element {
 
   const dictationModel = state.settings?.defaults.dictationModel?.trim() ?? '';
   const micPhase = dictationVisual(dictationStatus, listening, cleaning);
+  const composerModeClass = `composer-action--mode-${state.mode}`;
   const micDisabled = !dictationModel;
   const micGestureHint = cleaning
     ? undefined
@@ -1779,8 +1780,8 @@ export function App(): JSX.Element {
                 <button
                   className={
                     micPhase === 'idle'
-                      ? 'icon-btn icon-btn--primary composer-action'
-                      : `icon-btn composer-action composer-action--mic-${micPhase}`
+                      ? `icon-btn icon-btn--primary composer-action ${composerModeClass}`
+                      : `icon-btn composer-action composer-action--mic-${micPhase} ${composerModeClass}`
                   }
                   type="button"
                   aria-label={listening ? 'Stop dictation' : micPhase === 'idle' ? 'Dictate a message' : micTitle}
@@ -1804,7 +1805,7 @@ export function App(): JSX.Element {
               ) : null}
               {state.busy && !canSteer ? (
                 <button
-                  className="icon-btn composer-action composer-action--stop"
+                  className={`icon-btn composer-action composer-action--stop ${composerModeClass}`}
                   type="button"
                   aria-label="Stop"
                   title="Stop"
@@ -1814,7 +1815,7 @@ export function App(): JSX.Element {
                 </button>
               ) : showMic ? null : (
                 <button
-                  className="icon-btn icon-btn--primary composer-action"
+                  className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}
                   type="button"
                   aria-label="Send"
                   title="Send"
@@ -2856,9 +2857,62 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
 function ActivityGroup({ family, items }: { family: ActivityFamily; items: TranscriptItemView[] }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const summary = activitySummary(items);
-  const Icon = family === 'command' ? TerminalIcon : family === 'change' ? FileIcon : SearchIcon;
+  const Icon = family === 'command' ? TerminalIcon : family === 'change' ? FileIcon : family === 'work' ? SparkIcon : SearchIcon;
+  const nested = family === 'work' || items.some((item) => item.kind === 'reasoning');
+  const label = summary.detail ? `${summary.label} ${summary.detail}` : summary.label;
   return (
     <div className={`item-card activity-group${expanded ? ' activity-group--open' : ''}`}>
+      <button
+        type="button"
+        className="activity-group__toggle item-head"
+        aria-expanded={expanded}
+        aria-label={label}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className={`activity-group__chevron${expanded ? ' activity-group__chevron--open' : ''}`} aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
+        <span className="item-icon" aria-hidden="true">
+          <Icon />
+        </span>
+        <span className="item-main">
+          <span className="item-kind" title={summary.label}>
+            {summary.label}
+          </span>
+          {summary.detail ? <span className="item-path">{summary.detail}</span> : null}
+        </span>
+        <StatusChip status={summary.status} doneLabel={family === 'change' ? 'Applied' : 'Passed'} />
+      </button>
+      {expanded ? (
+        <div className="activity-group__items">
+          {nested ? (
+            activitySections(items).map((section) => (
+              <div className="activity-section" key={section.id}>
+                {section.reasoning ? <ReasoningCard item={section.reasoning} /> : null}
+                {toolBursts(section.tools).map((burst) =>
+                  burst.items.length === 1 ? (
+                    <GroupChild key={burst.id} item={burst.items[0]} />
+                  ) : (
+                    <NestedBurst key={burst.id} family={burst.family} items={burst.items} />
+                  )
+                )}
+              </div>
+            ))
+          ) : (
+            items.map((item) => <GroupChild key={item.id} item={item} />)
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function NestedBurst({ family, items }: { family: ActivityFamily; items: TranscriptItemView[] }): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const summary = activitySummary(items);
+  const Icon = family === 'command' ? TerminalIcon : family === 'change' ? FileIcon : SearchIcon;
+  return (
+    <div className={`item-card activity-group activity-group--nested${expanded ? ' activity-group--open' : ''}`}>
       <button
         type="button"
         className="activity-group__toggle item-head"
@@ -2875,7 +2929,7 @@ function ActivityGroup({ family, items }: { family: ActivityFamily; items: Trans
         <span className="item-main">
           <span className="item-kind">{summary.label}</span>
         </span>
-        <StatusChip status={summary.status} doneLabel={family === 'change' ? 'Applied' : 'Passed'} />
+        <StatusChip status={summary.status} doneLabel="Passed" />
       </button>
       {expanded ? (
         <div className="activity-group__items">
