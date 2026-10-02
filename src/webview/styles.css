@@ -1024,8 +1024,9 @@ body {
   gap: 4px;
   flex: 0 0 auto;
   align-self: flex-start;
-  height: 18px;
+  height: 24px;
   padding: 2px 0;
+  overflow: visible;
 }
 
 .typing-dots span {
@@ -1049,12 +1050,12 @@ body {
   60%,
   100% {
     opacity: 0.3;
-    transform: translateY(0);
+    transform: translateY(4px);
   }
 
   30% {
     opacity: 1;
-    transform: translateY(-3px);
+    transform: translateY(-8px);
   }
 }
 
@@ -1196,9 +1197,6 @@ body {
 .item-card--command[open] .item-path { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
 .item-card--command[open] .item-head { border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
 .item-card--command .item-body code { white-space: pre-wrap; overflow-wrap: anywhere; }
-
-.busy-indicator { display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--vscode-progressBar-background); }
-.busy-indicator .spinner { width: 12px; height: 12px; border-width: 1.5px; }
 
 .item-head {
   display: flex;
@@ -1783,9 +1781,56 @@ body {
   border-radius: var(--melink-radius-sm, 4px);
 }
 
-.composer-action--listening {
+.icon-btn.composer-action--mic-starting,
+.icon-btn.composer-action--mic-listening,
+.icon-btn.composer-action--mic-downloading,
+.icon-btn.composer-action--mic-working {
+  position: relative;
+}
+
+.icon-btn.composer-action--mic-starting,
+.icon-btn.composer-action--mic-starting:hover {
+  color: var(--melink-yellow);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.icon-btn.composer-action--mic-listening,
+.icon-btn.composer-action--mic-listening:hover {
   color: var(--melink-primary);
   animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.icon-btn.composer-action--mic-downloading,
+.icon-btn.composer-action--mic-downloading:hover {
+  color: var(--melink-yellow);
+}
+
+.icon-btn.composer-action--mic-working,
+.icon-btn.composer-action--mic-working:hover {
+  color: var(--melink-shell);
+}
+
+.composer-action--mic-downloading::after,
+.composer-action--mic-working::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+.icon-btn.composer-action--stop {
+  color: var(--melink-primary);
+  border: 1px solid var(--melink-primary);
+  background: transparent;
+}
+
+.icon-btn.composer-action--stop:hover {
+  background: color-mix(in srgb, var(--melink-primary) 14%, transparent);
+  color: var(--melink-primary);
 }
 
 @keyframes mic-pulse {
@@ -2035,16 +2080,6 @@ body {
 .composer-error .ico {
   flex: 0 0 auto;
   margin-top: 1px;
-}
-
-.composer-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 6px 8px 0;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
 }
 
 /* ---- Empty state ---- */
