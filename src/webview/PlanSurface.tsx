@@ -7,7 +7,6 @@ import {
   ChevronDownIcon,
   CrossIcon,
   FileIcon,
-  InfoIcon,
   RefreshIcon
 } from './Icons';
 
@@ -301,7 +300,14 @@ function TodoList({
           <ChevronDownIcon className={`ico ico--xs todo__chevron${stepsOpen ? '' : ' todo__chevron--closed'}`} />
           <span className="plan-card__title">{title}</span>
           <span className="spacer" />
-          <span className="todo__progress-text">{progressText}</span>
+          <span className="todo__progress">
+            {allDone ? (
+              <CheckIcon className="ico ico--xs todo__progress-icon todo__progress-icon--done" />
+            ) : stopped ? (
+              <AlertIcon className="ico ico--xs todo__progress-icon todo__progress-icon--stopped" />
+            ) : null}
+            <span className="todo__progress-text">{progressText}</span>
+          </span>
         </button>
         {plan.path ? (
           <button className="btn btn--link" type="button" onClick={onOpenPlan}>
@@ -328,33 +334,12 @@ function TodoList({
         </ul>
       ) : null}
 
-      {allDone ? (
-        <p className="todo__finished">
-          <CheckIcon className="ico ico--xs" />
-          <span>All steps finished.</span>
-        </p>
-      ) : stopped ? (
-        <p className="todo__note todo__note--stopped" role="status">
-          <AlertIcon className="ico ico--xs" />
-          <span>
-            {deniedCount > 0
-              ? `${deniedCount} of ${total} steps ${deniedCount === 1 ? 'was' : 'were'} denied. ${done} of ${total} done, so this is not a completed plan. Steps already done stay applied.`
-              : `${done} of ${total} steps done. The build did not finish, so this is not a completed plan. Steps already done stay applied.`}
-          </span>
-        </p>
-      ) : null}
       {stopped ? (
         <p className="todo__retry">
           <button className="btn" type="button" onClick={() => onRevise('Continue the remaining steps of this plan.')}>
             <RefreshIcon />
             Resume remaining steps
           </button>
-        </p>
-      ) : null}
-      {total === 0 ? (
-        <p className="todo__note">
-          <InfoIcon className="ico ico--xs" />
-          <span>The plan has no steps to track.</span>
         </p>
       ) : null}
     </section>
