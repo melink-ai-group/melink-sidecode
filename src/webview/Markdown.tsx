@@ -2,103 +2,16 @@ import type { JSX, ReactNode } from 'react';
 import { statusForMarker } from '../backends/plan';
 import type { TodoStepStatus } from '../backends/types';
 import { stepStatusKind, stepStatusLabel } from '../planStepIcon';
+import { parseMarkdownBlocks } from './markdownBlocks';
 
 /**
  * Minimal markdown renderer for agent output.
  *
  * This deliberately covers the subset the transcript needs - paragraphs,
- * fenced code blocks, headings, lists, blockquotes and inline code/emphasis/
- * links - and returns React nodes. It never builds an HTML string, so provider
- * output cannot inject markup into the webview.
+ * fenced code blocks, headings, lists, tables, blockquotes and inline
+ * code/emphasis/links - and returns React nodes. It never builds an HTML
+ * string, so provider output cannot inject markup into the webview.
  */
-
-type Block =
-  | { kind: 'code'; language: string; lines: string[] }
-  | { kind: 'heading'; level: number; text: string }
-  | { kind: 'paragraph'; text: string }
-  | { kind: 'quote'; lines: string[] }
-  | { kind: 'list'; ordered: boolean; items: string[] };
-
-const FENCE = /^\s*```\s*([\w.+-]*)\s*$/;
-const HEADING = /^(#{1,6})\s+(.*)$/;
-const UL = /^\s*[-*+]\s+(.*)$/;
-const OL = /^\s*\d+[.)]\s+(.*)$/;
-const QUOTE = /^\s*>\s?(.*)$/;
-
-function parseBlocks(source: string): Block[] {
-  const lines = source.replace(/\r\n?/g, '\n').split('\n');
-  const blocks: Block[] = [];
-  let index = 0;
-
-  while (index < lines.length) {
-    const line = lines[index];
-
-    if (line.trim() === '') {
-      index += 1;
-      continue;
-    }
-
-    const fence = FENCE.exec(line);
-    if (fence) {
-      const language = fence[1] ?? '';
-      const body: string[] = [];
-      index += 1;
-      while (index < lines.length && !FENCE.test(lines[index])) {
-        body.push(lines[index]);
-        index += 1;
-      }
-      index += 1; // consume closing fence (or run out cleanly)
-      blocks.push({ kind: 'code', language, lines: body });
-      continue;
-    }
-
-    const heading = HEADING.exec(line);
-    if (heading) {
-      blocks.push({ kind: 'heading', level: heading[1].length, text: heading[2] });
-      index += 1;
-      continue;
-    }
-
-    if (QUOTE.test(line)) {
-      const body: string[] = [];
-      while (index < lines.length && QUOTE.test(lines[index])) {
-        body.push(QUOTE.exec(lines[index])?.[1] ?? '');
-        index += 1;
-      }
-      blocks.push({ kind: 'quote', lines: body });
-      continue;
-    }
-
-    if (UL.test(line) || OL.test(line)) {
-      const ordered = OL.test(line);
-      const items: string[] = [];
-      const pattern = ordered ? OL : UL;
-      while (index < lines.length && pattern.test(lines[index])) {
-        items.push((pattern.exec(lines[index]) as RegExpExecArray)[1]);
-        index += 1;
-      }
-      blocks.push({ kind: 'list', ordered, items });
-      continue;
-    }
-
-    const paragraph: string[] = [];
-    while (
-      index < lines.length &&
-      lines[index].trim() !== '' &&
-      !FENCE.test(lines[index]) &&
-      !HEADING.test(lines[index]) &&
-      !QUOTE.test(lines[index]) &&
-      !UL.test(lines[index]) &&
-      !OL.test(lines[index])
-    ) {
-      paragraph.push(lines[index]);
-      index += 1;
-    }
-    blocks.push({ kind: 'paragraph', text: paragraph.join('\n') });
-  }
-
-  return blocks;
-}
 
 const LEADING_STEP = /^\[([ xX~-])\]\s*/;
 
@@ -113,6 +26,18 @@ function parseLeadingStep(text: string): { status: TodoStepStatus; text: string 
 const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\[[^\]]+\]\([^)\s]+\))/g;
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
+  const lines = text.split('\n');
+  const nodes: ReactNode[] = [];
+  lines.forEach((line, lineIndex) => {
+    if (lineIndex > 0) {
+      nodes.push(<br key={`${keyPrefix}-br${lineIndex}`} />);
+    }
+    nodes.push(...renderInlineLine(line, `${keyPrefix}-L${lineIndex}`));
+  });
+  return nodes;
+}
+
+function renderInlineLine(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let last = 0;
   let match: RegExpExecArray | null;
@@ -162,7 +87,7 @@ export interface MarkdownProps {
 }
 
 export function Markdown({ text, renderCodeHeader }: MarkdownProps): JSX.Element {
-  const blocks = parseBlocks(text);
+  const blocks = parseMarkdownBlocks(text);
   return (
     <div className="md">
       {blocks.map((block, index) => {
@@ -196,6 +121,31 @@ export function Markdown({ text, renderCodeHeader }: MarkdownProps): JSX.Element
               <blockquote className="md__quote" key={key}>
                 {renderInline(block.lines.join('\n'), key)}
               </blockquote>
+            );
+          case 'table':
+            return (
+              <div className="md__table-wrap" key={key}>
+                <table className="md__table">
+                  <thead>
+                    <tr>
+                      {block.headers.map((header, cellIndex) => (
+                        <th key={`${key}-h${cellIndex}`}>{renderInline(header, `${key}-h${cellIndex}`)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, rowIndex) => (
+                      <tr key={`${key}-r${rowIndex}`}>
+                        {row.map((cell, cellIndex) => (
+                          <td key={`${key}-r${rowIndex}-c${cellIndex}`}>
+                            {renderInline(cell, `${key}-r${rowIndex}-c${cellIndex}`)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             );
           case 'list': {
             const items = block.items.map((item, itemIndex) => {

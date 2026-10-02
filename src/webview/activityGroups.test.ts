@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activitySummary, groupTranscript } from './activityGroups.ts';
+import { activitySections, activitySummary, groupTranscript, toolBursts } from './activityGroups.ts';
 import type { TranscriptItemView } from './state.ts';
 
 function row(partial: Partial<TranscriptItemView> & Pick<TranscriptItemView, 'id'>): TranscriptItemView {
@@ -33,7 +33,7 @@ test('a mixed lookup burst is one line with file and search counts', () => {
   assert.equal(activitySummary(entries[0].items).status, 'completed');
 });
 
-test('a message or reasoning card splits a lookup burst', () => {
+test('a message starts a new line and reasoning stays inside the investigation', () => {
   const entries = groupTranscript([
     row({ id: 'r1', tool: 'read', title: 'Reading a.ts' }),
     row({ id: 'r2', tool: 'grep', title: 'Searching for token' }),
@@ -44,7 +44,7 @@ test('a message or reasoning card splits a lookup burst', () => {
   ]);
   assert.deepEqual(
     entries.map((entry) => (entry.kind === 'group' ? `group:${entry.id}` : entry.item.id)),
-    ['group:r1', 'm1', 'think', 'group:r3']
+    ['group:r1', 'm1', 'group:think']
   );
 });
 
@@ -54,7 +54,38 @@ test('a single tool stays unwrapped', () => {
   assert.equal(entries[0].kind, 'item');
 });
 
-test('edits and commands form their own bursts and a family change starts a new line', () => {
+test('lookups, commands, and reasoning are one line until an edit', () => {
+  const entries = groupTranscript([
+    row({ id: 't1', kind: 'reasoning', text: 'Let me explore the repo structure.' }),
+    row({ id: 'r1', title: 'Reading app.py' }),
+    row({ id: 'g1', title: 'Searching for users' }),
+    row({ id: 't2', kind: 'reasoning', text: 'Let me check the deployed endpoint.' }),
+    row({ id: 'c1', title: 'Running curl https://example.test' }),
+    row({ id: 'c2', title: 'Running curl -I https://example.test' }),
+    row({ id: 't3', kind: 'reasoning', text: 'The route redirects.' }),
+    row({ id: 'r2', title: 'Reading routes.py' }),
+    row({ id: 'e1', title: 'Editing routes.py' })
+  ]);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].kind, 'group');
+  assert.equal(entries[1].kind, 'item');
+  if (entries[0].kind !== 'group') {
+    return;
+  }
+  assert.equal(entries[0].id, 't1');
+  assert.equal(entries[0].family, 'work');
+  assert.equal(activitySummary(entries[0].items).label, 'The route redirects.');
+  assert.equal(activitySummary(entries[0].items).detail, 'Explored 2 files, 1 search, ran 2 commands');
+  const sections = activitySections(entries[0].items);
+  assert.equal(sections.length, 3);
+  assert.equal(sections[1].reasoning?.id, 't2');
+  assert.deepEqual(
+    toolBursts(sections[1].tools).map((burst) => burst.family),
+    ['command']
+  );
+});
+
+test('edits stay their own line after an investigation', () => {
   const entries = groupTranscript([
     row({ id: 'e1', title: 'Editing a.ts' }),
     row({
@@ -113,6 +144,17 @@ test('a pending approval stays outside the burst', () => {
     ['c1', 'req', 'c3']
   );
   assert.equal(entries[1].kind, 'item');
+});
+
+test('a running investigation shows the latest thought', () => {
+  const summary = activitySummary([
+    row({ id: 't1', kind: 'reasoning', text: 'Let me explore the repo structure.', status: 'completed' }),
+    row({ id: 'r1', title: 'Reading app.py', status: 'completed' }),
+    row({ id: 't2', kind: 'reasoning', text: 'Let me check the endpoint.', status: 'streaming' })
+  ]);
+  assert.equal(summary.label, 'Let me check the endpoint.');
+  assert.equal(summary.detail, 'Explored 1 file');
+  assert.equal(summary.status, 'streaming');
 });
 
 test('a running burst uses the live wording and a failure wins the status', () => {
