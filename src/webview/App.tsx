@@ -71,7 +71,7 @@ import {
   type TranscriptItemView
 } from './state';
 import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
-import { activitySections, activitySummary, groupTranscript, toolBursts, type ActivityFamily } from './activityGroups.ts';
+import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, type ActivityFamily } from './activityGroups.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
 import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
 import type {
@@ -1355,6 +1355,8 @@ export function App(): JSX.Element {
   }
 
   const chatEmpty = state.transcript.length === 0 && !state.restoring;
+  const transcriptEntries = groupTranscript(state.transcript);
+  const speakers = speakerRows(transcriptEntries, !state.busy);
 
   return (
     <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
@@ -1432,13 +1434,23 @@ export function App(): JSX.Element {
         ) : state.transcript.length === 0 && !state.startingTurn && !state.notice ? (
           <EmptyState state={state} dispatch={dispatch} hasAvailable={available.length > 0} />
         ) : (
-          groupTranscript(state.transcript).map((entry) =>
+          transcriptEntries.map((entry) =>
             entry.kind === 'group' ? (
               <ActivityGroup key={entry.id} family={entry.family} items={entry.items} />
+            ) : entry.kind === 'narration' ? (
+              <NarrationRow
+                key={entry.id}
+                message={entry.message}
+                items={entry.items}
+                showSpeaker={speakers.has(entry.id)}
+                providerId={entry.message.backendId ?? active?.id ?? 'ollama'}
+                hideQuestions={state.mode !== 'ask'}
+              />
             ) : (
               <TranscriptRow
                 key={entry.item.id}
                 item={entry.item}
+                showSpeaker={speakers.has(entry.item.id)}
                 hideQuestions={state.mode !== 'ask'}
                 providerId={entry.item.backendId ?? active?.id ?? 'ollama'}
                 pendingId={pending?.id}
@@ -1470,7 +1482,7 @@ export function App(): JSX.Element {
           <div className="turn turn--agent">
             <div className="turn-meta">
               <span className={`provider-dot provider-dot--${active?.id ?? 'ollama'}`} aria-hidden="true" />
-              <span className="meta-strong">Agent</span>
+              <span className="meta-strong">melink</span>
               <span className="stream-status" role="status">
                 <span className="spinner" aria-hidden="true" />
                 Starting
@@ -1491,7 +1503,7 @@ export function App(): JSX.Element {
         ) : null}
 
         {state.busy ? (
-          <div className="typing-dots" role="status" aria-label="Agent is working">
+          <div className="typing-dots" role="status" aria-label="melink is working">
             <span />
             <span />
             <span />
@@ -2617,6 +2629,7 @@ function RestoreResultStrip({
 function TranscriptRow({
   item,
   providerId,
+  showSpeaker,
   hideQuestions,
   pendingId,
   checkpoint,
@@ -2626,6 +2639,8 @@ function TranscriptRow({
 }: {
   item: TranscriptItemView;
   providerId: string;
+  /** The opening reply of a turn, and the closing one once that turn has settled. */
+  showSpeaker?: boolean;
   /** Plan and Agent hide a sidecode-question fence. Ask leaves it as text. */
   hideQuestions?: boolean;
   pendingId?: string;
@@ -2726,31 +2741,39 @@ function TranscriptRow({
   if (!assistantText && item.status !== 'failed') {
     return null;
   }
+  const statusChip =
+    item.status === 'streaming' ? (
+      <span className="stream-status" role="status">
+        <span className="spinner" aria-hidden="true" />
+        Generating
+      </span>
+    ) : item.status === 'canceled' ? (
+      <span className="stream-status stream-status--warning">
+        <StopIcon />
+        Stopped
+      </span>
+    ) : null;
   return (
     <article className="turn turn--agent" aria-live="polite">
-      <div className="turn-meta">
-        <span className={`provider-dot provider-dot--${providerId}`} aria-hidden="true" />
-        <span className="meta-strong">Agent</span>
-        {item.title ? (
-          <>
-            <span className="meta-sep" aria-hidden="true">
-              -
-            </span>
-            <span>{item.title}</span>
-          </>
-        ) : null}
-        {item.status === 'streaming' ? (
-          <span className="stream-status" role="status">
-            <span className="spinner" aria-hidden="true" />
-            Generating
-          </span>
-        ) : item.status === 'canceled' ? (
-          <span className="stream-status stream-status--warning">
-            <StopIcon />
-            Stopped
-          </span>
-        ) : null}
-      </div>
+      {showSpeaker || statusChip ? (
+        <div className="turn-meta">
+          {showSpeaker ? (
+            <>
+              <span className={`provider-dot provider-dot--${providerId}`} aria-hidden="true" />
+              <span className="meta-strong">melink</span>
+              {item.title ? (
+                <>
+                  <span className="meta-sep" aria-hidden="true">
+                    -
+                  </span>
+                  <span>{item.title}</span>
+                </>
+              ) : null}
+            </>
+          ) : null}
+          {statusChip}
+        </div>
+      ) : null}
       <div className="turn-body md">
         {assistantText ? (
         <Markdown
@@ -2848,6 +2871,69 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
               Thinking stopped early; this section may be incomplete.
             </p>
           ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function NarrationRow({
+  message,
+  items,
+  showSpeaker,
+  providerId,
+  hideQuestions
+}: {
+  message: TranscriptItemView;
+  items: TranscriptItemView[];
+  showSpeaker: boolean;
+  providerId: string;
+  hideQuestions?: boolean;
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const text = visibleTranscriptText(message.text, { hideQuestions });
+  const running = items.some((item) => item.status === 'streaming' || item.status === 'pending') || message.status === 'streaming';
+  return (
+    <article className={`narration${expanded ? ' narration--open' : ''}`}>
+      {showSpeaker ? (
+        <div className="turn-meta">
+          <span className={`provider-dot provider-dot--${providerId}`} aria-hidden="true" />
+          <span className="meta-strong">melink</span>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className="narration__toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className={`activity-group__chevron${expanded ? ' activity-group__chevron--open' : ''}`} aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
+        <span className="narration__text">
+          {text}
+          {message.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
+        </span>
+        {running ? (
+          <span className="stream-status" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Working
+          </span>
+        ) : null}
+      </button>
+      {expanded ? (
+        <div className="narration__details">
+          {groupTranscript(items).map((entry) =>
+            entry.kind === 'group' ? (
+              <ActivityGroup key={entry.id} family={entry.family} items={entry.items} />
+            ) : entry.kind === 'item' ? (
+              entry.item.kind === 'reasoning' ? (
+                <ReasoningCard key={entry.item.id} item={entry.item} />
+              ) : (
+                <GroupChild key={entry.item.id} item={entry.item} />
+              )
+            ) : null
+          )}
         </div>
       ) : null}
     </article>

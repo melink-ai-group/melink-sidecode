@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activitySections, activitySummary, groupTranscript, toolBursts } from './activityGroups.ts';
+import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, type TranscriptEntry } from './activityGroups.ts';
 import type { TranscriptItemView } from './state.ts';
 
 function row(partial: Partial<TranscriptItemView> & Pick<TranscriptItemView, 'id'>): TranscriptItemView {
@@ -42,10 +42,15 @@ test('a message starts a new line and reasoning stays inside the investigation',
     row({ id: 'r3', tool: 'read', title: 'Reading b.ts' }),
     row({ id: 'r4', tool: 'read', title: 'Reading c.ts' })
   ]);
-  assert.deepEqual(
-    entries.map((entry) => (entry.kind === 'group' ? `group:${entry.id}` : entry.item.id)),
-    ['group:r1', 'm1', 'group:think']
-  );
+  assert.deepEqual(entries.map(entryKey), ['group:r1', 'narration:m1']);
+  const narration = entries[1];
+  assert.equal(narration.kind, 'narration');
+  if (narration.kind === 'narration') {
+    assert.deepEqual(
+      narration.items.map((item) => item.id),
+      ['think', 'r3', 'r4']
+    );
+  }
 });
 
 test('a single tool stays unwrapped', () => {
@@ -140,7 +145,7 @@ test('a pending approval stays outside the burst', () => {
     row({ id: 'c3', title: 'Running git status' })
   ]);
   assert.deepEqual(
-    entries.map((entry) => (entry.kind === 'group' ? entry.id : entry.item.id)),
+    entries.map((entry) => (entry.kind === 'item' ? entry.item.id : entry.id)),
     ['c1', 'req', 'c3']
   );
   assert.equal(entries[1].kind, 'item');
@@ -195,6 +200,58 @@ test('the group id stays the first child as later tools join the same run', () =
     assert.equal(later[0].id, 'r1');
     assert.equal(later[0].items.length, 3);
   }
+});
+
+function entryKey(entry: TranscriptEntry): string {
+  if (entry.kind === 'group') {
+    return `group:${entry.id}`;
+  }
+  if (entry.kind === 'narration') {
+    return `narration:${entry.id}`;
+  }
+  return entry.item.id;
+}
+
+test('a one-line reply holds the following lookups and a later reply starts the next line', () => {
+  const entries = groupTranscript([
+    row({ id: 'a1', kind: 'message', role: 'assistant', text: 'Let me read the key files to understand the current structure.' }),
+    row({ id: 'r1', title: 'Reading Settings.tsx' }),
+    row({ id: 'r2', title: 'Reading Tabs.tsx' }),
+    row({ id: 'r3', title: 'Reading styles.css' }),
+    row({ id: 'a2', kind: 'message', role: 'assistant', text: 'Let me examine the tab navigation.' }),
+    row({ id: 'g1', title: 'Searching for tab' }),
+    row({ id: 'g2', title: 'Searching for nav' }),
+    row({ id: 'a3', kind: 'message', role: 'assistant', text: 'The tabs need a shared label.\n\nI would put it in the header.' })
+  ]);
+  assert.deepEqual(entries.map(entryKey), ['narration:a1', 'narration:a2', 'a3']);
+});
+
+test('a one-line reply does not swallow an edit', () => {
+  const entries = groupTranscript([
+    row({ id: 'a1', kind: 'message', role: 'assistant', text: 'I will update the header.' }),
+    row({ id: 'e1', title: 'Editing Header.tsx' })
+  ]);
+  assert.deepEqual(entries.map(entryKey), ['a1', 'e1']);
+});
+
+test('melink is marked on the first reply, and on the last only once the turn has settled', () => {
+  const entries = groupTranscript([
+    row({ id: 'u', kind: 'message', role: 'user', text: 'look at settings' }),
+    row({ id: 'a1', kind: 'message', role: 'assistant', text: 'I will look at the settings pages.' }),
+    row({ id: 'r1', title: 'Reading a.ts' }),
+    row({ id: 'r2', title: 'Reading b.ts' }),
+    row({ id: 'a2', kind: 'message', role: 'assistant', text: 'Let me read the next files.' }),
+    row({ id: 'r3', title: 'Reading c.ts' }),
+    row({ id: 'a3', kind: 'message', role: 'assistant', text: 'Done.\n\nThe header can carry the name.' })
+  ]);
+  const running = speakerRows(entries, false);
+  assert.equal(running.has('a1'), true);
+  assert.equal(running.has('a2'), false);
+  assert.equal(running.has('a3'), false);
+  const settled = speakerRows(entries, true);
+  assert.equal(settled.has('a1'), true);
+  assert.equal(settled.has('a2'), false);
+  assert.equal(settled.has('a3'), true);
 });
 
 test('an unknown tool is its own line and splits the neighbors', () => {

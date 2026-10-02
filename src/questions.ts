@@ -38,35 +38,34 @@ export interface QuestionAnswer {
   text: string;
 }
 
-const FENCE = /```sidecode-question[^\n]*\r?\n([\s\S]*?)```/gi;
+/** How many ranked suggestions a card keeps. The host still adds a custom answer. */
+const MAX_OPTIONS = 6;
+
+const CLOSED_FENCE = /```([^\n`]*)\r?\n([\s\S]*?)```/g;
+const UNCLOSED_QUESTION_FENCE = /```[ \t]*(sidecode[-_ ]?questions?|questions?)[^\n]*\r?\n([\s\S]*)$/i;
+const QUESTION_OBJECT_START = /\{\s*"questions"\s*:/g;
+
+interface QuestionSpan {
+  start: number;
+  end: number;
+  questions: ClarifyingQuestion[];
+}
 
 /**
- * Pull a valid question block out of an assistant reply and remove it.
+ * Pull a question payload out of an assistant reply and remove it.
+ * Accepts a `sidecode-question` fence, the same JSON in another fence, and a
+ * bare `{"questions":[...]}` object. The last payload is the one that is asked.
  * Invalid JSON is left in place. An empty result means there is nothing to ask.
  */
 export function extractSidecodeQuestions(text: string): { text: string; questions?: ClarifyingQuestion[] } {
-  const matches = [...text.matchAll(FENCE)];
-  if (matches.length === 0) {
+  const spans = findQuestionSpans(text);
+  if (spans.length === 0) {
     return { text };
   }
-  const questions: ClarifyingQuestion[] = [];
-  const removals: string[] = [];
-  for (const match of matches) {
-    const parsed = parseQuestionJson(match[1] ?? '');
-    if (!parsed) {
-      continue;
-    }
-    questions.push(...parsed);
-    if (match[0]) {
-      removals.push(match[0]);
-    }
-  }
-  if (questions.length === 0) {
-    return { text };
-  }
+  const questions = spans[spans.length - 1]?.questions ?? [];
   let stripped = text;
-  for (const block of removals) {
-    stripped = stripped.replace(block, '');
+  for (const span of [...spans].reverse()) {
+    stripped = stripped.slice(0, span.start) + stripped.slice(span.end);
   }
   return {
     text: stripped.replace(/\n{3,}/g, '\n\n').trim(),
@@ -74,13 +73,146 @@ export function extractSidecodeQuestions(text: string): { text: string; question
   };
 }
 
-/** Hide a question fence from the transcript while Plan or Agent is streaming it. */
+/** Hide a question payload from the transcript while Plan or Agent is streaming it. */
 export function hideQuestionFence(text: string): string {
-  return text
-    .replace(FENCE, '')
-    .replace(/```sidecode-question[^\n]*\r?\n[\s\S]*$/i, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const extracted = extractSidecodeQuestions(text);
+  let next = extracted.questions ? extracted.text : text;
+  next = next.replace(/```[ \t]*(?:sidecode[-_ ]?questions?|questions?)[^\n]*\r?\n[\s\S]*$/i, '');
+  next = hideUnbalancedQuestionTail(next);
+  return next.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Every question payload in `text`, earliest first. A fence owns the JSON
+ * inside it, so the same object is not reported twice.
+ */
+function findQuestionSpans(text: string): QuestionSpan[] {
+  const spans: QuestionSpan[] = [];
+  const fences: Array<[number, number]> = [];
+  CLOSED_FENCE.lastIndex = 0;
+  for (const match of text.matchAll(CLOSED_FENCE)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    fences.push([start, end]);
+    const questions = parseQuestionJson(match[2] ?? '');
+    if (questions) {
+      spans.push({ start, end, questions });
+    }
+  }
+  const unclosed = findUnclosedQuestionFence(text);
+  if (unclosed && !spans.some((span) => spansOverlap(span, unclosed))) {
+    spans.push(unclosed);
+    fences.push([unclosed.start, unclosed.end]);
+  }
+  for (const bare of findBareQuestionObjects(text)) {
+    const insideFence = fences.some(([start, end]) => bare.start >= start && bare.end <= end);
+    if (insideFence || spans.some((span) => spansOverlap(span, bare))) {
+      continue;
+    }
+    spans.push(bare);
+  }
+  spans.sort((left, right) => left.start - right.start || left.end - right.end);
+  return spans;
+}
+
+function findUnclosedQuestionFence(text: string): QuestionSpan | undefined {
+  const match = UNCLOSED_QUESTION_FENCE.exec(text);
+  if (!match || match.index === undefined) {
+    return undefined;
+  }
+  const body = match[2] ?? '';
+  const inner = findBareQuestionObjects(body);
+  const last = inner[inner.length - 1];
+  if (!last) {
+    return undefined;
+  }
+  const bodyStart = match.index + match[0].length - body.length;
+  return { start: match.index, end: bodyStart + last.end, questions: last.questions };
+}
+
+function findBareQuestionObjects(text: string): QuestionSpan[] {
+  const spans: QuestionSpan[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== '{') {
+      continue;
+    }
+    const end = matchingBrace(text, index);
+    if (end < 0) {
+      continue;
+    }
+    const questions = parseQuestionJson(text.slice(index, end));
+    if (!questions) {
+      continue;
+    }
+    const [start, expandedEnd] = expandWrappingTicks(text, index, end);
+    spans.push({ start, end: expandedEnd, questions });
+    index = expandedEnd - 1;
+  }
+  return spans;
+}
+
+/** Include backticks that only wrap the JSON object. */
+function expandWrappingTicks(text: string, start: number, end: number): [number, number] {
+  let nextStart = start;
+  let nextEnd = end;
+  while (nextStart > 0 && text[nextStart - 1] === '`') {
+    nextStart -= 1;
+  }
+  while (nextEnd < text.length && text[nextEnd] === '`') {
+    nextEnd += 1;
+  }
+  return [nextStart, nextEnd];
+}
+
+function hideUnbalancedQuestionTail(text: string): string {
+  let last = -1;
+  for (const match of text.matchAll(QUESTION_OBJECT_START)) {
+    last = match.index ?? last;
+  }
+  if (last < 0 || matchingBrace(text, last) >= 0) {
+    return text;
+  }
+  return text.slice(0, last);
+}
+
+function matchingBrace(text: string, open: number): number {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (char === '\\') {
+        escape = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+  }
+  return -1;
+}
+
+function spansOverlap(left: QuestionSpan, right: QuestionSpan): boolean {
+  return left.start < right.end && right.start < left.end;
 }
 
 /**
@@ -168,7 +300,7 @@ export function rankedOptions(raw: unknown): string[] {
       continue;
     }
     labels.push(label);
-    if (labels.length === 2) {
+    if (labels.length === MAX_OPTIONS) {
       break;
     }
   }
@@ -176,10 +308,8 @@ export function rankedOptions(raw: unknown): string[] {
 }
 
 function parseQuestionJson(body: string): ClarifyingQuestion[] | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(body);
-  } catch {
+  const value = parseJsonLoose(body);
+  if (value === undefined) {
     return undefined;
   }
   const record = asRecord(value);
@@ -189,6 +319,24 @@ function parseQuestionJson(body: string): ClarifyingQuestion[] | undefined {
   }
   const questions = normalizeQuestionList(list);
   return questions.length > 0 ? questions : undefined;
+}
+
+/** JSON.parse, then one repair for a trailing comma inside the payload. */
+function parseJsonLoose(body: string): unknown {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    // Models often leave a comma before the closing brace.
+  }
+  try {
+    return JSON.parse(trimmed.replace(/,\s*([}\]])/g, '$1')) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeQuestionList(raw: unknown): ClarifyingQuestion[] {
@@ -210,16 +358,18 @@ function normalizeQuestion(entry: unknown, index: number): ClarifyingQuestion | 
   if (!record) {
     return undefined;
   }
-  const prompt = asString(record.prompt) ?? asString(record.question) ?? asString(record.text);
+  const prompt =
+    asString(record.prompt) ?? asString(record.question) ?? asString(record.text) ?? asString(record.query) ?? asString(record.title);
   if (!prompt) {
     return undefined;
   }
-  const header = asString(record.header);
+  const title = asString(record.title);
+  const header = asString(record.header) ?? (title && title !== prompt ? title : undefined);
   return {
     id: asString(record.id) ?? `q${index + 1}`,
     ...(header ? { header } : {}),
     prompt,
-    options: rankedOptions(record.options)
+    options: rankedOptions(record.options ?? record.choices)
   };
 }
 

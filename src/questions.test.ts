@@ -26,11 +26,11 @@ const BLOCK = [
   '```'
 ].join('\n');
 
-test('a question fence is stripped and only the first two suggestions are kept', () => {
+test('a question fence is stripped and custom or duplicate options are dropped', () => {
   const extracted = extractSidecodeQuestions(BLOCK);
   assert.equal(extracted.text, 'Here is what I need to know.');
   assert.equal(extracted.questions?.length, 2);
-  assert.deepEqual(extracted.questions?.[0]?.options, ['Two columns', 'Single column']);
+  assert.deepEqual(extracted.questions?.[0]?.options, ['Two columns', 'Single column', 'A fourth']);
   assert.equal(extracted.questions?.[1]?.options.length, 1);
   assert.equal(extracted.questions?.[0]?.prompt, 'Which layout?');
 });
@@ -43,6 +43,60 @@ test('invalid question JSON stays in the reply', () => {
 
 test('a streaming fence is hidden without dropping the prose', () => {
   const text = 'Checking the layout.\n```sidecode-question\n{"questions":';
+  assert.equal(hideQuestionFence(text), 'Checking the layout.');
+});
+
+test('a bare questions object becomes the card and leaves the surrounding reply', () => {
+  const text = [
+    'I have enough context to plan.',
+    '',
+    JSON.stringify({
+      questions: [
+        { prompt: 'How should the page be split?', options: ['Tabs', 'Sections', 'Cards'] },
+        { prompt: 'How wide?', options: ['Full', 'One tab'] }
+      ]
+    }),
+    '',
+    'I need these answers before writing the plan.'
+  ].join('\n');
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.questions?.length, 2);
+  assert.equal(extracted.questions?.[0]?.prompt, 'How should the page be split?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['Tabs', 'Sections', 'Cards']);
+  assert.equal(extracted.text, 'I have enough context to plan.\n\nI need these answers before writing the plan.');
+  assert.equal(hideQuestionFence(text), extracted.text);
+});
+
+test('a json fence, a trailing comma, and label options still open the card', () => {
+  const fenced = 'Before.\n```json\n{"questions":[{"prompt":"Which?","options":["A","B",]}]}\n```\nAfter.';
+  const extracted = extractSidecodeQuestions(fenced);
+  assert.equal(extracted.questions?.[0]?.prompt, 'Which?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['A', 'B']);
+  assert.equal(extracted.text, 'Before.\n\nAfter.');
+  const labeled = '{"questions":[{"question":"Which color?","choices":[{"label":"Yellow"},{"label":"Blue"}]}]}';
+  assert.equal(extractSidecodeQuestions(labeled).questions?.[0]?.prompt, 'Which color?');
+  assert.deepEqual(extractSidecodeQuestions(labeled).questions?.[0]?.options, ['Yellow', 'Blue']);
+});
+
+test('an unclosed question fence keeps the sentence after the payload', () => {
+  const text = 'Before.\n```sidecode-question\n{"questions":[{"prompt":"Which?","options":["A"]}]}\n\nNeed these answers.';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.questions?.[0]?.prompt, 'Which?');
+  assert.match(extracted.text, /Before/);
+  assert.match(extracted.text, /Need these answers/);
+  assert.doesNotMatch(extracted.text, /sidecode-question/);
+  assert.doesNotMatch(extracted.text, /"questions"/);
+});
+
+test('a code sample that is not the question payload stays in the reply', () => {
+  const text = 'Example:\n```ts\nconst questions = ["a"];\n```\nDone.';
+  assert.equal(extractSidecodeQuestions(text).text, text);
+  assert.equal(extractSidecodeQuestions(text).questions, undefined);
+  assert.equal(extractSidecodeQuestions('```json\n{"name":"app"}\n```').questions, undefined);
+});
+
+test('an unfinished questions object is hidden while it streams', () => {
+  const text = 'Checking the layout.\n{"questions":[{"prompt":"Which?"';
   assert.equal(hideQuestionFence(text), 'Checking the layout.');
 });
 
@@ -78,9 +132,10 @@ test('answers are one numbered line per question', () => {
   ), /## Steps/);
 });
 
-test('ranked options drop a custom entry and anything past two', () => {
-  assert.deepEqual(rankedOptions(['Best', 'Next', CUSTOM_OPTION_LABEL, 'Later']), ['Best', 'Next']);
+test('ranked options drop a custom entry, duplicates, and anything past six', () => {
+  assert.deepEqual(rankedOptions(['Best', 'Next', CUSTOM_OPTION_LABEL, 'Later']), ['Best', 'Next', 'Later']);
   assert.deepEqual(rankedOptions([{ label: 'Best' }, { label: 'best' }]), ['Best']);
+  assert.deepEqual(rankedOptions(['1', '2', '3', '4', '5', '6', '7']), ['1', '2', '3', '4', '5', '6']);
 });
 
 test('a Codex user-input request becomes the same question list', () => {

@@ -66,13 +66,12 @@ export function QuestionCard({
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     const inField = event.target instanceof HTMLTextAreaElement;
-    if (!inField && (event.key === '1' || event.key === '2' || event.key === '3')) {
+    if (!inField && /^[1-9]$/.test(event.key)) {
+      const choice = Number(event.key) - 1;
       event.preventDefault();
-      if (event.key === '1' && question.options[0]) {
-        choose(0);
-      } else if (event.key === '2' && question.options[1]) {
-        choose(1);
-      } else if (event.key === '3') {
+      if (choice < question.options.length) {
+        choose(choice);
+      } else if (choice === question.options.length) {
         choose('custom');
       }
       return;
