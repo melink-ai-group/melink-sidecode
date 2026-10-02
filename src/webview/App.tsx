@@ -88,6 +88,26 @@ import type { Attachment, DefaultMode, PermissionLevel } from '../backends/types
 import { formatQuestionAnswers } from '../questions';
 import { QuestionCard } from './QuestionCard';
 
+/** How the mic button should look while a dictation status is current. */
+type DictationVisual = 'idle' | 'starting' | 'listening' | 'downloading' | 'working';
+
+function dictationVisual(status: string | undefined, listening: boolean, cleaning: boolean): DictationVisual {
+  const text = status ?? '';
+  if (/download/i.test(text)) {
+    return 'downloading';
+  }
+  if (cleaning || /transcrib|prepar|clean|finish|speech model|recording limit/i.test(text)) {
+    return 'working';
+  }
+  if (listening && /listen/i.test(text)) {
+    return 'listening';
+  }
+  if (listening || /start/i.test(text)) {
+    return 'starting';
+  }
+  return 'idle';
+}
+
 /** Append a cleaned or raw dictation line without dropping text already in the draft. */
 function appendDraft(current: string, addition: string): string {
   const extra = addition.trim();
@@ -739,16 +759,15 @@ export function App(): JSX.Element {
     (!state.busy || (active.id === 'codex' && Boolean(draft.trim()) && state.attachments.length === 0));
 
   const dictationModel = state.settings?.defaults.dictationModel?.trim() ?? '';
-  const micDisabled = !dictationModel || cleaning;
+  const micPhase = dictationVisual(dictationStatus, listening, cleaning);
+  const micDisabled = !dictationModel;
   const micTitle = !state.settings
     ? 'Loading settings…'
     : !dictationModel
       ? 'Choose a dictation model in Settings.'
-      : cleaning
-        ? dictationStatus ?? 'Working on the recording…'
-        : listening
-          ? 'Stop dictation'
-          : 'Dictate a message';
+      : dictationStatus
+        ? dictationStatus
+        : 'Dictate a message';
 
   const stopDictation = (): void => {
     const requestId = dictationRequestRef.current;
@@ -1522,12 +1541,9 @@ export function App(): JSX.Element {
               ))}
             </ul>
           ) : null}
-          {dictationStatus ? (
-            <p className="composer-status" role="status">
-              <span className="spinner" aria-hidden="true" />
-              <span>{dictationStatus}</span>
-            </p>
-          ) : null}
+          <p className="sr-only" role="status" aria-live="polite">
+            {dictationStatus ?? ''}
+          </p>
           {state.attachmentError ? (
             <p className="composer-error" role="alert">
               <AlertIcon className="ico ico--xs" />
@@ -1636,11 +1652,15 @@ export function App(): JSX.Element {
             ) : null}
             <span className="spacer" />
             <button
-              className={listening ? 'icon-btn composer-action composer-action--listening' : 'icon-btn composer-action'}
+              className={
+                micPhase === 'idle'
+                  ? 'icon-btn composer-action'
+                  : `icon-btn composer-action composer-action--mic-${micPhase}`
+              }
               type="button"
-              aria-label={listening ? 'Stop dictation' : 'Dictate a message'}
+              aria-label={listening ? 'Stop dictation' : micPhase === 'idle' ? 'Dictate a message' : micTitle}
               aria-pressed={listening}
-              aria-busy={cleaning || undefined}
+              aria-busy={micPhase === 'starting' || micPhase === 'downloading' || micPhase === 'working' || undefined}
               title={micTitle}
               disabled={micDisabled}
               onClick={toggleDictation}
@@ -1655,10 +1675,14 @@ export function App(): JSX.Element {
                     <ArrowIcon />
                   </button>
                 ) : null}
-                <span className="busy-indicator" role="status" aria-label="Agent is busy"><span className="spinner" /></span>
-                <button className="btn btn--secondary" type="button" onClick={cancel}>
+                <button
+                  className="icon-btn composer-action composer-action--stop"
+                  type="button"
+                  aria-label="Stop"
+                  title="Stop"
+                  onClick={cancel}
+                >
                   <StopIcon />
-                  Stop
                 </button>
               </>
             ) : (
