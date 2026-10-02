@@ -5135,6 +5135,39 @@ button.context-meter:hover {
   min-width: 0;
 }
 
+.todo__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo__toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.todo__toggle:disabled {
+  cursor: default;
+}
+
+.todo__chevron {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+}
+
+.todo__chevron--closed {
+  transform: rotate(-90deg);
+}
+
 .todo__progress-text {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
@@ -5298,24 +5331,6 @@ button.context-meter:hover {
   gap: 6px;
   margin: 0;
   padding: 0 8px 8px;
-}
-
-.plan-reference {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  min-width: 0;
-}
-
-/* Steps open inside the card. The dock scrolls; the list does not cover the chat. */
-.steps-menu__panel {
-  max-height: min(240px, 36vh);
-  overflow: auto;
-  margin: 0;
-  padding: 0 0 4px;
 }
 
 @media (max-width: 340px) {

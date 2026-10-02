@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
 import { Markdown } from './Markdown';
 import {
@@ -253,9 +253,8 @@ function PlanCard({
 }
 
 /**
- * The todo list once the plan is built. The step list stays closed until the
- * user opens it from the Steps control, in the same anchored popup as mode
- * selection. Progress still comes from the persisted step status.
+ * The todo list once the plan is built. The status row opens and closes the
+ * steps. Progress still comes from the persisted step status.
  */
 function TodoList({
   plan,
@@ -269,7 +268,6 @@ function TodoList({
   onRevise: (text: string) => void;
 }): JSX.Element {
   const [stepsOpen, setStepsOpen] = useState(false);
-  const stepsRef = useRef<HTMLDivElement>(null);
 
   const total = plan.steps.length;
   const done = plan.steps.filter((step) => step.status === 'completed').length;
@@ -290,34 +288,26 @@ function TodoList({
 
   const progressText = total > 0 ? `${done} of ${total} done` : 'No steps';
 
-  useEffect(() => {
-    if (!stepsOpen) {
-      return;
-    }
-    const onPointer = (event: PointerEvent): void => {
-      if (!stepsRef.current?.contains(event.target as Node)) {
-        setStepsOpen(false);
-      }
-    };
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setStepsOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onPointer);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [stepsOpen]);
-
   return (
     <section className={`todo${stateClass}`} aria-label="Plan progress" aria-live="polite">
       <header className="todo__head">
-        <span className="plan-card__title">{title}</span>
-        <span className="spacer" />
-        <span className="todo__progress-text">{progressText}</span>
+        <button
+          className="todo__toggle"
+          type="button"
+          aria-expanded={stepsOpen}
+          disabled={total === 0}
+          onClick={() => setStepsOpen((value) => !value)}
+        >
+          <ChevronDownIcon className={`ico ico--xs todo__chevron${stepsOpen ? '' : ' todo__chevron--closed'}`} />
+          <span className="plan-card__title">{title}</span>
+          <span className="spacer" />
+          <span className="todo__progress-text">{progressText}</span>
+        </button>
+        {plan.path ? (
+          <button className="btn btn--link" type="button" onClick={onOpenPlan}>
+            Open plan
+          </button>
+        ) : null}
       </header>
       <div
         className="todo__track"
@@ -330,34 +320,12 @@ function TodoList({
         <span className="todo__fill" style={{ width: `${percent}%` }} />
       </div>
 
-      <div className="plan-reference" ref={stepsRef}>
-        <button
-          className="control-trigger"
-          type="button"
-          aria-haspopup="dialog"
-          aria-expanded={stepsOpen}
-          aria-controls="steps-menu"
-          disabled={total === 0}
-          onClick={() => setStepsOpen((value) => !value)}
-        >
-          <span className="control-label">Steps</span>
-          <ChevronDownIcon className="control-chevron" />
-        </button>
-        <span className="spacer" />
-        {plan.path ? (
-          <button className="btn btn--link" type="button" onClick={onOpenPlan}>
-            Open plan file
-          </button>
-        ) : null}
-      </div>
       {stepsOpen ? (
-        <div className="steps-menu__panel" id="steps-menu" role="region" aria-label="Steps">
-          <ul className="todo__list">
-            {plan.steps.map((step, index) => (
-              <TodoRow key={`${index}-${step.text}`} step={step} live={busy} />
-            ))}
-          </ul>
-        </div>
+        <ul className="todo__list" aria-label="Steps">
+          {plan.steps.map((step, index) => (
+            <TodoRow key={`${index}-${step.text}`} step={step} live={busy} />
+          ))}
+        </ul>
       ) : null}
 
       {allDone ? (
