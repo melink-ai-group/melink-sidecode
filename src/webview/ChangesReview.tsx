@@ -12,12 +12,14 @@ import {
   ChevronRightIcon,
   CrossIcon,
   DiffIcon,
+  FileIcon,
   InfoIcon,
   PencilIcon,
   PlusIcon,
   PauseIcon,
   RenameIcon,
   RestoreIcon,
+  SearchIcon,
   TrashIcon
 } from './Icons';
 
@@ -332,45 +334,49 @@ function ChangeRow({
   const conflicted = outcome?.conflict === true && !outcome.ok;
   const failed = outcome !== undefined && !outcome.ok && !outcome.conflict;
   const reviewable = file.diffable;
-  const { dir, base } = splitPath(file.path);
   const decision = busy ? 'pending' : file.decision;
 
   return (
     <li className={`change-row${conflicted ? ' change-row--conflict' : ''}`}>
       <div className="change-row__line">
-        <span className="change-row__main">
-          <PathLabel dir={dir} base={base} full={file.path} />
-          <StatusChip file={file} />
-          <span className="diff-stats" aria-label={`${file.additions} added, ${file.deletions} removed`}>
-            {file.additions > 0 ? <span className="add">+{file.additions}</span> : null}
-            {file.deletions > 0 ? <span className="del">-{file.deletions}</span> : null}
-          </span>
+        <StatusMark file={file} />
+        <PathLabel full={file.path} />
+        <span className="diff-stats change-row__stats" aria-label={`${file.additions} added, ${file.deletions} removed`}>
+          {file.additions > 0 ? <span className="add">+{file.additions}</span> : null}
+          {file.deletions > 0 ? <span className="del">-{file.deletions}</span> : null}
         </span>
+        <span className="change-row__decision">
+          {reviewable ? <DecisionState decision={decision} conflicted={conflicted} failed={failed} /> : null}
+        </span>
+        <button
+          className="btn btn--link change-row__diff-btn"
+          type="button"
+          title="Open this file's pre-turn vs current diff in the workbench diff editor"
+          onClick={onOpenDiff}
+        >
+          Open diff
+        </button>
         <span className="change-row__actions">
-          {reviewable ? (
-            <DecisionState decision={decision} conflicted={conflicted} failed={failed} />
-          ) : (
-            <span className="change-row__detail" title={file.detail ?? 'No inline diff is available for this file.'}>
-              <InfoIcon className="ico ico--xs" />
-              <span>{file.detail ?? 'No inline diff'}</span>
-            </span>
-          )}
-          <button
-            className="btn btn--link"
-            type="button"
-            title="Open this file's pre-turn vs current diff in the workbench diff editor"
-            onClick={onOpenDiff}
-          >
-            Open diff
-          </button>
           {!reviewable && file.status !== 'deleted' ? (
-            <button className="btn btn--link" type="button" title="Open this file in the editor" onClick={onOpenFile}>
-              Open in editor
+            <button
+              className="btn btn--link change-row__icon-btn"
+              type="button"
+              title="Open this file in the editor"
+              aria-label="Open this file in the editor"
+              onClick={onOpenFile}
+            >
+              <FileIcon className="ico ico--xs" />
             </button>
           ) : null}
           {!reviewable ? (
-            <button className="btn btn--link" type="button" title="Reveal this file in Source Control" onClick={onReveal}>
-              Reveal
+            <button
+              className="btn btn--link change-row__icon-btn"
+              type="button"
+              title="Reveal this file in Source Control"
+              aria-label="Reveal this file in Source Control"
+              onClick={onReveal}
+            >
+              <SearchIcon className="ico ico--xs" />
             </button>
           ) : null}
           {conflicted ? (
@@ -449,37 +455,49 @@ function fileCountLabel(files: readonly ChangeFileView[]): string {
   return parts.join(' · ');
 }
 
-/** The relative path, middle-ellipsized: the directory truncates, the name holds. */
-function PathLabel({ dir, base, full }: { dir: string; base: string; full: string }): JSX.Element {
+/**
+ * The relative path, ellipsized from the start so the file name stays visible.
+ * The LTR embedding keeps slash-separated segments in order inside an RTL box,
+ * which is what places the ellipsis on the left.
+ */
+function PathLabel({ full }: { full: string }): JSX.Element {
   return (
     <span className="change-row__path" title={full}>
-      {dir ? <span className="change-row__path-dir">{dir}</span> : null}
-      <span className="change-row__path-base">{base}</span>
+      {`\u202A${full}\u202C`}
     </span>
   );
 }
 
-function StatusChip({ file }: { file: ChangeFileView }): JSX.Element {
-  if (!file.diffable) {
-    return (
-      <span className="status-chip status-chip--muted">
-        {file.binary ? 'Binary' : 'Too large'}
-      </span>
-    );
-  }
-  const label =
-    file.status === 'created'
-      ? 'Created'
+/** Status as a fixed-width icon. The word stays available as the accessible name. */
+function StatusMark({ file }: { file: ChangeFileView }): JSX.Element {
+  const kind = !file.diffable
+    ? file.binary
+      ? 'binary'
+      : 'large'
+    : file.status === 'created'
+      ? 'added'
       : file.status === 'deleted'
-        ? 'Deleted'
+        ? 'deleted'
         : file.status === 'renamed'
-          ? 'Renamed'
-          : 'Modified';
-  const Icon = file.status === 'created' ? PlusIcon : file.status === 'deleted' ? TrashIcon : file.status === 'renamed' ? RenameIcon : PencilIcon;
+          ? 'renamed'
+          : 'modified';
+  const label =
+    kind === 'binary'
+      ? 'Binary'
+      : kind === 'large'
+        ? 'Too large'
+        : kind === 'added'
+          ? 'Added'
+          : kind === 'deleted'
+            ? 'Deleted'
+            : kind === 'renamed'
+              ? 'Renamed'
+              : 'Modified';
+  const Icon =
+    kind === 'added' ? PlusIcon : kind === 'deleted' ? TrashIcon : kind === 'renamed' ? RenameIcon : kind === 'modified' ? PencilIcon : InfoIcon;
   return (
-    <span className="status-chip">
+    <span className={`change-row__mark change-row__mark--${kind}`} role="img" title={label} aria-label={label}>
       <Icon className="ico ico--xs" />
-      {label}
     </span>
   );
 }
@@ -549,11 +567,3 @@ function DecisionState({
   );
 }
 
-/** Split a POSIX-relative path into its directory and file name. */
-function splitPath(path: string): { dir: string; base: string } {
-  const index = path.lastIndexOf('/');
-  if (index === -1) {
-    return { dir: '', base: path };
-  }
-  return { dir: path.slice(0, index + 1), base: path.slice(index + 1) };
-}

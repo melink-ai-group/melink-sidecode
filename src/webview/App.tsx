@@ -10,6 +10,7 @@ import type {
 } from '../backends/types';
 import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
+import { splitReplyClose } from './replyClose';
 import { visibleTranscriptText } from './visibleTranscript';
 import {
   AlertIcon,
@@ -1307,6 +1308,26 @@ export function App(): JSX.Element {
               />
             ) : null}
           </div>
+          <span className="chat-tabs__sep" aria-hidden="true" />
+          <button
+            className="icon-btn"
+            type="button"
+            aria-label="Refresh project context"
+            title="Refresh project context"
+            disabled={!active}
+            onClick={() => bridge.post({ type: 'refreshContext' })}
+          >
+            <ContextIcon />
+          </button>
+          <button
+            className="icon-btn"
+            type="button"
+            aria-label="Open settings"
+            title="Open settings"
+            onClick={openSettings}
+          >
+            <SettingsIcon />
+          </button>
         </span>
       }
     />
@@ -1361,64 +1382,6 @@ export function App(): JSX.Element {
   return (
     <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
       {tabStrip}
-      <header className="view-title">
-        <button
-          className="model-trigger"
-          type="button"
-          aria-haspopup="listbox"
-          aria-expanded={modelPanelOpen}
-          aria-controls="model-panel"
-          onClick={toggleModelPanel}
-        >
-          <span className="trigger-label">Model</span>
-          {active?.status === 'available' ? (
-            <span className={`provider-dot provider-dot--${active.id}`} aria-hidden="true" />
-          ) : null}
-          <span className="trigger-model">{triggerLabel}</span>
-          <ChevronDownIcon className="trigger-chevron" />
-        </button>
-        <span className="view-title__actions">
-          <button
-            className="icon-btn"
-            type="button"
-            aria-label="Refresh project context"
-            title="Refresh project context"
-            disabled={!active}
-            onClick={() => bridge.post({ type: 'refreshContext' })}
-          >
-            <ContextIcon />
-          </button>
-          <button
-            className="icon-btn"
-            type="button"
-            aria-label="Open settings"
-            title="Open settings"
-            onClick={openSettings}
-          >
-            <SettingsIcon />
-          </button>
-        </span>
-      </header>
-
-      {modelPanelOpen ? (
-        <ModelPanel
-          providers={switcherProviders}
-          models={state.models}
-          modelErrors={state.modelErrors}
-          selectedBackendId={state.selectedBackendId}
-          selectedModel={state.selectedModel}
-          filter={modelFilter}
-          onFilterChange={setModelFilter}
-          onClose={() => {
-            setModelPanelOpen(false);
-            setModelFilter('');
-          }}
-          onSetToken={(backendId) => bridge.post({ type: 'setToken', backendId })}
-          onRetry={(backendId) => dispatch({ type: 'clearModels', backendId })}
-          dispatch={dispatch}
-        />
-      ) : null}
-
       <div
         className="transcript"
         ref={transcriptRef}
@@ -1725,6 +1688,48 @@ export function App(): JSX.Element {
                 ) : null}
               </div>
             ) : null}
+            <div className="mode-menu">
+              <button
+                className="control-trigger model-trigger"
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={modelPanelOpen}
+                aria-controls="model-panel"
+                aria-label={`Model: ${triggerLabel}`}
+                title={triggerLabel}
+                onClick={() => {
+                  setModePanelOpen(false);
+                  setPermissionPanelOpen(false);
+                  setModelSettingsOpen(false);
+                  toggleModelPanel();
+                }}
+              >
+                <span className="trigger-label">Model</span>
+                {active?.status === 'available' ? (
+                  <span className={`provider-dot provider-dot--${active.id}`} aria-hidden="true" />
+                ) : null}
+                <span className="trigger-model">{triggerLabel}</span>
+                <ChevronDownIcon className="control-chevron" />
+              </button>
+              {modelPanelOpen ? (
+                <ModelPanel
+                  providers={switcherProviders}
+                  models={state.models}
+                  modelErrors={state.modelErrors}
+                  selectedBackendId={state.selectedBackendId}
+                  selectedModel={state.selectedModel}
+                  filter={modelFilter}
+                  onFilterChange={setModelFilter}
+                  onClose={() => {
+                    setModelPanelOpen(false);
+                    setModelFilter('');
+                  }}
+                  onSetToken={(backendId) => bridge.post({ type: 'setToken', backendId })}
+                  onRetry={(backendId) => dispatch({ type: 'clearModels', backendId })}
+                  dispatch={dispatch}
+                />
+              ) : null}
+            </div>
             {state.selectedBackendId && state.selectedModel ? (
               <div className="mode-menu">
                 <button
@@ -2224,6 +2229,22 @@ function dropIndex(ids: readonly string[], dragId: string, overId: string, befor
   return to;
 }
 
+/** Keep a tab fully inside the horizontal strip without scrolling the page. */
+function revealChatTab(list: HTMLElement, tab: HTMLElement): boolean {
+  if (list.clientWidth === 0) {
+    return false;
+  }
+  const pad = 4;
+  const listRect = list.getBoundingClientRect();
+  const tabRect = tab.getBoundingClientRect();
+  if (tabRect.left < listRect.left + pad) {
+    list.scrollLeft -= listRect.left + pad - tabRect.left;
+  } else if (tabRect.right > listRect.right - pad) {
+    list.scrollLeft += tabRect.right - (listRect.right - pad);
+  }
+  return true;
+}
+
 function ChatTabStrip({
   tabs,
   activity,
@@ -2233,8 +2254,69 @@ function ChatTabStrip({
   activity: AppState['threadActivity'];
   actions: JSX.Element;
 }): JSX.Element | null {
+  const stripRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<{ id: string; before: boolean } | null>(null);
+  const activeId = tabs.find((tab) => tab.active)?.id ?? '';
+  const activeIndex = tabs.findIndex((tab) => tab.active);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !activeId) {
+      return;
+    }
+    const tab = list.querySelector<HTMLElement>(`[data-chat-tab-id="${CSS.escape(activeId)}"]`);
+    if (!tab) {
+      return;
+    }
+    let frame = 0;
+    let attempts = 0;
+    const reveal = (): void => {
+      if (revealChatTab(list, tab) || attempts >= 8) {
+        return;
+      }
+      attempts += 1;
+      frame = requestAnimationFrame(reveal);
+    };
+    reveal();
+    const observer = new ResizeObserver(() => {
+      revealChatTab(list, tab);
+    });
+    observer.observe(list);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [activeId, activeIndex, tabs.length]);
+
+  useEffect(() => {
+    const strip = stripRef.current;
+    const list = listRef.current;
+    if (!strip || !list) {
+      return;
+    }
+    const onWheel = (event: WheelEvent): void => {
+      if (list.scrollWidth <= list.clientWidth) {
+        return;
+      }
+      const axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (axis === 0) {
+        return;
+      }
+      const delta =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? axis * 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? axis * list.clientWidth
+            : axis;
+      event.preventDefault();
+      list.scrollLeft += delta;
+    };
+    strip.addEventListener('wheel', onWheel, { passive: false });
+    return () => strip.removeEventListener('wheel', onWheel);
+  }, [tabs.length]);
+
   if (tabs.length === 0) {
     return null;
   }
@@ -2243,8 +2325,8 @@ function ChatTabStrip({
     setOver(null);
   };
   return (
-    <div className="chat-tabs">
-      <div className="chat-tabs__list" role="tablist" aria-label="Open chats">
+    <div className="chat-tabs" ref={stripRef}>
+      <div className="chat-tabs__list" role="tablist" aria-label="Open chats" ref={listRef}>
         {tabs.map((tab) => {
           const key = tab.backendId && tab.threadId ? `${tab.backendId}:${tab.threadId}` : undefined;
           const live = key ? activity[key] : undefined;
@@ -2255,6 +2337,7 @@ function ChatTabStrip({
             <div
               className={`chat-tab${tab.active ? ' chat-tab--active' : ''}${drop}${dragging}`}
               key={tab.id}
+              data-chat-tab-id={tab.id}
               draggable
               onMouseDown={(event) => {
                 if (event.button !== 1) {
@@ -2774,16 +2857,12 @@ function TranscriptRow({
           {statusChip}
         </div>
       ) : null}
-      <div className="turn-body md">
+      <div className="turn-body">
         {assistantText ? (
-        <Markdown
-          text={assistantText}
-          renderCodeHeader={(_language, code) => (
-            <button className="icon-btn" type="button" aria-label="Copy code" onClick={() => copyText(code)}>
-              <CopyIcon />
-            </button>
-          )}
-        />
+          <AssistantReply
+            text={assistantText}
+            settled={item.status !== 'streaming' && item.status !== 'pending'}
+          />
         ) : null}
         {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
         {item.status === 'failed' ? (
@@ -2804,6 +2883,25 @@ function TranscriptRow({
         ) : null}
       </div>
     </article>
+  );
+}
+
+function AssistantReply({ text, settled }: { text: string; settled: boolean }): JSX.Element {
+  const parts = settled ? splitReplyClose(text) : { body: text };
+  const copyHeader = (_language: string, code: string): JSX.Element => (
+    <button className="icon-btn" type="button" aria-label="Copy code" onClick={() => copyText(code)}>
+      <CopyIcon />
+    </button>
+  );
+  return (
+    <>
+      {parts.body ? <Markdown text={parts.body} renderCodeHeader={copyHeader} /> : null}
+      {parts.close ? (
+        <div className="reply-close">
+          <Markdown text={parts.close} />
+        </div>
+      ) : null}
+    </>
   );
 }
 

@@ -119,6 +119,13 @@ body {
   padding: 0 6px 4px 4px;
 }
 
+.chat-tabs__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 4px 8px;
+  background: var(--vscode-panel-border);
+}
+
 .chat-tab {
   display: flex;
   align-items: center;
@@ -223,7 +230,7 @@ body {
   color: var(--vscode-foreground);
 }
 
-/* ---- Header: the model switcher is the single primary affordance ---- */
+/* ---- Screen headers (settings, rules). The chat model switcher sits in the composer. ---- */
 
 .view-title {
   flex: 0 0 auto;
@@ -344,17 +351,20 @@ body {
 .model-panel {
   position: absolute;
   z-index: 20;
-  top: 40px;
-  left: 8px;
-  right: 8px;
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
   display: flex;
   flex-direction: column;
+  width: min(320px, calc(100vw - 28px));
   min-height: min(180px, 35vh);
-  max-height: min(62vh, calc(100% - 52px));
+  max-height: min(420px, 62vh);
   margin: 0;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
   background: var(--vscode-editorWidget-background);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
   overflow: hidden;
 }
 
@@ -1104,6 +1114,29 @@ body {
   padding-left: 20px;
 }
 
+.md__list:has(> .md__step):not(:has(> li:not(.md__step))) {
+  padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.md__list:has(> .md__step):not(:has(> li:not(.md__step))) li {
+  margin: 0;
+}
+
+.reply-close {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
+  border-radius: 0 var(--melink-radius-sm, 4px) var(--melink-radius-sm, 4px) 0;
+  background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.reply-close .md__p {
+  margin: 0;
+}
+
 .md__list li {
   margin: 2px 0;
 }
@@ -1804,6 +1837,10 @@ body {
 .composer-row .control-trigger,
 .composer-row .mode-menu {
   flex: 0 0 auto;
+}
+
+.composer-row .model-trigger .trigger-model {
+  max-width: 9em;
 }
 
 /* Mode list opens upward from the composer trigger, only as wide as the names. */
@@ -5483,9 +5520,11 @@ button.context-meter:hover {
   padding: 2px 0;
   width: 100%;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 4.25rem minmax(4.5rem, max-content) max-content max-content;
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
 }
 
 .changes-review__more {
@@ -5496,7 +5535,10 @@ button.context-meter:hover {
 }
 
 .change-row {
-  width: 100%;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
   min-width: 0;
   box-sizing: border-box;
   border: 1px solid transparent;
@@ -5504,57 +5546,92 @@ button.context-meter:hover {
 }
 
 .change-row__line {
-  display: flex;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 2px 6px;
+  padding: 1px 6px 1px 4px;
 }
 
-.change-row__main {
+.change-row__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.change-row__mark--modified {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-foreground));
+}
+
+.change-row__mark--added {
+  color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-foreground));
+}
+
+.change-row__mark--deleted {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-foreground));
+}
+
+.change-row__mark--renamed {
+  color: var(--vscode-gitDecoration-renamedResourceForeground, var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-foreground)));
+}
+
+.change-row__stats {
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.change-row__decision {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex: 1 1 140px;
+  justify-content: flex-end;
   min-width: 0;
 }
 
-.change-row__main .status-chip,
-.change-row__main .diff-stats {
-  flex: 0 0 auto;
+.change-row__decision .decision-state--conflict {
+  white-space: nowrap;
+}
+
+.change-row__diff-btn {
+  justify-self: start;
 }
 
 .change-row__actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex: 1 1 auto;
   gap: 6px;
-  min-width: 0;
-  margin-left: auto;
 }
 
-.change-row__actions .btn {
+.change-row__actions .btn,
+.change-row__diff-btn {
   flex: 0 0 auto;
   min-height: 0;
-  padding: 1px 8px;
   font-size: 11px;
+  white-space: nowrap;
 }
 
-.change-row__detail {
+.change-row__actions .btn:not(.btn--link) {
+  padding: 1px 6px;
+}
+
+.change-row__icon-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 180px;
-  overflow: hidden;
-  font-size: 11px;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
   color: var(--vscode-descriptionForeground);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+}
+
+.change-row__icon-btn:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  text-decoration: none;
 }
 
 .change-row:hover {
@@ -5620,30 +5697,18 @@ button.context-meter:hover {
   height: 12px;
 }
 
-/* Middle ellipsis: the directory truncates, the file name holds. */
+/* Ellipsis on the left: overflow hides the start of the path, the file name stays. */
 .change-row__path {
-  display: flex;
-  align-items: baseline;
-  flex: 1 1 auto;
-  min-width: 0;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  color: var(--vscode-foreground);
-}
-
-.change-row__path-dir {
+  display: block;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  direction: ltr;
+  direction: rtl;
   text-align: left;
-  color: var(--vscode-descriptionForeground);
-}
-
-.change-row__path-base {
-  flex: 0 0 auto;
-  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--vscode-foreground);
 }
 
 .change-row__tags {
@@ -5666,6 +5731,7 @@ button.context-meter:hover {
 
 .change-row__note {
   display: flex;
+  grid-column: 1 / -1;
   align-items: flex-start;
   gap: 6px;
   min-width: 0;
@@ -5761,11 +5827,6 @@ button.context-meter:hover {
   color: var(--vscode-errorForeground);
 }
 
-/* A status chip for a row that carries no diff (binary or over the size cap). */
-.status-chip--muted {
-  border-style: dashed;
-}
-
 /* ---- Destructive reject confirmation (names its paths) ---- */
 
 .changes-review__confirm {
@@ -5852,8 +5913,7 @@ button.context-meter:hover {
 }
 
 @media (max-width: 340px) {
-  .changes-review__foot-actions .btn,
-  .change-row__actions .btn {
+  .changes-review__foot-actions .btn {
     flex: 1 1 auto;
     justify-content: center;
   }
