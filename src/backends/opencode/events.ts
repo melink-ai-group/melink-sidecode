@@ -181,6 +181,7 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
 
   switch (type) {
     case 'step_start':
+    case 'step-start':
       return { kind: 'step-start', sessionId };
     case 'text': {
       const text = asString(part?.text);
@@ -244,8 +245,9 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
         ...(edit?.afterText !== undefined ? { afterText: edit.afterText } : {})
       };
     }
-    case 'step_finish': {
-      const reason = asString(part?.reason) ?? 'unknown';
+    case 'step_finish':
+    case 'step-finish': {
+      const reason = asString(part?.reason) ?? asString(record.reason) ?? 'unknown';
       return { kind: 'step-finish', sessionId, reason, usedTokens: usedTokensOf(part) };
     }
     case 'error': {
