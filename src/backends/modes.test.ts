@@ -24,6 +24,7 @@ test('every mode carries the shared plan-document contract', () => {
   const ask = modeInstructions('ask') ?? '';
   assert.match(agent, /checkbox/i);
   assert.match(agent, /do not rewrite the plan prose/i);
+  assert.match(agent, /do not stop to ask whether to continue/i);
   assert.match(plan, /## Steps/);
   assert.match(plan, /unless the user asked you to update or revise it/i);
   assert.match(plan, /when the user answers your questions, rewrite/i);

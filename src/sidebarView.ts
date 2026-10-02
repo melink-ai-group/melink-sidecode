@@ -38,10 +38,13 @@ import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import {
   applyPlanDecisions,
+  continuePlanInstruction,
+  decidePlanAutopilot,
   hasPlanStepsHeading,
   mergeCheckboxStatuses,
   planDocumentFromReply,
   planRelativePath,
+  planTurnWork,
   shouldAutoOpenPlanDocument,
   updateStepStatus,
   userAsksToRevisePlan
@@ -93,6 +96,14 @@ interface ChatSession {
   revisePlanThisTurn: boolean;
   /** Answers already folded into this thread's plan, in ask order. */
   planDecisions: string[];
+  /** Bumped on a user send so a late autopilot decision cannot start another turn. */
+  planEpoch: number;
+  /** True when the open turn was started to keep a built plan moving. */
+  planRunAutomatic: boolean;
+  /** Steps-and-work signature of the previous turn, for the loop check. */
+  planRunSignature?: string;
+  /** A refused approval this turn must not be retried automatically. */
+  planHold: boolean;
   pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
   /** No conversation has been bound to this tab yet. */
   blank: boolean;
@@ -147,6 +158,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private readonly shownPlanPreviews = new Set<string>();
   /** True while Preview is being opened, so that open does not trigger another one. */
   private showingPlanPreview = false;
+  /** Built-plan turns waiting to start once the current turn has released the lock. */
+  private readonly planAutopilotQueue = new Map<string, { session: ChatSession; text: string }>();
+  /** The next sendTurn is an automatic plan continuation, not a user message. */
+  private autopilotSend = false;
   /**
    * The per-turn change journal: the host-owned record of what each turn
    * changed. Owned here so it shares the turn lifecycle the view already drives
@@ -310,7 +325,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // running. Settle it in the persisted plan so the todo list shows honest
         // partial progress instead of a spinner that never stops. A denied step
         // (set by the `approval/denied` branch below) is terminal and left alone.
-        if (event.threadId) {
+        if (event.threadId && !(event.type === 'turn/completed' && this.mode === 'agent')) {
           void this.settlePlanProgress(event.backendId, event.threadId);
         }
       }
@@ -324,11 +339,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // A refusal is the one signal that the step the agent was on never ran:
         // mark it denied, so it renders as partial rather than pending. Every
         // refusal path (a user decision or a mode enforcement) fires this event.
+        if (this.session) {
+          this.session.planHold = true;
+        }
         void this.denyPlanStep(event.backendId, event.threadId);
       }
       if (event.type === 'turn/started') {
         // A new turn starts; a native plan update for it has not arrived yet.
         this.nativePlanThisTurn = false;
+        if (this.session) {
+          this.session.planHold = false;
+        }
         // Open the change boundary and start the fallback watcher, reusing the
         // existing turn lifecycle rather than adding a parallel one.
         this.beginChangeTurn(event.backendId, event.threadId, event.turnId);
@@ -354,11 +375,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       } else if (event.type === 'turn/completed') {
         this.revisePlanThisTurn = false;
       }
-      if (event.type === 'turn/completed' && this.mode === 'agent' && event.threadId) {
-        // Direct providers have no native todo stream. Checkbox lines in the
-        // reply update the persisted list without rewriting the plan body.
-        void this.mergeTodoProgressFromReply(event.backendId, event.threadId);
-      }
       if (
         event.threadId &&
         (event.type === 'turn/completed' || event.type === 'turn/interrupted' || event.type === 'error')
@@ -374,6 +390,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
             this.removeSession(session);
           }
         }
+      }
+      if (event.type === 'turn/completed' && this.mode === 'agent' && event.threadId) {
+        void this.considerPlanAutopilot(event.backendId, event.threadId);
       }
       });
     });
@@ -882,6 +901,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       nativePlanThisTurn: false,
       revisePlanThisTurn: false,
       planDecisions: [],
+      planEpoch: 0,
+      planRunAutomatic: false,
+      planHold: false,
       blank: init.blank,
       ...(init.backendId && init.threadId ? { resume: { backendId: init.backendId, threadId: init.threadId } } : {}),
       disposed: false,
@@ -1767,6 +1789,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     updatePlan?: boolean
   ): Promise<void> {
     if (this.turnInProgress) {
+      this.autopilotSend = false;
       this.post({ type: 'notice', level: 'info', message: 'A request is already in progress. Wait for it to finish before sending another.' });
       return;
     }
@@ -1775,6 +1798,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       await this.sendTurnCore(text, model, permissionLevel, requestedSettings, attachments, backendId, updatePlan);
     } finally {
       this.turnInProgress = false;
+      this.flushPlanAutopilot();
     }
   }
 
@@ -1894,6 +1918,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     backendId?: string,
     updatePlan?: boolean
   ): Promise<void> {
+    const automatic = this.autopilotSend;
+    this.autopilotSend = false;
+    if (this.session) {
+      this.session.planRunAutomatic = automatic;
+      if (!automatic) {
+        this.planAutopilotQueue.delete(this.session.id);
+        this.session.planEpoch += 1;
+        this.session.planRunSignature = undefined;
+      }
+    }
     this.revisePlanThisTurn = updatePlan === true || userAsksToRevisePlan(text);
     const candidateBackend = backendId ?? this.activeThread?.backendId ??
       this.registry.snapshot().find((backend) => backend.status === 'available')?.id;
@@ -2633,6 +2667,66 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     });
     this.post({ type: 'plan', plan });
     this.publishPlanDocument(plan, false);
+  }
+
+  /**
+   * Keep a built plan moving after a clean turn. Remaining steps start the next
+   * turn on their own. The Resume control is only for a loop: an automatic
+   * turn that left the steps and the tool activity unchanged. A question or a
+   * refused approval also waits, because the user has to answer.
+   */
+  private async considerPlanAutopilot(backendId: string, threadId: string): Promise<void> {
+    const session = this.session;
+    if (!session || session.disposed || session.mode !== 'agent') {
+      return;
+    }
+    const epoch = session.planEpoch;
+    await this.settlePlanProgress(backendId, threadId);
+    await this.mergeTodoProgressFromReply(backendId, threadId);
+    if (this.session !== session || session.disposed || session.planEpoch !== epoch) {
+      return;
+    }
+    if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
+      return;
+    }
+    const existing = this.store.getPlanState(backendId, threadId);
+    if (!existing) {
+      return;
+    }
+    const decision = decidePlanAutopilot({
+      built: existing.built,
+      steps: existing.steps,
+      automatic: session.planRunAutomatic,
+      previousSignature: session.planRunSignature,
+      work: planTurnWork(this.store.getTranscript(backendId, threadId)),
+      blocked: session.planHold || session.pendingQuestion !== undefined || session.pendingApproval !== undefined
+    });
+    session.planRunSignature = decision.signature;
+    if (decision.decision !== 'continue') {
+      return;
+    }
+    this.planAutopilotQueue.set(session.id, {
+      session,
+      text: continuePlanInstruction(existing.steps)
+    });
+    this.flushPlanAutopilot();
+  }
+
+  /** Start one queued plan continuation once no turn is holding the lock. */
+  private flushPlanAutopilot(): void {
+    if (this.turnInProgress || this.planAutopilotQueue.size === 0) {
+      return;
+    }
+    const next = this.planAutopilotQueue.values().next().value;
+    if (!next || next.session.disposed) {
+      if (next) {
+        this.planAutopilotQueue.delete(next.session.id);
+      }
+      return;
+    }
+    this.planAutopilotQueue.delete(next.session.id);
+    this.autopilotSend = true;
+    void this.sessionStore.run(next.session, () => this.sendTurn(next.text));
   }
 
   /**

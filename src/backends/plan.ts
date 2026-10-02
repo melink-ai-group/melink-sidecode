@@ -1,4 +1,4 @@
-import type { PlanArtifact, TodoStep, TodoStepStatus } from './types';
+import type { PlanArtifact, TodoStep, TodoStepStatus, TranscriptItem } from './types';
 
 /**
  * The plan artifact: one markdown file per thread, at a predictable location.
@@ -478,4 +478,88 @@ export function updateStepStatus(
     return [...steps];
   }
   return steps.map((step, i) => (i === index ? { ...step, status } : step));
+}
+
+/**
+ * Whether a built plan should start the next turn by itself.
+ *
+ * A plan that still has work left continues without a click. The one pause is
+ * a loop: an automatic turn whose steps and tool activity match the turn
+ * before it. That pause is the Resume control. A question or a refused
+ * approval is also a pause, because the user already has to answer.
+ */
+export type PlanAutopilotDecision = 'continue' | 'hold';
+
+export function planHasRemainingSteps(steps: readonly TodoStep[]): boolean {
+  return steps.some((step) => step.status === 'pending' || step.status === 'inProgress');
+}
+
+/** Tools and files from the latest turn, ignoring the prose around them. */
+export function planTurnWork(items: readonly TranscriptItem[]): string[] {
+  let start = 0;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.kind === 'message' && item.role === 'user') {
+      start = index + 1;
+      break;
+    }
+  }
+  const work: string[] = [];
+  for (const item of items.slice(start)) {
+    if (item.kind === 'tool') {
+      const name = item.tool ?? item.title ?? 'tool';
+      const detail = item.command ?? item.detail ?? '';
+      work.push(`tool:${name}:${detail}`);
+    } else if (item.kind === 'file-change') {
+      for (const file of item.files ?? []) {
+        if (file.path) {
+          work.push(`file:${file.path}:${file.additions ?? ''}:${file.deletions ?? ''}`);
+        }
+      }
+    }
+  }
+  return work;
+}
+
+/**
+ * Steps plus the work that actually happened. Two turns with the same
+ * signature did not change the plan or the workspace.
+ */
+export function planWorkSignature(steps: readonly TodoStep[], work: readonly string[]): string {
+  const statuses = steps.map((step) => `${step.status}:${step.text}`).join('\n');
+  const evidence = [...new Set(work.map((item) => item.trim()).filter((item) => item.length > 0))].sort();
+  return `${statuses}\n${evidence.join('\n')}`;
+}
+
+export function decidePlanAutopilot(input: {
+  built: boolean;
+  steps: readonly TodoStep[];
+  /** True when this turn was started by autopilot rather than the user. */
+  automatic: boolean;
+  /** Signature of the previous turn, when one was stored. */
+  previousSignature?: string;
+  work: readonly string[];
+  /** A question or a refused approval is waiting on the user. */
+  blocked: boolean;
+}): { decision: PlanAutopilotDecision; signature: string } {
+  const signature = planWorkSignature(input.steps, input.work);
+  const remaining = input.built && planHasRemainingSteps(input.steps);
+  if (!remaining || input.blocked) {
+    return { decision: 'hold', signature };
+  }
+  if (input.automatic && input.previousSignature === signature) {
+    return { decision: 'hold', signature };
+  }
+  return { decision: 'continue', signature };
+}
+
+/** The turn that keeps a built plan moving. Remaining steps are listed once. */
+export function continuePlanInstruction(steps: readonly TodoStep[]): string {
+  const remaining = steps.filter((step) => step.status === 'pending' || step.status === 'inProgress');
+  const list = remaining.map((step) => `- [ ] ${step.text}`).join('\n');
+  return [
+    'Continue the remaining steps of this plan. Do not stop to ask whether to continue. Execute the remaining steps in order, and report progress with checkbox lines that repeat the step text exactly: "- [~] ..." while a step is in progress and "- [x] ..." when it is done. Leave the plan document prose unchanged.',
+    '',
+    list
+  ].join('\n');
 }

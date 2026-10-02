@@ -69,7 +69,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent acts on the workspace.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report progress with checkbox lines that repeat each step\u2019s text exactly ("- [~] ..." while it is in progress, "- [x] ..." when it is done, "- [-] ..." if it was denied). Do not rewrite the plan prose. ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
+      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report progress with checkbox lines that repeat each step\u2019s text exactly ("- [~] ..." while it is in progress, "- [x] ..." when it is done, "- [-] ..." if it was denied). Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
   },
   {
     mode: 'plan',
