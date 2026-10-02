@@ -134,6 +134,18 @@ function opencodePrompt(request: SendTurnRequest, freshSession: boolean, summary
 }
 
 /**
+ * Context for a steered continuation of a direct `/api/chat` turn.
+ * The snapshot stays the stable prefix. The per-turn delta was already sent
+ * with the original request, so it is not repeated.
+ */
+function steerContext(context?: ContextPayload): ContextPayload | undefined {
+  if (!context?.snapshot && !context?.notice) {
+    return undefined;
+  }
+  return { snapshot: context.snapshot, notice: context.notice };
+}
+
+/**
  * Whether a transport failure names the host (DNS failure, connection refused)
  * rather than the network (offline, timed out).
  *
@@ -266,6 +278,10 @@ export class OllamaBackend implements AgentBackend {
     }
   >();
   private inFlight?: AbortController;
+  /** User texts waiting to be folded into the active turn. Stop clears this. */
+  private steerTexts: string[] = [];
+  /** Thread whose turn is running. Compact sets `inFlight` without this. */
+  private activeTurnThreadId?: string;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -532,7 +548,48 @@ export class OllamaBackend implements AgentBackend {
   }
 
   cancel(): void {
+    this.steerTexts = [];
     this.inFlight?.abort();
+  }
+
+  /**
+   * Stop the current generation and continue this same turn with `text`.
+   * The direct adapter sends a new `/api/chat` that includes the partial
+   * reply. Opencode resumes the same session with the new prompt. Either way
+   * the turn stays open until that continuation finishes.
+   */
+  async steerTurn(handle: ThreadHandle, text: string): Promise<void> {
+    const value = text.trim();
+    if (!value) {
+      return;
+    }
+    if (!this.inFlight || this.activeTurnThreadId !== handle.threadId) {
+      throw new BackendError('provider', 'There is no active turn to steer.');
+    }
+    this.steerTexts.push(value);
+    this.inFlight.abort();
+  }
+
+  private beginFlight(): AbortController {
+    const controller = new AbortController();
+    this.inFlight = controller;
+    return controller;
+  }
+
+  private endFlight(controller: AbortController): void {
+    if (this.inFlight === controller) {
+      this.inFlight = undefined;
+    }
+  }
+
+  /** Join every queued steer, or `undefined` when Stop won or nothing is queued. */
+  private drainSteers(): string | undefined {
+    if (this.steerTexts.length === 0) {
+      return undefined;
+    }
+    const text = this.steerTexts.join('\n\n');
+    this.steerTexts = [];
+    return text;
   }
 
   /**
@@ -662,62 +719,108 @@ export class OllamaBackend implements AgentBackend {
     }
 
     const turnId = createId('ollama_turn');
-    const itemId = createId('ollama_item');
-    const controller = new AbortController();
-    this.inFlight = controller;
+    let itemId = createId('ollama_item');
+    let controller = this.beginFlight();
+    this.activeTurnThreadId = handle.threadId;
 
     this.events.fire({ type: 'turn/started', backendId: this.id, threadId: handle.threadId, turnId });
 
     const model = request.model ?? this.defaultModel;
     if (!model) {
-      this.inFlight = undefined;
+      this.endFlight(controller);
+      this.activeTurnThreadId = undefined;
       const failure = new BackendError('provider', 'No Ollama Cloud model selected.');
       this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId: handle.threadId, turnId, reason: failure.message });
       throw failure;
     }
 
-    this.events.fire({
-      type: 'item/started',
-      backendId: this.id,
-      threadId: handle.threadId,
-      item: { id: itemId, kind: 'message', role: 'assistant', title: model }
-    });
-
-    let response: Response;
-    try {
-      response = await this.request('/api/chat', token, {
-        method: 'POST',
-        signal: controller.signal,
-        body: JSON.stringify({
-          model,
-          stream: true,
-          messages: this.messagesFor(handle.threadId, request.text, request.context, request.mode),
-          // The adapter is the only place that knows Ollama spells the context
-          // window `options.num_ctx` and reasoning effort `think`; the mapping is
-          // the pure, unit-tested `ollamaNativeRequest`.
-          ...ollamaNativeRequest(request.modelSettings)
-        })
+    const startItem = (): void => {
+      this.events.fire({
+        type: 'item/started',
+        backendId: this.id,
+        threadId: handle.threadId,
+        item: { id: itemId, kind: 'message', role: 'assistant', title: model }
       });
-    } catch (error) {
-      this.inFlight = undefined;
-      this.failTurn(handle, itemId, turnId, this.categorize(error));
-      throw error;
-    }
+    };
+    startItem();
+
+    let text = request.text;
+    let steered = false;
+    const followSteer = (next: string): void => {
+      this.events.fire({ type: 'item/completed', backendId: this.id, threadId: handle.threadId, itemId, status: 'completed' });
+      text = next;
+      steered = true;
+      itemId = createId('ollama_item');
+      controller = this.beginFlight();
+      startItem();
+    };
 
     try {
-      await this.streamChunks(response, handle, itemId, controller);
-      if (controller.signal.aborted) {
-        throw new StreamError('canceled', 'Turn canceled.');
+      for (;;) {
+        let response: Response;
+        try {
+          response = await this.request('/api/chat', token, {
+            method: 'POST',
+            signal: controller.signal,
+            body: JSON.stringify({
+              model,
+              stream: true,
+              messages: this.messagesFor(
+                handle.threadId,
+                text,
+                steered ? steerContext(request.context) : request.context,
+                request.mode
+              ),
+              // The adapter is the only place that knows Ollama spells the context
+              // window `options.num_ctx` and reasoning effort `think`; the mapping is
+              // the pure, unit-tested `ollamaNativeRequest`.
+              ...ollamaNativeRequest(request.modelSettings)
+            })
+          });
+        } catch (error) {
+          const next = this.categorize(error).code === 'canceled' ? this.drainSteers() : undefined;
+          if (!next) {
+            this.failTurn(handle, itemId, turnId, this.categorize(error));
+            throw error;
+          }
+          followSteer(next);
+          continue;
+        }
+
+        try {
+          await this.streamChunks(response, handle, itemId, controller);
+          if (controller.signal.aborted) {
+            throw new StreamError('canceled', 'Turn canceled.');
+          }
+        } catch (error) {
+          const next = this.categorize(error).code === 'canceled' ? this.drainSteers() : undefined;
+          if (!next) {
+            this.failTurn(handle, itemId, turnId, this.categorize(error));
+            throw error;
+          }
+          followSteer(next);
+          continue;
+        }
+
+        this.events.fire({ type: 'item/completed', backendId: this.id, threadId: handle.threadId, itemId, status: 'completed' });
+        const next = this.drainSteers();
+        if (next) {
+          text = next;
+          steered = true;
+          itemId = createId('ollama_item');
+          controller = this.beginFlight();
+          startItem();
+          continue;
+        }
+        this.events.fire({ type: 'turn/completed', backendId: this.id, threadId: handle.threadId, turnId });
+        return;
       }
-      this.events.fire({ type: 'item/completed', backendId: this.id, threadId: handle.threadId, itemId, status: 'completed' });
-      this.events.fire({ type: 'turn/completed', backendId: this.id, threadId: handle.threadId, turnId });
-    } catch (error) {
-      this.failTurn(handle, itemId, turnId, this.categorize(error));
-      throw error;
     } finally {
-      if (this.inFlight === controller) {
-        this.inFlight = undefined;
+      this.endFlight(controller);
+      if (this.activeTurnThreadId === handle.threadId) {
+        this.activeTurnThreadId = undefined;
       }
+      this.steerTexts = [];
     }
   }
 
@@ -790,8 +893,8 @@ export class OllamaBackend implements AgentBackend {
       });
     }
 
-    const controller = new AbortController();
-    this.inFlight = controller;
+    let controller = this.beginFlight();
+    this.activeTurnThreadId = handle.threadId;
     // The session id is read before the turn so a later turn in the same thread
     // resumes the same opencode session; absent means a fresh session.
     //
@@ -810,7 +913,10 @@ export class OllamaBackend implements AgentBackend {
     // does not start a new session with only a delta. The cwd above is the
     // workspace root, so opencode's own `AGENTS.md` discovery works either way.
     const summary = compactedSummary(this.store?.getTranscript(this.id, handle.threadId) ?? []);
-    const promptFor = (fresh: boolean) => opencodePrompt(request, fresh, fresh ? summary : undefined);
+    // A steer on a live session sends only the new text. Until a session id
+    // exists, the text is still primed with the snapshot.
+    let visibleText = request.text;
+    let barePrompt = false;
 
     // The cwd the child is spawned with, reused to anchor a relative tool path.
     // It is the same root the snapshot service supplied, or the adapter's own
@@ -818,97 +924,130 @@ export class OllamaBackend implements AgentBackend {
     // actually ran in.
     const opencodeCwd = request.context?.workspaceRoot ?? this.cwd;
 
-    const runOnce = (fresh: boolean) =>
-      runOpencodeTurn(
-        {
-          executable: this.opencodePath,
-          // Prefer the snapshot service's root so opencode's own project
-          // discovery reads the real `AGENTS.md`; `this.cwd` is only a fallback.
-          cwd: opencodeCwd,
-          config: built.config,
-          modelRef: built.modelRef,
-          agent: built.agent,
-          prompt: promptFor(fresh),
-          sessionId,
-          token,
-          signal: controller.signal,
-          decidePermission: opencodeRequiresApproval(permissionLevel, request.mode ?? 'agent')
-            ? (ask, signal) => this.decideOpencodePermission(handle.threadId, ask, signal)
-            : undefined,
-          questionPermission: (request.mode ?? 'agent') === 'ask' ? 'deny' : 'ask',
-          answerQuestion:
-            (request.mode ?? 'agent') === 'ask'
-              ? undefined
-              : (ask, signal) => this.decideOpencodeQuestion(handle.threadId, ask, signal)
-        },
-        (event) => this.handleOpencodeEvent(event, handle.threadId, opencodeCwd)
-      );
+    const promptFor = (): string =>
+      barePrompt
+        ? visibleText
+        : opencodePrompt(
+            { ...request, text: visibleText },
+            !sessionId,
+            !sessionId ? summary : undefined
+          );
 
     try {
-      let result = await runOnce(!sessionId);
+      for (;;) {
+        const runOnce = (prompt: string, resumeId: string | undefined) =>
+          runOpencodeTurn(
+            {
+              executable: this.opencodePath,
+              // Prefer the snapshot service's root so opencode's own project
+              // discovery reads the real `AGENTS.md`; `this.cwd` is only a fallback.
+              cwd: opencodeCwd,
+              config: built.config,
+              modelRef: built.modelRef,
+              agent: built.agent,
+              prompt,
+              sessionId: resumeId,
+              token,
+              signal: controller.signal,
+              decidePermission: opencodeRequiresApproval(permissionLevel, request.mode ?? 'agent')
+                ? (ask, signal) => this.decideOpencodePermission(handle.threadId, ask, signal)
+                : undefined,
+              questionPermission: (request.mode ?? 'agent') === 'ask' ? 'deny' : 'ask',
+              answerQuestion:
+                (request.mode ?? 'agent') === 'ask'
+                  ? undefined
+                  : (ask, signal) => this.decideOpencodeQuestion(handle.threadId, ask, signal)
+            },
+            (event) => this.handleOpencodeEvent(event, handle.threadId, opencodeCwd)
+          );
 
-      // A stale session id degrades to a fresh session, says so, and retries
-      // exactly once — the same degradation rule the reload-resume work uses.
-      if (result.outcome === 'stale-session' && sessionId) {
-        await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
-        sessionId = undefined;
-        this.events.fire({
-          type: 'notice',
-          backendId: this.id,
-          threadId: handle.threadId,
-          level: 'info',
-          message: 'The saved opencode session was not available, so a new one was started.'
-        });
-        result = await runOnce(true);
-      }
+        let result = await runOnce(promptFor(), sessionId);
 
-      if (result.sessionId) {
-        await this.store?.setOpencodeSession(this.id, handle.threadId, result.sessionId);
-      }
+        // A stale session id degrades to a fresh session, says so, and retries
+        // exactly once — the same degradation rule the reload-resume work uses.
+        if (result.outcome === 'stale-session' && sessionId) {
+          await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
+          sessionId = undefined;
+          barePrompt = false;
+          this.events.fire({
+            type: 'notice',
+            backendId: this.id,
+            threadId: handle.threadId,
+            level: 'info',
+            message: 'The saved opencode session was not available, so a new one was started.'
+          });
+          result = await runOnce(promptFor(), undefined);
+        }
 
-      if (result.outcome === 'canceled') {
-        this.failTurn(handle, '', turnId, { code: 'canceled', message: 'Turn canceled.' });
-        return;
-      }
-      if (result.outcome === 'stale-session') {
-        // A fresh session also failed to start: clear the mapping and report it
-        // distinctly rather than reusing a session that cannot be resumed.
-        await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
-        this.failTurn(handle, '', turnId, {
-          code: 'provider',
-          message: 'The opencode session could not be started or resumed.'
-        });
-        throw new BackendError('provider', 'The opencode session could not be started or resumed.');
-      }
-      if (result.outcome === 'permission') {
-        // A headless `ask` was auto-rejected: the action was safely refused, the
-        // turn is not a failure, and the transcript stays coherent. A visible
-        // notice explains it rather than an error.
-        this.events.fire({
-          type: 'notice',
-          backendId: this.id,
-          threadId: handle.threadId,
-          level: 'info',
-          message: 'A tool action needed approval, which a headless turn cannot grant, so it was not run.'
-        });
+        if (result.sessionId) {
+          sessionId = result.sessionId;
+          await this.store?.setOpencodeSession(this.id, handle.threadId, result.sessionId);
+        }
+
+        const next =
+          result.outcome === 'canceled' || result.outcome === 'completed' ? this.drainSteers() : undefined;
+        if (next) {
+          // Keep this turn open. A live session already has the original prompt,
+          // so the continuation is the steer text alone. Without a session id
+          // the next child is fresh and must see both.
+          if (sessionId) {
+            visibleText = next;
+            barePrompt = true;
+          } else {
+            visibleText = `${visibleText}\n\n${next}`;
+            barePrompt = false;
+          }
+          controller = this.beginFlight();
+          continue;
+        }
+
+        if (result.outcome === 'canceled') {
+          this.failTurn(handle, '', turnId, { code: 'canceled', message: 'Turn canceled.' });
+          return;
+        }
+        if (result.outcome === 'stale-session') {
+          // A fresh session also failed to start: clear the mapping and report it
+          // distinctly rather than reusing a session that cannot be resumed.
+          await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
+          this.failTurn(handle, '', turnId, {
+            code: 'provider',
+            message: 'The opencode session could not be started or resumed.'
+          });
+          throw new BackendError('provider', 'The opencode session could not be started or resumed.');
+        }
+        if (result.outcome === 'permission') {
+          // A headless `ask` was auto-rejected: the action was safely refused, the
+          // turn is not a failure, and the transcript stays coherent. A visible
+          // notice explains it rather than an error.
+          this.events.fire({
+            type: 'notice',
+            backendId: this.id,
+            threadId: handle.threadId,
+            level: 'info',
+            message: 'A tool action needed approval, which a headless turn cannot grant, so it was not run.'
+          });
+          this.events.fire({ type: 'turn/completed', backendId: this.id, threadId: handle.threadId, turnId });
+          return;
+        }
+        if (result.outcome !== 'completed') {
+          // Every failure mode is a distinct, actionable state, and the turn is
+          // closed with an error + interruption so the transcript stays coherent.
+          const failure = this.opencodeFailure(result.outcome, result.detail);
+          this.failTurn(handle, '', turnId, failure);
+          throw new BackendError(
+            failure.code === 'unauthenticated' ? 'unauthenticated' : 'provider',
+            failure.message
+          );
+        }
         this.events.fire({ type: 'turn/completed', backendId: this.id, threadId: handle.threadId, turnId });
         return;
       }
-      if (result.outcome !== 'completed') {
-        // Every failure mode is a distinct, actionable state, and the turn is
-        // closed with an error + interruption so the transcript stays coherent.
-        const failure = this.opencodeFailure(result.outcome, result.detail);
-        this.failTurn(handle, '', turnId, failure);
-        throw new BackendError(
-          failure.code === 'unauthenticated' ? 'unauthenticated' : 'provider',
-          failure.message
-        );
-      }
-      this.events.fire({ type: 'turn/completed', backendId: this.id, threadId: handle.threadId, turnId });
     } finally {
-      if (this.inFlight === controller) {
-        this.inFlight = undefined;
+      this.endFlight(controller);
+      if (this.activeTurnThreadId === handle.threadId) {
+        this.activeTurnThreadId = undefined;
       }
+      this.steerTexts = [];
     }
   }
 
