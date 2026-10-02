@@ -100,7 +100,8 @@ export class SettingsService {
       defaults: {
         permissionLevel: this.readPermissionLevel(),
         mode: this.readMode(),
-        thinking: readDefaultThinking()
+        thinking: readDefaultThinking(),
+        dictationModel: config.get<string>(`${DEFAULTS_SECTION}.dictationModel`, '')
       },
       context: this.contextSnapshot(config),
       models: {}
@@ -171,6 +172,10 @@ export class SettingsService {
       } else {
         await config.update(`${DEFAULTS_SECTION}.thinking`, patch.thinking || undefined, this.target);
       }
+    }
+
+    if (patch.dictationModel !== undefined) {
+      await config.update(`${DEFAULTS_SECTION}.dictationModel`, patch.dictationModel.trim(), this.target);
     }
 
     if (patch.opencodeEnabled !== undefined) {

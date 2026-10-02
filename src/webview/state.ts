@@ -26,6 +26,7 @@ import type {
   ChangeDecisionResult,
   CheckpointView,
   RestoreCheckpointResult,
+  ChatTabView,
   HostToWebviewMessage,
   ModeSnapshot,
   ModelCapabilitySnapshot,
@@ -75,6 +76,8 @@ export interface AppState {
   /** Live activity and unread replies keyed by backend and thread identity. */
   threadActivity: Record<string, { busy: boolean; unread: boolean }>;
   threadLoading: Record<string, boolean>;
+  /** Open sidebar chat tabs. The active one is the transcript on screen. */
+  chatTabs: ChatTabView[];
   selectedBackendId?: string;
   selectedModel?: string;
   /** Permission level the active conversation runs at. */
@@ -237,6 +240,7 @@ export type Action =
   | { type: 'clearModels'; backendId: string }
   | { type: 'threadsLoading'; backendId: string; value: boolean }
   | { type: 'threads'; backendId: string; threads: ThreadSummary[] }
+  | { type: 'chatTabs'; tabs: ChatTabView[] }
   | { type: 'selectBackend'; backendId: string }
   | { type: 'selectModel'; model: string }
   | { type: 'agentEvent'; event: AgentEvent }
@@ -355,6 +359,7 @@ export const initialState: AppState = {
   threads: {},
   threadActivity: {},
   threadLoading: {},
+  chatTabs: [],
   permissionLevel: 'default',
   permissionEpoch: 0,
   mode: 'agent',
@@ -469,6 +474,8 @@ export function reduce(state: AppState, action: Action): AppState {
         threads: { ...state.threads, [action.backendId]: action.threads },
         threadLoading: { ...state.threadLoading, [action.backendId]: false }
       };
+    case 'chatTabs':
+      return { ...state, chatTabs: action.tabs };
     case 'threadsLoading':
       return { ...state, threadLoading: { ...state.threadLoading, [action.backendId]: action.value } };
     case 'selectBackend':
@@ -548,6 +555,11 @@ export function reduce(state: AppState, action: Action): AppState {
         permissionEpoch: action.permissionLevel !== undefined ? state.permissionEpoch + 1 : state.permissionEpoch,
         mode: action.mode ?? state.mode,
         activeThreadId: action.threadId,
+        // A failure banner belongs to the conversation that produced it.
+        notice:
+          action.threadId !== state.activeThreadId || action.backendId !== state.selectedBackendId
+            ? undefined
+            : state.notice,
         busy: activityKey ? Boolean(state.threadActivity[activityKey]?.busy) : false,
         threadActivity: activityKey && state.threadActivity[activityKey]?.unread
           ? { ...state.threadActivity, [activityKey]: { ...state.threadActivity[activityKey], unread: false } }
@@ -1128,12 +1140,16 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
     case 'error':
       // A backend the user is not currently driving must never surface a status
       // or error: a failed Codex auth attempt stays invisible while Ollama is
-      // the selected provider, and vice versa.
-      if (state.selectedBackendId && event.backendId !== state.selectedBackendId) {
+      // the selected provider, and vice versa. A failure from another chat
+      // stays there too.
+      if (!eventForActiveChat(state, event.backendId, event.threadId)) {
         return state;
       }
       return { ...state, planRevising: false, notice: noticeForError(event) };
     case 'turn/interrupted':
+      if (!eventForActiveChat(state, event.backendId, event.threadId)) {
+        return state;
+      }
       if (event.canceled) {
         return {
           ...state,
@@ -1177,7 +1193,11 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
       };
     case 'notice':
       // A provider-neutral informational line from a backend (e.g. a degraded
-      // session resume), rendered with the existing notice path.
+      // session resume), rendered with the existing notice path. A line from
+      // another chat does not replace the banner on this one.
+      if (!eventForActiveChat(state, event.backendId, event.threadId)) {
+        return state;
+      }
       return { ...state, notice: { level: event.level, message: event.message } };
     default:
       return state;
@@ -1250,6 +1270,17 @@ export function decisionMessage(decision: ApprovalDecision): string {
   }
 }
 
+/** Whether an event belongs on the chat currently on screen. */
+function eventForActiveChat(state: AppState, backendId: string, threadId?: string): boolean {
+  if (state.selectedBackendId && backendId !== state.selectedBackendId) {
+    return false;
+  }
+  if (threadId && state.activeThreadId && threadId !== state.activeThreadId) {
+    return false;
+  }
+  return true;
+}
+
 /** Leave no item stuck in `streaming` after a turn ends. */
 function markStreamingItems(
   transcript: TranscriptItemView[],
@@ -1303,6 +1334,8 @@ function noticeForError(event: Extract<AgentEvent, { type: 'error' }>): AppState
 export interface HostBridge {
   post(message: WebviewToHostMessage): void;
   subscribe(listener: (message: HostToWebviewMessage) => void): () => void;
+  /** Persist the editor-tab identity so a reload reopens this conversation. */
+  setState(state: unknown): void;
 }
 
 interface VsCodeApi {
@@ -1325,6 +1358,7 @@ export function createHostBridge(): HostBridge {
 
   return {
     post: (message) => api.postMessage(message),
+    setState: (state) => api.setState(state),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

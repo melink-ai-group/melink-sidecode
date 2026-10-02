@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { PERMISSION_LEVELS, type AgentEvent, type DefaultMode, type PermissionLevel, type TodoStep, type TranscriptItem } from './types';
+import { mergeThreadRef } from './threadRef.ts';
 
 /**
  * Persists the small amount of state needed to reconnect after a window reload:
@@ -114,7 +115,8 @@ export class ThreadStore implements vscode.Disposable {
   async rememberThread(ref: PersistedThreadRef): Promise<void> {
     const index = this.loadThreadIndex();
     const existing = index[ref.backendId] ?? [];
-    index[ref.backendId] = [ref, ...existing.filter((thread) => thread.threadId !== ref.threadId)].slice(
+    const previous = existing.find((thread) => thread.threadId === ref.threadId);
+    index[ref.backendId] = [mergeThreadRef(previous, ref), ...existing.filter((thread) => thread.threadId !== ref.threadId)].slice(
       0,
       MAX_THREADS_PER_BACKEND
     );

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { request as httpRequest, Agent, type IncomingMessage } from 'node:http';
 import { parseOpencodeEvent } from './events.ts';
 import type { OpencodeEvent } from './events.ts';
 import {
@@ -24,6 +25,15 @@ import type { OpencodeRunOptions, OpencodeRunResult } from './runtime.ts';
  */
 
 const LISTEN_TIMEOUT_MS = 15_000;
+const READY_ATTEMPTS = 50;
+const READY_INTERVAL_MS = 100;
+
+/**
+ * The extension host replaces Node's global agent with one that follows the
+ * editor proxy. This server is on loopback, and that proxy refusing it is
+ * reported as the server not accepting a connection.
+ */
+const loopbackAgent = new Agent({ keepAlive: false });
 
 export async function runOpencodeServerTurn(
   options: OpencodeRunOptions & {
@@ -75,7 +85,7 @@ export async function runOpencodeServerTurn(
       };
     }
 
-    const ready = await waitUntilReady(baseUrl, options.cwd, options.signal);
+    const ready = await waitUntilReady(baseUrl, options.cwd, env, options.signal);
     if (ready === 'unauthorized') {
       return { outcome: 'unauthenticated', terminal: false, detail: 'The opencode server rejected the token.' };
     }
@@ -90,22 +100,29 @@ export async function runOpencodeServerTurn(
       const existing = await serverFetch(baseUrl, options.cwd, `/session/${encodeURIComponent(options.sessionId)}`, {
         method: 'GET',
         signal: options.signal
-      });
+      }, env);
       if (existing.status === 404) {
         return { outcome: 'stale-session', terminal: false, sessionId: options.sessionId, detail: 'The saved opencode session is no longer available.' };
       }
     }
 
-    const sessionId = options.sessionId ?? (await createSession(baseUrl, options));
-    if (!sessionId) {
-      return { outcome: 'provider', terminal: false, detail: 'The opencode session could not be started.' };
+    const created = options.sessionId
+      ? { id: options.sessionId }
+      : await createSession(baseUrl, options, env);
+    if (!created.id) {
+      return {
+        outcome: 'provider',
+        terminal: false,
+        detail: created.detail ?? 'The opencode session could not be started.'
+      };
     }
+    const sessionId = created.id;
 
     const state = { sawError: undefined as { message: string; statusCode?: number } | undefined, terminal: false };
     const eventsAbort = new AbortController();
     const stopEvents = (): void => eventsAbort.abort();
     options.signal?.addEventListener('abort', stopEvents, { once: true });
-    const events = readEvents(baseUrl, options, sessionId, state, onEvent, eventsAbort.signal);
+    const events = readEvents(baseUrl, options, env, sessionId, state, onEvent, eventsAbort.signal);
 
     const model = splitModel(options.modelRef);
     const prompt = await serverFetch(baseUrl, options.cwd, `/session/${encodeURIComponent(sessionId)}/message`, {
@@ -117,7 +134,7 @@ export async function runOpencodeServerTurn(
         parts: [{ type: 'text', text: options.prompt }]
       }),
       signal: options.signal
-    });
+    }, env);
     stopEvents();
     await events.catch(() => undefined);
 
@@ -148,24 +165,79 @@ export async function runOpencodeServerTurn(
   }
 }
 
-async function createSession(baseUrl: string, options: OpencodeRunOptions): Promise<string | undefined> {
-  const response = await serverFetch(baseUrl, options.cwd, '/session', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      permission: [
-        { permission: 'question', action: options.questionPermission ?? 'deny', pattern: '*' },
-        { permission: 'plan_enter', action: 'deny', pattern: '*' },
-        { permission: 'plan_exit', action: 'deny', pattern: '*' }
-      ]
-    }),
-    signal: options.signal
-  });
-  if (!response.ok) {
+async function createSession(
+  baseUrl: string,
+  options: OpencodeRunOptions,
+  env: NodeJS.ProcessEnv
+): Promise<{ id: string; detail?: undefined } | { id?: undefined; detail: string }> {
+  let response: Response;
+  try {
+    response = await serverFetch(baseUrl, options.cwd, '/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        permission: [
+          { permission: 'question', action: options.questionPermission ?? 'deny', pattern: '*' },
+          { permission: 'plan_enter', action: 'deny', pattern: '*' },
+          { permission: 'plan_exit', action: 'deny', pattern: '*' }
+        ]
+      }),
+      signal: options.signal
+    }, env);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    return { detail: message ? `The opencode session could not be started. ${message}` : 'The opencode session could not be started.' };
+  }
+  const text = await response.text().catch(() => '');
+  const id = response.ok ? sessionIdFromBody(text) : undefined;
+  if (id) {
+    return { id };
+  }
+  const reason = serverErrorDetail(text);
+  const status = response.ok ? '' : ` (HTTP ${response.status})`;
+  return {
+    detail: reason
+      ? `The opencode session could not be started${status}. ${reason}`
+      : `The opencode session could not be started${status}.`
+  };
+}
+
+/** Session id from a v1 body `{ id }` or a v2 body `{ data: { id } }`. */
+function sessionIdFromBody(text: string): string | undefined {
+  try {
+    const parsed = JSON.parse(text) as { id?: unknown; data?: { id?: unknown } };
+    if (typeof parsed.id === 'string') {
+      return parsed.id;
+    }
+    if (typeof parsed.data?.id === 'string') {
+      return parsed.data.id;
+    }
+  } catch {
+    // Not JSON.
+  }
+  return undefined;
+}
+
+function serverErrorDetail(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) {
     return undefined;
   }
-  const body = (await response.json().catch(() => undefined)) as { id?: unknown } | undefined;
-  return typeof body?.id === 'string' ? body.id : undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as { message?: unknown; data?: { message?: unknown } };
+    const message =
+      typeof parsed.message === 'string'
+        ? parsed.message
+        : typeof parsed.data?.message === 'string'
+          ? parsed.data.message
+          : undefined;
+    if (message?.trim()) {
+      return message.trim().replace(/\s+/g, ' ').slice(0, 240);
+    }
+  } catch {
+    // A plain-text body is still worth showing.
+  }
+  return trimmed.replace(/\s+/g, ' ').slice(0, 240);
 }
 
 async function readEvents(
@@ -173,6 +245,7 @@ async function readEvents(
   options: OpencodeRunOptions & {
     decidePermission: (ask: OpencodePermissionAsk, signal: AbortSignal) => Promise<OpencodePermissionReply>;
   },
+  env: NodeJS.ProcessEnv,
   sessionId: string,
   state: { sawError?: { message: string; statusCode?: number }; terminal: boolean },
   onEvent: (event: OpencodeEvent) => void,
@@ -182,7 +255,7 @@ async function readEvents(
     method: 'GET',
     headers: { accept: 'text/event-stream' },
     signal
-  });
+  }, env);
   if (!response.ok || !response.body) {
     return;
   }
@@ -199,7 +272,7 @@ async function readEvents(
       const consumed = consumeSse(buffer);
       buffer = consumed.rest;
       for (const message of consumed.messages) {
-        await handleBusMessage(message, baseUrl, options, sessionId, state, onEvent);
+        await handleBusMessage(message, baseUrl, options, env, sessionId, state, onEvent);
       }
     }
   } catch {
@@ -219,6 +292,7 @@ async function handleBusMessage(
   options: OpencodeRunOptions & {
     decidePermission: (ask: OpencodePermissionAsk, signal: AbortSignal) => Promise<OpencodePermissionReply>;
   },
+  env: NodeJS.ProcessEnv,
   sessionId: string,
   state: { sawError?: { message: string; statusCode?: number }; terminal: boolean },
   onEvent: (event: OpencodeEvent) => void
@@ -245,7 +319,7 @@ async function handleBusMessage(
         message: reply === 'reject' ? 'The user denied this request.' : undefined
       }),
       signal: options.signal
-    }).catch(() => undefined);
+    }, env).catch(() => undefined);
     return;
   }
 
@@ -263,14 +337,14 @@ async function handleBusMessage(
         headers: { 'content-type': 'application/json' },
         body: '{}',
         signal: options.signal
-      }).catch(() => undefined);
+      }, env).catch(() => undefined);
     } else {
       await serverFetch(baseUrl, options.cwd, `/question/${encodeURIComponent(question.id)}/reply`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ answers }),
         signal: options.signal
-      }).catch(() => undefined);
+      }, env).catch(() => undefined);
     }
     return;
   }
@@ -282,7 +356,7 @@ async function handleBusMessage(
       headers: { 'content-type': 'application/json' },
       body: '{}',
       signal: options.signal
-    }).catch(() => undefined);
+    }, env).catch(() => undefined);
     return;
   }
 
@@ -339,8 +413,15 @@ async function waitForListen(child: ChildProcess, signal?: AbortSignal): Promise
     const onData = (chunk: Buffer): void => {
       buffer += chunk.toString();
       const url = opencodeListenUrl(buffer);
-      if (url) {
-        finish(undefined, url);
+      if (!url) {
+        return;
+      }
+      try {
+        if (isLoopbackHttp(new URL(url))) {
+          finish(undefined, url);
+        }
+      } catch {
+        // The listen line is not complete enough to parse yet.
       }
     };
     const onError = (error: NodeJS.ErrnoException): void => finish(error);
@@ -357,34 +438,168 @@ async function waitForListen(child: ChildProcess, signal?: AbortSignal): Promise
 async function waitUntilReady(
   baseUrl: string,
   cwd: string,
+  env: NodeJS.ProcessEnv,
   signal?: AbortSignal
 ): Promise<'ok' | 'unauthorized' | 'canceled' | 'failed'> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < READY_ATTEMPTS; attempt += 1) {
     if (signal?.aborted) {
       return 'canceled';
     }
     try {
-      const response = await serverFetch(baseUrl, cwd, '/session', { method: 'GET', signal });
-      if (response.ok) {
-        return 'ok';
+      const health = await serverFetch(baseUrl, cwd, '/global/health', { method: 'GET', signal }, env);
+      const healthStatus = classifyReady(health.status);
+      await health.body?.cancel().catch(() => undefined);
+      if (healthStatus) {
+        return healthStatus;
       }
-      if (response.status === 401 || response.status === 403) {
-        return 'unauthorized';
+      // Older servers have no health route. A session list is ready once it answers.
+      if (health.status === 404) {
+        const sessions = await serverFetch(baseUrl, cwd, '/session', { method: 'GET', signal }, env);
+        const sessionStatus = classifyReady(sessions.status);
+        await sessions.body?.cancel().catch(() => undefined);
+        if (sessionStatus) {
+          return sessionStatus;
+        }
       }
     } catch {
       // The listen line can arrive before the socket accepts connections.
     }
-    await delay(100, signal);
+    await delay(READY_INTERVAL_MS, signal);
   }
   return 'failed';
 }
 
-function serverFetch(baseUrl: string, _cwd: string, path: string, init: RequestInit): Promise<Response> {
-  // The child is already started in the workspace, which is the server's
-  // default project. A directory query that does not byte-match that root
-  // would open a second instance and the permission reply would miss the ask.
+function classifyReady(status: number): 'ok' | 'unauthorized' | undefined {
+  if (status >= 200 && status < 300) {
+    return 'ok';
+  }
+  if (status === 401 || status === 403) {
+    return 'unauthorized';
+  }
+  return undefined;
+}
+
+/**
+ * Talk to the spawned server on loopback.
+ *
+ * The child is already started in the workspace, which is the server's
+ * default project. A directory header that does not byte-match that root
+ * opens a second project, and the next turn cannot see this session.
+ *
+ * `fetch` follows the extension host proxy, which does not accept this
+ * loopback port. A private agent connects directly. When the child inherited
+ * `OPENCODE_SERVER_PASSWORD`, the server requires that same basic credential.
+ */
+export function serverFetch(
+  baseUrl: string,
+  _cwd: string,
+  path: string,
+  init: RequestInit,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<Response> {
   const url = new URL(path, baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
-  return fetch(url, init);
+  if (!isLoopbackHttp(url)) {
+    return Promise.reject(new Error('The opencode server URL is not a loopback address.'));
+  }
+  const headers: Record<string, string> = {};
+  const requestHeaders = new Headers(init.headers);
+  requestHeaders.forEach((value, key) => {
+    headers[key] = value;
+  });
+  const authorization = basicAuthorization(env);
+  if (authorization) {
+    headers.authorization = authorization;
+  }
+  const body = requestBody(init.body);
+  const stream = requestHeaders.get('accept') === 'text/event-stream';
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      url,
+      {
+        method: init.method ?? 'GET',
+        headers,
+        agent: loopbackAgent,
+        signal: init.signal ?? undefined
+      },
+      (incoming) => {
+        const responseHeaders = new Headers();
+        const contentType = incoming.headers['content-type'];
+        if (typeof contentType === 'string') {
+          responseHeaders.set('content-type', contentType);
+        }
+        const status = incoming.statusCode ?? 500;
+        if (stream) {
+          resolve(new Response(byteStream(incoming), { status, headers: responseHeaders }));
+          return;
+        }
+        readBody(incoming).then(
+          (bytes) => resolve(new Response(bytes, { status, headers: responseHeaders })),
+          reject
+        );
+      }
+    );
+    req.on('error', reject);
+    if (body) {
+      req.end(body);
+    } else {
+      req.end();
+    }
+  });
+}
+
+function isLoopbackHttp(url: URL): boolean {
+  if (url.protocol !== 'http:') {
+    return false;
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+function basicAuthorization(env: NodeJS.ProcessEnv): string | undefined {
+  const password = env.OPENCODE_SERVER_PASSWORD;
+  if (!password) {
+    return undefined;
+  }
+  const username = env.OPENCODE_SERVER_USERNAME?.trim() || 'opencode';
+  return `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`;
+}
+
+function requestBody(body: BodyInit | null | undefined): Buffer | undefined {
+  if (body == null) {
+    return undefined;
+  }
+  if (typeof body === 'string') {
+    return Buffer.from(body);
+  }
+  if (body instanceof Uint8Array) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+  }
+  throw new Error('The opencode request body must be text.');
+}
+
+function readBody(incoming: IncomingMessage): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+    incoming.on('end', () => resolve(new Uint8Array(Buffer.concat(chunks))));
+    incoming.on('error', reject);
+  });
+}
+
+/** Byte stream for SSE. Chunks are copied so the extension host can read them. */
+function byteStream(incoming: IncomingMessage): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      incoming.on('data', (chunk: Buffer) => {
+        controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+      });
+      incoming.on('end', () => controller.close());
+      incoming.on('error', (error) => controller.error(error));
+    },
+    cancel() {
+      incoming.destroy();
+    }
+  });
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {

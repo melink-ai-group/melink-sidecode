@@ -113,7 +113,11 @@
         },
         "melink.defaults.permissionLevel": {
           "type": "string",
-          "enum": ["read-only", "default", "unrestricted"],
+          "enum": [
+            "read-only",
+            "default",
+            "unrestricted"
+          ],
           "enumDescriptions": [
             "Read-only: Codex runs read-only; anything that would write is requested.",
             "Default: workspace writes and sandboxed commands run on their own. Anything outside the sandbox is requested.",
@@ -124,7 +128,11 @@
         },
         "melink.defaults.mode": {
           "type": "string",
-          "enum": ["agent", "plan", "ask"],
+          "enum": [
+            "agent",
+            "plan",
+            "ask"
+          ],
           "enumDescriptions": [
             "Agent: the agent acts on the workspace.",
             "Plan: the agent proposes a plan before acting.",
@@ -135,7 +143,14 @@
         },
         "melink.defaults.thinking": {
           "type": "string",
-          "enum": ["", "off", "low", "medium", "high", "extra high"],
+          "enum": [
+            "",
+            "off",
+            "low",
+            "medium",
+            "high",
+            "extra high"
+          ],
           "enumDescriptions": [
             "No app default: each model uses its own reported default level.",
             "Off: do not reason.",
@@ -146,6 +161,11 @@
           ],
           "default": "",
           "description": "App-level default thinking level. A per-model choice overrides it, and a model's own reported default overrides this when neither is set."
+        },
+        "melink.defaults.dictationModel": {
+          "type": "string",
+          "default": "",
+          "description": "Ollama or Codex model that cleans dictated speech into the message text. Stored as provider|model. It does not answer. Empty disables the microphone."
         },
         "melink.context.includeInstructions": {
           "type": "boolean",
@@ -200,6 +220,8 @@
     "package": "vsce package"
   },
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
+    "ffmpeg-static": "^5.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

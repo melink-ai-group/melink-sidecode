@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { THINKING_LEVELS, type BackendModel } from '../backends/types';
 import type { ConnectionTestResult, SettingsPatch, SettingsSnapshot } from '../protocol';
+import { formatDictationTarget } from '../dictation/target';
 import { AlertIcon, BackIcon, CheckIcon, CrossIcon, InfoIcon } from './Icons';
+import { summarizeOpencodeCliOutput } from '../backends/opencode/upgradeText';
 import { opencodeRuntimeView } from './runtimeStatus';
 import { contextPatternError } from '../context/contextSettings';
 import { TabList, TabPanel, type TabItem } from './Tabs';
@@ -63,6 +65,7 @@ interface Draft {
   permissionLevel: SettingsSnapshot['defaults']['permissionLevel'];
   mode: SettingsSnapshot['defaults']['mode'];
   thinking: SettingsSnapshot['defaults']['thinking'] | '';
+  dictationModel: string;
   opencodeEnabled: boolean;
   opencodePath: string;
   contextIncludeInstructions: boolean;
@@ -85,6 +88,7 @@ function draftFrom(settings: SettingsSnapshot): Draft {
     permissionLevel: settings.defaults.permissionLevel,
     mode: settings.defaults.mode,
     thinking: settings.defaults.thinking ?? '',
+    dictationModel: formatDictationTarget(settings.defaults.dictationModel),
     opencodeEnabled: settings.opencode.enabled,
     opencodePath: settings.opencode.path,
     contextIncludeInstructions: settings.context.includeInstructions,
@@ -123,6 +127,9 @@ export function SettingsScreen({
   // The visible settings section. Switching tabs never touches the draft, so an
   // unsaved edit in another section survives.
   const [tab, setTab] = useState<'providers' | 'defaults' | 'context'>('providers');
+  // Ollama and Codex are separate pages inside Providers. The choice is view
+  // state only; it does not touch the draft.
+  const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-codex'>('provider-ollama');
   const backRef = useRef<HTMLButtonElement>(null);
   const lastSettingsRef = useRef<SettingsSnapshot | undefined>(undefined);
 
@@ -188,6 +195,7 @@ export function SettingsScreen({
       draft.permissionLevel !== settings.defaults.permissionLevel ||
       draft.mode !== settings.defaults.mode ||
       draft.thinking !== (settings.defaults.thinking ?? '') ||
+      draft.dictationModel !== formatDictationTarget(settings.defaults.dictationModel) ||
       draft.opencodeEnabled !== settings.opencode.enabled ||
       draft.opencodePath !== settings.opencode.path ||
       draft.contextIncludeInstructions !== settings.context.includeInstructions ||
@@ -262,6 +270,7 @@ export function SettingsScreen({
       permissionLevel: draft.permissionLevel,
       mode: draft.mode,
       thinking: draft.thinking,
+      dictationModel: draft.dictationModel.trim(),
       opencodeEnabled: draft.opencodeEnabled,
       // The path is sent only while the runtime is on: an off runtime must not
       // write an empty path over a previously stored valid one.
@@ -338,13 +347,23 @@ export function SettingsScreen({
 
         {/* ---------- Providers ---------- */}
         <TabPanel id="providers" active={tab}>
-        <section className="panel" aria-labelledby="providers-title">
+        <section className="panel panel--fill" aria-labelledby="providers-title">
           <div className="panel__head" id="providers-title">
             <span>Providers</span>
             <span className="spacer" />
             <span className="panel__note">Where the agent sends your prompts</span>
           </div>
-          <div className="panel__body">
+          <TabList
+            className="tablist--nested"
+            label="Provider"
+            tabs={[
+              { id: 'provider-ollama', label: 'Ollama' },
+              { id: 'provider-codex', label: 'Codex' }
+            ]}
+            active={providerTab}
+            onChange={(id) => setProviderTab(id as 'provider-ollama' | 'provider-codex')}
+          />
+          <TabPanel id="provider-ollama" active={providerTab} className="tabpanel--inline">
             {/* Ollama Cloud */}
             <div className="field">
               <div className="field__head">
@@ -478,10 +497,15 @@ export function SettingsScreen({
               </p>
 
               {ollamaStatus ? <TestResult backendLabel="Ollama Cloud" test={ollamaStatus} onRetry={() => onTestConnection('ollama')} /> : null}
+            </div>
 
-              {/* Optional opencode agentic runtime: a switch and a CLI path in
-                  the same Ollama provider region. The path only appears while
-                  the runtime is on; the status is three distinct states. */}
+            <div className="field">
+              <div className="field__head">
+                <span className="field-label field-label--row">opencode</span>
+              </div>
+              <p className="field-help">
+                Optional runtime for Ollama Cloud. Turns use the opencode CLI when this is on, and the direct adapter when it is off.
+              </p>
               <div className="runtime">
                 <label className="check" htmlFor="opencode-enabled">
                   <input
@@ -495,10 +519,8 @@ export function SettingsScreen({
                     <CheckIcon />
                   </span>
                   <span className="check-body">
-                    <span className="check-label">Use opencode as the agentic runtime</span>
-                    <span className="check-text">
-                      Runs Ollama Cloud turns through the opencode CLI instead of the direct adapter.
-                    </span>
+                    <span className="check-label">Use opencode for Ollama turns</span>
+                    <span className="check-text">Applies from the next turn. Save settings before installing or updating.</span>
                   </span>
                 </label>
 
@@ -540,53 +562,41 @@ export function SettingsScreen({
                 {settings.opencode.enabled ? (
                   <div className="runtime-actions">
                     {settings.opencode.status === 'detected' ? (
-                      <button
-                        className="btn btn--secondary"
-                        type="button"
-                        disabled={opencodeUpgrade?.pending}
-                        title="Run opencode upgrade"
-                        onClick={onUpgradeOpencode}
-                      >
-                        {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
-                      </button>
+                      <>
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          disabled={opencodeUpgrade?.pending}
+                          onClick={onUpgradeOpencode}
+                        >
+                          {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
+                        </button>
+                        {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
+                          <CliResult ok={opencodeUpgrade.ok} message={opencodeUpgrade.message} />
+                        ) : null}
+                      </>
                     ) : (
-                      <button
-                        className="btn btn--secondary"
-                        type="button"
-                        disabled={opencodeInstall?.pending}
-                        title="Download and install the opencode CLI"
-                        onClick={onInstallOpencode}
-                      >
-                        {opencodeInstall?.pending ? 'Installing...' : 'Install opencode'}
-                      </button>
+                      <>
+                        <button
+                          className="btn btn--secondary"
+                          type="button"
+                          disabled={opencodeInstall?.pending}
+                          onClick={onInstallOpencode}
+                        >
+                          {opencodeInstall?.pending ? 'Installing...' : 'Install opencode'}
+                        </button>
+                        {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
+                          <CliResult ok={opencodeInstall.ok} message={opencodeInstall.message} />
+                        ) : null}
+                      </>
                     )}
-                    {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
-                      <p
-                        className={`field-msg ${opencodeInstall.ok ? '' : 'field-msg--error'}`}
-                        role="status"
-                      >
-                        <span>{opencodeInstall.message}</span>
-                      </p>
-                    ) : null}
-                    {settings.opencode.status === 'detected' &&
-                    opencodeUpgrade &&
-                    !opencodeUpgrade.pending &&
-                    opencodeUpgrade.message ? (
-                      <p
-                        className={`field-msg ${opencodeUpgrade.ok ? '' : 'field-msg--error'}`}
-                        role="status"
-                      >
-                        <span>{opencodeUpgrade.message}</span>
-                      </p>
-                    ) : null}
                   </div>
                 ) : null}
-
-                <p className="field-help">Applies from the next turn.</p>
               </div>
             </div>
+          </TabPanel>
 
-            {/* Codex */}
+          <TabPanel id="provider-codex" active={providerTab} className="tabpanel--inline">
             <div className="field">
               <div className="field__head">
                 <span className="provider-badge provider-badge--codex">
@@ -669,7 +679,7 @@ export function SettingsScreen({
 
               {codexStatus ? <TestResult backendLabel="Codex" test={codexStatus} onRetry={() => onTestConnection('codex')} /> : null}
             </div>
-          </div>
+          </TabPanel>
         </section>
         </TabPanel>
 
@@ -778,6 +788,43 @@ export function SettingsScreen({
               <p className="field-help">
                 A model’s reported default and its saved per-model choice take precedence. Otherwise this level
                 is used; unsupported levels are reduced to the closest level the model supports.
+              </p>
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="dictation-model">
+                Dictation model
+              </label>
+              <select
+                className="select"
+                id="dictation-model"
+                value={draft.dictationModel}
+                onChange={(event) => update('dictationModel', event.target.value)}
+              >
+                <option value="">None</option>
+                {(['ollama', 'codex'] as const).map((backendId) => {
+                  const options = modelOptions.filter((option) => option.backendId === backendId);
+                  const savedHere = draft.dictationModel.startsWith(`${backendId}|`);
+                  if (options.length === 0 && !savedHere) {
+                    return null;
+                  }
+                  const known = options.some((option) => `${backendId}|${option.id}` === draft.dictationModel);
+                  return (
+                    <optgroup label={backendId === 'ollama' ? 'Ollama' : 'Codex'} key={backendId}>
+                      {!known && draft.dictationModel.startsWith(`${backendId}|`) ? (
+                        <option value={draft.dictationModel}>{draft.dictationModel.slice(backendId.length + 1)}</option>
+                      ) : null}
+                      {options.map((option) => (
+                        <option value={`${backendId}|${option.id}`} key={`${backendId}|${option.id}`}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
+              </select>
+              <p className="field-help">
+                This model only cleans dictated text. It does not answer. Choose an Ollama or Codex model. None disables the microphone.
               </p>
             </div>
           </div>
@@ -1096,6 +1143,17 @@ function ContextCategory({
         </span>
       </label>
     </li>
+  );
+}
+
+/** One plain sentence for an install or update. Terminal color and progress bars are stripped. */
+function CliResult({ ok, message }: { ok?: boolean; message: string }): JSX.Element {
+  const text = summarizeOpencodeCliOutput(message, ok === false ? 1 : 0);
+  return (
+    <p className={`runtime-result ${ok ? 'runtime-result--ok' : 'runtime-result--error'}`} role="status">
+      {ok ? <CheckIcon /> : <AlertIcon />}
+      <span>{text}</span>
+    </p>
   );
 }
 

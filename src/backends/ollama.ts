@@ -49,6 +49,7 @@ import {
   fitCompactionSource
 } from './compaction';
 import { cleanToolTarget, friendlyToolTitle, isStatusText } from './toolLabel.ts';
+import { DICTATION_INSTRUCTIONS, dictationText } from '../dictation/prompt';
 import type { OpencodeEvent } from './opencode/events';
 import type { OpencodeOutcome } from './opencode/runtime';
 import { isAbsolute, resolve } from 'node:path';
@@ -605,6 +606,45 @@ export class OllamaBackend implements AgentBackend {
     // leaves the conversation where it was.
     await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
     return { transcript: compactedTranscript(summary) };
+  }
+
+  /**
+   * Turn a raw dictation into the utterance the speaker meant to send.
+   * A direct `/api/chat` call: it never opens a thread and never uses opencode.
+   */
+  async cleanDictation(text: string, model: string): Promise<string> {
+    const source = text.trim();
+    if (!source) {
+      throw new BackendError('provider', 'No speech was heard.');
+    }
+    const selected = model.trim();
+    if (!selected) {
+      throw new BackendError('provider', 'Choose a dictation model in Settings.');
+    }
+    const token = await this.token();
+    if (!token) {
+      throw new BackendError('unauthenticated', 'Set an Ollama Cloud token before using dictation.');
+    }
+    const response = await this.request('/api/chat', token, {
+      method: 'POST',
+      body: JSON.stringify({
+        model: selected,
+        stream: false,
+        messages: [
+          { role: 'system', content: DICTATION_INSTRUCTIONS },
+          { role: 'user', content: source }
+        ]
+      })
+    });
+    const body = (await response.json()) as OllamaChatChunk;
+    if (body.error) {
+      throw new BackendError('provider', body.error);
+    }
+    const cleaned = dictationText(body.message?.content ?? '');
+    if (!cleaned) {
+      throw new BackendError('provider', 'Dictation cleanup returned nothing.');
+    }
+    return cleaned;
   }
 
   async sendTurn(handle: ThreadHandle, request: SendTurnRequest): Promise<void> {

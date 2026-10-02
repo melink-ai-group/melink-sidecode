@@ -3,17 +3,22 @@
 A tour of what the sidebar does and how to drive it. For installation, see the
 [README](../README.md).
 
-## Opening the sidebar
+## Opening a chat
 
 Click the **SideCode** icon in the Activity Bar, or run **View: Show SideCode** from the
-Command Palette. The view is a single chat column: a title bar for provider/model
-controls, the transcript, and a composer at the bottom.
+Command Palette. Each conversation is a tab in the sidebar. A new tab is named
+**SideCode** until you send a message; the tab is then renamed to a short truncation
+of that message. **+** opens another sidebar tab (an unused SideCode tab is focused
+instead of stacking a second blank one). History opens a chat in a new sidebar tab, or
+focuses that tab when it is already open.
 
 ## The layout at a glance
 
 ```
 +--------------------------------------------------+
-| Model  <provider> <model> v   [+][history][refresh][gear] |
+| SideCode | Fix the login            x   [+][history] |
++--------------------------------------------------+
+| Model  <provider> <model> v          [context][cog] |
 +--------------------------------------------------+
 |                                                  |
 |   transcript: your turns, agent replies,         |
@@ -25,6 +30,11 @@ controls, the transcript, and a composer at the bottom.
 | Enter to send, Shift+Enter for a new line        |
 +--------------------------------------------------+
 ```
+
+**+** is the primary new-chat button, on the right of the tab row next to the title-bar
+refresh. History sits beside it: a searchable list (title and model) that still
+shows Busy and Unread. Drag a tab to reorder it. The cog opens settings. Backend
+availability is refreshed from the title bar, not from the model row.
 
 ## Providers
 
@@ -155,20 +165,22 @@ conversation is easy to read.
 
 ## Conversations
 
-- **New conversation** (the `+` icon) starts a fresh thread on the selected
-  provider and model.
-- **Conversation history** (the clock icon) lists recent conversations for the
-  active provider, newest first, with a title taken from the first user turn and
-  the model it used. Selecting one reconnects and replays its turns.
+- **New chat** (the primary `+` button, on the tab row) opens another sidebar
+  tab. It does not clear the tab you are in. An unused SideCode tab is focused
+  instead of opening a second blank one. Drag a tab to change the order.
+- **Conversation history** (the clock icon, next to `+`) opens a searchable list
+  of recent conversations for the active provider, newest first, with a title
+  taken from the first user turn, the model it used, and Busy / Unread when
+  those apply. Choosing one opens that conversation in a new sidebar tab, or
+  focuses the tab when it is already open.
 
 ### Reload resume
 
-Reloading the window and reopening the sidebar **restores the previous
-conversation** for the active backend: a brief *"Restoring conversation…"* status
-clears and the prior turns repaint. The selected model is restored too. If the
-previous thread is no longer available, the sidebar quietly starts a new
-conversation rather than blocking — you will see an informational notice, never a
-disabled input.
+Reloading the window **reopens the sidebar tabs** that were open. Each tab
+restores its own conversation: a brief *"Restoring conversation…"* status clears
+and the prior turns repaint. A tab that never sent a message comes back as
+SideCode. If a thread is no longer available, that tab shows a notice and stays
+usable.
 
 For Ollama Cloud, replaying the stored turns against the stateless `/api/chat`
 *is* the resume: the next turn is sent with the conversation's context. For
@@ -367,7 +379,7 @@ and coherent.
 
 **Manual refresh.** The context button in the header asks for a fresh snapshot on
 demand, so a turn sent right after a workspace change reflects it without a
-reload. (The adjacent refresh button re-probes backend availability.)
+reload. The title-bar refresh re-probes backend availability.
 
 Nothing about the rendered block is shown in the sidebar: it is sent to the
 model, not rendered as a message.

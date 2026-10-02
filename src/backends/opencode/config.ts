@@ -112,6 +112,19 @@ export function opencodeBaseUrl(baseUrl: string): string {
   return `${trimmed}/v1`;
 }
 
+/**
+ * Max output tokens sent with a context limit.
+ *
+ * opencode's model schema requires `limit.output` whenever `limit` is present.
+ * The value stays at most half the context window, and at least 1, so a small
+ * window is not given an output budget larger than itself.
+ */
+const DEFAULT_OUTPUT_LIMIT = 8_192;
+
+function outputLimitFor(context: number): number {
+  return Math.max(1, Math.min(DEFAULT_OUTPUT_LIMIT, Math.floor(context / 2) || 1));
+}
+
 /** The UI thinking level as an opencode/OpenAI-compatible reasoning effort. */
 export function opencodeReasoningEffort(level: ThinkingLevel): string | undefined {
   switch (level) {
@@ -230,7 +243,9 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
 
   const selected: Record<string, unknown> = { name: modelId, tool_call: true };
   if (contextApplied !== undefined) {
-    selected.limit = { context: contextApplied };
+    // opencode 1.18 rejects a limit that names context without output
+    // (`ConfigInvalidError` / Missing key). Output stays inside the window.
+    selected.limit = { context: contextApplied, output: outputLimitFor(contextApplied) };
   }
   if (reasoningKnown) {
     selected.reasoning = reasoningSupported;
