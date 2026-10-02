@@ -5126,7 +5126,7 @@ button.context-meter:hover {
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
   background: var(--vscode-editorWidget-background);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .todo--finished {
@@ -5312,6 +5312,7 @@ button.context-meter:hover {
 }
 
 .plan-reference {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -5320,35 +5321,21 @@ button.context-meter:hover {
   min-width: 0;
 }
 
-.plan-reference__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: var(--melink-radius-sm, 4px);
-  background: transparent;
-  color: var(--vscode-foreground);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.plan-reference__toggle:hover {
-  background: var(--vscode-list-hoverBackground);
-}
-
-.plan-reference__toggle:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 1px;
-}
-
-.plan-reference__body {
-  padding: 0 8px 8px;
-  font-size: 13px;
-  color: var(--vscode-foreground);
-  overflow-wrap: anywhere;
+/* Same anchored card as the mode menu, wide enough for the step text. */
+.steps-menu__panel {
+  position: absolute;
+  z-index: 16;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 4px);
+  max-height: min(320px, 50vh);
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
 }
 
 @media (max-width: 340px) {
