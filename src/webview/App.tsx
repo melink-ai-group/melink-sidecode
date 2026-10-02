@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -127,6 +127,45 @@ function acceptsSteer(backendId: string | undefined): boolean {
   return backendId === 'codex' || backendId === 'ollama';
 }
 
+const POPUP_PREFERRED_WIDTH = 320;
+
+/**
+ * Place a composer popup on the side of its trigger that has room.
+ * A trigger near the right edge opens the card to the left.
+ */
+function usePopupSide(open: boolean): { ref: RefObject<HTMLDivElement>; className: string } {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+    const root = ref.current;
+    if (!root) {
+      return;
+    }
+    const place = (): void => {
+      const anchor = root.getBoundingClientRect();
+      const margin = 8;
+      const spaceRight = window.innerWidth - anchor.left - margin;
+      const spaceLeft = anchor.right - margin;
+      const alignEnd = spaceRight < POPUP_PREFERRED_WIDTH && spaceLeft > spaceRight;
+      const available = Math.max(160, alignEnd ? spaceLeft : spaceRight);
+      root.style.setProperty('--popup-left', alignEnd ? 'auto' : '0');
+      root.style.setProperty('--popup-right', alignEnd ? '0' : 'auto');
+      root.style.setProperty('--popup-max', `${available}px`);
+    };
+    place();
+    const frame = requestAnimationFrame(place);
+    const observer = new ResizeObserver(place);
+    observer.observe(document.documentElement);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [open]);
+  return { ref, className: 'mode-menu' };
+}
+
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reduce, initialState);
   const [draft, setDraft] = useState('');
@@ -135,6 +174,9 @@ export function App(): JSX.Element {
   const [modePanelOpen, setModePanelOpen] = useState(false);
   const [permissionPanelOpen, setPermissionPanelOpen] = useState(false);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const permissionPopup = usePopupSide(permissionPanelOpen);
+  const modelPopup = usePopupSide(modelPanelOpen);
+  const modelSettingsPopup = usePopupSide(modelSettingsOpen);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const historyRef = useRef<HTMLDivElement>(null);
@@ -1661,7 +1703,7 @@ export function App(): JSX.Element {
               </div>
             ) : null}
             {hasApprovalChannel && permissionOptions.length > 0 ? (
-              <div className="mode-menu">
+              <div className={permissionPopup.className} ref={permissionPopup.ref}>
                 <PermissionTrigger
                   options={permissionOptions}
                   selected={state.permissionLevel}
@@ -1688,7 +1730,7 @@ export function App(): JSX.Element {
                 ) : null}
               </div>
             ) : null}
-            <div className="mode-menu">
+            <div className={modelPopup.className} ref={modelPopup.ref}>
               <button
                 className="control-trigger model-trigger"
                 type="button"
@@ -1704,7 +1746,9 @@ export function App(): JSX.Element {
                   toggleModelPanel();
                 }}
               >
-                <span className="trigger-label">Model</span>
+                {active?.status === 'available' && selectedModelLabel ? null : (
+                  <span className="trigger-label">Model</span>
+                )}
                 {active?.status === 'available' ? (
                   <span className={`provider-dot provider-dot--${active.id}`} aria-hidden="true" />
                 ) : null}
@@ -1731,7 +1775,7 @@ export function App(): JSX.Element {
               ) : null}
             </div>
             {state.selectedBackendId && state.selectedModel ? (
-              <div className="mode-menu">
+              <div className={modelSettingsPopup.className} ref={modelSettingsPopup.ref}>
                 <button
                   className="control-trigger"
                   type="button"
@@ -1739,6 +1783,7 @@ export function App(): JSX.Element {
                   aria-expanded={modelSettingsOpen}
                   aria-controls="model-settings-panel"
                   aria-label="Model settings"
+                  title="Model settings"
                   disabled={Boolean(pending) || asking}
                   onClick={() => {
                     setModelSettingsOpen((value) => !value);
@@ -1748,8 +1793,6 @@ export function App(): JSX.Element {
                   }}
                 >
                   <SlidersIcon className="ico ico--sm" />
-                  <span className="control-label">Settings</span>
-                  <ChevronDownIcon className="control-chevron" />
                 </button>
                 {modelSettingsOpen ? (
                   <ModelSettingsPanel
@@ -3651,9 +3694,9 @@ function RulesScreen({
 }
 
 /**
- * The compact permission level trigger that sits with the model and mode in the
- * composer. Collapsed it shows the current level; the options open in a
- * floating panel above the composer.
+ * The compact permission trigger that sits with the model and mode in the
+ * composer. The button is the shield icon; the current level is its tooltip.
+ * The options open in a floating panel above the composer.
  */
 function PermissionTrigger({
   options,
@@ -3678,12 +3721,11 @@ function PermissionTrigger({
       aria-expanded={open}
       aria-controls="permission-panel"
       aria-label={`Permission level: ${current?.label ?? selected}`}
+      title={current?.label ?? selected}
       disabled={disabled}
       onClick={onToggle}
     >
       <ShieldIcon className="ico ico--sm" />
-      <span className="control-label">{current?.label ?? selected}</span>
-      <ChevronDownIcon className="control-chevron" />
     </button>
   );
 }

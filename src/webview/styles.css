@@ -1849,12 +1849,15 @@ body {
   min-width: 0;
 }
 
-/* Permission and model settings use the same anchored card as the mode list. */
-.mode-menu .control-panel {
-  left: 0;
-  right: auto;
+/* Permission and model settings use the same anchored card as the mode list.
+ * --popup-left / --popup-right flip the card to the side that fits. */
+.mode-menu .control-panel,
+.mode-menu .model-panel {
+  left: var(--popup-left, 0);
+  right: var(--popup-right, auto);
   bottom: calc(100% + 4px);
-  width: min(320px, calc(100vw - 28px));
+  width: min(320px, var(--popup-max, calc(100vw - 28px)));
+  max-width: var(--popup-max, calc(100vw - 28px));
   min-height: 0;
   max-height: min(420px, 62vh);
   box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
