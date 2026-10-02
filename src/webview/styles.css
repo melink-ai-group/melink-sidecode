@@ -5119,7 +5119,10 @@ button.context-meter:hover {
 }
 
 .todo--finished {
-  border-color: var(--melink-success);
+  /* Full success green reads as a glow on the dark card. Pull it toward the
+   * surface so a finished plan stays green without the high contrast. */
+  --todo-done: color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background));
+  border-color: color-mix(in srgb, var(--melink-success) 38%, var(--vscode-widget-border, var(--vscode-panel-border)));
 }
 
 .todo--stopped {
@@ -5176,7 +5179,7 @@ button.context-meter:hover {
 }
 
 .todo__progress-icon--done {
-  color: var(--melink-success);
+  color: var(--todo-done, color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background)));
 }
 
 .todo__progress-icon--stopped {
@@ -5203,7 +5206,7 @@ button.context-meter:hover {
 }
 
 .todo--finished .todo__fill {
-  background: var(--melink-success);
+  background: var(--todo-done);
 }
 
 .todo--stopped .todo__fill {
@@ -5248,8 +5251,8 @@ button.context-meter:hover {
 }
 
 .todo__item--done .todo__mark {
-  border-color: var(--melink-success);
-  color: var(--melink-success);
+  border-color: var(--todo-done, color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background)));
+  color: var(--todo-done, color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background)));
 }
 
 /* A denied step never ran: the cross glyph and the "Denied" label carry the
