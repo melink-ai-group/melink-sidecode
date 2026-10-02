@@ -2196,11 +2196,6 @@ function ModelPanel({
           </div>
         ) : null}
       </div>
-
-      <div className="model-panel__foot">
-        <InfoIcon />
-        <span>Switching applies to your next message. This conversation is kept.</span>
-      </div>
     </div>
   );
 }
