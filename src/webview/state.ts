@@ -510,6 +510,7 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'localUserMessage':
       return {
         ...state,
+        notice: withoutFailureNotice(state.notice),
         attachments: [],
         attachmentError: undefined,
         contextUsedTokens: (state.contextUsedTokens ?? 0) + tokensFromText(action.text),
@@ -1025,6 +1026,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         ...state,
         busy: true,
         startingTurn: true,
+        notice: withoutFailureNotice(state.notice),
         changeDecision: undefined,
         changeRejectConfirm: undefined,
         changeDeciding: false
@@ -1047,6 +1049,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
       return {
         ...state,
         startingTurn: false,
+        notice: withoutFailureNotice(state.notice),
         transcript: [
           ...state.transcript,
           {
@@ -1308,6 +1311,14 @@ function markStreamingItems(
  * Provider wording is not trusted verbatim for the generic cases: the code
  * decides the sentence, so a raw protocol failure never reaches the transcript.
  */
+/** Drop an error banner once the user or the agent continues. Info notices stay. */
+function withoutFailureNotice(notice: AppState['notice']): AppState['notice'] {
+  if (notice?.level === 'error' || notice?.level === 'warning') {
+    return undefined;
+  }
+  return notice;
+}
+
 function noticeForError(event: Extract<AgentEvent, { type: 'error' }>): AppState['notice'] {
   switch (event.code) {
     case 'unauthenticated':

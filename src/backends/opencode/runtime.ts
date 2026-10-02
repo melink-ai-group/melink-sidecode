@@ -153,6 +153,8 @@ export async function runOpencodeTurn(
     sawError: undefined as { message: string; statusCode?: number } | undefined,
     sawAnyEvent: false,
     sawPermissionReject: false,
+    openTools: new Set<string>(),
+    lastStepReason: undefined as string | undefined,
     spawnError: undefined as NodeJS.ErrnoException | undefined,
     stderrTail: '',
     aborted: false
@@ -252,9 +254,12 @@ export async function runOpencodeTurn(
     };
   }
   if (!state.terminal) {
-    // The reported upstream regression: JSON mode can drop events after a tool
-    // call, so a stream with no terminal `step_finish` is a failed turn, not a
-    // quietly successful one.
+    // JSON mode sometimes exits 0 after the tools have finished and drops the
+    // final `step_finish`. That is a completed turn. A process that dies while
+    // a tool is still running, or right after it asked for tool calls, is not.
+    if (cleanOpencodeExit(exit.code, state)) {
+      return { ...common, outcome: 'completed', terminal: true };
+    }
     return {
       ...common,
       outcome: 'stream',
@@ -295,6 +300,17 @@ function configContainsSecret(config: Record<string, unknown>, token: string): b
   }
 }
 
+/**
+ * A zero exit after real output, with no tool left running and no trailing
+ * request for tool calls, finished the turn even when `step_finish` was dropped.
+ */
+export function cleanOpencodeExit(
+  exitCode: number | null,
+  state: { sawAnyEvent: boolean; openTools: ReadonlySet<string>; lastStepReason?: string }
+): boolean {
+  return exitCode === 0 && state.sawAnyEvent && state.openTools.size === 0 && state.lastStepReason !== 'tool-calls';
+}
+
 function captureState(
   event: OpencodeEvent,
   state: {
@@ -302,14 +318,26 @@ function captureState(
     terminal: boolean;
     sawError?: { message: string; statusCode?: number };
     sawAnyEvent: boolean;
+    openTools: Set<string>;
+    lastStepReason?: string;
   }
 ): void {
   const sessionId = sessionIdOf(event);
   if (sessionId) {
     state.sessionId = sessionId;
   }
-  if (event.kind === 'step-finish' && isTerminalStepReason(event.reason)) {
-    state.terminal = true;
+  if (event.kind === 'tool') {
+    if (event.status === 'pending' || event.status === 'running') {
+      state.openTools.add(event.callId);
+    } else {
+      state.openTools.delete(event.callId);
+    }
+  }
+  if (event.kind === 'step-finish') {
+    state.lastStepReason = event.reason;
+    if (isTerminalStepReason(event.reason)) {
+      state.terminal = true;
+    }
   }
   if (event.kind === 'error') {
     state.sawError = { message: event.message, statusCode: event.statusCode };

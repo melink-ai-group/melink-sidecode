@@ -1727,25 +1727,14 @@ body {
   min-height: 0;
 }
 
-/* A live agent todo list floats just above the composer so it remains visible
- * while the transcript scrolls. The list itself stays bounded in a short view. */
-.todo-floating {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: calc(100% + 8px);
-  z-index: 5;
-  max-height: min(45vh, 360px);
-  filter: drop-shadow(0 3px 10px var(--vscode-widget-shadow, transparent));
-}
-
-.todo-floating .todo {
-  max-height: min(45vh, 360px);
-}
-
-.todo-floating .todo__list {
+/* The plan card sits in the footer and takes its own space, so the transcript
+ * stays above it instead of scrolling underneath. */
+.todo-dock {
+  position: relative;
+  flex: 0 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  max-height: min(42vh, 320px);
+  overflow: auto;
 }
 
 .composer-box {
@@ -5321,21 +5310,12 @@ button.context-meter:hover {
   min-width: 0;
 }
 
-/* Same anchored card as the mode menu, wide enough for the step text. */
+/* Steps open inside the card. The dock scrolls; the list does not cover the chat. */
 .steps-menu__panel {
-  position: absolute;
-  z-index: 16;
-  left: 0;
-  right: 0;
-  bottom: calc(100% + 4px);
-  max-height: min(320px, 50vh);
+  max-height: min(240px, 36vh);
   overflow: auto;
   margin: 0;
-  padding: 4px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: var(--melink-radius-md, 6px);
-  background: var(--vscode-editorWidget-background);
-  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
+  padding: 0 0 4px;
 }
 
 @media (max-width: 340px) {

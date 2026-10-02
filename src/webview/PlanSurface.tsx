@@ -343,15 +343,6 @@ function TodoList({
           <span className="control-label">Steps</span>
           <ChevronDownIcon className="control-chevron" />
         </button>
-        {stepsOpen ? (
-          <div className="steps-menu__panel" id="steps-menu" role="dialog" aria-label="Steps">
-            <ul className="todo__list">
-              {plan.steps.map((step, index) => (
-                <TodoRow key={`${index}-${step.text}`} step={step} live={busy} />
-              ))}
-            </ul>
-          </div>
-        ) : null}
         <span className="spacer" />
         {plan.path ? (
           <button className="btn btn--link" type="button" onClick={onOpenPlan}>
@@ -359,6 +350,15 @@ function TodoList({
           </button>
         ) : null}
       </div>
+      {stepsOpen ? (
+        <div className="steps-menu__panel" id="steps-menu" role="region" aria-label="Steps">
+          <ul className="todo__list">
+            {plan.steps.map((step, index) => (
+              <TodoRow key={`${index}-${step.text}`} step={step} live={busy} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {allDone ? (
         <p className="todo__finished">

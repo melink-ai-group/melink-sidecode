@@ -7,6 +7,7 @@ import {
   reportedChangeOfTool,
   sessionIdOf
 } from './events.ts';
+import { cleanOpencodeExit } from './runtime.ts';
 
 // Real captured lines from `opencode run --format json` (opencode 1.1.65).
 const STEP_START =
@@ -57,6 +58,20 @@ test('a terminal step_finish is recognized, a non-terminal one is not', () => {
   }
   assert.equal(isTerminalStepReason('tool-calls'), false);
   assert.equal(isTerminalStepReason('unknown'), false);
+  const hyphen = parseOpencodeEvent('{"type":"step-finish","sessionID":"ses_1","reason":"stop"}');
+  assert.equal(hyphen.kind, 'step-finish');
+  if (hyphen.kind === 'step-finish') {
+    assert.equal(hyphen.reason, 'stop');
+  }
+});
+
+test('a clean exit after finished tools is a completed turn', () => {
+  const idle = { sawAnyEvent: true, openTools: new Set<string>(), lastStepReason: undefined };
+  assert.equal(cleanOpencodeExit(0, idle), true);
+  assert.equal(cleanOpencodeExit(0, { ...idle, lastStepReason: 'tool-calls' }), false);
+  assert.equal(cleanOpencodeExit(0, { ...idle, openTools: new Set(['call_1']) }), false);
+  assert.equal(cleanOpencodeExit(1, idle), false);
+  assert.equal(cleanOpencodeExit(0, { ...idle, sawAnyEvent: false }), false);
 });
 
 test('a bash tool call carries its command and status', () => {

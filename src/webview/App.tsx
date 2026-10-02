@@ -1513,7 +1513,7 @@ export function App(): JSX.Element {
 
       <footer className={chatEmpty ? 'composer composer--expanded' : 'composer'}>
         {state.plan?.built ? (
-          <div className="todo-floating">
+          <div className="todo-dock">
             <PlanSurface
               plan={state.plan}
               revising={state.planRevising}

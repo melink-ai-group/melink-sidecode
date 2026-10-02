@@ -747,6 +747,29 @@ test('a decision answer settles the in-flight lock and closes the confirmation',
   assert.equal(answered.changeDecision?.results[0].ok, true);
 });
 
+test('a failure banner leaves once the user or the next turn continues', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 'thread_1' });
+  const failed = reduce(active, {
+    type: 'agentEvent',
+    event: {
+      type: 'error',
+      backendId: 'ollama',
+      threadId: 'thread_1',
+      message: 'The opencode stream ended before the turn completed.',
+      recoverable: true,
+      code: 'stream'
+    }
+  });
+  assert.equal(failed.notice?.message, 'The opencode stream ended before the turn completed.');
+  const continued = reduce(failed, { type: 'localUserMessage', text: 'Continue the remaining steps.' });
+  assert.equal(continued.notice, undefined);
+  const again = reduce(failed, {
+    type: 'agentEvent',
+    event: { type: 'turn/started', backendId: 'ollama', threadId: 'thread_1', turnId: 'turn_2' }
+  });
+  assert.equal(again.notice, undefined);
+});
+
 test('a new turn keeps the review but stops claiming a decision is in flight', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
   const withReview = reduce(active, {
