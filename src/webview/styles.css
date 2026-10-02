@@ -1187,16 +1187,55 @@ body {
   overflow: hidden;
 }
 
-.item-card--command > summary { list-style: none; cursor: pointer; }
-.item-card--command > summary::-webkit-details-marker { display: none; }
+.item-card--command > summary,
+.item-card--change > summary { list-style: none; cursor: pointer; }
+.item-card--command > summary::-webkit-details-marker,
+.item-card--change > summary::-webkit-details-marker { display: none; }
 .item-card--command:not([open]),
-.item-card--command:not([open]) > .item-head {
+.item-card--command:not([open]) > .item-head,
+.item-card--change:not([open]),
+.item-card--change:not([open]) > .item-head {
   min-height: 32px;
 }
-.item-card--command:not([open]) .item-path { white-space: normal; }
-.item-card--command[open] .item-path { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
-.item-card--command[open] .item-head { border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
-.item-card--command .item-body code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.item-card--command:not([open]) .item-path,
+.item-card--change:not([open]) .item-path { white-space: normal; }
+.item-card--command[open] .item-path,
+.item-card--change[open] .item-path { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
+.item-card--command[open] .item-head,
+.item-card--change[open] .item-head { border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
+.item-card--command .item-body code,
+.item-card--change .item-body code { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.activity-group__toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activity-group__chevron {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+  color: var(--vscode-descriptionForeground);
+  transform: rotate(-90deg);
+}
+
+.activity-group__chevron--open {
+  transform: none;
+}
+
+.activity-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 8px 16px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
 
 .item-head {
   display: flex;

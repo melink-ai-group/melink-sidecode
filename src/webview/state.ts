@@ -48,6 +48,8 @@ export interface TranscriptItemView {
   backendId?: string;
   role?: 'user' | 'assistant' | 'system';
   title?: string;
+  /** Tool id (`read`, `grep`, `bash`) when the backend reported one. */
+  tool?: string;
   detail?: string;
   /** `tool` items: the command or invocation that ran. */
   command?: string;
@@ -921,6 +923,7 @@ function toTranscriptItemView(backendId: string) {
     backendId,
     role: item.role,
     title: item.title,
+    tool: item.tool,
     detail: item.detail,
     command: item.command,
     files: item.files,
@@ -992,6 +995,7 @@ function mergeToolItem(item: TranscriptItemView, incoming: TranscriptItem): Tran
   return {
     ...item,
     title: incoming.title || item.title,
+    tool: incoming.tool || item.tool,
     command: cleanToolTarget(incoming.command) ?? cleanToolTarget(item.command),
     detail: preferDetail(item.detail, incoming.detail),
     files: incoming.files && incoming.files.length > 0 ? incoming.files : item.files,
@@ -1051,6 +1055,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
             backendId: event.backendId,
             role: event.item.role,
             title: event.item.title,
+            tool: event.item.tool,
             detail: preferDetail(undefined, event.item.detail),
             command: cleanToolTarget(event.item.command),
             files: event.item.files,
