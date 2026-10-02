@@ -14,7 +14,8 @@ export type ActivityFamily = 'lookup' | 'change' | 'command' | 'work';
 
 export type TranscriptEntry =
   | { kind: 'item'; item: TranscriptItemView }
-  | { kind: 'group'; id: string; family: ActivityFamily; items: TranscriptItemView[] };
+  | { kind: 'group'; id: string; family: ActivityFamily; items: TranscriptItemView[] }
+  | { kind: 'narration'; id: string; message: TranscriptItemView; items: TranscriptItemView[] };
 
 /** One reasoning highlight and the tool calls that followed it. */
 export interface ActivitySection {
@@ -97,7 +98,119 @@ export function groupTranscript(items: TranscriptItemView[]): TranscriptEntry[] 
     buffer.push(item);
   }
   flush();
-  return entries;
+  return foldNarration(entries);
+}
+
+/**
+ * A one-line assistant sentence becomes the row for the lookups and commands
+ * that follow it. The sentence is the click target; the calls stay inside.
+ * An edit, a reply with more than one line, or another message starts a new row.
+ */
+function foldNarration(entries: TranscriptEntry[]): TranscriptEntry[] {
+  const folded: TranscriptEntry[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (entry.kind !== 'item' || !isNarrationMessage(entry.item)) {
+      folded.push(entry);
+      continue;
+    }
+    const details: TranscriptItemView[] = [];
+    let next = index + 1;
+    while (next < entries.length && isDetailEntry(entries[next])) {
+      details.push(...itemsOf(entries[next]));
+      next += 1;
+    }
+    if (details.length === 0) {
+      folded.push(entry);
+      continue;
+    }
+    folded.push({ kind: 'narration', id: entry.item.id, message: entry.item, items: details });
+    index = next - 1;
+  }
+  return folded;
+}
+
+/** Ids of replies that should show the speaker name: the first, and the last once the turn has settled. */
+export function speakerRows(entries: TranscriptEntry[], settled: boolean): Set<string> {
+  const shown = new Set<string>();
+  const turns: string[][] = [];
+  let current: string[] = [];
+  const flush = (): void => {
+    if (current.length > 0) {
+      turns.push(current);
+    }
+    current = [];
+  };
+  for (const entry of entries) {
+    if (entry.kind === 'item' && entry.item.kind === 'message' && entry.item.role === 'user') {
+      flush();
+      continue;
+    }
+    const id = replyId(entry);
+    if (id) {
+      current.push(id);
+    }
+  }
+  flush();
+  turns.forEach((ids, index) => {
+    shown.add(ids[0]);
+    const turnSettled = settled || index < turns.length - 1;
+    if (turnSettled && ids.length > 1) {
+      shown.add(ids[ids.length - 1]);
+    }
+  });
+  return shown;
+}
+
+function replyId(entry: TranscriptEntry): string | undefined {
+  if (entry.kind === 'narration') {
+    return entry.id;
+  }
+  if (entry.kind === 'item' && entry.item.kind === 'message' && entry.item.role === 'assistant') {
+    return entry.item.id;
+  }
+  return undefined;
+}
+
+function isNarrationMessage(item: TranscriptItemView): boolean {
+  if (item.kind !== 'message' || item.role !== 'assistant') {
+    return false;
+  }
+  const text = item.text.trim();
+  return text.length > 0 && !/[\r\n]/.test(text);
+}
+
+function isDetailEntry(entry: TranscriptEntry): boolean {
+  if (entry.kind === 'group') {
+    return entry.family !== 'change';
+  }
+  if (entry.kind === 'narration') {
+    return false;
+  }
+  return isDetailItem(entry.item);
+}
+
+function isDetailItem(item: TranscriptItemView): boolean {
+  if (item.kind === 'reasoning') {
+    return true;
+  }
+  if (item.kind === 'notice' && item.title?.trim().toLowerCase() === 'web search') {
+    return true;
+  }
+  if (item.kind === 'tool') {
+    return runOf(item) !== 'change';
+  }
+  return false;
+}
+
+function itemsOf(entry: TranscriptEntry): TranscriptItemView[] {
+  if (entry.kind === 'group') {
+    return entry.items;
+  }
+  if (entry.kind === 'narration') {
+    return [entry.message, ...entry.items];
+  }
+  return [entry.item];
 }
 
 /**

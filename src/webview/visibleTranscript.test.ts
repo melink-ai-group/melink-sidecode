@@ -66,6 +66,21 @@ test('plan and agent hide a question fence; ask leaves it as text', () => {
   assert.match(visibleTranscriptText(text), /sidecode-question/);
 });
 
+test('plan and agent hide a bare question payload and keep the sentence after it', () => {
+  const text = [
+    'I have enough context to plan.',
+    '',
+    '{"questions":[{"prompt":"Which layout?","options":["Two columns","Single column"]}]}',
+    '',
+    'I need these answers before writing the plan.'
+  ].join('\n');
+  assert.equal(
+    visibleTranscriptText(text, { hideQuestions: true }),
+    'I have enough context to plan.\n\nI need these answers before writing the plan.'
+  );
+  assert.match(visibleTranscriptText(text), /"questions"/);
+});
+
 test('a real answer that says "this file" is kept', () => {
   const text = 'Open this file in the editor and check the layout.';
   assert.equal(visibleTranscriptText(text), text);
