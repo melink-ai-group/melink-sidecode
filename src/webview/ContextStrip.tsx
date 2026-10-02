@@ -7,54 +7,33 @@ import { AlertIcon, ContextIcon, FileIcon } from './Icons';
  * The strip directly above the composer.
  *
  * It names the workspace and the file open in the editor. It does not list
- * project-context references. The ring on the right is the share of the model's
- * max context setting currently in use. While the agent is idle and that share
- * is above 25%, the ring compacts the thread.
+ * project-context references. The context ring is drawn beside the composer
+ * actions. While the agent is idle and the window is above 25% full, that ring
+ * compacts the thread.
  */
 
 export interface ContextStripProps {
   view?: ContextView;
   settingsEnabled: boolean;
   exclusions: string[];
-  busy: boolean;
   /** Open the active file (or a context file) in the editor. */
   onOpenFile: (path: string) => void;
   /** Whether the file open in the editor is included on the next turn. */
   includeViewedFile: boolean;
   /** Add or remove that file. Off until the user asks. */
   onSetIncludeViewedFile: (included: boolean) => void;
-  /** Tokens currently occupying the context window. */
-  usedTokens: number;
-  /** Effective max context setting, when one is known. */
-  maxTokens?: number;
-  /** Compact the active thread. Called only when the ring is enabled. */
-  onCompact: () => void;
 }
 
 export function ContextStrip({
   view,
   settingsEnabled,
   exclusions,
-  busy,
   onOpenFile,
   includeViewedFile,
-  onSetIncludeViewedFile,
-  usedTokens,
-  maxTokens,
-  onCompact
+  onSetIncludeViewedFile
 }: ContextStripProps): JSX.Element | null {
-  const meter = (
-    <ContextMeter usedTokens={usedTokens} maxTokens={maxTokens} busy={busy} onCompact={onCompact} />
-  );
-
   if (!view) {
-    return meter ? (
-      <div className="ctx-region">
-        <div className="context-strip" aria-label="Context window">
-          {meter}
-        </div>
-      </div>
-    ) : null;
+    return null;
   }
 
   const effective = applyViewExclusions(view, exclusions);
@@ -135,8 +114,6 @@ export function ContextStrip({
             Could not build context
           </span>
         ) : null}
-
-        {meter}
       </div>
     </div>
   );
@@ -145,10 +122,10 @@ export function ContextStrip({
 /**
  * A ring filled by the share of the context window in use.
  *
- * The number is the displayed percent. The ring is a button only while the
- * agent is idle and that percent is above 25, which is when compaction runs.
+ * The fill is the percent. The ring is a button only while the agent is idle
+ * and that percent is above 25, which is when compaction runs.
  */
-function ContextMeter({
+export function ContextMeter({
   usedTokens,
   maxTokens,
   busy,
@@ -179,7 +156,6 @@ function ContextMeter({
           strokeDasharray={`${percent} ${100 - percent}`}
         />
       </svg>
-      <span className="context-meter__pct">{percent}</span>
     </>
   );
 

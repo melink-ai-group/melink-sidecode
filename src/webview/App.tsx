@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -38,7 +38,7 @@ import {
 } from './Icons';
 import { SettingsScreen } from './SettingsScreen';
 import { TabList, type TabItem } from './Tabs';
-import { ContextStrip } from './ContextStrip';
+import { ContextMeter, ContextStrip } from './ContextStrip';
 import { ChangesReview } from './ChangesReview';
 import { ChangedFilesStrip } from './ChangedFilesStrip';
 import { PlanSurface } from './PlanSurface';
@@ -147,6 +147,14 @@ export function App(): JSX.Element {
   const [listening, setListening] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const listeningRef = useRef(false);
+  /** Click latches the mic until the next click. Hold is push-to-talk. */
+  const [dictationGesture, setDictationGesture] = useState<'idle' | 'latched' | 'ptt'>('idle');
+  const dictationGestureRef = useRef<'idle' | 'latched' | 'ptt'>('idle');
+  const micHoldTimerRef = useRef<number | undefined>(undefined);
+  const micHeldRef = useRef(false);
+  const micPointerRef = useRef(false);
+  /** This press opened the mic. A short release leaves it on; a hold stops on release. */
+  const micPressStartedRef = useRef(false);
   const [dictationStatus, setDictationStatus] = useState<string | undefined>();
   const dictationRequestRef = useRef<string | undefined>(undefined);
   const stopDictationRef = useRef<() => void>(() => {});
@@ -761,13 +769,27 @@ export function App(): JSX.Element {
   const dictationModel = state.settings?.defaults.dictationModel?.trim() ?? '';
   const micPhase = dictationVisual(dictationStatus, listening, cleaning);
   const micDisabled = !dictationModel;
+  const micGestureHint = cleaning
+    ? undefined
+    : dictationGesture === 'ptt'
+      ? 'Release to stop'
+      : listening
+        ? 'Click to stop'
+        : 'Click to dictate, or hold to talk';
   const micTitle = !state.settings
     ? 'Loading settings…'
     : !dictationModel
       ? 'Choose a dictation model in Settings.'
-      : dictationStatus
-        ? dictationStatus
-        : 'Dictate a message';
+      : dictationStatus && micGestureHint
+        ? `${dictationStatus} — ${micGestureHint}`
+        : dictationStatus ?? micGestureHint ?? 'Dictate a message';
+  const showMic =
+    listening || cleaning || (!state.busy && draft.trim().length === 0 && state.attachments.length === 0);
+
+  const setDictationGestureBoth = (gesture: 'idle' | 'latched' | 'ptt'): void => {
+    dictationGestureRef.current = gesture;
+    setDictationGesture(gesture);
+  };
 
   const stopDictation = (): void => {
     const requestId = dictationRequestRef.current;
@@ -782,12 +804,8 @@ export function App(): JSX.Element {
   };
   stopDictationRef.current = stopDictation;
 
-  const toggleDictation = (): void => {
-    if (cleaning) {
-      return;
-    }
-    if (listeningRef.current) {
-      stopDictation();
+  const startDictation = (): void => {
+    if (cleaning || listeningRef.current) {
       return;
     }
     const requestId = `dictation_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -797,6 +815,82 @@ export function App(): JSX.Element {
     setListening(true);
     setDictationStatus('Starting the microphone…');
     bridge.post({ type: 'startDictation', requestId });
+  };
+
+  const clearMicHold = (): void => {
+    window.clearTimeout(micHoldTimerRef.current);
+    micHoldTimerRef.current = undefined;
+  };
+
+  const latchDictation = (): void => {
+    if (cleaning) {
+      return;
+    }
+    if (listeningRef.current || dictationGestureRef.current === 'latched') {
+      setDictationGestureBoth('idle');
+      stopDictation();
+      return;
+    }
+    setDictationGestureBoth('latched');
+    startDictation();
+  };
+
+  const onMicPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (event.button !== 0 || micDisabled || cleaning) {
+      return;
+    }
+    micPointerRef.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    micHeldRef.current = false;
+    micPressStartedRef.current = false;
+    clearMicHold();
+    if (dictationGestureRef.current === 'idle' && !listeningRef.current) {
+      micPressStartedRef.current = true;
+      startDictation();
+    }
+    micHoldTimerRef.current = window.setTimeout(() => {
+      micHeldRef.current = true;
+      if (micPressStartedRef.current) {
+        setDictationGestureBoth('ptt');
+      }
+    }, 400);
+  };
+
+  const onMicPointerUp = (): void => {
+    if (!micPointerRef.current) {
+      return;
+    }
+    micPointerRef.current = false;
+    clearMicHold();
+    const held = micHeldRef.current;
+    micHeldRef.current = false;
+    if (dictationGestureRef.current === 'ptt') {
+      micPressStartedRef.current = false;
+      setDictationGestureBoth('idle');
+      stopDictation();
+      return;
+    }
+    if (micPressStartedRef.current) {
+      micPressStartedRef.current = false;
+      setDictationGestureBoth('latched');
+      return;
+    }
+    if (cleaning || held) {
+      return;
+    }
+    latchDictation();
+  };
+
+  const onMicPointerCancel = (): void => {
+    const stopPress = dictationGestureRef.current === 'ptt' || micPressStartedRef.current;
+    micPointerRef.current = false;
+    micPressStartedRef.current = false;
+    clearMicHold();
+    micHeldRef.current = false;
+    if (stopPress) {
+      setDictationGestureBoth('idle');
+      stopDictation();
+    }
   };
 
   onDictationRef.current = (message) => {
@@ -809,6 +903,8 @@ export function App(): JSX.Element {
     }
     dictationRequestRef.current = undefined;
     listeningRef.current = false;
+    dictationGestureRef.current = 'idle';
+    setDictationGesture('idle');
     setListening(false);
     setCleaning(false);
     setDictationStatus(undefined);
@@ -1418,33 +1514,6 @@ export function App(): JSX.Element {
             The agent is paused until you answer above.
           </p>
         ) : null}
-        {permissionPanelOpen ? (
-          <PermissionPanel
-            options={permissionOptions}
-            selected={state.permissionLevel}
-            onSelect={(option) => {
-              setPermissionPanelOpen(false);
-              selectPermission(option);
-            }}
-            onOpenRules={() => dispatch({ type: 'openRules' })}
-            onClose={() => setPermissionPanelOpen(false)}
-          />
-        ) : null}
-        {modelSettingsOpen && state.selectedBackendId && state.selectedModel ? (
-          <ModelSettingsPanel
-            view={modelSettings}
-            modelId={state.selectedModel}
-            status={state.modelCapabilityStatus}
-            error={state.modelCapabilityError}
-            conversationTokens={conversationTokens}
-            onContextChange={(value) => updateModelSetting('contextWindow', value)}
-            onThinkingChange={(value) => updateModelSetting('thinking', value)}
-            onResetField={resetModelSettingField}
-            onResetAll={resetAllModelSettings}
-            onRetry={retryModelCapability}
-            onClose={() => setModelSettingsOpen(false)}
-          />
-        ) : null}
         {state.changes && state.changes.length > 0 ? (
           <ChangedFilesStrip
             entries={state.changes}
@@ -1479,22 +1548,9 @@ export function App(): JSX.Element {
           view={state.contextView}
           settingsEnabled={state.contextSettingsEnabled}
           exclusions={state.contextExclusions}
-          busy={state.busy}
           onOpenFile={openContextFile}
           includeViewedFile={state.includeViewedFile}
           onSetIncludeViewedFile={setIncludeViewedFile}
-          usedTokens={state.contextUsedTokens ?? 0}
-          maxTokens={contextMax}
-          onCompact={() => {
-            if (contextMax === undefined) {
-              return;
-            }
-            bridge.post({
-              type: 'compactContext',
-              usedTokens: state.contextUsedTokens ?? 0,
-              maxTokens: contextMax
-            });
-          }}
         />
         {state.pendingQuestion ? (
           <QuestionCard
@@ -1578,15 +1634,6 @@ export function App(): JSX.Element {
             }}
           />
           <div className="composer-row">
-            <button
-              className="icon-btn"
-              type="button"
-              aria-label="Attach files"
-              disabled={active?.status !== 'available' || state.restoring || Boolean(pending) || asking}
-              onClick={openFilePicker}
-            >
-              <PaperclipIcon />
-            </button>
             {modeSnapshot ? (
               <div className="mode-menu">
                 <ModeTrigger
@@ -1597,6 +1644,7 @@ export function App(): JSX.Element {
                     setModePanelOpen((value) => !value);
                     setPermissionPanelOpen(false);
                     setModelPanelOpen(false);
+                    setModelSettingsOpen(false);
                   }}
                 />
                 {modePanelOpen ? (
@@ -1616,65 +1664,130 @@ export function App(): JSX.Element {
               </div>
             ) : null}
             {hasApprovalChannel && permissionOptions.length > 0 ? (
-              <PermissionTrigger
-                options={permissionOptions}
-                selected={state.permissionLevel}
-                open={permissionPanelOpen}
-                disabled={Boolean(pending) || asking}
-                onToggle={() => {
-                  setPermissionPanelOpen((value) => !value);
-                  setModePanelOpen(false);
-                  setModelPanelOpen(false);
-                  setModelSettingsOpen(false);
-                }}
-              />
+              <div className="mode-menu">
+                <PermissionTrigger
+                  options={permissionOptions}
+                  selected={state.permissionLevel}
+                  open={permissionPanelOpen}
+                  disabled={Boolean(pending) || asking}
+                  onToggle={() => {
+                    setPermissionPanelOpen((value) => !value);
+                    setModePanelOpen(false);
+                    setModelPanelOpen(false);
+                    setModelSettingsOpen(false);
+                  }}
+                />
+                {permissionPanelOpen ? (
+                  <PermissionPanel
+                    options={permissionOptions}
+                    selected={state.permissionLevel}
+                    onSelect={(option) => {
+                      setPermissionPanelOpen(false);
+                      selectPermission(option);
+                    }}
+                    onOpenRules={() => dispatch({ type: 'openRules' })}
+                    onClose={() => setPermissionPanelOpen(false)}
+                  />
+                ) : null}
+              </div>
             ) : null}
             {state.selectedBackendId && state.selectedModel ? (
-              <button
-                className="control-trigger"
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded={modelSettingsOpen}
-                aria-controls="model-settings-panel"
-                aria-label="Model settings"
-                disabled={Boolean(pending) || asking}
-                onClick={() => {
-                  setModelSettingsOpen((value) => !value);
-                  setModePanelOpen(false);
-                  setPermissionPanelOpen(false);
-                  setModelPanelOpen(false);
-                }}
-              >
-                <SlidersIcon className="ico ico--sm" />
-                <span className="control-label">Settings</span>
-                <ChevronDownIcon className="control-chevron" />
-              </button>
-            ) : null}
-            <span className="spacer" />
-            <button
-              className={
-                micPhase === 'idle'
-                  ? 'icon-btn composer-action'
-                  : `icon-btn composer-action composer-action--mic-${micPhase}`
-              }
-              type="button"
-              aria-label={listening ? 'Stop dictation' : micPhase === 'idle' ? 'Dictate a message' : micTitle}
-              aria-pressed={listening}
-              aria-busy={micPhase === 'starting' || micPhase === 'downloading' || micPhase === 'working' || undefined}
-              title={micTitle}
-              disabled={micDisabled}
-              onClick={toggleDictation}
-            >
-              <MicIcon />
-            </button>
-            {state.busy ? (
-              <>
-                {active?.id === 'codex' ? (
-                  <button className="btn btn--primary" type="button" disabled={!canSend} onClick={send}>
-                    Steer
-                    <ArrowIcon />
-                  </button>
+              <div className="mode-menu">
+                <button
+                  className="control-trigger"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-expanded={modelSettingsOpen}
+                  aria-controls="model-settings-panel"
+                  aria-label="Model settings"
+                  disabled={Boolean(pending) || asking}
+                  onClick={() => {
+                    setModelSettingsOpen((value) => !value);
+                    setModePanelOpen(false);
+                    setPermissionPanelOpen(false);
+                    setModelPanelOpen(false);
+                  }}
+                >
+                  <SlidersIcon className="ico ico--sm" />
+                  <span className="control-label">Settings</span>
+                  <ChevronDownIcon className="control-chevron" />
+                </button>
+                {modelSettingsOpen ? (
+                  <ModelSettingsPanel
+                    view={modelSettings}
+                    modelId={state.selectedModel}
+                    status={state.modelCapabilityStatus}
+                    error={state.modelCapabilityError}
+                    conversationTokens={conversationTokens}
+                    onContextChange={(value) => updateModelSetting('contextWindow', value)}
+                    onThinkingChange={(value) => updateModelSetting('thinking', value)}
+                    onResetField={resetModelSettingField}
+                    onResetAll={resetAllModelSettings}
+                    onRetry={retryModelCapability}
+                    onClose={() => setModelSettingsOpen(false)}
+                  />
                 ) : null}
+              </div>
+            ) : null}
+            <div className="composer-actions">
+              {state.busy && active?.id === 'codex' ? (
+                <button className="btn btn--primary" type="button" disabled={!canSend} onClick={send}>
+                  Steer
+                  <ArrowIcon />
+                </button>
+              ) : null}
+              <ContextMeter
+                usedTokens={state.contextUsedTokens ?? 0}
+                maxTokens={contextMax}
+                busy={state.busy}
+                onCompact={() => {
+                  if (contextMax === undefined) {
+                    return;
+                  }
+                  bridge.post({
+                    type: 'compactContext',
+                    usedTokens: state.contextUsedTokens ?? 0,
+                    maxTokens: contextMax
+                  });
+                }}
+              />
+              <button
+                className="icon-btn composer-attach"
+                type="button"
+                aria-label="Attach files"
+                disabled={active?.status !== 'available' || state.restoring || Boolean(pending) || asking}
+                onClick={openFilePicker}
+              >
+                <PaperclipIcon />
+              </button>
+              {showMic ? (
+                <button
+                  className={
+                    micPhase === 'idle'
+                      ? 'icon-btn composer-action'
+                      : `icon-btn composer-action composer-action--mic-${micPhase}`
+                  }
+                  type="button"
+                  aria-label={listening ? 'Stop dictation' : micPhase === 'idle' ? 'Dictate a message' : micTitle}
+                  aria-pressed={listening}
+                  aria-busy={micPhase === 'starting' || micPhase === 'downloading' || micPhase === 'working' || undefined}
+                  title={micTitle}
+                  disabled={micDisabled}
+                  onPointerDown={onMicPointerDown}
+                  onPointerUp={onMicPointerUp}
+                  onPointerCancel={onMicPointerCancel}
+                  onClick={(event) => {
+                    if (event.detail !== 0) {
+                      return;
+                    }
+                    latchDictation();
+                  }}
+                  onContextMenu={(event) => event.preventDefault()}
+                >
+                  <MicIcon />
+                </button>
+              ) : null}
+              {state.busy ? (
                 <button
                   className="icon-btn composer-action composer-action--stop"
                   type="button"
@@ -1684,19 +1797,19 @@ export function App(): JSX.Element {
                 >
                   <StopIcon />
                 </button>
-              </>
-            ) : (
-              <button
-                className="icon-btn icon-btn--primary composer-action"
-                type="button"
-                aria-label="Send"
-                title="Send"
-                disabled={!canSend}
-                onClick={send}
-              >
-                <ArrowIcon />
-              </button>
-            )}
+              ) : showMic ? null : (
+                <button
+                  className="icon-btn icon-btn--primary composer-action"
+                  type="button"
+                  aria-label="Send"
+                  title="Send"
+                  disabled={!canSend}
+                  onClick={send}
+                >
+                  <ArrowIcon />
+                </button>
+              )}
+            </div>
           </div>
         </div>
         <span className="composer-hint">Enter to send, Shift+Enter for a new line</span>

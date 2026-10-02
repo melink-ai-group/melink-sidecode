@@ -138,10 +138,12 @@ test('the strip follows editor and selection changes without touching the transc
   assert.equal(/refreshContextView\(\)[\s\S]{0,200}transcript/.test(view), false);
 });
 
-test('the strip shows context fill and does not open project-context references', async () => {
+test('the composer shows context fill and does not open project-context references', async () => {
   const strip = await source('webview/ContextStrip.tsx');
   assert.match(strip, /context-meter/);
   assert.match(strip, /onCompact/);
+  const app = await source('webview/App.tsx');
+  assert.match(app, /<ContextMeter/);
   assert.equal(/context-panel/.test(strip), false);
   assert.equal(/context-branch/.test(strip), false);
   assert.equal(/context-more/.test(strip), false);

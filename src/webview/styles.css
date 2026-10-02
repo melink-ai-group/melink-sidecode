@@ -1690,6 +1690,17 @@ body {
   min-width: 0;
 }
 
+/* Permission and model settings use the same anchored card as the mode list. */
+.mode-menu .control-panel {
+  left: 0;
+  right: auto;
+  bottom: calc(100% + 4px);
+  width: min(320px, calc(100vw - 28px));
+  min-height: 0;
+  max-height: min(420px, 62vh);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
+}
+
 .mode-menu__list {
   position: absolute;
   z-index: 16;
@@ -1775,10 +1786,39 @@ body {
   flex: 1 1 auto;
 }
 
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.composer-actions .context-meter {
+  width: 22px;
+  height: 22px;
+  margin-left: 0;
+}
+
+.composer-actions .context-meter__ring {
+  width: 22px;
+  height: 22px;
+}
+
+.composer-attach {
+  width: 28px;
+  height: 28px;
+}
+
+.composer-attach .ico {
+  width: 18px;
+  height: 18px;
+}
+
 .composer-row .composer-action {
   width: 30px;
   height: 30px;
-  border-radius: var(--melink-radius-sm, 4px);
+  border-radius: 50%;
 }
 
 .icon-btn.composer-action--mic-starting,
@@ -4142,18 +4182,6 @@ button.context-meter:hover {
   stroke-linecap: round;
   transform: rotate(-90deg);
   transform-origin: 18px 18px;
-}
-
-.context-meter__pct {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--vscode-foreground);
 }
 
 .context-strip.is-open {
