@@ -52,7 +52,7 @@ export function PlanSurface({
   onReject,
   onRevise
 }: PlanSurfaceProps): JSX.Element {
-  const built = plan.built === true || plan.steps.some((step) => step.status !== 'pending');
+  const built = plan.built === true;
   if (built) {
     return (
       <TodoList

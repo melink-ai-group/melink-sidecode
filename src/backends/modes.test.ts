@@ -26,6 +26,7 @@ test('every mode carries the shared plan-document contract', () => {
   assert.match(agent, /do not rewrite the plan prose/i);
   assert.match(plan, /## Steps/);
   assert.match(plan, /unless the user asked you to update or revise it/i);
+  assert.match(plan, /when the user answers your questions, rewrite/i);
   assert.match(ask, /do not run commands/i);
   assert.match(ask, /write or revise the plan/i);
   assert.match(agent, /sidecode-question/);

@@ -29,12 +29,16 @@ import { modeDescriptor, supportedModes } from './backends/modes';
 import {
   extractSidecodeQuestions,
   formatQuestionAnswers,
+  planDecisionLines,
+  planUpdateFromAnswers,
   type QuestionAnswer,
   type QuestionRequest
 } from './questions';
 import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import {
+  applyPlanDecisions,
+  hasPlanStepsHeading,
   mergeCheckboxStatuses,
   planDocumentFromReply,
   planRelativePath,
@@ -87,6 +91,8 @@ interface ChatSession {
   pendingQuestion?: { source: 'fence' | 'native'; request: QuestionRequest };
   nativePlanThisTurn: boolean;
   revisePlanThisTurn: boolean;
+  /** Answers already folded into this thread's plan, in ask order. */
+  planDecisions: string[];
   pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
   /** No conversation has been bound to this tab yet. */
   blank: boolean;
@@ -442,6 +448,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private set revisePlanThisTurn(value: boolean) {
     if (this.session) {
       this.session.revisePlanThisTurn = value;
+    }
+  }
+
+  private get planDecisions(): string[] {
+    return this.session?.planDecisions ?? [];
+  }
+
+  private set planDecisions(value: string[]) {
+    if (this.session) {
+      this.session.planDecisions = value;
     }
   }
 
@@ -865,6 +881,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       mode: readDefaultMode(),
       nativePlanThisTurn: false,
       revisePlanThisTurn: false,
+      planDecisions: [],
       blank: init.blank,
       ...(init.backendId && init.threadId ? { resume: { backendId: init.backendId, threadId: init.threadId } } : {}),
       disposed: false,
@@ -2288,47 +2305,38 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Push the plan into the rendered preview. The first unbuilt plan opens on
-   * its own. Later writes refresh an open preview without taking focus, unless
-   * `reveal` is set because the user asked to open it.
+   * Push the plan into the rendered preview. That view is the one with Build.
+   * The first unbuilt plan opens on its own, and a closed preview opens again
+   * when the document is still waiting to be built. Later writes refresh an
+   * open preview without taking focus, unless `reveal` is set because the user
+   * asked to open it.
    */
   private publishPlanDocument(plan: PlanArtifact, reveal: boolean): void {
     const threadId = this.activeThread?.threadId;
     if (!threadId) {
       return;
     }
-    const autoOpen =
-      !reveal &&
-      shouldAutoOpenPlanDocument({
-        built: plan.built,
-        stepCount: plan.steps.length,
-        alreadyOpened: this.planPreviewOpenedFor === threadId
-      });
-    const open = reveal || autoOpen;
-    if (open) {
-      this.planPreviewOpenedFor = threadId;
-      void this.showPlanMarkdownPreviewForPlan(plan);
-    }
-    if (this.planPreview.isOpen) {
-      this.planPreview.show(planPreviewState(plan), false);
-    }
-  }
-
-  /**
-   * Show a plan file in Markdown Preview. Called when a plan is first created
-   * and when the user opens the plan from the sidebar.
-   */
-  private showPlanMarkdownPreviewForPlan(plan: PlanArtifact): void {
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    if (!folder || !plan.path) {
+    this.planPreviewThreadId = threadId;
+    const wasOpen = this.planPreview.isOpen;
+    const autoOpen = shouldAutoOpenPlanDocument({
+      built: plan.built,
+      stepCount: plan.steps.length,
+      alreadyOpened: wasOpen && this.planPreviewOpenedFor === threadId
+    });
+    const show = reveal || wasOpen || autoOpen;
+    if (!show) {
       return;
     }
-    void this.showPlanMarkdownPreview(vscode.Uri.joinPath(folder.uri, plan.path));
+    if (reveal || autoOpen) {
+      this.planPreviewOpenedFor = threadId;
+    }
+    this.planPreview.show(planPreviewState(plan), reveal || !wasOpen);
   }
 
   /**
-   * Switch a plan document to Preview mode. The uri is remembered first so the
-   * text editor that Preview opens does not immediately request Preview again.
+   * Switch a plan file to Preview mode when the source editor is focused. The
+   * uri is remembered first so that open does not immediately request Preview
+   * again. The plan view with Build is opened separately.
    */
   private async showPlanMarkdownPreview(uri: vscode.Uri): Promise<void> {
     const key = uri.toString();
@@ -2595,8 +2603,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       .reverse()
       .find((item) => item.kind === 'message' && item.role === 'assistant');
     const reply = lastReply?.text ?? '';
+    // A question follow-up that never came back as a plan must not replace the
+    // document. The answers are already in the body from when the card closed.
+    if (revising && existing && existing.steps.length > 0 && existing.body && !hasPlanStepsHeading(reply)) {
+      return;
+    }
     const draft = planDocumentFromReply(reply);
-    const steps = nativeSteps && existing && existing.steps.length > 0 ? existing.steps : draft.steps;
+    const steps = nativeSteps && existing && existing.steps.length > 0 && !revising ? existing.steps : draft.steps;
     if (steps.length === 0) {
       return;
     }
@@ -2605,7 +2618,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       threadId,
       title,
       summary: draft.summary ?? existing?.summary,
-      body: draft.body ?? existing?.body,
+      body: applyPlanDecisions(draft.body ?? existing?.body, this.planDecisions),
       steps
     });
     const plan = { ...artifact, built: existing?.built ?? false };
@@ -2781,12 +2794,49 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     this.pendingQuestion = undefined;
     const text = formatQuestionAnswers(pending.request.questions, answers);
+    const revisingPlan = this.mode === 'plan';
+    if (revisingPlan) {
+      this.planDecisions = [...this.planDecisions, ...planDecisionLines(pending.request.questions, answers)];
+      await this.applyDecisionsToPlan();
+    }
     if (pending.source === 'native') {
+      if (revisingPlan) {
+        this.revisePlanThisTurn = true;
+      }
       this.registry.answerQuestion(pending.request.backendId, pending.request.threadId, requestId, answers);
       await this.store.appendUserMessage(pending.request.backendId, pending.request.threadId, text);
       return;
     }
-    await this.sendTurn(text);
+    await this.sendTurn(
+      revisingPlan ? planUpdateFromAnswers(pending.request.questions, answers) : text,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      revisingPlan
+    );
+  }
+
+  /**
+   * Write the current answers into the open plan and show that document.
+   * A plan that does not exist yet keeps the answers until the next reply
+   * creates the file.
+   */
+  private async applyDecisionsToPlan(): Promise<void> {
+    if (!this.activeThread || this.planDecisions.length === 0) {
+      return;
+    }
+    const { backendId, threadId } = this.activeThread;
+    const existing = this.store.getPlanState(backendId, threadId);
+    if (!existing || existing.steps.length === 0) {
+      return;
+    }
+    const body = applyPlanDecisions(existing.body ?? existing.summary, this.planDecisions);
+    if (body === existing.body) {
+      return;
+    }
+    await this.writePlan(existing.title || 'Plan', existing.summary, existing.steps, body);
   }
 
   private decideApproval(

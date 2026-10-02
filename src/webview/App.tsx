@@ -758,13 +758,22 @@ export function App(): JSX.Element {
   // While an approval is pending the turn is blocked at the backend, so the
   // composer and Send are locked until a decision arrives.
   const asking = Boolean(state.pendingQuestion);
+  const canSteer =
+    state.busy &&
+    active?.id === 'codex' &&
+    active.status === 'available' &&
+    Boolean(draft.trim()) &&
+    state.attachments.length === 0 &&
+    !state.restoring &&
+    !pending &&
+    !asking;
   const canSend =
     (Boolean(draft.trim()) || state.attachments.length > 0) &&
     !state.restoring &&
     !pending &&
     !asking &&
     active?.status === 'available' &&
-    (!state.busy || (active.id === 'codex' && Boolean(draft.trim()) && state.attachments.length === 0));
+    (!state.busy || canSteer);
 
   const dictationModel = state.settings?.defaults.dictationModel?.trim() ?? '';
   const micPhase = dictationVisual(dictationStatus, listening, cleaning);
@@ -1732,12 +1741,6 @@ export function App(): JSX.Element {
               </div>
             ) : null}
             <div className="composer-actions">
-              {state.busy && active?.id === 'codex' ? (
-                <button className="btn btn--primary" type="button" disabled={!canSend} onClick={send}>
-                  Steer
-                  <ArrowIcon />
-                </button>
-              ) : null}
               <ContextMeter
                 usedTokens={state.contextUsedTokens ?? 0}
                 maxTokens={contextMax}
@@ -1789,7 +1792,7 @@ export function App(): JSX.Element {
                   <MicIcon />
                 </button>
               ) : null}
-              {state.busy ? (
+              {state.busy && !canSteer ? (
                 <button
                   className="icon-btn composer-action composer-action--stop"
                   type="button"

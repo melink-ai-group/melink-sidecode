@@ -88,12 +88,28 @@ export function hideQuestionFence(text: string): string {
  * One line per question, in the order they were asked.
  */
 export function formatQuestionAnswers(questions: readonly ClarifyingQuestion[], answers: readonly QuestionAnswer[]): string {
-  const lines = questions.map((question, index) => {
+  return `Answers:\n${planDecisionLines(questions, answers).join('\n')}`;
+}
+
+/** One line per answer, in ask order, for the plan document and the follow-up turn. */
+export function planDecisionLines(questions: readonly ClarifyingQuestion[], answers: readonly QuestionAnswer[]): string[] {
+  return questions.map((question, index) => {
     const answer = answers.find((entry) => entry.questionId === question.id);
     const text = answer?.text.trim() || SKIPPED_ANSWER;
     return `${index + 1}. ${question.prompt}: ${text}`;
   });
-  return `Answers:\n${lines.join('\n')}`;
+}
+
+/**
+ * The Plan-mode turn sent after a question card. The host treats it as a
+ * revision, and the wording asks for a full updated plan rather than a chat reply.
+ */
+export function planUpdateFromAnswers(questions: readonly ClarifyingQuestion[], answers: readonly QuestionAnswer[]): string {
+  return [
+    'Update the plan document so these decisions are part of it. Reply with one full markdown plan: a title, the updated body, a "## Decisions" section listing each answer, and a final "## Steps" checkbox list. Do not implement the plan.',
+    '',
+    formatQuestionAnswers(questions, answers)
+  ].join('\n');
 }
 
 /**
