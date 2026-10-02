@@ -5168,6 +5168,21 @@ button.context-meter:hover {
   transform: rotate(-90deg);
 }
 
+.todo__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.todo__progress-icon--done {
+  color: var(--melink-success);
+}
+
+.todo__progress-icon--stopped {
+  color: var(--vscode-editorWarning-foreground);
+}
+
 .todo__progress-text {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
@@ -5281,48 +5296,6 @@ button.context-meter:hover {
 
 .todo__item--active .todo__status {
   color: var(--vscode-foreground);
-}
-
-.todo__note {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  margin: 0;
-  padding: 5px 8px;
-  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-  overflow-wrap: anywhere;
-}
-
-.todo__note > .ico {
-  flex: 0 0 auto;
-  margin-top: 2px;
-}
-
-.todo__note--stopped {
-  color: var(--vscode-foreground);
-}
-
-.todo__note--stopped > .ico {
-  color: var(--vscode-editorWarning-foreground);
-}
-
-.todo__finished {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 6px 8px;
-  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  font-size: 11px;
-  color: var(--vscode-foreground);
-  overflow-wrap: anywhere;
-}
-
-.todo__finished > .ico {
-  flex: 0 0 auto;
-  color: var(--melink-success);
 }
 
 .todo__retry {
