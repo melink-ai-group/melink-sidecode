@@ -1,11 +1,10 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
 import { Markdown } from './Markdown';
 import {
   AlertIcon,
   CheckIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   CrossIcon,
   FileIcon,
   InfoIcon,
@@ -254,9 +253,9 @@ function PlanCard({
 }
 
 /**
- * The todo list once the plan is built. Progress is real: it comes from the
- * persisted step status, so a reload shows the same steps. The plan collapses to
- * a reference above the list instead of repeating the steps.
+ * The todo list once the plan is built. The step list stays closed until the
+ * user opens it from the Steps control, in the same anchored popup as mode
+ * selection. Progress still comes from the persisted step status.
  */
 function TodoList({
   plan,
@@ -269,7 +268,8 @@ function TodoList({
   onOpenPlan: () => void;
   onRevise: (text: string) => void;
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(false);
+  const [stepsOpen, setStepsOpen] = useState(false);
+  const stepsRef = useRef<HTMLDivElement>(null);
 
   const total = plan.steps.length;
   const done = plan.steps.filter((step) => step.status === 'completed').length;
@@ -284,12 +284,33 @@ function TodoList({
   // so the surface never depends on an echo a reload could miss.
   const madeProgress = done > 0 || deniedCount > 0;
   const stopped = !allDone && !busy && madeProgress;
-  const running = !allDone && busy;
 
   const stateClass = allDone ? ' todo--finished' : stopped ? ' todo--stopped' : '';
   const title = allDone ? 'Plan complete' : stopped ? 'Build incomplete' : 'Building plan';
 
   const progressText = total > 0 ? `${done} of ${total} done` : 'No steps';
+
+  useEffect(() => {
+    if (!stepsOpen) {
+      return;
+    }
+    const onPointer = (event: PointerEvent): void => {
+      if (!stepsRef.current?.contains(event.target as Node)) {
+        setStepsOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setStepsOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [stepsOpen]);
 
   return (
     <section className={`todo${stateClass}`} aria-label="Plan progress" aria-live="polite">
@@ -309,22 +330,28 @@ function TodoList({
         <span className="todo__fill" style={{ width: `${percent}%` }} />
       </div>
 
-      <ul className="todo__list">
-        {plan.steps.map((step, index) => (
-          <TodoRow key={`${index}-${step.text}`} step={step} live={busy} />
-        ))}
-      </ul>
-
-      <div className="plan-reference">
+      <div className="plan-reference" ref={stepsRef}>
         <button
-          className="plan-reference__toggle"
+          className="control-trigger"
           type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
+          aria-haspopup="dialog"
+          aria-expanded={stepsOpen}
+          aria-controls="steps-menu"
+          disabled={total === 0}
+          onClick={() => setStepsOpen((value) => !value)}
         >
-          {expanded ? <ChevronDownIcon className="ico ico--xs" /> : <ChevronRightIcon className="ico ico--xs" />}
-          <span>Plan reference</span>
+          <span className="control-label">Steps</span>
+          <ChevronDownIcon className="control-chevron" />
         </button>
+        {stepsOpen ? (
+          <div className="steps-menu__panel" id="steps-menu" role="dialog" aria-label="Steps">
+            <ul className="todo__list">
+              {plan.steps.map((step, index) => (
+                <TodoRow key={`${index}-${step.text}`} step={step} live={busy} />
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <span className="spacer" />
         {plan.path ? (
           <button className="btn btn--link" type="button" onClick={onOpenPlan}>
@@ -332,11 +359,6 @@ function TodoList({
           </button>
         ) : null}
       </div>
-      {expanded && plan.summary ? (
-        <div className="plan-reference__body">
-          <Markdown text={plan.summary} />
-        </div>
-      ) : null}
 
       {allDone ? (
         <p className="todo__finished">
@@ -352,12 +374,7 @@ function TodoList({
               : `${done} of ${total} steps done. The build did not finish, so this is not a completed plan. Steps already done stay applied.`}
           </span>
         </p>
-      ) : (
-        <p className="todo__note">
-          <InfoIcon className="ico ico--xs" />
-          <span>{running ? 'Progress comes from the persisted step state and survives a reload.' : 'Waiting for the build to start.'}</span>
-        </p>
-      )}
+      ) : null}
       {stopped ? (
         <p className="todo__retry">
           <button className="btn" type="button" onClick={() => onRevise('Continue the remaining steps of this plan.')}>
