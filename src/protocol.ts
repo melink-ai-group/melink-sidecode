@@ -115,6 +115,8 @@ export interface SettingsSnapshot {
     permissionLevel: PermissionLevel;
     mode: DefaultMode;
     thinking?: ThinkingLevel;
+    /** Ollama model id that cleans dictated speech. Empty disables the microphone. */
+    dictationModel: string;
   };
   /**
    * The project-context defaults. The screen reads and writes exactly the keys
@@ -160,6 +162,8 @@ export interface SettingsPatch {
   permissionLevel?: PermissionLevel;
   mode?: DefaultMode;
   thinking?: ThinkingLevel | '';
+  /** Ollama model id for dictation cleanup. Empty clears the choice. */
+  dictationModel?: string;
   opencodeEnabled?: boolean;
   opencodePath?: string;
   contextIncludeInstructions?: boolean;
@@ -246,6 +250,15 @@ export interface ModelCapabilitySnapshot {
   settings: ResolvedModelSettings;
 }
 
+/** One open chat in the sidebar tab strip. */
+export interface ChatTabView {
+  id: string;
+  title: string;
+  active: boolean;
+  backendId?: string;
+  threadId?: string;
+}
+
 export type HostToWebviewMessage =
   | { type: 'snapshot'; availability: BackendAvailability[] }
   | { type: 'models'; backendId: string; models: BackendModel[]; error?: string }
@@ -282,6 +295,8 @@ export type HostToWebviewMessage =
       keepPendingUserMessage?: boolean;
     }
   | { type: 'threads'; backendId: string; threads: ThreadSummary[] }
+  /** Open sidebar chat tabs. The webview paints the strip and shows the active one. */
+  | { type: 'chatTabs'; tabs: ChatTabView[] }
   | { type: 'settings'; settings: SettingsSnapshot }
   | { type: 'permissions'; permissions: PermissionSnapshot }
   | { type: 'modes'; modes: ModeSnapshot }
@@ -315,6 +330,12 @@ export type HostToWebviewMessage =
    * present when it answers an `attachFiles`/`readClipboard` request.
    */
   | { type: 'attachmentError'; message: string; requestId?: string }
+  /** Cleaned dictation text. `requestId` matches the mic session; a stale id is ignored. */
+  | { type: 'dictationCleaned'; requestId: string; text: string }
+  /** Dictation failed. `raw` is the transcript when cleanup failed after speech was heard. */
+  | { type: 'dictationError'; requestId: string; message: string; raw?: string }
+  /** Progress for recording, model download, transcription, or cleanup. */
+  | { type: 'dictationStatus'; requestId: string; message: string }
   | {
       type: 'notice';
       level: 'info' | 'warning' | 'error';
@@ -443,6 +464,10 @@ export type WebviewToHostMessage =
       updatePlan?: boolean;
     }
   | { type: 'steerTurn'; text: string }
+  /** Open the microphone. The host answers with status, then a cleaned or failed transcript. */
+  | { type: 'startDictation'; requestId: string }
+  /** Stop the microphone and transcribe what was recorded. */
+  | { type: 'stopDictation'; requestId: string }
   /**
    * Ask the host to open a native file picker for attachments. The host answers
    * with `attachmentsPicked` (or `attachmentError`) carrying the same
@@ -462,6 +487,16 @@ export type WebviewToHostMessage =
   | { type: 'compactContext'; usedTokens: number; maxTokens: number }
   | { type: 'listThreads'; backendId: string }
   | { type: 'resumeThread'; backendId: string; threadId: string }
+  /** Open another sidebar chat tab. An existing blank tab is focused instead of stacking another. */
+  | { type: 'newChat' }
+  /** Show the sidebar tab for this thread, or open one and resume it. */
+  | { type: 'openThread'; backendId: string; threadId: string }
+  /** Bring one open sidebar chat tab to the front. */
+  | { type: 'selectChatTab'; tabId: string }
+  /** Close one sidebar chat tab. The thread stays in history. */
+  | { type: 'closeChatTab'; tabId: string }
+  /** Drag a sidebar chat tab to a new index among the open tabs. */
+  | { type: 'reorderChatTab'; tabId: string; toIndex: number }
   | { type: 'getSettings' }
   | { type: 'saveSettings'; patch: SettingsPatch }
   | { type: 'setOllamaToken'; value: string }

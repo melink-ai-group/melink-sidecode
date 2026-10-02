@@ -42,6 +42,7 @@ import {
 import { questionRequestFromToolParams, SKIPPED_ANSWER, type QuestionAnswer } from '../questions';
 import { todoStepsFromNative } from './plan';
 import { readDefaultMode, readDefaultPermissionLevel } from './defaults';
+import { DICTATION_INSTRUCTIONS, dictationText } from '../dictation/prompt';
 import { isItemTerminal, translateItem, translateTurnItems } from './appserver/items';
 import { itemDeltaFor } from './appserver/deltas';
 import {
@@ -168,6 +169,17 @@ export class CodexBackend implements AgentBackend {
   private connecting?: Promise<AppServerConnection>;
   private pendingTurn?: PendingTurn;
   private disposing?: Promise<void>;
+  /** Threads used only to clean a transcript. Their events never reach the chat. */
+  private readonly quietThreads = new Set<string>();
+  /** Set while `thread/start` for a cleanup turn is in flight, before its id is known. */
+  private expectQuietThread = false;
+  private quietCapture?: {
+    threadId: string;
+    text: string;
+    settled: boolean;
+    resolve: (text: string) => void;
+    reject: (error: Error) => void;
+  };
 
   constructor(
     private readonly store?: ThreadStore,
@@ -504,6 +516,87 @@ export class CodexBackend implements AgentBackend {
     void connection.interruptTurn({ threadId: pending.threadId, turnId: pending.turnId });
   }
 
+  /**
+   * Clean a transcript on a throwaway read-only thread. The thread is deleted
+   * afterwards and none of its events are shown in the conversation.
+   */
+  async cleanDictation(model: string, text: string): Promise<string> {
+    if (this.pendingTurn) {
+      throw new BackendError('provider', 'Codex is busy. The transcript was left in the draft.');
+    }
+    const selected = model.trim();
+    const source = text.trim();
+    if (!selected) {
+      throw new BackendError('provider', 'Choose a dictation model in Settings.');
+    }
+    if (!source) {
+      throw new BackendError('provider', 'No speech was heard.');
+    }
+    const connection = await this.connect();
+    const mapping = codexPermissionMapping('read-only');
+    this.expectQuietThread = true;
+    let threadId: string | undefined;
+    try {
+      const started = await connection
+        .startThread({
+          model: selected,
+          cwd: this.cwd,
+          approvalPolicy: mapping.approvalPolicy,
+          approvalsReviewer: 'user',
+          sandbox: mapping.sandbox,
+          developerInstructions: DICTATION_INSTRUCTIONS
+        })
+        .catch((error: unknown) => this.fail(error));
+      threadId = started.thread.id;
+      this.quietThreads.add(threadId);
+      this.threadModes.set(threadId, 'ask');
+      const cleaned = await new Promise<string>((resolve, reject) => {
+        this.quietCapture = { threadId: threadId as string, text: '', settled: false, resolve, reject };
+        const timer = setTimeout(() => {
+          this.finishQuiet(threadId as string, 'failed', 'Dictation cleanup did not finish.');
+        }, 90_000);
+        void connection
+          .startTurn({
+            threadId: threadId as string,
+            input: [{ type: 'text', text: source, text_elements: [] }],
+            model: selected,
+            approvalPolicy: mapping.approvalPolicy,
+            approvalsReviewer: 'user',
+            sandboxPolicy: codexSandboxPolicy('read-only', this.cwd),
+            ...codexNativeRequest({ thinking: 'low' })
+          })
+          .catch((error: unknown) => {
+            clearTimeout(timer);
+            this.finishQuiet(threadId as string, 'failed', error instanceof Error ? error.message : 'Dictation cleanup failed.');
+          });
+        const capture = this.quietCapture;
+        const settle = (action: () => void) => {
+          clearTimeout(timer);
+          action();
+        };
+        const originalResolve = resolve;
+        const originalReject = reject;
+        capture.resolve = (value) => settle(() => originalResolve(value));
+        capture.reject = (error) => settle(() => originalReject(error));
+      });
+      const text = dictationText(cleaned);
+      if (!text) {
+        throw new BackendError('provider', 'Dictation cleanup returned nothing.');
+      }
+      return text;
+    } finally {
+      this.expectQuietThread = false;
+      if (threadId) {
+        await connection.deleteThread(threadId).catch(() => undefined);
+        this.quietThreads.delete(threadId);
+        this.threadModes.delete(threadId);
+        if (this.quietCapture?.threadId === threadId) {
+          this.quietCapture = undefined;
+        }
+      }
+    }
+  }
+
   async sendTurn(handle: ThreadHandle, request: SendTurnRequest): Promise<void> {
     const connection = await this.connect();
     const model = request.model ?? this.defaultModel;
@@ -753,6 +846,50 @@ export class CodexBackend implements AgentBackend {
   }
 
   /** Emit `thread/started` at most once per thread id for this backend. */
+  /** Keep a cleanup thread out of the chat. Returns true when the notification was consumed. */
+  private swallowQuiet(method: string, params: unknown): boolean {
+    const record = params && typeof params === 'object' ? (params as { threadId?: string; thread?: { id?: string } }) : undefined;
+    const threadId = method === 'thread/started' ? record?.thread?.id : record?.threadId;
+    if (method === 'thread/started' && this.expectQuietThread && threadId) {
+      this.quietThreads.add(threadId);
+      return true;
+    }
+    if (!threadId || !this.quietThreads.has(threadId)) {
+      return false;
+    }
+    if (method === 'item/agentMessage/delta') {
+      const delta = itemDeltaFor(method, params);
+      if (delta && this.quietCapture?.threadId === threadId) {
+        this.quietCapture.text += delta.delta;
+      }
+    } else if (method === 'turn/completed') {
+      const turn = (params as { turn?: { status?: string; error?: { message?: string } } }).turn;
+      this.finishQuiet(threadId, turn?.status, turn?.error?.message);
+    } else if (method === 'error') {
+      const message = (params as { error?: { message?: string } }).error?.message;
+      this.finishQuiet(threadId, 'failed', message);
+    }
+    return true;
+  }
+
+  private finishQuiet(threadId: string, status: string | undefined, errorMessage?: string): void {
+    const capture = this.quietCapture;
+    if (!capture || capture.threadId !== threadId || capture.settled) {
+      return;
+    }
+    capture.settled = true;
+    if (status === 'completed') {
+      const text = capture.text.trim();
+      if (text) {
+        capture.resolve(text);
+      } else {
+        capture.reject(new BackendError('provider', 'Dictation cleanup returned nothing.'));
+      }
+      return;
+    }
+    capture.reject(new BackendError('provider', errorMessage || 'Dictation cleanup failed.'));
+  }
+
   private announceThread(threadId: string, model?: string): void {
     if (this.announcedThreads.has(threadId)) {
       return;
@@ -763,6 +900,9 @@ export class CodexBackend implements AgentBackend {
 
   private handleNotification(notification: { method: string; params?: unknown }): void {
     const params = notification.params ?? {};
+    if (this.swallowQuiet(notification.method, params)) {
+      return;
+    }
     switch (notification.method) {
       case 'thread/started': {
         const { thread } = params as ThreadStartedNotification;
@@ -1043,6 +1183,13 @@ export class CodexBackend implements AgentBackend {
       return;
     }
     const { threadId, request: approval } = translated;
+    if (this.quietThreads.has(threadId)) {
+      this.answerApproval(
+        { threadId, requestId: approval.id, rpcId: request.id, request: approval, settled: true },
+        'reject'
+      );
+      return;
+    }
     // The legacy apply-patch payload already carries the changed files. Report
     // the content side for the change journal, then continue to present the
     // approval exactly as before: the decision path below is untouched.

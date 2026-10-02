@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { BackendRegistry } from './backends/registry';
+import { OllamaBackend } from './backends/ollama';
+import { CodexBackend } from './backends/codex';
+import { DictationController } from './dictation/controller';
+import { parseDictationTarget } from './dictation/target';
 import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
 import { SettingsService } from './settings';
 import { PlanStore } from './planStore';
@@ -58,26 +63,52 @@ import type {
   PermissionSnapshot,
   WebviewToHostMessage
 } from './protocol';
+import {
+  DEFAULT_TAB_TITLE,
+  parseChatTabState,
+  resolveChatTarget,
+  tabTitle,
+  type ChatTabState,
+  type OpenChatTab,
+  reorderById
+} from './chatTabs';
 
 /**
- * Renders the chat sidebar. This class is UI-facing glue: it forwards the
- * registry's snapshot and normalized events to the React webview and turns
- * webview intents into registry calls. It holds no provider types.
- *
- * It also owns the reload lifecycle: on activation it restores the persisted
- * conversation (replaying prior turns) before enabling the input, and degrades
- * a missing thread to a fresh conversation with a quiet notice.
+ * One sidebar chat tab. Fields that used to live once on the provider move here
+ * so two open conversations do not share a thread, a mode, or a pending prompt.
+ */
+interface ChatSession {
+  id: string;
+  title: string;
+  restored: boolean;
+  activeThread?: ThreadHandle;
+  mode: DefaultMode;
+  pendingApproval?: ApprovalRequest;
+  pendingQuestion?: { source: 'fence' | 'native'; request: QuestionRequest };
+  nativePlanThisTurn: boolean;
+  revisePlanThisTurn: boolean;
+  pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
+  /** No conversation has been bound to this tab yet. */
+  blank: boolean;
+  /** Thread to resume the first time this tab is shown. */
+  resume?: { backendId: string; threadId: string };
+  disposed: boolean;
+  /** True while this tab's turn is still running, including after the tab is closed. */
+  turnOpen: boolean;
+}
+
+/** Open sidebar tabs, so a reload can put the same chats back. */
+const OPEN_CHAT_TABS_KEY = 'melink.openChatTabs';
+
+/**
+ * Renders the SideCode sidebar. Each open conversation is a tab in that view.
+ * This class is UI-facing glue: it forwards the registry's snapshot and
+ * normalized events to the React webview and turns webview intents into
+ * registry calls. It holds no provider types.
  */
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'melinkAgent.chat';
 
-  private view?: vscode.WebviewView;
-  /** True once the webview script has posted `ready`. A missed post means the host document never finished loading. */
-  private webviewMounted = false;
-  private webviewMountTimers: ReturnType<typeof setTimeout>[] = [];
-  private activeThread?: ThreadHandle;
-  /** Guards against a second restore if `ready` is re-sent by the webview. */
-  private restored = false;
   /**
    * The permission level the next turn and the next chat run at. Seeded from
    * the last picker choice, then from the settings default. A new conversation
@@ -86,38 +117,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private permissionLevel: PermissionLevel = readDefaultPermissionLevel();
   /** Bumped whenever the selection is stored, so a late snapshot cannot revert it. */
   private permissionEpoch = 0;
-  /**
-   * The mode the active conversation runs at. Seeded from the stored default,
-   * then from the thread's persisted mode on resume. A change applies to the
-   * next turn and is persisted with the thread index; it never mutates the
-   * transcript.
-   */
-  private mode: DefaultMode = readDefaultMode();
-  /**
-   * The approval currently blocking the active thread, if any. Tracked here so a
-   * webview reload can repaint exactly one pending prompt; cleared the moment a
-   * decision or denial arrives, so a settled request is never resurrected.
-   */
-  private pendingApproval?: ApprovalRequest;
-  /**
-   * The clarifying question card for one thread. A fence ask is answered by
-   * sending the next turn; a native ask is answered on the backend that raised it.
-   */
-  private pendingQuestion?: { source: 'fence' | 'native'; request: QuestionRequest };
-  /**
-   * True once a native `turn/plan/updated` has arrived for the current turn. It
-   * suppresses the reply-derived fallback so a native plan is never overwritten
-   * by a looser parse of the same reply.
-   */
-  private nativePlanThisTurn = false;
-  /**
-   * True when the in-flight turn should replace the plan document: the user
-   * used Ask for changes, or the composer text asked to revise the plan.
-   * Read when the turn completes. A later Plan-mode reply leaves the file
-   * alone when this is false and a plan already exists.
-   */
-  private revisePlanThisTurn = false;
+  /** Per-tab state for the async call that is currently running. */
+  private readonly sessionStore = new AsyncLocalStorage<ChatSession | undefined>();
+  private sessions: ChatSession[] = [];
+  /** The sidebar webview. Every tab paints into this one view. */
+  private view?: vscode.WebviewView;
+  /** True once the webview script has posted `ready`. */
+  private webviewMounted = false;
+  private webviewMountTimers: ReturnType<typeof setTimeout>[] = [];
+  /** The tab whose transcript is on screen. */
+  private visible?: ChatSession;
+  private tabSeq = 0;
   private readonly settings: SettingsService;
+  private readonly dictation: DictationController;
   private readonly plans = new PlanStore();
   /** Rendered plan document in the editor area. Build on that view runs the plan. */
   private readonly planPreview: PlanPreview;
@@ -156,12 +168,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * journal's recorded pre-turn bytes.
    */
   private readonly nativeDiff: NativeDiffService;
-  /**
-   * The user message whose turn is currently open, so the turn's pre-state
-   * snapshot is addressable as that message's checkpoint. Scoped to its thread
-   * so a background thread's turn cannot consume an id meant for another.
-   */
-  private pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
   /** Prevents overlapping sends and mode changes while one request is running. */
   private turnInProgress = false;
   /**
@@ -185,6 +191,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     private readonly projectContext: VscodeProjectContext
   ) {
     this.settings = new SettingsService(context, registry);
+    this.dictation = new DictationController(
+      extensionUri.fsPath,
+      path.join(context.globalStorageUri.fsPath, 'whisper'),
+      {
+        status: (requestId, message) => this.post({ type: 'dictationStatus', requestId, message }),
+        cleaned: (requestId, text) => this.post({ type: 'dictationCleaned', requestId, text }),
+        failed: (requestId, message, raw) =>
+          this.post({ type: 'dictationError', requestId, message, ...(raw ? { raw } : {}) })
+      },
+      (text) => this.cleanupTranscript(text)
+    );
     this.contextDelivery = new ContextDelivery({ reads: projectContext.context });
     // The change journal is bound to the real workspace fs and workspace-scoped
     // storage here; the tracker and watcher only ever talk to the host-free
@@ -209,7 +226,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // dispose on deactivate removes both.
     this.nativeDiff = new NativeDiffService(this.changeJournal);
     this.planPreview = new PlanPreview(this.extensionUri, () => {
-      void this.buildPlan();
+      const session = this.planPreviewThreadId
+        ? this.sessions.find((entry) => entry.activeThread?.threadId === this.planPreviewThreadId)
+        : undefined;
+      void this.sessionStore.run(session, () => this.buildPlan());
     });
     context.subscriptions.push(
       this.nativeDiff,
@@ -232,6 +252,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     );
     this.registry.onDidChangeAvailability((availability) => this.post({ type: 'snapshot', availability }));
     this.registry.onEvent((event) => {
+      const owner = event.threadId ? this.sessionForThread(event.backendId, event.threadId) : undefined;
+      this.sessionStore.run(owner, () => {
       // `changes/reported` is internal turn bookkeeping, not transcript content:
       // it is folded into the journal here and never forwarded to the webview,
       // which only ever receives the final `changes/changed` snapshot.
@@ -331,6 +353,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // reply update the persisted list without rewriting the plan body.
         void this.mergeTodoProgressFromReply(event.backendId, event.threadId);
       }
+      if (
+        event.threadId &&
+        (event.type === 'turn/completed' || event.type === 'turn/interrupted' || event.type === 'error')
+      ) {
+        for (const session of [...this.sessions]) {
+          const sameThread =
+            session.activeThread?.backendId === event.backendId && session.activeThread.threadId === event.threadId;
+          if (!sameThread) {
+            continue;
+          }
+          session.turnOpen = false;
+          if (session.disposed) {
+            this.removeSession(session);
+          }
+        }
+      }
+      });
     });
     const storedPermission = this.store.getLastPermissionLevel();
     if (storedPermission) {
@@ -340,6 +379,80 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private get store(): ThreadStore {
     return this.registry.threads;
+  }
+
+  private get session(): ChatSession | undefined {
+    return this.sessionStore.getStore();
+  }
+
+  private get activeThread(): ThreadHandle | undefined {
+    return this.session?.activeThread;
+  }
+
+  private set activeThread(value: ThreadHandle | undefined) {
+    if (this.session) {
+      this.session.activeThread = value;
+    }
+  }
+
+  private get mode(): DefaultMode {
+    return this.session?.mode ?? readDefaultMode();
+  }
+
+  private set mode(value: DefaultMode) {
+    if (this.session) {
+      this.session.mode = value;
+    }
+  }
+
+  private get pendingApproval(): ApprovalRequest | undefined {
+    return this.session?.pendingApproval;
+  }
+
+  private set pendingApproval(value: ApprovalRequest | undefined) {
+    if (this.session) {
+      this.session.pendingApproval = value;
+    }
+  }
+
+  private get pendingQuestion(): ChatSession['pendingQuestion'] {
+    return this.session?.pendingQuestion;
+  }
+
+  private set pendingQuestion(value: ChatSession['pendingQuestion']) {
+    if (this.session) {
+      this.session.pendingQuestion = value;
+    }
+  }
+
+  private get nativePlanThisTurn(): boolean {
+    return this.session?.nativePlanThisTurn ?? false;
+  }
+
+  private set nativePlanThisTurn(value: boolean) {
+    if (this.session) {
+      this.session.nativePlanThisTurn = value;
+    }
+  }
+
+  private get revisePlanThisTurn(): boolean {
+    return this.session?.revisePlanThisTurn ?? false;
+  }
+
+  private set revisePlanThisTurn(value: boolean) {
+    if (this.session) {
+      this.session.revisePlanThisTurn = value;
+    }
+  }
+
+  private get pendingTurnMessage(): ChatSession['pendingTurnMessage'] {
+    return this.session?.pendingTurnMessage;
+  }
+
+  private set pendingTurnMessage(value: ChatSession['pendingTurnMessage']) {
+    if (this.session) {
+      this.session.pendingTurnMessage = value;
+    }
   }
 
   /**
@@ -617,19 +730,51 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')]
     };
-    // Listen before the document is written so a fast `ready` is not missed.
     const messages = view.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
       if (message.type === 'ready') {
         this.webviewMounted = true;
         this.clearWebviewMountTimers();
+        // No tab exists yet on a cold start, so this cannot wait for `visible`.
+        void this.handle(message);
+        return;
       }
-      void this.handle(message);
+      if (message.type === 'newChat') {
+        this.openBlank();
+        return;
+      }
+      if (message.type === 'openThread') {
+        this.openThread(message.backendId, message.threadId);
+        return;
+      }
+      if (message.type === 'selectChatTab') {
+        const session = this.liveSessions().find((entry) => entry.id === message.tabId);
+        if (session) {
+          void this.showSession(session);
+        }
+        return;
+      }
+      if (message.type === 'closeChatTab') {
+        this.closeSession(message.tabId);
+        return;
+      }
+      if (message.type === 'reorderChatTab') {
+        this.reorderSession(message.tabId, message.toIndex);
+        return;
+      }
+      const session = this.visible;
+      if (!session) {
+        return;
+      }
+      void this.sessionStore.run(session, () => this.handle(message));
     });
     view.onDidDispose(() => {
       messages.dispose();
+      this.dictation.dispose();
       this.clearWebviewMountTimers();
+      if (this.view === view) {
+        this.view = undefined;
+      }
     });
-
     // VS Code registers a service worker in the webview iframe before our HTML
     // is shown. Writing the document on this same turn navigates that iframe
     // while registration is in flight, and Chromium then rejects the worker
@@ -652,23 +797,240 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.webviewMountTimers = [];
   }
 
+  /** Open a blank editor tab, or focus one that has not been used yet. */
+  /** Open a blank sidebar tab, or focus one that has not been used yet. */
+  openBlank(): void {
+    const target = resolveChatTarget(this.openTabRecords(), { kind: 'new' });
+    if (target.action === 'reveal') {
+      const existing = this.liveSessions()[target.index];
+      if (existing) {
+        void this.showSession(existing);
+      }
+      return;
+    }
+    void this.showSession(this.createSession({ blank: true, title: DEFAULT_TAB_TITLE }));
+  }
+
+  /** Show the tab for a thread, or open one and resume that thread. */
+  openThread(backendId: string, threadId: string): void {
+    const target = resolveChatTarget(this.openTabRecords(), { kind: 'thread', backendId, threadId });
+    if (target.action === 'reveal') {
+      const existing = this.liveSessions()[target.index];
+      if (existing) {
+        void this.showSession(existing);
+      }
+      return;
+    }
+    const stored = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId)?.title;
+    void this.showSession(this.createSession({ blank: false, backendId, threadId, title: tabTitle(stored) }));
+  }
+
+  private reorderSession(tabId: string, toIndex: number): void {
+    const next = reorderById(this.liveSessions(), tabId, toIndex);
+    if (!next) {
+      return;
+    }
+    const disposed = this.sessions.filter((session) => session.disposed);
+    this.sessions = [...next, ...disposed];
+    this.publishTabs();
+  }
+
+  private closeSession(tabId: string): void {
+    const session = this.sessions.find((entry) => entry.id === tabId && !entry.disposed);
+    if (!session) {
+      return;
+    }
+    session.disposed = true;
+    if (!session.turnOpen) {
+      this.removeSession(session);
+    }
+    const live = this.liveSessions();
+    if (this.visible === session || this.visible?.disposed) {
+      if (live.length === 0) {
+        void this.showSession(this.createSession({ blank: true, title: DEFAULT_TAB_TITLE }));
+        return;
+      }
+      void this.showSession(live[live.length - 1]);
+      return;
+    }
+    this.publishTabs();
+  }
+
+  private createSession(init: ChatTabState): ChatSession {
+    this.tabSeq += 1;
+    const session: ChatSession = {
+      id: `tab_${this.tabSeq}`,
+      title: init.title ?? DEFAULT_TAB_TITLE,
+      restored: false,
+      mode: readDefaultMode(),
+      nativePlanThisTurn: false,
+      revisePlanThisTurn: false,
+      blank: init.blank,
+      ...(init.backendId && init.threadId ? { resume: { backendId: init.backendId, threadId: init.threadId } } : {}),
+      disposed: false,
+      turnOpen: false
+    };
+    this.sessions.push(session);
+    return session;
+  }
+
+  /** Put this tab's conversation on screen. */
+  private async showSession(session: ChatSession): Promise<void> {
+    if (session.disposed) {
+      return;
+    }
+    this.visible = session;
+    this.publishTabs();
+    await this.sessionStore.run(session, async () => {
+      const pending = session.resume;
+      if (pending) {
+        session.resume = undefined;
+        session.blank = false;
+        await this.resumeThread(pending.backendId, pending.threadId);
+        return;
+      }
+      if (session.activeThread) {
+        this.repaintSession();
+        this.postLatestChanges();
+        await this.postActiveCheckpoints();
+        return;
+      }
+      this.postFreshConversation();
+      this.post({ type: 'restoring', value: false });
+    });
+  }
+
+  /** Re-send the visible tab's stored conversation without starting a new thread. */
+  private repaintSession(): void {
+    const thread = this.activeThread;
+    if (!thread) {
+      this.postFreshConversation();
+      this.post({ type: 'restoring', value: false });
+      return;
+    }
+    const { backendId, threadId, model } = thread;
+    const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
+    this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+    this.post({
+      type: 'conversation',
+      backendId,
+      threadId,
+      model,
+      permissionLevel: this.permissionLevel,
+      mode: this.mode,
+      replay: this.store.getTranscript(backendId, threadId),
+      pendingApproval: this.pendingApproval,
+      pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
+      plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
+    });
+    this.post({ type: 'restoring', value: false });
+  }
+
+  private loadSavedSessions(): void {
+    const saved = this.context.workspaceState.get<ChatTabState[]>(OPEN_CHAT_TABS_KEY);
+    if (!Array.isArray(saved) || saved.length === 0) {
+      this.visible = this.createSession({ blank: true, title: DEFAULT_TAB_TITLE });
+      return;
+    }
+    let active: ChatSession | undefined;
+    for (const tab of saved) {
+      const session = this.createSession(parseChatTabState(tab));
+      if (tab.active) {
+        active = session;
+      }
+    }
+    this.visible = active ?? this.liveSessions()[0];
+  }
+
+  private liveSessions(): ChatSession[] {
+    return this.sessions.filter((session) => !session.disposed);
+  }
+
+  private openTabRecords(): OpenChatTab[] {
+    return this.liveSessions().map((session) => ({
+      blank: session.blank && !session.activeThread && !session.resume,
+      backendId: session.activeThread?.backendId ?? session.resume?.backendId,
+      threadId: session.activeThread?.threadId ?? session.resume?.threadId
+    }));
+  }
+
+  private sessionForThread(backendId: string, threadId: string): ChatSession | undefined {
+    const matches = this.sessions.filter(
+      (session) =>
+        (session.activeThread?.backendId === backendId && session.activeThread.threadId === threadId) ||
+        (session.resume?.backendId === backendId && session.resume.threadId === threadId)
+    );
+    return matches.find((session) => session === this.visible) ?? matches.find((session) => !session.disposed) ?? matches[0];
+  }
+
+  private removeSession(session: ChatSession): void {
+    this.sessions = this.sessions.filter((entry) => entry !== session);
+    this.persistOpenTabs();
+  }
+
+  private persistOpenTabs(): void {
+    const tabs: ChatTabState[] = this.liveSessions().map((session) => {
+      const backendId = session.activeThread?.backendId ?? session.resume?.backendId;
+      const threadId = session.activeThread?.threadId ?? session.resume?.threadId;
+      const blank = session.blank && !threadId;
+      return {
+        blank,
+        ...(backendId ? { backendId } : {}),
+        ...(threadId ? { threadId } : {}),
+        title: session.title,
+        ...(session === this.visible ? { active: true } : {})
+      };
+    });
+    void this.context.workspaceState.update(OPEN_CHAT_TABS_KEY, tabs);
+  }
+
+  private publishTabs(): void {
+    this.persistOpenTabs();
+    const tabs = this.liveSessions().map((session) => {
+      const backendId = session.activeThread?.backendId ?? session.resume?.backendId;
+      const threadId = session.activeThread?.threadId ?? session.resume?.threadId;
+      return {
+        id: session.id,
+        title: session.title,
+        active: session === this.visible,
+        ...(backendId ? { backendId } : {}),
+        ...(threadId ? { threadId } : {})
+      };
+    });
+    void this.view?.webview.postMessage({ type: 'chatTabs', tabs });
+  }
+
   private post(message: HostToWebviewMessage): void {
-    void this.view?.webview.postMessage(message);
+    if (!this.view) {
+      return;
+    }
+    const shared =
+      message.type === 'agentEvent' ||
+      message.type === 'busy' ||
+      message.type === 'snapshot' ||
+      message.type === 'context' ||
+      message.type === 'threads' ||
+      message.type === 'chatTabs';
+    if (!shared && this.session && this.visible && this.session !== this.visible) {
+      return;
+    }
+    void this.view.webview.postMessage(message);
   }
 
   private async handle(message: WebviewToHostMessage): Promise<void> {
     switch (message.type) {
-      case 'ready':
+      case 'ready': {
         this.post({ type: 'snapshot', availability: this.registry.snapshot() });
-        await this.restore();
-        // A reload repaints the change surface from the journal's recorded set
-        // for the active thread (nothing when the latest turn observed nothing).
-        this.postLatestChanges();
-        // Repaint the per-message checkpoint list for the active thread, so the
-        // per-message entry point offers the same messages after a reload.
-        await this.postActiveCheckpoints();
+        if (this.liveSessions().length === 0) {
+          this.loadSavedSessions();
+        }
+        const session = this.visible && !this.visible.disposed ? this.visible : this.liveSessions()[0];
+        if (session) {
+          await this.showSession(session);
+        }
         await this.postContextView();
         break;
+      }
       case 'refresh':
         this.post({ type: 'snapshot', availability: await this.registry.refresh() });
         break;
@@ -742,6 +1104,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'steerTurn':
         await this.steerTurn(message.text);
+        break;
+      case 'startDictation':
+        await this.dictation.start(message.requestId);
+        break;
+      case 'stopDictation':
+        await this.dictation.stop(message.requestId);
         break;
       case 'attachFiles':
         await this.attachFiles(message.requestId);
@@ -1089,93 +1457,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Reconnects to the conversation persisted for this workspace. Runs once, and
-   * always reports the restoring flag off so a failure cannot wedge the input.
-   */
-  private async restore(): Promise<void> {
-    if (this.restored) {
-      // The webview reloaded inside the same host session (e.g. it was
-      // re-resolved): re-send the live conversation instead of restoring again.
-      if (this.activeThread) {
-        const { backendId, threadId, model } = this.activeThread;
-        const ref = this.store.getActiveThread();
-        this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
-        this.post({
-          type: 'conversation',
-          backendId,
-          threadId,
-          model,
-          permissionLevel: this.permissionLevel,
-          mode: this.mode,
-          replay: this.store.getTranscript(backendId, threadId),
-          pendingApproval: this.pendingApproval,
-          pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
-          plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
-        });
-      }
-      this.post({ type: 'restoring', value: false });
-      return;
-    }
-    this.restored = true;
-    this.post({ type: 'restoring', value: true });
-    try {
-      const ref = this.store.getActiveThread();
-      if (!ref) {
-        this.postFreshConversation();
-        return;
-      }
-      const backend = this.registry.get(ref.backendId);
-      if (!backend) {
-        await this.store.clearActiveThread();
-        this.postFreshConversation();
-        return;
-      }
-      try {
-        // Re-prime on resume: the upstream context may be gone after the replay,
-        // so the snapshot is sent again rather than assumed to have survived.
-        const prime = await this.contextDelivery.snapshot();
-        const result = await backend.resumeThread(ref.threadId, { context: prime.payload });
-        this.activeThread = result.handle;
-        this.syncPlanPreviewThread(result.handle.threadId);
-        this.contextDelivery.begin(
-          ContextDelivery.key(ref.backendId, ref.threadId),
-          prime,
-          Boolean(result.handle.contextPrimed)
-        );
-        const model = ref.modelId ?? result.model;
-        // Restore the thread's mode so a resumed thread keeps the mode it ran in.
-        this.mode = this.resolveMode(ref.backendId, ref.mode ?? this.mode);
-        await this.store.setActiveThread({
-          backendId: ref.backendId,
-          threadId: ref.threadId,
-          modelId: model,
-          mode: this.mode,
-          title: ref.title,
-          updatedAt: Date.now()
-        });
-        this.post({
-          type: 'conversation',
-          backendId: ref.backendId,
-          threadId: ref.threadId,
-          model,
-          permissionLevel: this.permissionLevel,
-          mode: this.mode,
-          replay: this.store.mergeApprovalMarkers(ref.backendId, ref.threadId, result.items),
-          pendingApproval: this.pendingApproval,
-          pendingQuestion: this.pendingQuestionPayload(ref.backendId, ref.threadId),
-          plan: this.store.getPlanState(ref.backendId, ref.threadId)
-            ? this.planArtifact(ref.backendId, ref.threadId)
-            : undefined
-        });
-      } catch (error) {
-        await this.degradeToFresh(ref.backendId, error);
-      }
-    } finally {
-      this.post({ type: 'restoring', value: false });
-    }
-  }
-
-  /**
    * Opens an empty conversation, re-applying the last-used model so reopening a
    * window still lands on the model the user last chose.
    */
@@ -1209,34 +1490,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       model: last?.modelId || undefined,
       permissionLevel: this.permissionLevel,
       mode: this.mode
-    });
-  }
-
-  /**
-   * A stale or unreadable thread must never block activation: keep the backend
-   * selected, start empty, and explain quietly.
-   */
-  private async degradeToFresh(backendId: string, error: unknown): Promise<void> {
-    await this.store.clearActiveThread();
-    this.activeThread = undefined;
-    this.syncPlanPreviewThread(undefined);
-    if (error instanceof BackendError && error.code === 'provider') {
-      this.post({
-        type: 'notice',
-        level: 'info',
-        message: 'The previous conversation could not be restored, so a new one was started.'
-      });
-    } else if (!(error instanceof BackendError && error.code === 'unauthenticated')) {
-      this.post({
-        type: 'notice',
-        level: 'info',
-        message: 'The previous conversation is not available right now.'
-      });
-    }
-    this.post({
-      type: 'conversation',
-      backendId,
-      model: this.store.getLastUsedModel()?.modelId || undefined
     });
   }
 
@@ -1416,12 +1669,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   /** Reconnects to a listed thread and replays its stored turns. */
   private async resumeThread(backendId: string, threadId: string): Promise<void> {
-    const backend = this.registry.get(backendId);
-    if (!backend) {
-      return;
-    }
     this.post({ type: 'restoring', value: true });
     try {
+      const backend = this.registry.get(backendId);
+      if (!backend) {
+        this.post({
+          type: 'notice',
+          level: 'warning',
+          message: 'That conversation could not be restored because its provider is not available.'
+        });
+        return;
+      }
       // A resumed thread is re-primed with a fresh snapshot, because the upstream
       // context may be gone after the replay.
       const prime = await this.contextDelivery.snapshot();
@@ -1437,13 +1695,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       // a mode the backend cannot serve degrades to `agent`.
       const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
       this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+      const titled =
+        ref?.title ?? result.items.find((item) => item.role === 'user' && item.text?.trim())?.text;
       await this.store.setActiveThread({
         backendId,
         threadId,
         modelId: result.model,
         mode: this.mode,
+        title: titled ? ThreadStore.titleFromText(titled) ?? titled : undefined,
         updatedAt: Date.now()
       });
+      if (this.session) {
+        this.session.blank = false;
+        this.session.title = tabTitle(titled);
+        this.publishTabs();
+      }
       this.post({
         type: 'conversation',
         backendId,
@@ -1558,6 +1824,31 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Rewrite a transcript with the settings model. Ollama uses a one-shot chat
+   * call. Codex uses a throwaway read-only thread that is not shown in the chat.
+   */
+  private async cleanupTranscript(text: string): Promise<string> {
+    const target = parseDictationTarget(
+      vscode.workspace.getConfiguration('melink.defaults').get<string>('dictationModel', '')
+    );
+    if (!target) {
+      throw new Error('Choose a dictation model in Settings.');
+    }
+    if (target.backendId === 'ollama') {
+      const backend = this.registry.get('ollama');
+      if (!(backend instanceof OllamaBackend)) {
+        throw new Error('Dictation needs Ollama for that model.');
+      }
+      return backend.cleanDictation(text, target.modelId);
+    }
+    const backend = this.registry.get('codex');
+    if (!(backend instanceof CodexBackend)) {
+      throw new Error('Dictation needs Codex for that model.');
+    }
+    return backend.cleanDictation(text, target.modelId);
+  }
+
   private async steerTurn(text: string): Promise<void> {
     const value = text.trim();
     const active = this.activeThread;
@@ -1663,20 +1954,33 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       void this.postContextView();
     }
     const messageId = await this.store.appendUserMessage(activeBackendId, threadId, text, persisted);
+    const indexed = this.store.listThreads(activeBackendId).find((entry) => entry.threadId === threadId);
+    const title = indexed?.title ?? ThreadStore.titleFromText(text);
     await this.store.setActiveThread({
       backendId: activeBackendId,
       threadId,
       modelId: resolvedModel,
       mode,
-      title: this.store.getActiveThread()?.title ?? ThreadStore.titleFromText(text),
+      title,
       updatedAt: Date.now()
     });
+    if (this.session && (this.session.blank || this.session.title === DEFAULT_TAB_TITLE)) {
+      const label = tabTitle(text);
+      if (label !== DEFAULT_TAB_TITLE) {
+        this.session.title = label;
+      }
+      this.session.blank = false;
+      this.publishTabs();
+    }
     await this.store.setLastUsedModel({ backendId: activeBackendId, modelId: resolvedModel ?? '' });
     this.post({ type: 'busy', value: true, backendId: activeBackendId, threadId });
     // Bind the next turn boundary to this user message, so the turn's pre-state
     // snapshot becomes this message's checkpoint. `turn/started` consumes it;
     // a send that never starts a turn must not strand it on a later turn.
     this.pendingTurnMessage = { messageId, backendId: activeBackendId, threadId };
+    if (this.session) {
+      this.session.turnOpen = true;
+    }
     try {
       await backend.sendTurn(
         { backendId: activeBackendId, threadId, model: resolvedModel },
@@ -1684,6 +1988,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       );
     } catch (error) {
       this.pendingTurnMessage = undefined;
+      if (this.session) {
+        this.session.turnOpen = false;
+      }
       if (error instanceof BackendError && error.code === 'unauthenticated') {
         this.post({ type: 'notice', level: 'warning', message: error.message, action: 'setToken' });
       } else if (!isCancellation(error)) {

@@ -104,4 +104,10 @@ test('the serve listen line yields the base URL', () => {
     opencodeListenUrl('Warning: OPENCODE_SERVER_PASSWORD is not set.\nopencode server listening on http://127.0.0.1:4096\n'),
     'http://127.0.0.1:4096'
   );
+  assert.equal(
+    opencodeListenUrl(
+      'loaded provider https://ollama.com/v1\nopencode server listening on http://127.0.0.1:54321\n'
+    ),
+    'http://127.0.0.1:54321'
+  );
 });

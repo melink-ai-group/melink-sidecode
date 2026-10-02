@@ -1,4 +1,26 @@
 import { build, context } from 'esbuild';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.dirname(fileURLToPath(import.meta.url));
+
+function stageDictation() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(root, 'scripts', 'stage-dictation.mjs')], {
+      cwd: root,
+      stdio: 'inherit'
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`stage-dictation exited with ${code}`));
+      }
+    });
+  });
+}
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -54,10 +76,12 @@ const planPreviewOptions = {
 const targets = [extensionOptions, webviewOptions, planPreviewOptions];
 
 if (watch) {
+  await stageDictation();
   const contexts = await Promise.all(targets.map((options) => context(options)));
   await Promise.all(contexts.map((ctx) => ctx.watch()));
   console.log('[esbuild] watching extension host and webview');
 } else {
   await Promise.all(targets.map((options) => build(options)));
+  await stageDictation();
   console.log(`[esbuild] built dist/extension.js, dist/webview.{js,css}, and dist/planPreview.{js,css} (${production ? 'production' : 'development'})`);
 }

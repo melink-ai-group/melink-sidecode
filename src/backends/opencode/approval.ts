@@ -171,10 +171,18 @@ export function consumeSse(buffer: string): { messages: string[]; rest: string }
   return { messages, rest };
 }
 
-/** The URL from `opencode server listening on http://...`. */
+/**
+ * The URL from `opencode server listening on http://...`.
+ *
+ * Startup text can mention another URL first (a provider base, a docs link).
+ * Only the listen line is the server we spawned.
+ */
 export function opencodeListenUrl(text: string): string | undefined {
-  const match = text.match(/https?:\/\/[^\s]+/i);
-  return match ? match[0].replace(/[),.;]+$/, '') : undefined;
+  const match = text.match(/opencode server listening on\s+(https?:\/\/\S+)/i);
+  if (!match) {
+    return undefined;
+  }
+  return match[1].replace(/\u001b\[[0-9;]*m/g, '').replace(/[),.;]+$/, '');
 }
 
 function partStillStreaming(part: Record<string, unknown>): boolean {

@@ -53,6 +53,176 @@ body {
   min-width: 0;
 }
 
+/* ---- Sidebar chat tabs. + and history sit on the right of this strip. ---- */
+
+.chat-tab-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.chat-tab-body > .app {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.chat-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  min-width: 0;
+  padding-top: 4px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background)));
+}
+
+.chat-tabs__list {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+}
+
+.chat-tabs__list::-webkit-scrollbar {
+  height: 6px;
+  width: 0;
+}
+
+.chat-tabs__list::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 6px;
+}
+
+.chat-tabs__list::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+.chat-tabs__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-tabs__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 0 6px 4px 4px;
+}
+
+.chat-tab {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 180px;
+  min-width: 0;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
+  cursor: grab;
+}
+
+.chat-tab:active {
+  cursor: grabbing;
+}
+
+.chat-tab--active {
+  z-index: 1;
+  background: transparent;
+  color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
+  box-shadow: inset 0 2px 0 var(--melink-primary);
+}
+
+.chat-tab--dragging {
+  opacity: 0.45;
+}
+
+.chat-tab--drop-before {
+  box-shadow: inset 2px 0 0 var(--melink-primary);
+}
+
+.chat-tab--drop-after {
+  box-shadow: inset -2px 0 0 var(--melink-primary);
+}
+
+.chat-tab--active.chat-tab--drop-before {
+  box-shadow: inset 0 2px 0 var(--melink-primary), inset 2px 0 0 var(--melink-primary);
+}
+
+.chat-tab--active.chat-tab--drop-after {
+  box-shadow: inset 0 2px 0 var(--melink-primary), inset -2px 0 0 var(--melink-primary);
+}
+
+.chat-tab__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 148px;
+  padding: 5px 2px 5px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: inherit;
+}
+
+.chat-tab--active .chat-tab__label {
+  font-weight: 600;
+}
+
+.chat-tab__text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-tab__mark {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.chat-tab__unread {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--melink-primary);
+}
+
+.chat-tab__close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+}
+
+.chat-tab__close:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-foreground);
+}
+
 /* ---- Header: the model switcher is the single primary affordance ---- */
 
 .view-title {
@@ -702,11 +872,15 @@ body {
   font-size: 11px;
 }
 
+.turn--reasoning--collapsed {
+  gap: 0;
+}
+
 .reasoning-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
   width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
@@ -714,21 +888,59 @@ body {
   color: inherit;
   font: inherit;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+.reasoning-lead {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.reasoning-lead .meta-strong {
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reasoning-snippet__sep,
+.reasoning-snippet__text {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.reasoning-snippet__sep {
+  flex: 0 0 auto;
+}
+
+.reasoning-snippet__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 0.35em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .reasoning-toggle__hint {
+  flex: 0 0 auto;
   margin-left: auto;
+  padding-left: 8px;
   color: var(--vscode-descriptionForeground);
   font-size: 11px;
 }
 
-/* Collapsed reasoning shows the last two lines. scrollTop is pinned to the end. */
-.reasoning-clamp {
-  max-height: calc(2 * 1.45em + 16px);
-  overflow: hidden;
-  line-height: 1.45;
-  cursor: pointer;
+.turn--reasoning .stream-status {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+.turn--reasoning .stream-status + .reasoning-toggle__hint {
+  margin-left: 8px;
 }
 
 .turn--reasoning .turn-body {
@@ -1314,22 +1526,58 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
-.icon-btn.icon-btn--new-chat {
-  width: auto;
-  min-width: 28px;
-  padding: 0 8px;
-  color: var(--vscode-foreground);
-  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+.icon-btn.icon-btn--primary {
+  background: var(--melink-primary);
+  color: var(--melink-surface);
 }
 
-.icon-btn.icon-btn--new-chat .ico {
+.icon-btn.icon-btn--primary .ico {
   width: 14px;
   height: 14px;
 }
 
-.icon-btn.icon-btn--new-chat:hover:not(:disabled) {
-  background: var(--vscode-list-hoverBackground);
-  color: var(--vscode-foreground);
+.icon-btn.icon-btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  color: var(--melink-surface);
+}
+
+.history-anchor {
+  position: relative;
+}
+
+.history-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 72vw);
+  max-height: min(420px, 60vh);
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow, #000) 35%, transparent);
+  overflow: hidden;
+}
+
+.history-menu__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.history-menu__search .model-filter {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.history-menu .model-list {
+  max-height: 320px;
 }
 
 /* ---- Composer ---- */
@@ -1527,6 +1775,27 @@ body {
 
 .composer-row .spacer {
   flex: 1 1 auto;
+}
+
+.composer-row .composer-action {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--melink-radius-sm, 4px);
+}
+
+.composer-action--listening {
+  color: var(--melink-primary);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--melink-primary) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
 }
 
 .composer-hint {
@@ -1768,6 +2037,16 @@ body {
   margin-top: 1px;
 }
 
+.composer-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
 /* ---- Empty state ---- */
 
 .empty-state {
@@ -1933,6 +2212,16 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
+/* A second tab row inside a panel (Ollama / Codex). Same pattern, quieter. */
+.tablist--nested {
+  background: transparent;
+}
+
+.tablist--nested .tab {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 .tabpanel:focus {
   outline: none;
 }
@@ -1947,6 +2236,16 @@ body {
  * UA `[hidden] { display: none }` and stack every section. */
 .tabpanel[hidden] {
   display: none;
+}
+
+/* Nested provider pages scroll inside the panel. They must not become a second
+ * full-height column beside the outer settings tab. */
+.settings .tabpanel.tabpanel--inline:not([hidden]) {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ---- Settings screen (inline surface, mirrors the switcher panel pattern) ---- */
@@ -2011,6 +2310,30 @@ body {
   overflow: hidden;
 }
 
+/* Providers fills the tab so the Ollama / Codex tabs stay put and the fields scroll. */
+.settings .panel--fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings .panel--fill > .tablist {
+  flex: 0 0 auto;
+}
+
+.settings .panel__head {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.settings .panel__head .panel__note {
+  flex: 1 1 10rem;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: unset;
+}
+
 .panel__head {
   display: flex;
   align-items: center;
@@ -2059,7 +2382,9 @@ body {
 .field-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .field__head .spacer,
@@ -2152,6 +2477,11 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+.field-row {
+  flex-wrap: wrap;
 }
 
 .field-row .spacer,
@@ -2315,10 +2645,8 @@ body {
 .runtime {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
-  padding-top: 6px;
-  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  gap: 6px;
+  min-width: 0;
 }
 
 .check {
@@ -2376,22 +2704,69 @@ body {
 .check-text {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
 }
 
 .runtime-status {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 5px;
+  min-width: 0;
   font-size: 11px;
-  white-space: nowrap;
+}
+
+.runtime-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .runtime-actions {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.runtime-actions > .btn {
+  align-self: flex-start;
+}
+
+.runtime-result {
+  display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin-top: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  font-size: 12px;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.runtime-result .ico {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.runtime-result > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-result--ok {
+  background: color-mix(in srgb, var(--melink-success) 8%, transparent);
+}
+
+.runtime-result--ok .ico {
+  color: var(--melink-success);
+}
+
+.runtime-result--error {
+  background: color-mix(in srgb, var(--vscode-errorForeground) 8%, transparent);
+  color: var(--vscode-errorForeground);
 }
 
 .runtime-dot {
@@ -3378,6 +3753,7 @@ body {
   margin: 2px 0 0;
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
 }
 
 .confirm-gate__actions {

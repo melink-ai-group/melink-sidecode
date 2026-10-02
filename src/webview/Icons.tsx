@@ -57,7 +57,7 @@ export const SettingsIcon = (props: IconProps): JSX.Element =>
   base('ico ico--sm', 1.6, props, (
     <>
       <circle cx="12" cy="12" r="3" />
-      <path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.4 1z" />
     </>
   ));
 
@@ -106,6 +106,15 @@ export const PaperclipIcon = (props: IconProps): JSX.Element =>
 
 export const ArrowIcon = (props: IconProps): JSX.Element =>
   base('ico ico--xs', 2, props, <path d="M5 12h13M13 6l6 6-6 6" />);
+
+export const MicIcon = (props: IconProps): JSX.Element =>
+  base('ico ico--sm', 1.6, props, (
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M6 11a6 6 0 0 0 12 0" />
+      <path d="M12 17v3M8 21h8" />
+    </>
+  ));
 
 export const StopIcon = (props: IconProps): JSX.Element =>
   base('ico ico--xs', 2, props, <rect x="6" y="6" width="12" height="12" rx="2" />);

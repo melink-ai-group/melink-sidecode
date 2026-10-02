@@ -287,6 +287,38 @@ test('a send that opens a thread keeps the optimistic user line and binds the ne
   assert.equal(bound.transcript[0].text, 'hello from ollama');
 });
 
+test('switching conversation clears a failure banner from the previous chat', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 't1' });
+  const failed = reduce(active, {
+    type: 'agentEvent',
+    event: {
+      type: 'error',
+      backendId: 'ollama',
+      threadId: 't1',
+      message: 'The opencode session could not be started.',
+      recoverable: true,
+      code: 'provider'
+    }
+  });
+  assert.equal(failed.notice?.message, 'The opencode session could not be started.');
+  const same = reduce(failed, { type: 'conversation', backendId: 'ollama', threadId: 't1' });
+  assert.equal(same.notice?.message, 'The opencode session could not be started.');
+  const switched = reduce(failed, { type: 'conversation', backendId: 'ollama', threadId: 't2' });
+  assert.equal(switched.notice, undefined);
+  const late = reduce(switched, {
+    type: 'agentEvent',
+    event: {
+      type: 'error',
+      backendId: 'ollama',
+      threadId: 't1',
+      message: 'The opencode session could not be started.',
+      recoverable: true,
+      code: 'provider'
+    }
+  });
+  assert.equal(late.notice, undefined);
+});
+
 test('switching conversation drops the previous thread change set', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
   const withSet = reduce(active, {

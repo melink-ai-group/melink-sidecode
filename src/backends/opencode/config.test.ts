@@ -143,11 +143,25 @@ test('max context arrives as the model limit and reasoning as a model option', (
   });
   const provider = (built.config.provider as Record<string, Record<string, unknown>>)[OPENCODE_PROVIDER_ID];
   const model = (provider.models as Record<string, Record<string, unknown>>).m;
-  assert.deepEqual(model.limit, { context: 65536 });
+  assert.deepEqual(model.limit, { context: 65536, output: 8192 });
   assert.deepEqual(model.options, { reasoningEffort: 'high' });
   assert.equal(built.contextApplied, 65536);
   assert.equal(built.reasoningApplied, 'high');
   assert.equal(built.reasoningUnsupported, false);
+});
+
+test('a small context window keeps the required output limit inside that window', () => {
+  const built = buildOpencodeConfig({
+    baseUrl: 'https://ollama.com',
+    modelIds: ['m'],
+    modelId: 'm',
+    settings: { contextWindow: 1000 },
+    mode: 'agent',
+    permissionLevel: 'default'
+  });
+  const provider = (built.config.provider as Record<string, Record<string, unknown>>)[OPENCODE_PROVIDER_ID];
+  const model = (provider.models as Record<string, Record<string, unknown>>).m;
+  assert.deepEqual(model.limit, { context: 1000, output: 500 });
 });
 
 test('a model with no reasoning control omits the key and reports unsupported', () => {

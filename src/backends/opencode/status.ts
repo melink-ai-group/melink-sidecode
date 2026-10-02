@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { summarizeOpencodeCliOutput } from './upgradeText.ts';
 
 /**
  * Probe for the optional opencode CLI, backing the settings screen's status line.
@@ -18,7 +19,7 @@ export interface OpencodeProbeResult {
   version?: string;
 }
 
-/** Outcome of `opencode upgrade`. The message is CLI text, truncated for the settings screen. */
+/** Outcome of `opencode upgrade`. The message is one plain sentence, never raw CLI chrome. */
 export interface OpencodeUpgradeResult {
   ok: boolean;
   message: string;
@@ -133,7 +134,8 @@ const UPGRADE_TIMEOUT_MS = 120_000;
  * Run `opencode upgrade` against the configured executable.
  *
  * Direct spawn, no shell. The CLI's own upgrade command installs the latest
- * release. Output is truncated so a long log cannot fill the settings screen.
+ * release. Its log is reduced to one sentence so color codes and progress
+ * bars never reach the settings screen.
  */
 export function upgradeOpencode(
   executable: string,
@@ -191,20 +193,10 @@ export function upgradeOpencode(
       });
     });
     child.on('close', (code) => {
-      const text = clipUpgradeOutput(`${stdout}\n${stderr}`);
-      if (code === 0) {
-        finish({ ok: true, message: text || 'opencode updated.' });
-        return;
-      }
-      finish({ ok: false, message: text || `opencode upgrade exited with code ${code ?? 'unknown'}.` });
+      finish({
+        ok: code === 0,
+        message: summarizeOpencodeCliOutput(`${stdout}\n${stderr}`, code)
+      });
     });
   });
-}
-
-function clipUpgradeOutput(value: string): string {
-  const text = value.replace(/\s+/g, ' ').trim();
-  if (text.length <= 400) {
-    return text;
-  }
-  return `${text.slice(0, 400)}…`;
 }

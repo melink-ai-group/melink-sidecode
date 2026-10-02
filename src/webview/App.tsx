@@ -23,6 +23,7 @@ import {
   FileIcon,
   HistoryIcon,
   InfoIcon,
+  MicIcon,
   PaperclipIcon,
   PlusIcon,
   RefreshIcon,
@@ -71,6 +72,7 @@ import {
 } from './state';
 import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
+import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
 import type {
   CheckpointView,
   ConflictResolution,
@@ -86,6 +88,16 @@ import type { Attachment, DefaultMode, PermissionLevel } from '../backends/types
 import { formatQuestionAnswers } from '../questions';
 import { QuestionCard } from './QuestionCard';
 
+/** Append a cleaned or raw dictation line without dropping text already in the draft. */
+function appendDraft(current: string, addition: string): string {
+  const extra = addition.trim();
+  if (!extra) {
+    return current;
+  }
+  const base = current.trimEnd();
+  return base ? `${base}\n${extra}` : extra;
+}
+
 const bridge: HostBridge = createHostBridge();
 
 export function App(): JSX.Element {
@@ -97,6 +109,8 @@ export function App(): JSX.Element {
   const [permissionPanelOpen, setPermissionPanelOpen] = useState(false);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState('');
+  const historyRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   /** Follow new transcript content only while the reader is already at the bottom. */
   const stickToBottomRef = useRef(true);
@@ -110,6 +124,20 @@ export function App(): JSX.Element {
    */
   const attachRequestRef = useRef<string | undefined>(undefined);
   const attachCounterRef = useRef(0);
+  const [listening, setListening] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const listeningRef = useRef(false);
+  const [dictationStatus, setDictationStatus] = useState<string | undefined>();
+  const dictationRequestRef = useRef<string | undefined>(undefined);
+  const stopDictationRef = useRef<() => void>(() => {});
+  const onDictationRef = useRef<
+    (
+      message:
+        | { type: 'dictationCleaned'; requestId: string; text: string }
+        | { type: 'dictationError'; requestId: string; message: string; raw?: string }
+        | { type: 'dictationStatus'; requestId: string; message: string }
+    ) => void
+  >(() => {});
 
   useEffect(() => {
     const unsubscribe = bridge.subscribe((message) => {
@@ -122,6 +150,9 @@ export function App(): JSX.Element {
           break;
         case 'threads':
           dispatch({ type: 'threads', backendId: message.backendId, threads: message.threads });
+          break;
+        case 'chatTabs':
+          dispatch({ type: 'chatTabs', tabs: message.tabs });
           break;
         case 'agentEvent':
           dispatch({ type: 'agentEvent', event: message.event });
@@ -249,11 +280,33 @@ export function App(): JSX.Element {
         case 'attachmentError':
           dispatch({ type: 'attachmentError', message: message.message });
           break;
+        case 'dictationCleaned':
+        case 'dictationError':
+        case 'dictationStatus':
+          onDictationRef.current(message);
+          break;
       }
     });
     bridge.post({ type: 'ready' });
+    bridge.post({ type: 'getSettings' });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!listening) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      stopDictationRef.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [listening]);
 
   // Keep the permission read model in step with the selected backend: this is
   // what tells the picker which levels the backend actually serves and which of
@@ -408,9 +461,45 @@ export function App(): JSX.Element {
     activeModels.find((model) => model.id === state.selectedModel)?.label ??
     activeModels[0]?.label;
 
+  useEffect(() => {
+    const firstUser = state.transcript.find((item) => item.kind === 'message' && item.role === 'user' && item.text?.trim());
+    const blank = !state.activeThreadId && !firstUser;
+    bridge.setState({
+      backendId: state.selectedBackendId,
+      threadId: state.activeThreadId,
+      blank,
+      title: firstUser?.text ? tabTitle(firstUser.text) : DEFAULT_TAB_TITLE
+    });
+  }, [state.activeThreadId, state.selectedBackendId, state.transcript]);
+
+  useEffect(() => {
+    if (!historyOpen) {
+      return;
+    }
+    const onPointer = (event: PointerEvent): void => {
+      if (!historyRef.current?.contains(event.target as Node)) {
+        setHistoryOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setHistoryOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [historyOpen]);
+
   const toggleHistory = (): void => {
     const open = !historyOpen;
     setHistoryOpen(open);
+    if (open) {
+      setHistoryQuery('');
+    }
     if (open && active) {
       dispatch({ type: 'threadsLoading', backendId: active.id, value: true });
       bridge.post({ type: 'listThreads', backendId: active.id });
@@ -423,13 +512,9 @@ export function App(): JSX.Element {
       return;
     }
     setHistoryOpen(false);
+    setHistoryQuery('');
     stickToBottomRef.current = true;
-    if (threadId === state.activeThreadId) {
-      scrollTranscriptToBottom();
-      return;
-    }
-    dispatch({ type: 'dismissNotice' });
-    bridge.post({ type: 'resumeThread', backendId: active.id, threadId });
+    bridge.post({ type: 'openThread', backendId: active.id, threadId });
   };
 
   const toggleModelPanel = (): void => {
@@ -653,19 +738,98 @@ export function App(): JSX.Element {
     active?.status === 'available' &&
     (!state.busy || (active.id === 'codex' && Boolean(draft.trim()) && state.attachments.length === 0));
 
-  const newConversation = (): void => {
-    if (!active) {
+  const dictationModel = state.settings?.defaults.dictationModel?.trim() ?? '';
+  const micDisabled = !dictationModel || cleaning;
+  const micTitle = !state.settings
+    ? 'Loading settings…'
+    : !dictationModel
+      ? 'Choose a dictation model in Settings.'
+      : cleaning
+        ? dictationStatus ?? 'Working on the recording…'
+        : listening
+          ? 'Stop dictation'
+          : 'Dictate a message';
+
+  const stopDictation = (): void => {
+    const requestId = dictationRequestRef.current;
+    if (!requestId || !listeningRef.current) {
       return;
     }
-    setHistoryOpen(false);
+    listeningRef.current = false;
+    setListening(false);
+    setCleaning(true);
+    setDictationStatus('Finishing the recording…');
+    bridge.post({ type: 'stopDictation', requestId });
+  };
+  stopDictationRef.current = stopDictation;
+
+  const toggleDictation = (): void => {
+    if (cleaning) {
+      return;
+    }
+    if (listeningRef.current) {
+      stopDictation();
+      return;
+    }
+    const requestId = `dictation_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    dictationRequestRef.current = requestId;
+    listeningRef.current = true;
+    dispatch({ type: 'dismissAttachmentError' });
+    setListening(true);
+    setDictationStatus('Starting the microphone…');
+    bridge.post({ type: 'startDictation', requestId });
+  };
+
+  onDictationRef.current = (message) => {
+    if (message.requestId !== dictationRequestRef.current) {
+      return;
+    }
+    if (message.type === 'dictationStatus') {
+      setDictationStatus(message.message);
+      return;
+    }
+    dictationRequestRef.current = undefined;
+    listeningRef.current = false;
+    setListening(false);
+    setCleaning(false);
+    setDictationStatus(undefined);
+    if (message.type === 'dictationError') {
+      if (message.raw?.trim()) {
+        setDraft((current) => appendDraft(current, message.raw as string));
+      }
+      dispatch({ type: 'attachmentError', message: message.message });
+      return;
+    }
+    if (!message.text.trim()) {
+      dispatch({ type: 'attachmentError', message: 'Dictation cleanup returned nothing.' });
+      return;
+    }
+    const next = appendDraft(draft, message.text);
+    const locked =
+      state.restoring || Boolean(pending) || asking || state.busy || active?.status !== 'available' || !next.trim();
+    if (locked) {
+      setDraft(next);
+      return;
+    }
+    const text = next.trim();
+    dispatch({ type: 'localUserMessage', text, attachments: state.attachments });
     dispatch({ type: 'dismissNotice' });
-    setDraft('');
+    dispatch({ type: 'dismissAttachmentError' });
     bridge.post({
-      type: 'startThread',
-      backendId: active.id,
+      type: 'sendTurn',
+      text,
+      backendId: state.selectedBackendId,
       model: state.selectedModel,
-      permissionLevel: state.permissionLevel
+      permissionLevel: state.permissionLevel,
+      attachments: state.attachments
     });
+    setDraft('');
+  };
+
+  const newConversation = (): void => {
+    setHistoryOpen(false);
+    setHistoryQuery('');
+    bridge.post({ type: 'newChat' });
   };
 
   const triggerLabel =
@@ -953,12 +1117,77 @@ export function App(): JSX.Element {
   };
 
 
+  const activeChatTabId = state.chatTabs.find((tab) => tab.active)?.id;
+  const draftsRef = useRef<Record<string, string>>({});
+  const draftMirrorRef = useRef(draft);
+  draftMirrorRef.current = draft;
+  const previousChatTabRef = useRef(activeChatTabId);
+  useEffect(() => {
+    const previous = previousChatTabRef.current;
+    if (previous && previous !== activeChatTabId) {
+      draftsRef.current[previous] = draftMirrorRef.current;
+    }
+    previousChatTabRef.current = activeChatTabId;
+    if (activeChatTabId) {
+      setDraft(draftsRef.current[activeChatTabId] ?? '');
+    }
+  }, [activeChatTabId]);
+
+  const tabStrip = (
+    <ChatTabStrip
+      tabs={state.chatTabs}
+      activity={state.threadActivity}
+      actions={
+        <span className="chat-tabs__actions">
+          <button
+            className="icon-btn icon-btn--primary"
+            type="button"
+            aria-label="New chat"
+            title="New chat"
+            onClick={newConversation}
+          >
+            <PlusIcon />
+          </button>
+          <div className="history-anchor" ref={historyRef}>
+            <button
+              className="icon-btn"
+              type="button"
+              aria-label="Conversation history"
+              title="Conversation history"
+              aria-expanded={historyOpen}
+              aria-controls="history-panel"
+              disabled={!active}
+              onClick={toggleHistory}
+            >
+              <HistoryIcon />
+            </button>
+            {historyOpen && active ? (
+              <HistoryPanel
+                threads={state.threads[active.id] ?? []}
+                loading={state.threadLoading[active.id] ?? false}
+                activeThreadId={state.activeThreadId}
+                backendId={active.id}
+                threadActivity={state.threadActivity}
+                query={historyQuery}
+                onQueryChange={setHistoryQuery}
+                onSelect={resumeThread}
+              />
+            ) : null}
+          </div>
+        </span>
+      }
+    />
+  );
+
   // The settings and rules screens replace the chat surface inside the same
   // view; the model and composer panels float over the chat without replacing
   // it. The rules screen is the one-click destination of the revocation
   // route from an `always` decision.
   if (state.settingsOpen) {
     return (
+      <main className="app">
+      {tabStrip}
+      <div className="chat-tab-body">
       <SettingsScreen
         settings={state.settings}
         connectionTest={state.connectionTest}
@@ -972,16 +1201,23 @@ export function App(): JSX.Element {
         opencodeInstall={state.opencodeInstall}
         onInstallOpencode={installOpencode}
       />
+      </div>
+      </main>
     );
   }
 
   if (state.rulesOpen) {
     return (
-      <RulesScreen
-        rules={storedRules}
-        onBack={() => dispatch({ type: 'closeRules' })}
-        onRevoke={revokeRule}
-      />
+      <main className="app">
+        {tabStrip}
+        <div className="chat-tab-body">
+          <RulesScreen
+            rules={storedRules}
+            onBack={() => dispatch({ type: 'closeRules' })}
+            onRevoke={revokeRule}
+          />
+        </div>
+      </main>
     );
   }
 
@@ -989,6 +1225,7 @@ export function App(): JSX.Element {
 
   return (
     <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
+      {tabStrip}
       <header className="view-title">
         <button
           className="model-trigger"
@@ -1006,40 +1243,6 @@ export function App(): JSX.Element {
           <ChevronDownIcon className="trigger-chevron" />
         </button>
         <span className="view-title__actions">
-          <button
-            className="icon-btn icon-btn--new-chat"
-            type="button"
-            aria-label="New conversation"
-            title="New conversation"
-            disabled={!active}
-            onClick={newConversation}
-          >
-            <PlusIcon />
-          </button>
-          <span className="view-title__sep" aria-hidden="true" />
-          <button
-            className="icon-btn"
-            type="button"
-            aria-label="Conversation history"
-            title="Conversation history"
-            aria-expanded={historyOpen}
-            disabled={!active}
-            onClick={toggleHistory}
-          >
-            <HistoryIcon />
-          </button>
-          <button
-            className="icon-btn"
-            type="button"
-            aria-label="Refresh backend availability"
-            title="Refresh backend availability"
-            onClick={() => {
-              dispatch({ type: 'refresh' });
-              bridge.post({ type: 'refresh' });
-            }}
-          >
-            <RefreshIcon />
-          </button>
           <button
             className="icon-btn"
             type="button"
@@ -1080,18 +1283,6 @@ export function App(): JSX.Element {
           dispatch={dispatch}
         />
       ) : null}
-
-      {historyOpen && active ? (
-        <HistoryPanel
-          threads={state.threads[active.id] ?? []}
-          loading={state.threadLoading[active.id] ?? false}
-          activeThreadId={state.activeThreadId}
-          backendId={active.id}
-          threadActivity={state.threadActivity}
-          onSelect={resumeThread}
-        />
-      ) : null}
-
 
       <div
         className="transcript"
@@ -1331,6 +1522,12 @@ export function App(): JSX.Element {
               ))}
             </ul>
           ) : null}
+          {dictationStatus ? (
+            <p className="composer-status" role="status">
+              <span className="spinner" aria-hidden="true" />
+              <span>{dictationStatus}</span>
+            </p>
+          ) : null}
           {state.attachmentError ? (
             <p className="composer-error" role="alert">
               <AlertIcon className="ico ico--xs" />
@@ -1438,6 +1635,18 @@ export function App(): JSX.Element {
               </button>
             ) : null}
             <span className="spacer" />
+            <button
+              className={listening ? 'icon-btn composer-action composer-action--listening' : 'icon-btn composer-action'}
+              type="button"
+              aria-label={listening ? 'Stop dictation' : 'Dictate a message'}
+              aria-pressed={listening}
+              aria-busy={cleaning || undefined}
+              title={micTitle}
+              disabled={micDisabled}
+              onClick={toggleDictation}
+            >
+              <MicIcon />
+            </button>
             {state.busy ? (
               <>
                 {active?.id === 'codex' ? (
@@ -1453,8 +1662,14 @@ export function App(): JSX.Element {
                 </button>
               </>
             ) : (
-              <button className="btn btn--primary" type="button" disabled={!canSend} onClick={send}>
-                Send
+              <button
+                className="icon-btn icon-btn--primary composer-action"
+                type="button"
+                aria-label="Send"
+                title="Send"
+                disabled={!canSend}
+                onClick={send}
+              >
                 <ArrowIcon />
               </button>
             )}
@@ -1829,12 +2044,148 @@ function ProviderBadge({ backend }: { backend: BackendAvailability }): JSX.Eleme
   );
 }
 
+function dropIndex(ids: readonly string[], dragId: string, overId: string, before: boolean): number {
+  const from = ids.indexOf(dragId);
+  let to = ids.indexOf(overId);
+  if (from < 0 || to < 0) {
+    return -1;
+  }
+  if (!before) {
+    to += 1;
+  }
+  if (from < to) {
+    to -= 1;
+  }
+  return to;
+}
+
+function ChatTabStrip({
+  tabs,
+  activity,
+  actions
+}: {
+  tabs: AppState['chatTabs'];
+  activity: AppState['threadActivity'];
+  actions: JSX.Element;
+}): JSX.Element | null {
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [over, setOver] = useState<{ id: string; before: boolean } | null>(null);
+  if (tabs.length === 0) {
+    return null;
+  }
+  const finishDrag = (): void => {
+    setDragId(null);
+    setOver(null);
+  };
+  return (
+    <div className="chat-tabs">
+      <div className="chat-tabs__list" role="tablist" aria-label="Open chats">
+        {tabs.map((tab) => {
+          const key = tab.backendId && tab.threadId ? `${tab.backendId}:${tab.threadId}` : undefined;
+          const live = key ? activity[key] : undefined;
+          const drop =
+            over?.id === tab.id ? (over.before ? ' chat-tab--drop-before' : ' chat-tab--drop-after') : '';
+          const dragging = dragId === tab.id ? ' chat-tab--dragging' : '';
+          return (
+            <div
+              className={`chat-tab${tab.active ? ' chat-tab--active' : ''}${drop}${dragging}`}
+              key={tab.id}
+              draggable
+              onMouseDown={(event) => {
+                if (event.button !== 1) {
+                  return;
+                }
+                event.preventDefault();
+                bridge.post({ type: 'closeChatTab', tabId: tab.id });
+              }}
+              onAuxClick={(event) => {
+                if (event.button === 1) {
+                  event.preventDefault();
+                }
+              }}
+              onDragStart={(event) => {
+                if ((event.target as HTMLElement).closest('.chat-tab__close')) {
+                  event.preventDefault();
+                  return;
+                }
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', tab.id);
+                setDragId(tab.id);
+              }}
+              onDragEnd={finishDrag}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                const rect = event.currentTarget.getBoundingClientRect();
+                const before = event.clientX < rect.left + rect.width / 2;
+                setOver((current) =>
+                  current?.id === tab.id && current.before === before ? current : { id: tab.id, before }
+                );
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const source = event.dataTransfer.getData('text/plain') || dragId;
+                const rect = event.currentTarget.getBoundingClientRect();
+                const before = event.clientX < rect.left + rect.width / 2;
+                if (source) {
+                  const to = dropIndex(
+                    tabs.map((item) => item.id),
+                    source,
+                    tab.id,
+                    before
+                  );
+                  if (to >= 0) {
+                    bridge.post({ type: 'reorderChatTab', tabId: source, toIndex: to });
+                  }
+                }
+                finishDrag();
+              }}
+            >
+              <button
+                className="chat-tab__label"
+                type="button"
+                role="tab"
+                aria-selected={tab.active}
+                title={tab.title}
+                onClick={() => bridge.post({ type: 'selectChatTab', tabId: tab.id })}
+              >
+                <span className="chat-tab__text">{tab.title}</span>
+                {live?.busy ? <span className="chat-tab__mark">Busy</span> : null}
+                {!tab.active && live?.unread ? <span className="chat-tab__unread" aria-label="Unread" /> : null}
+              </button>
+              <button
+                className="chat-tab__close"
+                type="button"
+                aria-label={`Close ${tab.title}`}
+                draggable={false}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                  if (event.button === 1) {
+                    event.preventDefault();
+                    bridge.post({ type: 'closeChatTab', tabId: tab.id });
+                  }
+                }}
+                onClick={() => bridge.post({ type: 'closeChatTab', tabId: tab.id })}
+              >
+                <CrossIcon />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {actions}
+    </div>
+  );
+}
+
 function HistoryPanel({
   threads,
   loading,
   activeThreadId,
   backendId,
   threadActivity,
+  query,
+  onQueryChange,
   onSelect
 }: {
   threads: ThreadSummary[];
@@ -1842,11 +2193,38 @@ function HistoryPanel({
   activeThreadId?: string;
   backendId: string;
   threadActivity: AppState['threadActivity'];
+  query: string;
+  onQueryChange: (value: string) => void;
   onSelect: (threadId: string) => void;
 }): JSX.Element {
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? threads.filter((thread) => {
+        const title = (thread.title ?? 'Untitled conversation').toLowerCase();
+        const model = (thread.model ?? '').toLowerCase();
+        return title.includes(needle) || model.includes(needle);
+      })
+    : threads;
   return (
-    <div className="model-panel" id="history-panel">
-      <div className="model-panel__head">Recent conversations</div>
+    <div className="history-menu" id="history-panel">
+      <div className="history-menu__search">
+        <SearchIcon />
+        <input
+          className="model-filter"
+          type="search"
+          placeholder="Search conversations"
+          aria-label="Search conversations"
+          value={query}
+          autoFocus
+          onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && visible[0]) {
+              event.preventDefault();
+              onSelect(visible[0].threadId);
+            }
+          }}
+        />
+      </div>
       {loading ? (
         <div className="history-loading" role="status" aria-live="polite">
           <span className="spinner" aria-hidden="true" />
@@ -1856,9 +2234,13 @@ function HistoryPanel({
         <ul className="model-list">
           <li className="model-option model-option--empty">No earlier conversations yet.</li>
         </ul>
+      ) : visible.length === 0 ? (
+        <ul className="model-list">
+          <li className="model-option model-option--empty">No conversations match.</li>
+        </ul>
       ) : (
         <ul className="model-list" role="listbox" aria-label="Conversations">
-          {threads.map((thread) => {
+          {visible.map((thread) => {
             const selected = thread.threadId === activeThreadId;
             const activity = threadActivity?.[`${backendId}:${thread.threadId}`];
             return (
@@ -2249,53 +2631,72 @@ function TranscriptRow({
   );
 }
 
+function reasoningSnippet(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const clampRef = useRef<HTMLDivElement>(null);
   const text = item.text.trim();
-
-  useLayoutEffect(() => {
-    const node = clampRef.current;
-    if (!node || expanded) {
-      return;
-    }
-    node.scrollTop = node.scrollHeight;
-  }, [expanded, item.text]);
-
+  const label = item.title || 'Reasoning';
+  const incomplete = item.status === 'failed' || item.status === 'canceled' || item.status === 'warning';
+  const snippet = reasoningSnippet(text);
+  const preview =
+    snippet ||
+    (item.status === 'streaming'
+      ? 'Waiting for a reasoning summary…'
+      : incomplete
+        ? 'Thinking stopped early; this section may be incomplete.'
+        : 'No reasoning summary was provided for this step.');
   const toggle = (): void => setExpanded((value) => !value);
 
   return (
-    <article className="turn turn--reasoning" aria-live="polite">
-      <button type="button" className="reasoning-toggle" aria-expanded={expanded} onClick={toggle}>
-        <span className="meta-strong">{item.title || 'Thinking'}</span>
+    <article className={`turn turn--reasoning${expanded ? '' : ' turn--reasoning--collapsed'}`} aria-live="polite">
+      <button
+        type="button"
+        className="reasoning-toggle"
+        aria-expanded={expanded}
+        aria-label={`${expanded ? 'Hide' : 'Show'} ${label}`}
+        onClick={toggle}
+      >
+        <span className="reasoning-lead">
+          <span className="meta-strong">{label}</span>
+          {!expanded && preview ? (
+            <span className="reasoning-snippet__sep" aria-hidden="true">
+              ...
+            </span>
+          ) : null}
+        </span>
+        {!expanded && preview ? (
+          <span className="reasoning-snippet__text" title={preview}>
+            {preview}
+          </span>
+        ) : null}
         {item.status === 'streaming' ? (
           <span className="stream-status" role="status">
             <span className="spinner" aria-hidden="true" />
             Thinking
           </span>
-        ) : (
-          <span className="reasoning-toggle__hint">{expanded ? 'Hide' : 'Show'}</span>
-        )}
-      </button>
-      <div
-        className={`turn-body md${expanded || !text ? '' : ' reasoning-clamp'}`}
-        ref={clampRef}
-        onClick={toggle}
-      >
-        {text ? (
-          <Markdown text={item.text} />
-        ) : item.status === 'streaming' ? (
-          <p className="reasoning-pending">Waiting for a reasoning summary…</p>
-        ) : item.status === 'failed' || item.status === 'canceled' || item.status === 'warning' ? null : (
-          <p className="reasoning-pending">No reasoning summary was provided for this step.</p>
-        )}
-        {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
-        {item.status === 'failed' || item.status === 'canceled' || item.status === 'warning' ? (
-          <p className="reasoning-incomplete" role="status">
-            Thinking stopped early; this section may be incomplete.
-          </p>
         ) : null}
-      </div>
+        <span className="reasoning-toggle__hint">{expanded ? 'Hide' : 'Show'}</span>
+      </button>
+      {expanded ? (
+        <div className="turn-body md" onClick={toggle}>
+          {text ? (
+            <Markdown text={item.text} />
+          ) : item.status === 'streaming' ? (
+            <p className="reasoning-pending">Waiting for a reasoning summary…</p>
+          ) : incomplete ? null : (
+            <p className="reasoning-pending">No reasoning summary was provided for this step.</p>
+          )}
+          {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
+          {incomplete ? (
+            <p className="reasoning-incomplete" role="status">
+              Thinking stopped early; this section may be incomplete.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }

@@ -517,6 +517,10 @@ export class AppServerConnection implements Disposable {
     return this.request<ThreadStartResponse>('thread/start', params);
   }
 
+  deleteThread(threadId: string): Promise<unknown> {
+    return this.request<unknown>('thread/delete', { threadId });
+  }
+
   resumeThread(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
     return this.request<ThreadResumeResponse>('thread/resume', params);
   }
