@@ -22,7 +22,10 @@ import {
   statusForMarker,
   todoStepsFromNative,
   updateStepStatus,
-  userAsksToRevisePlan
+  userAsksToRevisePlan,
+  continuePlanInstruction,
+  decidePlanAutopilot,
+  planTurnWork
 } from './plan.ts';
 import { denyInProgressStep, settleInProgressSteps } from './types.ts';
 import { modeRefusalReason } from './modes.ts';
@@ -405,4 +408,72 @@ test('denying marks the running step as denied and leaves the rest alone', () =>
   // With nothing running there is no step to deny: the list is unchanged.
   const none: TodoStep[] = [{ text: 'a', status: 'pending' }];
   assert.deepEqual(denyInProgressStep(none), none);
+});
+
+test('a built plan continues on its own until an automatic turn repeats the same result', () => {
+  const steps: TodoStep[] = [
+    { text: 'Write the schema', status: 'completed' },
+    { text: 'Write the service', status: 'pending' }
+  ];
+  const quiet = decidePlanAutopilot({
+    built: true,
+    steps,
+    automatic: false,
+    work: [],
+    blocked: false
+  });
+  assert.equal(quiet.decision, 'continue');
+
+  const progressed = decidePlanAutopilot({
+    built: true,
+    steps,
+    automatic: true,
+    previousSignature: quiet.signature,
+    work: ['tool:write:backend/app/services/analytics.py'],
+    blocked: false
+  });
+  assert.equal(progressed.decision, 'continue');
+
+  const stalled = decidePlanAutopilot({
+    built: true,
+    steps,
+    automatic: true,
+    previousSignature: progressed.signature,
+    work: ['tool:write:backend/app/services/analytics.py'],
+    blocked: false
+  });
+  assert.equal(stalled.decision, 'hold');
+
+  const finished = decidePlanAutopilot({
+    built: true,
+    steps: steps.map((step) => ({ ...step, status: 'completed' as const })),
+    automatic: true,
+    previousSignature: progressed.signature,
+    work: ['tool:write:backend/app/services/analytics.py'],
+    blocked: false
+  });
+  assert.equal(finished.decision, 'hold');
+
+  const asked = decidePlanAutopilot({
+    built: true,
+    steps,
+    automatic: false,
+    work: [],
+    blocked: true
+  });
+  assert.equal(asked.decision, 'hold');
+  assert.match(continuePlanInstruction(steps), /Write the service/);
+  assert.doesNotMatch(continuePlanInstruction(steps), /Write the schema/);
+});
+
+test('plan work is the latest turn’s tools and files, not the prose', () => {
+  assert.deepEqual(
+    planTurnWork([
+      { id: 'u', kind: 'message', role: 'user', text: 'Build the plan' },
+      { id: 'a', kind: 'message', role: 'assistant', text: 'Writing the service next.' },
+      { id: 't', kind: 'tool', tool: 'read', command: 'analytics.py' },
+      { id: 'f', kind: 'file-change', files: [{ path: 'backend/app/services/analytics.py', additions: 4, deletions: 1 }] }
+    ]),
+    ['tool:read:analytics.py', 'file:backend/app/services/analytics.py:4:1']
+  );
 });
