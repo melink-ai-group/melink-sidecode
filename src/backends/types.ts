@@ -470,6 +470,11 @@ export interface TranscriptItem {
   role?: MessageRole;
   /** Short label, e.g. a tool name or a model name. */
   title?: string;
+  /**
+   * Tool id when the backend reported one (`read`, `grep`, `bash`).
+   * Grouping prefers this over the display title.
+   */
+  tool?: string;
   /** Free-form provider-neutral detail line. */
   detail?: string;
   /** `tool` items: the command or invocation that ran. */

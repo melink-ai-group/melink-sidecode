@@ -1253,6 +1253,7 @@ export class OllamaBackend implements AgentBackend {
                 id: itemId,
                 kind: 'file-change',
                 title: friendlyToolTitle(event.tool, event.filePath ?? target),
+                tool: event.tool,
                 files: event.filePath ? [{ path: event.filePath }] : [],
                 text: output
               }
@@ -1260,6 +1261,7 @@ export class OllamaBackend implements AgentBackend {
                 id: itemId,
                 kind: 'tool',
                 title: friendlyToolTitle(event.tool, target),
+                tool: event.tool,
                 command: target,
                 text: output
               }

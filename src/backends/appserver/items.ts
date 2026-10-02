@@ -79,6 +79,7 @@ export function translateItem(item: ThreadItem): TranslatedItem {
           id: item.id,
           kind: 'tool',
           title: friendlyToolTitle('command', item.command ?? undefined),
+          tool: 'command',
           command: item.command,
           detail: item.aggregatedOutput ?? undefined,
           text: item.aggregatedOutput ?? '',
@@ -105,6 +106,7 @@ export function translateItem(item: ThreadItem): TranslatedItem {
           id: item.id,
           kind: 'tool',
           title: `${item.server} · ${friendlyToolTitle(item.tool, targetFromJson(item.tool, item.arguments))}`,
+          tool: item.tool,
           command: targetFromJson(item.tool, item.arguments),
           detail: item.error?.message ?? undefined,
           status: item.status === 'inProgress' ? undefined : item.status === 'completed' ? 'completed' : 'failed'
@@ -118,6 +120,7 @@ export function translateItem(item: ThreadItem): TranslatedItem {
           id: item.id,
           kind: 'tool',
           title: friendlyToolTitle(item.tool, targetFromJson(item.tool, item.arguments)),
+          tool: item.tool,
           command: targetFromJson(item.tool, item.arguments),
           status: item.status === 'inProgress' ? undefined : item.status === 'completed' ? 'completed' : 'failed'
         }

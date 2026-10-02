@@ -71,6 +71,7 @@ import {
   type TranscriptItemView
 } from './state';
 import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
+import { activitySummary, groupTranscript, type ActivityFamily } from './activityGroups.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
 import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
 import type {
@@ -1430,19 +1431,23 @@ export function App(): JSX.Element {
         ) : state.transcript.length === 0 && !state.startingTurn && !state.notice ? (
           <EmptyState state={state} dispatch={dispatch} hasAvailable={available.length > 0} />
         ) : (
-          state.transcript.map((item) => (
-            <TranscriptRow
-              key={item.id}
-              item={item}
-              hideQuestions={state.mode !== 'ask'}
-              providerId={item.backendId ?? active?.id ?? 'ollama'}
-              pendingId={pending?.id}
-              checkpoint={state.checkpoints?.find((entry) => entry.messageId === item.id)}
-              onDecide={decide}
-              onOpenRules={() => dispatch({ type: 'openRules' })}
-              onRestore={restoreCheckpoint}
-            />
-          ))
+          groupTranscript(state.transcript).map((entry) =>
+            entry.kind === 'group' ? (
+              <ActivityGroup key={entry.id} family={entry.family} items={entry.items} />
+            ) : (
+              <TranscriptRow
+                key={entry.item.id}
+                item={entry.item}
+                hideQuestions={state.mode !== 'ask'}
+                providerId={entry.item.backendId ?? active?.id ?? 'ollama'}
+                pendingId={pending?.id}
+                checkpoint={state.checkpoints?.find((checkpoint) => checkpoint.messageId === entry.item.id)}
+                onDecide={decide}
+                onOpenRules={() => dispatch({ type: 'openRules' })}
+                onRestore={restoreCheckpoint}
+              />
+            )
+          )
         )}
 
         {state.plan && !state.plan.built ? (
@@ -2848,6 +2853,68 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
   );
 }
 
+function ActivityGroup({ family, items }: { family: ActivityFamily; items: TranscriptItemView[] }): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const summary = activitySummary(items);
+  const Icon = family === 'command' ? TerminalIcon : family === 'change' ? FileIcon : SearchIcon;
+  return (
+    <div className={`item-card activity-group${expanded ? ' activity-group--open' : ''}`}>
+      <button
+        type="button"
+        className="activity-group__toggle item-head"
+        aria-expanded={expanded}
+        aria-label={summary.label}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className={`activity-group__chevron${expanded ? ' activity-group__chevron--open' : ''}`} aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
+        <span className="item-icon" aria-hidden="true">
+          <Icon />
+        </span>
+        <span className="item-main">
+          <span className="item-kind">{summary.label}</span>
+        </span>
+        <StatusChip status={summary.status} doneLabel={family === 'change' ? 'Applied' : 'Passed'} />
+      </button>
+      {expanded ? (
+        <div className="activity-group__items">
+          {items.map((item) => (
+            <GroupChild key={item.id} item={item} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GroupChild({ item }: { item: TranscriptItemView }): JSX.Element {
+  if (item.kind === 'file-change') {
+    return <FileChangeCard item={item} />;
+  }
+  if (item.kind === 'tool') {
+    return <ToolCard item={item} />;
+  }
+  return (
+    <div className="item-card" aria-label="Web search item">
+      <div className="item-head">
+        <span className="item-icon" aria-hidden="true">
+          <SearchIcon />
+        </span>
+        <span className="item-main">
+          <span className="item-kind">{item.title || 'Web search'}</span>
+          {item.text ? (
+            <span className="item-path" title={item.text}>
+              {item.text}
+            </span>
+          ) : null}
+        </span>
+        <StatusChip status={item.status} doneLabel="Passed" />
+      </div>
+    </div>
+  );
+}
+
 function ToolCard({ item }: { item: TranscriptItemView }): JSX.Element {
   const presentation = toolCardPresentation(item);
   const output = toolOutput(item, presentation.detail);
@@ -3065,8 +3132,8 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
       ? friendlyToolTitle(rawTitle, files[0]?.path)
       : rawTitle || 'Edited';
   return (
-    <div className="item-card" aria-label="File change item">
-      <div className="item-head">
+    <details className="item-card item-card--change">
+      <summary className="item-head" aria-label="File change item">
         <span className="item-icon" aria-hidden="true">
           <FileIcon />
         </span>
@@ -3083,7 +3150,7 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
           </span>
         ) : null}
         <StatusChip status={item.status} doneLabel="Applied" />
-      </div>
+      </summary>
       {diffs.length > 0 ? (
         <div className="diff-body" role="figure" aria-label={`Diff for ${diffs.length} changed ${diffs.length === 1 ? 'file' : 'files'}`}>
           {diffs.map((file) => (
@@ -3105,7 +3172,7 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
           <code>{item.text}</code>
         </div>
       ) : null}
-    </div>
+    </details>
   );
 }
 
