@@ -1098,7 +1098,12 @@ export interface AgentBackend {
    */
   compact(handle: ThreadHandle, request: CompactRequest): Promise<CompactResult>;
 
-  /** Adds a user message to the active turn when the provider supports steering. */
+  /**
+   * Adds a user message to the active turn.
+   * Codex steers the app-server turn in place. Ollama, including its opencode
+   * runtime, stops the current generation and continues the same turn with the
+   * new text.
+   */
   steerTurn?(handle: ThreadHandle, text: string, clientUserMessageId?: string): Promise<void>;
 
   /**

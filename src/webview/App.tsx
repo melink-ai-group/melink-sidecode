@@ -120,6 +120,11 @@ function appendDraft(current: string, addition: string): string {
 
 const bridge: HostBridge = createHostBridge();
 
+/** Codex steers in place. Ollama and its opencode runtime continue the same turn. */
+function acceptsSteer(backendId: string | undefined): boolean {
+  return backendId === 'codex' || backendId === 'ollama';
+}
+
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reduce, initialState);
   const [draft, setDraft] = useState('');
@@ -655,7 +660,7 @@ export function App(): JSX.Element {
       return;
     }
     if (state.busy) {
-      if (!text || state.attachments.length > 0 || active?.id !== 'codex') return;
+      if (!text || state.attachments.length > 0 || !acceptsSteer(active?.id)) return;
       dispatch({ type: 'localUserMessage', text });
       bridge.post({ type: 'steerTurn', text });
       dispatch({ type: 'dismissNotice' });
@@ -760,8 +765,8 @@ export function App(): JSX.Element {
   const asking = Boolean(state.pendingQuestion);
   const canSteer =
     state.busy &&
-    active?.id === 'codex' &&
-    active.status === 'available' &&
+    acceptsSteer(active?.id) &&
+    active?.status === 'available' &&
     Boolean(draft.trim()) &&
     state.attachments.length === 0 &&
     !state.restoring &&
