@@ -43,14 +43,14 @@ export function buildCodexTurnInput(input: CodexTurnInput): UserInput[] {
 
 function providerText(input: CodexTurnInput): string {
   const parts: string[] = [];
+  if (input.bakedMode !== undefined && input.bakedMode !== input.mode) {
+    parts.push(
+      `The developer instruction that required ${MODE_NAME[input.bakedMode]} mode is revoked. It no longer applies, including any rule that prohibited implementation. The active developer instruction for this turn is ${MODE_NAME[input.mode]} mode.`
+    );
+  }
   const instructions = modeInstructions(input.mode);
   if (instructions) {
     parts.push(instructions);
-  }
-  if (input.bakedMode !== undefined && input.bakedMode !== input.mode) {
-    parts.push(
-      `The mode for this turn is ${MODE_NAME[input.mode]}. Disregard mode instructions from earlier turns.`
-    );
   }
 
   const context = input.context;

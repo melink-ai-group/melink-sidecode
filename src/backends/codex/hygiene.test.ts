@@ -51,6 +51,14 @@ test('the auth code maps the API-key rejection to its own status and never logs'
   assert.equal(/\boutputChannel\b/i.test(auth), false);
 });
 
+test('a mode change unsubscribes before resume so a running thread accepts new instructions', async () => {
+  const codex = await source('backends/codex.ts');
+  const rewrite = codex.slice(codex.indexOf('private async rewriteInstructions'));
+  const unsub = rewrite.indexOf('unsubscribeThread');
+  const resume = rewrite.indexOf('resumeThread');
+  assert.ok(unsub !== -1 && resume !== -1 && unsub < resume);
+});
+
 test('the codex adapter classifies a failed turn instead of forwarding the raw body', async () => {
   const codex = await source('backends/codex.ts');
   assert.match(codex, /classifyCodexAuthFailure/);

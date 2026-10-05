@@ -59,8 +59,9 @@ test('a mode switch tells the model to disregard the earlier mode', () => {
   if (text.type !== 'text') {
     return;
   }
-  assert.match(text.text, /mode for this turn is Agent/);
-  assert.match(text.text, /Disregard mode instructions/);
+  assert.match(text.text, /developer instruction that required Plan mode is revoked/);
+  assert.match(text.text, /prohibited implementation/);
+  assert.match(text.text, /active developer instruction for this turn is Agent mode/);
   assert.match(text.text, /Agent mode/);
 });
 
