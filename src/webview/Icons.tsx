@@ -7,6 +7,23 @@ import type { JSX, SVGProps } from 'react';
 
 type IconProps = SVGProps<SVGSVGElement> & { className?: string };
 
+function solid(className: string, props: IconProps, children: JSX.Element): JSX.Element {
+  const { className: extra, ...rest } = props;
+  return (
+    <svg
+      className={extra ? `${className} ${extra}` : className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      stroke="none"
+      aria-hidden="true"
+      focusable="false"
+      {...rest}
+    >
+      {children}
+    </svg>
+  );
+}
+
 function base(className: string, strokeWidth: number, props: IconProps, children: JSX.Element): JSX.Element {
   const { className: extra, ...rest } = props;
   return (
@@ -116,8 +133,25 @@ export const MicIcon = (props: IconProps): JSX.Element =>
     </>
   ));
 
+/** Filled mic for the composer. The outline icon stays available elsewhere. */
+export const MicSolidIcon = (props: IconProps): JSX.Element =>
+  solid('ico', props, (
+    <>
+      <rect x="9" y="3" width="6" height="10" rx="3" />
+      <path d="M6.4 11.2a5.6 5.6 0 0 0 11.2 0H19a7 7 0 0 1-6.2 6.7V21h-1.6v-3.1A7 7 0 0 1 5 11.2h1.4z" />
+    </>
+  ));
+
 export const StopIcon = (props: IconProps): JSX.Element =>
   base('ico ico--xs', 2, props, <rect x="6" y="6" width="12" height="12" rx="2" />);
+
+/** Filled square for the composer stop control. */
+export const StopSolidIcon = (props: IconProps): JSX.Element =>
+  solid('ico', props, <rect x="5" y="5" width="14" height="14" rx="2.5" />);
+
+/** Filled arrow for the composer send control. */
+export const SendSolidIcon = (props: IconProps): JSX.Element =>
+  solid('ico', props, <path d="M4.5 10.2h8.7L10 7l1.4-1.4L18.8 13 11.4 20.4 10 19l3.2-3.2H4.5z" />);
 
 export const AlertIcon = (props: IconProps): JSX.Element =>
   base('ico', 1.6, props, (

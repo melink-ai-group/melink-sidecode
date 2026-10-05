@@ -8,6 +8,7 @@
  */
 
 import { isRawToolName } from '../backends/toolLabel.ts';
+import { plainRowText } from './plainRowText.ts';
 import type { ItemStatus, TranscriptItemView } from './state.ts';
 
 export type ActivityFamily = 'lookup' | 'change' | 'command' | 'work';
@@ -337,7 +338,7 @@ function latestThought(items: TranscriptItemView[]): string | undefined {
     if (item.kind !== 'reasoning') {
       continue;
     }
-    const snippet = item.text.replace(/\s+/g, ' ').trim();
+    const snippet = plainRowText(item.text);
     if (snippet) {
       return snippet;
     }
