@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCodexTurnInput } from './turnInput.ts';
+import { buildCodexTurnInput, planEscapeInstructions } from './turnInput.ts';
 import type { Attachment } from '../types.ts';
 
 const image: Attachment = {
@@ -63,6 +63,29 @@ test('a mode switch tells the model to disregard the earlier mode', () => {
   assert.match(text.text, /prohibited implementation/);
   assert.match(text.text, /active developer instruction for this turn is Agent mode/);
   assert.match(text.text, /Agent mode/);
+});
+
+test('leaving a resumed Plan thread says the old restriction is finished', () => {
+  const [text] = buildCodexTurnInput({
+    mode: 'agent',
+    text: 'implement the plan',
+    revokePlan: true
+  });
+  assert.equal(text.type, 'text');
+  if (text.type !== 'text') {
+    return;
+  }
+  assert.match(text.text, /required Plan mode is revoked/);
+  assert.match(text.text, /Agent mode/);
+});
+
+test('the fork instruction ends the Plan restriction and keeps the snapshot', () => {
+  const text = planEscapeInstructions('<project-context>repo</project-context>');
+  assert.match(text, /prohibited implementation/);
+  assert.match(text, /earlier refusal/);
+  assert.match(text, /Those rules are finished/);
+  assert.match(text, /project-context/);
+  assert.equal(text.includes('Do not implement'), false);
 });
 
 test('a picked image is a localImage part and a clipboard image is an image url', () => {

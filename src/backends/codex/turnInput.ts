@@ -27,6 +27,18 @@ export interface CodexTurnInput {
    * re-primed (a refresh or an exclusion change).
    */
   includeSnapshot?: boolean;
+  /**
+   * True when an earlier developer instruction required Plan mode. The turn
+   * states that the restriction is finished.
+   */
+  revokePlan?: boolean;
+}
+
+/** Developer instruction for a thread forked out of a Plan-mode session. */
+export function planEscapeInstructions(snapshot?: string): string {
+  const notice =
+    'Ignore every earlier developer instruction, every earlier turn, and every earlier refusal that required Plan mode or prohibited implementation. Those rules are finished. Follow the mode at the start of the latest user turn. When that turn asks to build or implement a plan, do the work.';
+  return snapshot && snapshot.trim().length > 0 ? `${notice}\n\n${snapshot}` : notice;
 }
 
 const MODE_NAME: Record<DefaultMode, string> = {
@@ -43,9 +55,11 @@ export function buildCodexTurnInput(input: CodexTurnInput): UserInput[] {
 
 function providerText(input: CodexTurnInput): string {
   const parts: string[] = [];
-  if (input.bakedMode !== undefined && input.bakedMode !== input.mode) {
+  if (input.revokePlan || (input.bakedMode !== undefined && input.bakedMode !== input.mode)) {
+    const previous =
+      input.bakedMode !== undefined && input.bakedMode !== input.mode ? MODE_NAME[input.bakedMode] : 'Plan';
     parts.push(
-      `The developer instruction that required ${MODE_NAME[input.bakedMode]} mode is revoked. It no longer applies, including any rule that prohibited implementation. The active developer instruction for this turn is ${MODE_NAME[input.mode]} mode.`
+      `The developer instruction that required ${previous} mode is revoked. It no longer applies, including any rule that prohibited implementation. The active developer instruction for this turn is ${MODE_NAME[input.mode]} mode.`
     );
   }
   const instructions = modeInstructions(input.mode);
