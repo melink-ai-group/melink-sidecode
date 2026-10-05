@@ -1,6 +1,7 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import { hasIgnoredSegment } from './ignore.ts';
 import type { JournalFileEntry, JournalStorage, JournalTurn } from './journal';
+import { sessionChangeSet } from './sessionFiles.ts';
 import { applyRejectedHunks, diffLines, type DiffLine } from './diff.ts';
 import { hashBytes } from './hash.ts';
 
@@ -144,8 +145,10 @@ export interface ChangeWorkspaceFs {
 /** The recorded-artifact read seam, satisfied by `ChangeJournal`. */
 export interface ChangeArtifacts {
   getTurn(turnId: string): JournalTurn | undefined;
+  listTurns(threadId: string): JournalTurn[];
   getBefore(turnId: string, relPath: string): Promise<Uint8Array | undefined>;
   getAfter(turnId: string, relPath: string): Promise<Uint8Array | undefined>;
+  readBlob(key: string): Promise<Uint8Array | undefined>;
   beginReview(turnId: string): void;
   endReview(): void;
 }
@@ -223,13 +226,52 @@ export class ChangeStore {
     if (!turn) {
       return undefined;
     }
-    const decisions = this.validDecisions(backendId, threadId, turnId, turn);
+    return this.compose(backendId, threadId, turn);
+  }
+
+  /**
+   * The review snapshot for the whole thread: every step's files, netted to one
+   * row per path. `turnId` is the newest observed turn, which is what the
+   * surface is already showing. Returns `undefined` when the thread has no
+   * observed turn.
+   */
+  async viewSession(backendId: string, threadId: string): Promise<ChangeView | undefined> {
+    const session = sessionChangeSet(this.artifacts.listTurns(threadId));
+    if (!session) {
+      return undefined;
+    }
+    const turn = this.artifacts.getTurn(session.turnId);
+    if (!turn) {
+      return undefined;
+    }
+    return this.compose(backendId, threadId, { ...turn, files: session.files.map((file) => file.entry) });
+  }
+
+  /**
+   * The turn a decision addresses. The newest observed turn stands for the
+   * whole thread, so keep and undo see every step's files and restore the
+   * first baseline. An older turn id still addresses only that turn.
+   */
+  private reviewedTurn(turnId: string): JournalTurn | undefined {
+    const turn = this.artifacts.getTurn(turnId);
+    if (!turn) {
+      return undefined;
+    }
+    const session = sessionChangeSet(this.artifacts.listTurns(turn.threadId));
+    if (!session || session.turnId !== turnId) {
+      return turn;
+    }
+    return { ...turn, files: session.files.map((file) => file.entry) };
+  }
+
+  private async compose(backendId: string, threadId: string, turn: JournalTurn): Promise<ChangeView> {
+    const decisions = this.validDecisions(backendId, threadId, turn.turnId, turn);
     const files: ChangeFileView[] = [];
     for (const entry of turn.files) {
       if (hasIgnoredSegment(entry.relPath)) {
         continue;
       }
-      files.push(await this.fileView(turnId, entry, decisions));
+      files.push(await this.fileView(turn.turnId, entry, decisions));
     }
     const additions = files.reduce((sum, file) => sum + file.additions, 0);
     const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
@@ -238,7 +280,31 @@ export class ChangeStore {
       files.every(
         (file) => file.decision !== 'pending' && file.hunks.every((hunk) => hunk.decision !== 'pending')
       );
-    return { backendId, threadId, turnId, files, additions, deletions, fullyDecided };
+    return { backendId, threadId, turnId: turn.turnId, files, additions, deletions, fullyDecided };
+  }
+
+  /** The stored side of a file. A session row carries the blob key of the turn that owns that side. */
+  private async readSide(
+    turnId: string,
+    entry: JournalFileEntry,
+    side: 'before' | 'after'
+  ): Promise<Uint8Array | undefined> {
+    if (side === 'before') {
+      if (!entry.hasBefore) {
+        return undefined;
+      }
+      if (entry.beforeKey) {
+        return this.artifacts.readBlob(entry.beforeKey);
+      }
+      return this.artifacts.getBefore(turnId, entry.relPath);
+    }
+    if (!entry.hasAfter) {
+      return undefined;
+    }
+    if (entry.afterKey) {
+      return this.artifacts.readBlob(entry.afterKey);
+    }
+    return this.artifacts.getAfter(turnId, entry.relPath);
   }
 
   /* ------------------------------ decisions -------------------------------- */
@@ -250,7 +316,7 @@ export class ChangeStore {
    * recorded, so a reject is never claimed to have succeeded when it did not.
    */
   async decide(input: DecideChangeInput): Promise<ChangeDecisionResult> {
-    const turn = this.artifacts.getTurn(input.turnId);
+    const turn = this.reviewedTurn(input.turnId);
     const entry = turn?.files.find((file) => file.relPath === toPosixRel(input.relPath));
     if (!turn || !entry) {
       return { relPath: input.relPath, decision: 'pending', ok: false, error: 'That file is no longer part of this turn.' };
@@ -275,7 +341,7 @@ export class ChangeStore {
    * hidden; the caller must surface any `ok: false` result.
    */
   async decideAll(input: DecideAllInput): Promise<ChangeDecisionResult[]> {
-    const turn = this.artifacts.getTurn(input.turnId);
+    const turn = this.reviewedTurn(input.turnId);
     if (!turn) {
       return [];
     }
@@ -330,8 +396,8 @@ export class ChangeStore {
     input: DecideChangeInput,
     decisions: StoredDecision[]
   ): Promise<ChangeDecisionResult> {
-    const before = entry.hasBefore ? await this.artifacts.getBefore(turn.turnId, entry.relPath) : undefined;
-    const after = entry.hasAfter ? await this.artifacts.getAfter(turn.turnId, entry.relPath) : undefined;
+    const before = await this.readSide(turn.turnId, entry, 'before');
+    const after = await this.readSide(turn.turnId, entry, 'after');
 
     const fileDecision = decisions.find((d) => d.relPath === entry.relPath && d.hunkId === undefined);
     const rejectedHunkIds = new Set(
@@ -479,8 +545,8 @@ export class ChangeStore {
       detail = 'No pre-change snapshot was recorded, so unchanged lines are not shown as additions.';
       diffable = entry.inlineable && !entry.binary;
     } else if (canDiff) {
-      const before = entry.hasBefore ? await this.artifacts.getBefore(turnId, entry.relPath) : undefined;
-      const after = entry.hasAfter ? await this.artifacts.getAfter(turnId, entry.relPath) : undefined;
+      const before = await this.readSide(turnId, entry, 'before');
+      const after = await this.readSide(turnId, entry, 'after');
       if ((entry.hasBefore ? before !== undefined : true) && (entry.hasAfter ? after !== undefined : true)) {
         const diff = diffLines(decode(before), decode(after), entry.relPath);
         if (diff.tooLarge) {

@@ -39,7 +39,7 @@ export function ChangedFilesStrip({ entries, files = [], onOpenFile, children }:
       </button>
       {open ? (
         <div className="changed-files__panel">
-        <ul className="changed-files__list" aria-label="Files changed in the latest turn">
+        <ul className="changed-files__list" aria-label="Files changed in this session">
           {entries.map((entry) => {
             const file = details.get(entry.absPath);
             const status = file?.status ?? entry.status;

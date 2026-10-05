@@ -200,7 +200,7 @@ export function ChangesReview({
             className="btn btn--primary"
             type="button"
             disabled={locked || review.files.length === 0}
-            title="Keep all changes from this turn."
+            title="Keep all changes from this session."
             onClick={onKeepAll}
           >
             <CheckIcon className="ico ico--xs" />
