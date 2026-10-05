@@ -138,8 +138,9 @@ export interface AppState {
   /** True while the always-allow rules surface is open for review/revocation. */
   rulesOpen: boolean;
   /**
-   * Files attached to the pending message; cleared on send or new conversation.
-   * Each chip is removable before the turn leaves the composer.
+   * Files attached to the pending message. Cleared when the message is sent.
+   * A chat switch restores that tab's own chips. Each chip is removable before
+   * the turn leaves the composer.
    */
   attachments: Attachment[];
   /**
@@ -282,6 +283,8 @@ export type Action =
   | { type: 'addAttachments'; attachments: Attachment[] }
   /** Remove one chip before sending. */
   | { type: 'removeAttachment'; id: string }
+  /** Replace the pending chips, for a tab switch or a restored draft. */
+  | { type: 'setAttachments'; attachments: Attachment[] }
   /** Surface an attach/paste failure inline in the composer. */
   | { type: 'attachmentError'; message: string }
   | { type: 'dismissAttachmentError' }
@@ -580,9 +583,8 @@ export function reduce(state: AppState, action: Action): AppState {
         threadActivity: activityKey && state.threadActivity[activityKey]?.unread
           ? { ...state.threadActivity, [activityKey]: { ...state.threadActivity[activityKey], unread: false } }
           : state.threadActivity,
-        // A conversation switch discards any pending composer attachments: they
-        // belonged to the message the user was about to send in the old one.
-        attachments: [],
+        // Pending chips belong to the composer draft, which the view restores
+        // per tab. A repaint of the open chat must not drop them.
         attachmentError: undefined,
         // A revision belongs to the plan that was on screen; a switch resets it.
         planRevising: false,
@@ -668,6 +670,8 @@ export function reduce(state: AppState, action: Action): AppState {
         ...state,
         attachments: state.attachments.filter((attachment) => attachment.id !== action.id)
       };
+    case 'setAttachments':
+      return { ...state, attachments: action.attachments };
     case 'attachmentError':
       return { ...state, attachmentError: action.message };
     case 'dismissAttachmentError':

@@ -78,8 +78,10 @@ import type {
   WebviewToHostMessage
 } from './protocol';
 import {
+  COMPOSER_DRAFT_LIMIT,
   DEFAULT_TAB_TITLE,
   parseChatTabState,
+  parseDraftAttachments,
   resolveChatTarget,
   tabTitle,
   type ChatTabState,
@@ -114,6 +116,10 @@ interface ChatSession {
   pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
   /** No conversation has been bound to this tab yet. */
   blank: boolean;
+  /** Unsent composer text. Restored with the tab. */
+  composerText: string;
+  /** Unsent composer files. Inline bytes stay in memory; the saved record does not. */
+  composerAttachments: Attachment[];
   /** Thread to resume the first time this tab is shown. */
   resume?: { backendId: string; threadId: string };
   disposed: boolean;
@@ -152,6 +158,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   /** The tab whose transcript is on screen. */
   private visible?: ChatSession;
   private tabSeq = 0;
+  /** Serializes draft blob writes so an older save cannot skip the latest text. */
+  private readonly composerPersistChain = new WeakMap<ChatSession, Promise<void>>();
   private readonly settings: SettingsService;
   private readonly dictation: DictationController;
   private readonly plans = new PlanStore();
@@ -817,7 +825,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       if (message.type === 'newChat') {
-        this.openBlank();
+        this.openBlank({ text: message.text ?? '', attachments: message.attachments ?? [] });
         return;
       }
       if (message.type === 'openThread') {
@@ -875,18 +883,38 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.webviewMountTimers = [];
   }
 
-  /** Open a blank editor tab, or focus one that has not been used yet. */
   /** Open a blank sidebar tab, or focus one that has not been used yet. */
-  openBlank(): void {
+  openBlank(incoming?: { text: string; attachments: Attachment[] }): void {
+    const source = this.visible;
+    const text = (incoming?.text ?? source?.composerText ?? '').slice(0, COMPOSER_DRAFT_LIMIT);
+    const attachments = (incoming?.attachments ?? source?.composerAttachments ?? []).map((attachment) => ({
+      ...attachment
+    }));
+    const carry = text.trim().length > 0 || attachments.length > 0;
+    if (source) {
+      this.rememberComposer(source, text, attachments.map((attachment) => ({ ...attachment })));
+    }
     const target = resolveChatTarget(this.openTabRecords(), { kind: 'new' });
     if (target.action === 'reveal') {
       const existing = this.liveSessions()[target.index];
-      if (existing) {
-        void this.showSession(existing);
+      if (!existing) {
+        return;
       }
+      if (existing !== source && carry) {
+        this.rememberComposer(existing, text, attachments.map((attachment) => ({ ...attachment })));
+      }
+      void this.showSession(existing);
       return;
     }
-    void this.showSession(this.createSession({ blank: true, title: DEFAULT_TAB_TITLE }));
+    const created = this.createSession({
+      blank: true,
+      title: DEFAULT_TAB_TITLE,
+      ...(carry ? { draftText: text } : {})
+    });
+    if (carry) {
+      this.rememberComposer(created, text, attachments);
+    }
+    void this.showSession(created);
   }
 
   /** Show the tab for a thread, or open one and resume that thread. */
@@ -948,6 +976,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       planRunAutomatic: false,
       planHold: false,
       blank: init.blank,
+      composerText: init.draftText?.slice(0, COMPOSER_DRAFT_LIMIT) ?? '',
+      composerAttachments: (init.draftAttachments ?? []).map((attachment) => ({ ...attachment })),
       ...(init.backendId && init.threadId ? { resume: { backendId: init.backendId, threadId: init.threadId } } : {}),
       disposed: false,
       turnOpen: false
@@ -980,6 +1010,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.postFreshConversation();
       this.post({ type: 'restoring', value: false });
     });
+    await this.postComposerDraft(session);
   }
 
   /** Re-send the visible tab's stored conversation without starting a new thread. */
@@ -1055,12 +1086,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       const backendId = session.activeThread?.backendId ?? session.resume?.backendId;
       const threadId = session.activeThread?.threadId ?? session.resume?.threadId;
       const blank = session.blank && !threadId;
+      const draftText = session.composerText.slice(0, COMPOSER_DRAFT_LIMIT);
+      const draftAttachments = draftAttachmentsForStore(session.composerAttachments);
       return {
         blank,
         ...(backendId ? { backendId } : {}),
         ...(threadId ? { threadId } : {}),
         title: session.title,
-        ...(session === this.visible ? { active: true } : {})
+        ...(session === this.visible ? { active: true } : {}),
+        ...(draftText ? { draftText } : {}),
+        ...(draftAttachments.length > 0 ? { draftAttachments } : {})
       };
     });
     void this.context.workspaceState.update(OPEN_CHAT_TABS_KEY, tabs);
@@ -1082,6 +1117,107 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage({ type: 'chatTabs', tabs });
   }
 
+  /** Keep one tab's unsent composer and write it with the open tabs. */
+  private rememberComposer(session: ChatSession, text: string, attachments: Attachment[]): void {
+    const previous = session.composerAttachments;
+    const clean = parseDraftAttachments(attachments);
+    session.composerText = text.slice(0, COMPOSER_DRAFT_LIMIT);
+    session.composerAttachments = clean.map((attachment) => {
+      const source = attachments.find((item) => item.id === attachment.id);
+      const prior = previous.find((item) => item.id === attachment.id);
+      const path = attachment.path ?? prior?.path;
+      const dataUrl = source?.dataUrl ?? prior?.dataUrl;
+      return {
+        ...attachment,
+        ...(path ? { path } : {}),
+        ...(dataUrl ? { dataUrl } : {})
+      };
+    });
+    this.queueComposerPersist(session);
+  }
+
+  private queueComposerPersist(session: ChatSession): void {
+    const previous = this.composerPersistChain.get(session) ?? Promise.resolve();
+    const next = previous
+      .then(() => this.writeMissingDraftBlobs(session))
+      .then(() => {
+        this.persistOpenTabs();
+      })
+      .catch(() => undefined);
+    this.composerPersistChain.set(session, next);
+  }
+
+  /** Paste images have no path. Write their bytes beside the workspace so a reload can read them. */
+  private async writeMissingDraftBlobs(session: ChatSession): Promise<void> {
+    const root = this.context.storageUri;
+    if (!root) {
+      return;
+    }
+    const pending = session.composerAttachments.filter((attachment) => !attachment.path && attachment.dataUrl);
+    if (pending.length === 0) {
+      return;
+    }
+    const dir = vscode.Uri.joinPath(root, 'composer-drafts');
+    await vscode.workspace.fs.createDirectory(dir);
+    for (const attachment of pending) {
+      const current = session.composerAttachments.find((item) => item.id === attachment.id);
+      if (!current || current.path || !current.dataUrl) {
+        continue;
+      }
+      const bytes = decodeDataUrl(current.dataUrl);
+      if (!bytes || bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        continue;
+      }
+      const file = vscode.Uri.joinPath(dir, safeDraftFileName(current.id));
+      await vscode.workspace.fs.writeFile(file, bytes);
+      const still = session.composerAttachments.find((item) => item.id === current.id);
+      if (still && !still.path) {
+        still.path = file.fsPath;
+      }
+    }
+  }
+
+  /** Send the visible tab's unsent composer, re-reading images so thumbnails survive a reload. */
+  private async postComposerDraft(session: ChatSession): Promise<void> {
+    if (session.disposed || this.visible !== session) {
+      return;
+    }
+    const attachments = await this.withImageBytes(session.composerAttachments);
+    if (session.disposed || this.visible !== session) {
+      return;
+    }
+    session.composerAttachments = attachments;
+    this.post({
+      type: 'composerDraft',
+      tabId: session.id,
+      text: session.composerText,
+      attachments
+    });
+  }
+
+  private async withImageBytes(attachments: readonly Attachment[]): Promise<Attachment[]> {
+    const next: Attachment[] = [];
+    for (const attachment of attachments) {
+      if (attachment.dataUrl || attachment.kind !== 'image' || !attachment.path) {
+        next.push(attachment);
+        continue;
+      }
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(attachment.path)).then(
+        (value) => value,
+        () => undefined
+      );
+      if (!bytes || bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        next.push(attachment);
+        continue;
+      }
+      next.push({
+        ...attachment,
+        dataUrl: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString('base64')}`
+      });
+    }
+    return next;
+  }
+
   private post(message: HostToWebviewMessage): void {
     if (!this.view) {
       return;
@@ -1101,6 +1237,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private async handle(message: WebviewToHostMessage): Promise<void> {
     switch (message.type) {
+      case 'composerDraft': {
+        const session =
+          (message.tabId ? this.liveSessions().find((entry) => entry.id === message.tabId) : undefined) ?? this.visible;
+        if (session) {
+          this.rememberComposer(session, message.text, message.attachments);
+        }
+        break;
+      }
       case 'ready': {
         this.post({ type: 'snapshot', availability: this.registry.snapshot() });
         if (this.liveSessions().length === 0) {
@@ -3417,8 +3561,26 @@ function kindForMime(mimeType: string): AttachmentKind {
   return 'file';
 }
 
+/** Metadata saved with the open tabs. Inline bytes stay out of workspace state. */
+function draftAttachmentsForStore(attachments: readonly Attachment[]): NonNullable<ChatTabState['draftAttachments']> {
+  return parseDraftAttachments(persistableAttachments(attachments) ?? []);
+}
+
+function decodeDataUrl(dataUrl: string): Uint8Array | undefined {
+  const match = /^data:[^;,]+;base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUrl);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  return Buffer.from(match[1], 'base64');
+}
+
+function safeDraftFileName(id: string): string {
+  const cleaned = id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
+  return cleaned || 'attachment';
+}
+
 /** Strip inline bytes before an attachment is persisted to workspace state. */
-function persistableAttachments(attachments?: Attachment[]): Attachment[] | undefined {
+function persistableAttachments(attachments?: readonly Attachment[]): Attachment[] | undefined {
   if (!attachments || attachments.length === 0) {
     return undefined;
   }

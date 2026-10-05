@@ -13,6 +13,7 @@ import { splitReplyClose } from './replyClose';
 import { plainRowText } from './plainRowText';
 import { visibleTranscriptText } from './visibleTranscript';
 import { historyEntries, historyLoading, type HistoryEntry } from './historyEntries';
+import { acceptComposerRestore, hostAttachments, switchComposerDraft, type ComposerDraft } from './composerDraft';
 import {
   AlertIcon,
   BackIcon,
@@ -201,6 +202,41 @@ export function App(): JSX.Element {
    */
   const attachRequestRef = useRef<string | undefined>(undefined);
   const attachCounterRef = useRef(0);
+  /** Unsent composer text and files, remembered per open tab. */
+  const composerMemoryRef = useRef<Record<string, ComposerDraft>>({});
+  const composerDirtyRef = useRef(false);
+  /** True until the host has restored this tab, so an empty composer is not saved over it. */
+  const composerSkipPublishRef = useRef(true);
+  const composerCarryRef = useRef<ComposerDraft | undefined>(undefined);
+  const composerCarryFromRef = useRef<string | undefined>(undefined);
+  const composerSentBytesRef = useRef(new Set<string>());
+  const activeChatTabIdRef = useRef<string | undefined>(undefined);
+  const draftMirrorRef = useRef(draft);
+  const attachmentsMirrorRef = useRef(state.attachments);
+  draftMirrorRef.current = draft;
+  attachmentsMirrorRef.current = state.attachments;
+  const onComposerDraftRef = useRef<
+    (message: { tabId: string; text: string; attachments: Attachment[] }) => void
+  >(() => {});
+  const markComposerEdited = (): void => {
+    composerDirtyRef.current = true;
+    composerSkipPublishRef.current = false;
+  };
+  const publishComposer = (tabId: string | undefined, text: string, attachments: Attachment[]): void => {
+    if (tabId) {
+      composerMemoryRef.current[tabId] = {
+        text,
+        attachments: attachments.map((attachment) => ({ ...attachment }))
+      };
+    }
+    composerSkipPublishRef.current = false;
+    bridge.post({
+      type: 'composerDraft',
+      ...(tabId ? { tabId } : {}),
+      text,
+      attachments: hostAttachments(attachments, composerSentBytesRef.current)
+    });
+  };
   const [listening, setListening] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const listeningRef = useRef(false);
@@ -238,6 +274,9 @@ export function App(): JSX.Element {
           break;
         case 'chatTabs':
           dispatch({ type: 'chatTabs', tabs: message.tabs });
+          break;
+        case 'composerDraft':
+          onComposerDraftRef.current(message);
           break;
         case 'agentEvent':
           dispatch({ type: 'agentEvent', event: message.event });
@@ -361,6 +400,7 @@ export function App(): JSX.Element {
             // the composer exactly as it was.
             break;
           }
+          markComposerEdited();
           dispatch({ type: 'addAttachments', attachments: message.attachments });
           break;
         case 'attachmentError':
@@ -774,6 +814,7 @@ export function App(): JSX.Element {
       bridge.post({ type: 'steerTurn', text });
       dispatch({ type: 'dismissNotice' });
       setDraft('');
+      publishComposer(activeChatTabIdRef.current, '', state.attachments);
       return;
     }
     dispatch({ type: 'localUserMessage', text, attachments: state.attachments });
@@ -787,6 +828,7 @@ export function App(): JSX.Element {
       attachments: state.attachments
     });
     setDraft('');
+    publishComposer(activeChatTabIdRef.current, '', []);
   };
 
   // The attach button opens a native picker in the host; the response arrives as
@@ -801,6 +843,7 @@ export function App(): JSX.Element {
   };
 
   const removeAttachment = (id: string): void => {
+    markComposerEdited();
     dispatch({ type: 'removeAttachment', id });
   };
 
@@ -836,6 +879,7 @@ export function App(): JSX.Element {
       return;
     }
     event.preventDefault();
+    markComposerEdited();
     void Promise.all(files.map(readClipboardFile)).then((attachments) => {
       const usable = attachments.filter((attachment): attachment is Attachment => attachment !== undefined);
       const skipped = attachments.length - usable.length;
@@ -1034,6 +1078,7 @@ export function App(): JSX.Element {
     setDictationStatus(undefined);
     if (message.type === 'dictationError') {
       if (message.raw?.trim()) {
+        markComposerEdited();
         setDraft((current) => appendDraft(current, message.raw as string));
       }
       if (message.message !== 'No speech was heard.') {
@@ -1049,6 +1094,7 @@ export function App(): JSX.Element {
     const locked =
       state.restoring || Boolean(pending) || asking || state.busy || active?.status !== 'available' || !next.trim();
     if (locked) {
+      markComposerEdited();
       setDraft(next);
       return;
     }
@@ -1065,12 +1111,24 @@ export function App(): JSX.Element {
       attachments: state.attachments
     });
     setDraft('');
+    publishComposer(activeChatTabIdRef.current, '', []);
   };
 
   const newConversation = (): void => {
     setHistoryOpen(false);
     setHistoryQuery('');
-    bridge.post({ type: 'newChat' });
+    const text = draft;
+    const attachments = state.attachments.map((attachment) => ({ ...attachment }));
+    if (text.trim().length > 0 || attachments.length > 0) {
+      composerCarryRef.current = { text, attachments };
+      composerCarryFromRef.current = activeChatTabIdRef.current;
+    }
+    bridge.post({ type: 'newChat', text, attachments });
+    for (const attachment of attachments) {
+      if (attachment.dataUrl) {
+        composerSentBytesRef.current.add(attachment.id);
+      }
+    }
   };
 
   const triggerLabel =
@@ -1085,6 +1143,8 @@ export function App(): JSX.Element {
   // change is posted to the host, which clamps and echoes it back as a fresh
   // snapshot, so the panel always shows the value that will be sent.
   const modelSettings = state.modelCapability ? modelSettingsView(state.modelCapability) : undefined;
+  const thinkingLabel =
+    modelSettings?.thinking.available && modelSettings.thinking.value ? modelSettings.thinking.value : undefined;
   const contextMax = resolveContextMax({
     settingsWindow: state.modelCapability?.settings.contextWindow,
     capabilityMax: state.modelCapability?.capabilities?.contextWindow.max,
@@ -1359,20 +1419,114 @@ export function App(): JSX.Element {
 
 
   const activeChatTabId = state.chatTabs.find((tab) => tab.active)?.id;
-  const draftsRef = useRef<Record<string, string>>({});
-  const draftMirrorRef = useRef(draft);
-  draftMirrorRef.current = draft;
+  activeChatTabIdRef.current = activeChatTabId;
   const previousChatTabRef = useRef(activeChatTabId);
+  onComposerDraftRef.current = (message) => {
+    if (
+      composerCarryRef.current &&
+      message.tabId === composerCarryFromRef.current &&
+      message.tabId === activeChatTabIdRef.current
+    ) {
+      composerCarryRef.current = undefined;
+      composerCarryFromRef.current = undefined;
+    }
+    if (!acceptComposerRestore(composerMemoryRef.current, message.tabId, composerDirtyRef.current)) {
+      return;
+    }
+    const restored: ComposerDraft = {
+      text: message.text,
+      attachments: message.attachments.map((attachment) => ({ ...attachment }))
+    };
+    composerMemoryRef.current[message.tabId] = restored;
+    for (const attachment of restored.attachments) {
+      if (attachment.dataUrl || attachment.path) {
+        composerSentBytesRef.current.add(attachment.id);
+      }
+    }
+    composerSkipPublishRef.current = false;
+    if (message.tabId === activeChatTabIdRef.current) {
+      setDraft(restored.text);
+      dispatch({ type: 'setAttachments', attachments: restored.attachments });
+    }
+  };
   useEffect(() => {
     const previous = previousChatTabRef.current;
-    if (previous && previous !== activeChatTabId) {
-      draftsRef.current[previous] = draftMirrorRef.current;
+    const nextId = activeChatTabId;
+    if (!nextId) {
+      previousChatTabRef.current = nextId;
+      return;
     }
-    previousChatTabRef.current = activeChatTabId;
-    if (activeChatTabId) {
-      setDraft(draftsRef.current[activeChatTabId] ?? '');
+    // The composer can be typed in before the first tab id exists. Keep that
+    // text on the tab instead of replacing it with a host restore.
+    if (
+      !previous &&
+      (composerDirtyRef.current ||
+        draftMirrorRef.current.length > 0 ||
+        attachmentsMirrorRef.current.length > 0)
+    ) {
+      composerMemoryRef.current[nextId] = {
+        text: draftMirrorRef.current,
+        attachments: attachmentsMirrorRef.current.map((attachment) => ({ ...attachment }))
+      };
+      previousChatTabRef.current = nextId;
+      composerSkipPublishRef.current = false;
+      return;
     }
+    const carry = composerCarryRef.current;
+    const switched = switchComposerDraft(
+      composerMemoryRef.current,
+      previous,
+      nextId,
+      { text: draftMirrorRef.current, attachments: attachmentsMirrorRef.current },
+      previous !== nextId ? carry : undefined
+    );
+    composerMemoryRef.current = switched.remembered;
+    if (switched.carried) {
+      composerCarryRef.current = undefined;
+      composerCarryFromRef.current = undefined;
+    }
+    previousChatTabRef.current = nextId;
+    if (previous === nextId) {
+      return;
+    }
+    composerDirtyRef.current = false;
+    composerSkipPublishRef.current = switched.waitForHost;
+    if (previous) {
+      const saved = switched.remembered[previous];
+      if (saved) {
+        bridge.post({
+          type: 'composerDraft',
+          tabId: previous,
+          text: saved.text,
+          attachments: hostAttachments(saved.attachments, composerSentBytesRef.current)
+        });
+      }
+    }
+    setDraft(switched.next.text);
+    dispatch({ type: 'setAttachments', attachments: switched.next.attachments });
   }, [activeChatTabId]);
+  useEffect(() => {
+    if (composerSkipPublishRef.current) {
+      return;
+    }
+    const tabId = activeChatTabId;
+    const text = draft;
+    const attachments = state.attachments;
+    const handle = window.setTimeout(() => {
+      publishComposer(tabId, text, attachments);
+    }, 80);
+    return () => window.clearTimeout(handle);
+  }, [draft, state.attachments, activeChatTabId]);
+  useEffect(() => {
+    const flush = (): void => {
+      if (composerSkipPublishRef.current) {
+        return;
+      }
+      publishComposer(activeChatTabIdRef.current, draftMirrorRef.current, attachmentsMirrorRef.current);
+    };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, []);
 
   const tabStrip = (
     <ChatTabStrip
@@ -1708,7 +1862,10 @@ export function App(): JSX.Element {
             }
             disabled={active?.status !== 'available' || state.restoring || Boolean(pending) || asking}
             rows={1}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              markComposerEdited();
+              setDraft(event.target.value);
+            }}
             onPaste={onComposerPaste}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
@@ -1827,8 +1984,8 @@ export function App(): JSX.Element {
                   aria-haspopup="dialog"
                   aria-expanded={modelSettingsOpen}
                   aria-controls="model-settings-panel"
-                  aria-label="Model settings"
-                  title="Model settings"
+                  aria-label={thinkingLabel ? `Model settings, thinking ${thinkingLabel}` : 'Model settings'}
+                  title={thinkingLabel ? `Model settings · ${thinkingLabel}` : 'Model settings'}
                   disabled={Boolean(pending) || asking}
                   onClick={() => {
                     setModelSettingsOpen((value) => !value);
@@ -1838,6 +1995,7 @@ export function App(): JSX.Element {
                   }}
                 >
                   <SlidersIcon className="ico ico--sm" />
+                  {thinkingLabel ? <span className="control-label">{thinkingLabel}</span> : null}
                 </button>
                 {modelSettingsOpen ? (
                   <ModelSettingsPanel

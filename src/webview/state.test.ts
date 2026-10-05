@@ -368,11 +368,13 @@ test('sending a message clears the pending attachments and stamps them on the tu
   assert.deepEqual(sent.transcript[0].attachments, [image]);
 });
 
-test('a switch of conversation discards pending composer attachments', () => {
+test('a switch of conversation keeps pending composer attachments', () => {
   const image = { id: 'a1', name: 'shot.png', path: '/w/shot.png', mimeType: 'image/png', kind: 'image' as const };
   const withAttachment = reduce(initialState, { type: 'addAttachments', attachments: [image] });
   const switched = reduce(withAttachment, { type: 'conversation', backendId: 'codex', threadId: 't2' });
-  assert.equal(switched.attachments.length, 0);
+  assert.deepEqual(switched.attachments, [image]);
+  const replaced = reduce(switched, { type: 'setAttachments', attachments: [] });
+  assert.equal(replaced.attachments.length, 0);
 });
 
 test('an attach failure shows inline and clears on the next successful add', () => {
