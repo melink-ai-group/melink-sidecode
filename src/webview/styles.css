@@ -1894,14 +1894,18 @@ body {
 .app--chat-empty .composer.composer--expanded .composer-input {
   flex: 1 1 auto;
   min-height: 0;
+  /* The base 50vh cap leaves a gap under the control row once the box is taller. */
+  max-height: none;
   overflow-y: auto;
 }
 
 .composer-row {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  margin-top: auto;
   padding: 4px 6px 6px 8px;
 }
 
