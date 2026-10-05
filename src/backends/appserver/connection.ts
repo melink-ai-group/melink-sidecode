@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { Emitter } from '../base.ts';
 import type { Disposable } from '../types.ts';
 import {
@@ -169,6 +170,7 @@ export class AppServerConnection implements Disposable {
   private disposing?: Promise<void>;
   private nextId = 1;
   private stdoutBuffer = '';
+  private stdoutDecoder = new StringDecoder('utf8');
   private stderrTail = '';
   /** The argument form that actually started, for the diagnostic log. */
   private spawnForm?: string;
@@ -291,11 +293,12 @@ export class AppServerConnection implements Disposable {
     // its requests.
     this.child = child;
     this.stdoutBuffer = '';
+    this.stdoutDecoder = new StringDecoder('utf8');
     this.stderrTail = '';
 
     child.stdout.on('data', (chunk: Buffer) => {
       if (this.child === child) {
-        this.onStdout(chunk.toString());
+        this.onStdout(this.stdoutDecoder.write(chunk));
       }
     });
     child.stderr.on('data', (chunk: Buffer) => {
@@ -381,7 +384,29 @@ export class AppServerConnection implements Disposable {
     const { lines, remainder } = drainLines(this.stdoutBuffer);
     this.stdoutBuffer = remainder;
     for (const line of lines) {
+      this.applyLine(line);
+    }
+  }
+
+  /**
+   * Apply one stdout line. A listener that throws must not abandon the rest of
+   * the buffer: that is how a turn stops mid-reply with no further events.
+   */
+  private applyLine(line: string): void {
+    try {
       this.handleLine(line);
+    } catch {
+      this.options.log?.('A Codex notification could not be applied.');
+    }
+  }
+
+  /** A process can exit with the last JSON object still missing its newline. */
+  private flushStdoutTail(): void {
+    this.onStdout(this.stdoutDecoder.end());
+    const tail = this.stdoutBuffer.trim();
+    this.stdoutBuffer = '';
+    if (tail) {
+      this.applyLine(tail);
     }
   }
 
@@ -437,6 +462,7 @@ export class AppServerConnection implements Disposable {
   }
 
   private onProcessClose(code: number | null): void {
+    this.flushStdoutTail();
     const expected = this.disposed;
     const reason = this.stderrTail.trim().split(/\r?\n/).slice(-1)[0] ?? '';
     const error = new ConnectionError(

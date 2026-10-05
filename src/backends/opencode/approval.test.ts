@@ -90,6 +90,15 @@ test('a streaming text part is held until it finishes', () => {
   assert.equal(parseOpencodeEvent(done).kind, 'text');
 });
 
+test('a closed SSE stream keeps a trailing frame that has no blank line', () => {
+  const closed = consumeSse('data: {"type":"message.part.updated","properties":{"part":{"type":"text"}}}\n', true);
+  assert.equal(closed.messages.length, 1);
+  assert.equal(closed.rest, '');
+  const partial = consumeSse('data: {"type":"mess', true);
+  assert.deepEqual(partial.messages, []);
+  assert.equal(partial.rest.includes('mess'), true);
+});
+
 test('SSE frames are split without dropping a partial tail', () => {
   const first = consumeSse('data: {"type":"server.connected"}\n\ndata: {"ty');
   assert.deepEqual(first.messages, ['{"type":"server.connected"}']);

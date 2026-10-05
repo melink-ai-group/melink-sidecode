@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   isTerminalStepReason,
+  opencodeStreamDetail,
   parseOpencodeEvent,
   sessionIdOf,
   type OpencodeEvent
@@ -263,7 +264,7 @@ export async function runOpencodeTurn(
     return {
       ...common,
       outcome: 'stream',
-      detail: 'The opencode stream ended before the turn completed.'
+      detail: opencodeStreamDetail(state.lastStepReason)
     };
   }
   return { ...common, outcome: 'completed' };
@@ -301,14 +302,16 @@ function configContainsSecret(config: Record<string, unknown>, token: string): b
 }
 
 /**
- * A zero exit after real output, with no tool left running and no trailing
- * request for tool calls, finished the turn even when `step_finish` was dropped.
+ * A zero exit after real output, with no tool left running, finished the turn
+ * even when `step_finish` was dropped. A recorded reason other than `stop`
+ * (the output limit, a request for more tool calls) did not finish it.
  */
 export function cleanOpencodeExit(
   exitCode: number | null,
   state: { sawAnyEvent: boolean; openTools: ReadonlySet<string>; lastStepReason?: string }
 ): boolean {
-  return exitCode === 0 && state.sawAnyEvent && state.openTools.size === 0 && state.lastStepReason !== 'tool-calls';
+  const droppedFinish = state.lastStepReason === undefined || state.lastStepReason === 'stop';
+  return exitCode === 0 && state.sawAnyEvent && state.openTools.size === 0 && droppedFinish;
 }
 
 function captureState(

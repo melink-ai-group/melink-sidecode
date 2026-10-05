@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { request as httpRequest, Agent, type IncomingMessage } from 'node:http';
-import { parseOpencodeEvent } from './events.ts';
+import { isTerminalStepReason, opencodeStreamDetail, parseOpencodeEvent, promptTurnFromBody } from './events.ts';
 import type { OpencodeEvent } from './events.ts';
 import {
   busPayloadToOpencodeLine,
@@ -118,11 +118,38 @@ export async function runOpencodeServerTurn(
     }
     const sessionId = created.id;
 
-    const state = { sawError: undefined as { message: string; statusCode?: number } | undefined, terminal: false };
+    const state = {
+      sawError: undefined as { message: string; statusCode?: number } | undefined,
+      terminal: false,
+      cutoff: undefined as string | undefined
+    };
+    const seenText = new Map<string, string>();
+    const publish = (event: OpencodeEvent): void => {
+      if (event.kind === 'step-finish') {
+        if (event.reason === 'length') {
+          state.cutoff = 'length';
+        }
+        if (isTerminalStepReason(event.reason)) {
+          state.terminal = true;
+        }
+      }
+      if (event.kind === 'text' || event.kind === 'reasoning') {
+        const previous = seenText.get(event.partId);
+        if (previous !== undefined) {
+          if (event.text.startsWith(previous) && event.text.length > previous.length) {
+            onEvent({ ...event, text: event.text.slice(previous.length) });
+            seenText.set(event.partId, event.text);
+          }
+          return;
+        }
+        seenText.set(event.partId, event.text);
+      }
+      onEvent(event);
+    };
     const eventsAbort = new AbortController();
     const stopEvents = (): void => eventsAbort.abort();
     options.signal?.addEventListener('abort', stopEvents, { once: true });
-    const events = readEvents(baseUrl, options, env, sessionId, state, onEvent, eventsAbort.signal);
+    const events = readEvents(baseUrl, options, env, sessionId, state, publish, eventsAbort.signal);
 
     const model = splitModel(options.modelRef);
     const prompt = await serverFetch(baseUrl, options.cwd, `/session/${encodeURIComponent(sessionId)}/message`, {
@@ -135,8 +162,13 @@ export async function runOpencodeServerTurn(
       }),
       signal: options.signal
     }, env);
+    const body = await prompt.text().catch(() => '');
     stopEvents();
     await events.catch(() => undefined);
+    const reported = promptTurnFromBody(body);
+    for (const event of reported.events) {
+      publish(event);
+    }
 
     if (options.signal?.aborted) {
       return { outcome: 'canceled', terminal: state.terminal, sessionId };
@@ -155,8 +187,11 @@ export async function runOpencodeServerTurn(
         detail: state.sawError?.message ?? 'The opencode server did not complete the turn.'
       };
     }
+    if (reported.finish === 'length' || state.cutoff === 'length') {
+      return { outcome: 'stream', terminal: false, sessionId, detail: opencodeStreamDetail('length') };
+    }
     if (!state.terminal) {
-      onEvent({ kind: 'step-finish', sessionId, reason: 'stop' });
+      publish({ kind: 'step-finish', sessionId, reason: 'stop' });
     }
     return { outcome: 'completed', terminal: true, sessionId };
   } finally {
@@ -262,6 +297,13 @@ async function readEvents(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const drain = async (flushTail: boolean): Promise<void> => {
+    const consumed = consumeSse(buffer, flushTail);
+    buffer = consumed.rest;
+    for (const message of consumed.messages) {
+      await handleBusMessage(message, baseUrl, options, env, sessionId, state, onEvent);
+    }
+  };
   try {
     while (!signal.aborted) {
       const chunk = await reader.read();
@@ -269,15 +311,17 @@ async function readEvents(
         break;
       }
       buffer += decoder.decode(chunk.value, { stream: true });
-      const consumed = consumeSse(buffer);
-      buffer = consumed.rest;
-      for (const message of consumed.messages) {
-        await handleBusMessage(message, baseUrl, options, env, sessionId, state, onEvent);
-      }
+      await drain(false);
     }
   } catch {
     // The prompt ending aborts this stream on purpose.
   } finally {
+    buffer += decoder.decode();
+    try {
+      await drain(true);
+    } catch {
+      // A late frame must not hide the turn result already in hand.
+    }
     try {
       await reader.cancel();
     } catch {
@@ -373,9 +417,6 @@ async function handleBusMessage(
   }
   if (event.kind === 'error') {
     state.sawError = { message: event.message, statusCode: event.statusCode };
-  }
-  if (event.kind === 'step-finish' && event.reason === 'stop') {
-    state.terminal = true;
   }
   onEvent(event);
 }
