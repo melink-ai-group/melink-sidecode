@@ -385,3 +385,103 @@ function unifiedDiff(value: unknown): string | undefined {
 export function isTerminalStepReason(reason: string): boolean {
   return reason === 'stop';
 }
+
+/**
+ * Plain-language reason a non-terminal stream stopped.
+ * `length` is the output budget, not a transport failure.
+ */
+export function opencodeStreamDetail(reason: string | undefined): string {
+  if (reason === 'length') {
+    return 'The reply stopped early because it reached the output limit.';
+  }
+  return 'The opencode stream ended before the turn completed.';
+}
+
+/**
+ * The assistant turn carried by a completed `POST /session/:id/message` body.
+ *
+ * The live bus can drop the last frame when the request returns. This body is
+ * the copy the server already finished, so text and the finish reason can be
+ * recovered from it. Tool parts are left to the live bus: replaying them would
+ * open a second card for the same call.
+ */
+export function promptTurnFromBody(body: string): { finish?: string; events: OpencodeEvent[] } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { events: [] };
+  }
+  const events: OpencodeEvent[] = [];
+  let finish: string | undefined;
+  for (const message of assistantMessages(parsed)) {
+    const info = asRecord(message.info) ?? {};
+    if (asString(info.role) === 'user') {
+      continue;
+    }
+    const sessionId = asString(info.sessionID) ?? asString(message.sessionID);
+    const messageFinish = asString(info.finish);
+    if (messageFinish) {
+      finish = messageFinish;
+    }
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+    let stepReason: string | undefined;
+    for (const part of parts) {
+      const record = asRecord(part);
+      if (!record) {
+        continue;
+      }
+      const event = eventFromPart(sessionId, record);
+      if (!event) {
+        continue;
+      }
+      if (event.kind === 'step-finish') {
+        stepReason = event.reason;
+      }
+      if (event.kind === 'text' || event.kind === 'reasoning' || event.kind === 'step-finish') {
+        events.push(event);
+      }
+    }
+    if (!messageFinish && stepReason) {
+      finish = stepReason;
+    }
+  }
+  return { ...(finish ? { finish } : {}), events };
+}
+
+function assistantMessages(parsed: unknown): Record<string, unknown>[] {
+  if (Array.isArray(parsed)) {
+    return parsed.flatMap((entry) => assistantMessages(entry));
+  }
+  const record = asRecord(parsed);
+  if (!record) {
+    return [];
+  }
+  const data = asRecord(record.data);
+  if (data && (data.info || data.parts) && !record.parts) {
+    return [data];
+  }
+  if (record.info || record.parts) {
+    return [record];
+  }
+  return [];
+}
+
+function eventFromPart(sessionId: string | undefined, part: Record<string, unknown>): OpencodeEvent | undefined {
+  const type = asString(part.type);
+  if (!type) {
+    return undefined;
+  }
+  const wire = type === 'tool' ? 'tool_use' : type === 'step-finish' ? 'step_finish' : type === 'step-start' ? 'step_start' : type;
+  const event = parseOpencodeEvent(
+    JSON.stringify({
+      type: wire,
+      sessionID: asString(part.sessionID) ?? sessionId,
+      part
+    })
+  );
+  if (event.kind === 'unknown' || event.kind === 'malformed') {
+    return undefined;
+  }
+  return event;
+}

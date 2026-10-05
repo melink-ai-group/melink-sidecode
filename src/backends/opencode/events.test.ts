@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   isFileTool,
   isTerminalStepReason,
+  opencodeStreamDetail,
   parseOpencodeEvent,
+  promptTurnFromBody,
   reportedChangeOfTool,
   sessionIdOf
 } from './events.ts';
@@ -65,10 +67,32 @@ test('a terminal step_finish is recognized, a non-terminal one is not', () => {
   }
 });
 
+test('a message response restores text the live stream dropped and names a length cutoff', () => {
+  const body = JSON.stringify({
+    info: { role: 'assistant', sessionID: 'ses_1', finish: 'length' },
+    parts: [
+      { id: 'prt_text', sessionID: 'ses_1', type: 'text', text: 'and no remote, so' },
+      { id: 'prt_step', sessionID: 'ses_1', type: 'step-finish', reason: 'length' },
+      { id: 'prt_tool', sessionID: 'ses_1', type: 'tool', callID: 'call_1', tool: 'bash', state: { status: 'completed', input: { command: 'ls' } } }
+    ]
+  });
+  const turn = promptTurnFromBody(body);
+  assert.equal(turn.finish, 'length');
+  assert.equal(turn.events.length, 2);
+  assert.equal(turn.events[0].kind, 'text');
+  if (turn.events[0].kind === 'text') {
+    assert.equal(turn.events[0].text, 'and no remote, so');
+    assert.equal(turn.events[0].partId, 'prt_text');
+  }
+  assert.equal(opencodeStreamDetail('length'), 'The reply stopped early because it reached the output limit.');
+  assert.deepEqual(promptTurnFromBody('not json'), { events: [] });
+});
+
 test('a clean exit after finished tools is a completed turn', () => {
   const idle = { sawAnyEvent: true, openTools: new Set<string>(), lastStepReason: undefined };
   assert.equal(cleanOpencodeExit(0, idle), true);
   assert.equal(cleanOpencodeExit(0, { ...idle, lastStepReason: 'tool-calls' }), false);
+  assert.equal(cleanOpencodeExit(0, { ...idle, lastStepReason: 'length' }), false);
   assert.equal(cleanOpencodeExit(0, { ...idle, openTools: new Set(['call_1']) }), false);
   assert.equal(cleanOpencodeExit(1, idle), false);
   assert.equal(cleanOpencodeExit(0, { ...idle, sawAnyEvent: false }), false);

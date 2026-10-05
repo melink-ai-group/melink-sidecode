@@ -116,13 +116,16 @@ export function opencodeBaseUrl(baseUrl: string): string {
  * Max output tokens sent with a context limit.
  *
  * opencode's model schema requires `limit.output` whenever `limit` is present.
- * The value stays at most half the context window, and at least 1, so a small
- * window is not given an output budget larger than itself.
+ * The budget is half the context window already selected for this model, at
+ * least 1. A turn recomputes it from that setting, so a 1024k window can spend
+ * a long investigation and a smaller window cannot be given an output budget
+ * larger than itself. Nothing is written back onto the setting.
  */
-const DEFAULT_OUTPUT_LIMIT = 8_192;
-
-function outputLimitFor(context: number): number {
-  return Math.max(1, Math.min(DEFAULT_OUTPUT_LIMIT, Math.floor(context / 2) || 1));
+export function outputLimitFor(context: number): number {
+  if (!Number.isFinite(context) || context <= 0) {
+    return 1;
+  }
+  return Math.max(1, Math.floor(context / 2));
 }
 
 /** The UI thinking level as an opencode/OpenAI-compatible reasoning effort. */

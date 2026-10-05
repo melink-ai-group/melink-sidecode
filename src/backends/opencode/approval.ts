@@ -150,25 +150,55 @@ export function busPayloadToOpencodeLine(payload: Record<string, unknown>): stri
   return undefined;
 }
 
-/** Split an SSE buffer into complete `data:` payloads, keeping a partial tail. */
-export function consumeSse(buffer: string): { messages: string[]; rest: string } {
+/**
+ * Split an SSE buffer into complete `data:` payloads, keeping a partial tail.
+ *
+ * `flushTail` also accepts one trailing frame that never received its blank
+ * line. A closed stream often ends that way, and dropping it drops the last
+ * text part.
+ */
+export function consumeSse(buffer: string, flushTail = false): { messages: string[]; rest: string } {
   const messages: string[] = [];
   let rest = buffer.replace(/\r\n/g, '\n');
   let split = rest.indexOf('\n\n');
   while (split >= 0) {
     const block = rest.slice(0, split);
     rest = rest.slice(split + 2);
-    const data = block
-      .split('\n')
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).trimStart())
-      .join('\n');
-    if (data && data !== '[DONE]') {
+    const data = sseData(block);
+    if (data) {
       messages.push(data);
     }
     split = rest.indexOf('\n\n');
   }
+  if (flushTail) {
+    const data = sseData(rest);
+    if (data && isJsonPayload(data)) {
+      messages.push(data);
+      rest = '';
+    }
+  }
   return { messages, rest };
+}
+
+function sseData(block: string): string | undefined {
+  const data = block
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+  if (!data || data === '[DONE]') {
+    return undefined;
+  }
+  return data;
+}
+
+function isJsonPayload(data: string): boolean {
+  try {
+    JSON.parse(data);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
