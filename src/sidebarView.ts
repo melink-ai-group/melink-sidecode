@@ -36,6 +36,7 @@ import {
 } from './questions';
 import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
+import { compactedSummary, compactedTranscript, compactionSource } from './backends/compaction';
 import {
   adoptedPlanSteps,
   applyPlanDecisions,
@@ -1626,7 +1627,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     requestedMode?: DefaultMode,
     notify = true,
     requestedSettings?: import('./backends/types').ModelSettingOverrides,
-    keepPendingUserMessage = false
+    keepPendingUserMessage = false,
+    handover?: string
   ): Promise<void> {
     const backend = this.registry.get(backendId);
     if (!backend) {
@@ -1662,19 +1664,31 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         permissionLevel: level,
         mode,
         modelSettings,
-        context: prime.payload
+        context: prime.payload,
+        handover
       });
       this.activeThread = handle;
       this.syncPlanPreviewThread(handle.threadId);
       this.contextDelivery.begin(ContextDelivery.key(backendId, handle.threadId), prime, Boolean(handle.contextPrimed));
       await this.rememberPermission(level);
       this.mode = mode;
+      const seeded = handover?.trim() ? compactedTranscript(handover) : undefined;
+      if (seeded) {
+        this.store.setTranscript(backendId, handle.threadId, seeded);
+      }
+      if (handover?.trim() && previous) {
+        const plan = this.store.getPlanState(previous.backendId, previous.threadId);
+        if (plan) {
+          await this.store.setPlanState(backendId, handle.threadId, { ...plan, updatedAt: Date.now() });
+        }
+      }
       await this.store.setActiveThread({
         backendId,
         threadId: handle.threadId,
         modelId: model ?? handle.model,
         mode,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        ...(handover?.trim() ? { handoverSummary: handover.trim() } : {})
       });
       await this.store.setLastUsedModel({ backendId, modelId: model ?? handle.model ?? '' });
       if (notify) {
@@ -1686,6 +1700,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           permissionLevel: level,
           mode,
           pendingQuestion: this.pendingQuestionPayload(backendId, handle.threadId),
+          ...(seeded ? { replay: seeded } : {}),
+          ...(this.store.getPlanState(backendId, handle.threadId)
+            ? { plan: this.planArtifact(backendId, handle.threadId) }
+            : {}),
           ...(keepPendingUserMessage ? { keepPendingUserMessage: true } : {})
         });
       }
@@ -1764,7 +1782,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       // A resumed thread is re-primed with a fresh snapshot, because the upstream
       // context may be gone after the replay.
       const prime = await this.contextDelivery.snapshot();
-      const result = await backend.resumeThread(threadId, { context: prime.payload });
+      const stored = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
+      const result = await backend.resumeThread(threadId, {
+        context: prime.payload,
+        handover: stored?.handoverSummary
+      });
       this.activeThread = result.handle;
       this.syncPlanPreviewThread(result.handle.threadId);
       this.contextDelivery.begin(
@@ -1774,7 +1796,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       );
       // The thread index carries the mode, so a resumed thread keeps its mode;
       // a mode the backend cannot serve degrades to `agent`.
-      const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
+      const ref = stored ?? this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
       this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
       const titled =
         ref?.title ?? result.items.find((item) => item.role === 'user' && item.text?.trim())?.text;
@@ -1798,7 +1820,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         model: result.model,
         permissionLevel: this.permissionLevel,
         mode: this.mode,
-        replay: this.store.mergeApprovalMarkers(backendId, threadId, result.items),
+        replay: this.store.mergeApprovalMarkers(
+          backendId,
+          threadId,
+          ref?.handoverSummary && !compactedSummary(result.items)
+            ? [...compactedTranscript(ref.handoverSummary), ...result.items]
+            : result.items
+        ),
         pendingApproval: this.pendingApproval,
         pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
         plan: this.store.getPlanState(backendId, threadId)
@@ -1841,6 +1869,57 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     } finally {
       this.turnInProgress = false;
       this.flushPlanAutopilot();
+    }
+  }
+
+  /**
+   * Compact the open chat into a summary the next provider can continue from.
+   * Returns the summary, `undefined` when there is nothing to carry, or
+   * `'failed'` when the summary could not be produced. A failure leaves the
+   * current thread in place.
+   */
+  private async compactHandover(thread: ThreadHandle): Promise<string | undefined | 'failed'> {
+    const transcript = this.store.getTranscript(thread.backendId, thread.threadId);
+    if (!compactionSource(transcript).trim()) {
+      return undefined;
+    }
+    const backend = this.registry.get(thread.backendId);
+    if (!backend) {
+      return undefined;
+    }
+    this.post({ type: 'busy', value: true });
+    this.post({
+      type: 'notice',
+      level: 'info',
+      message: 'Compacting this chat so it can continue on the other provider.'
+    });
+    try {
+      const modelSettings = await this.resolveTurnSettings(thread.backendId, thread.model);
+      const summary = await backend.summarize({
+        model: thread.model,
+        modelSettings,
+        transcript,
+        maxTokens: modelSettings.contextWindow
+      });
+      const text = summary.trim();
+      if (!text) {
+        throw new BackendError('provider', 'Compaction did not return a summary.');
+      }
+      return text;
+    } catch (error) {
+      this.post({ type: 'busy', value: false });
+      const message =
+        error instanceof BackendError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : 'Context could not be compacted.';
+      this.post({
+        type: 'notice',
+        level: message === 'Compaction canceled.' ? 'info' : 'error',
+        message
+      });
+      return 'failed';
     }
   }
 
@@ -2006,13 +2085,31 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'notice', level: 'warning', message: 'No available backend to send the turn.' });
       return;
     }
-    // A model pick only updates the webview. Open a thread on the selected
-    // backend before the turn, and tell the webview which thread the events
-    // belong to, so a reply is not dropped for a backend mismatch.
+    // A model pick only updates the webview. A different provider continues
+    // this chat: the current transcript is compacted, and that summary is the
+    // next thread's opening context. An empty chat just opens a thread.
+    let handover: string | undefined;
+    if (this.activeThread && this.activeThread.backendId !== candidateBackend) {
+      const summary = await this.compactHandover(this.activeThread);
+      if (summary === 'failed') {
+        return;
+      }
+      handover = summary;
+    }
     if (this.activeThread?.backendId !== candidateBackend) {
-      await this.startThread(candidateBackend, model, permissionLevel, this.mode, true, requestedSettings, true);
+      await this.startThread(
+        candidateBackend,
+        model,
+        permissionLevel,
+        this.mode,
+        true,
+        requestedSettings,
+        true,
+        handover
+      );
     }
     if (!this.activeThread || this.activeThread.backendId !== candidateBackend) {
+      this.post({ type: 'busy', value: false });
       return;
     }
     const { backendId: activeBackendId, threadId } = this.activeThread;
@@ -2324,7 +2421,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       view,
       settingsEnabled: anyCategoryEnabled(this.projectContext.context.contextSettings()),
       exclusions: this.contextDelivery.exclusionKeys(),
-      includeViewedFile: this.contextDelivery.includeViewedFileEnabled()
+      includeViewedFile: this.contextDelivery.includeViewedFileEnabled(),
+      workspaceRoots: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)
     });
   }
 

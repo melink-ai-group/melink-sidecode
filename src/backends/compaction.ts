@@ -96,6 +96,18 @@ export function compactionPreface(summary: string): string {
   return `Earlier conversation, compacted so it fits the context window:\n${summary.trim()}`;
 }
 
+/**
+ * Developer instructions for a thread that continues another provider's chat.
+ * The summary comes first so it survives as the standing context. A project
+ * snapshot, when one exists, follows it.
+ */
+export function instructionsWithHandover(snapshot: string | undefined, handover: string | undefined): string | null {
+  const parts = [handover?.trim() ? compactionPreface(handover) : undefined, snapshot?.trim() || undefined].filter(
+    (part): part is string => Boolean(part)
+  );
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
 /** Tokens the replacement transcript will occupy, until the next provider count arrives. */
 export function compactedTokenEstimate(items: readonly Pick<TranscriptItem, 'text'>[]): number {
   return items.reduce((sum, item) => sum + tokensFromText(item.text ?? ''), 0);

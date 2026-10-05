@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ChangeEntry } from '../backends/types';
 import type { ChangeFileView } from '../changes/changeStore';
+import { prettyPath } from './prettyPath.ts';
 
 interface ChangedFilesStripProps {
   entries: ChangeEntry[];
@@ -55,10 +56,10 @@ export function ChangedFilesStrip({ entries, files = [], onOpenFile, children }:
                 <button
                   className="changed-files__file"
                   type="button"
-                  title={entry.path}
+                  title={prettyPath(entry.path)}
                   onClick={() => onOpenFile(entry.absPath)}
                 >
-                  <span className="changed-files__path">{entry.path}</span>
+                  <span className="changed-files__path">{prettyPath(entry.path)}</span>
                   <span className="changed-files__stats" aria-label={status === 'created' ? 'Added' : status === 'deleted' ? 'Deleted' : file ? `${file.additions} additions, ${file.deletions} deletions` : status}>
                     {stats}
                   </span>

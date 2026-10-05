@@ -287,6 +287,33 @@ test('a send that opens a thread keeps the optimistic user line and binds the ne
   assert.equal(bound.transcript[0].text, 'hello from ollama');
 });
 
+test('a provider handover keeps the optimistic user line after the compacted replay', () => {
+  const drafted = reduce(initialState, { type: 'selectBackend', backendId: 'codex' });
+  const sent = reduce(drafted, { type: 'localUserMessage', text: 'continue over there' });
+  const bound = reduce(sent, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 'codex_thread',
+    keepPendingUserMessage: true,
+    replay: [
+      { id: 'compact_notice', kind: 'notice', title: 'Context compacted', text: '', status: 'completed' },
+      {
+        id: 'compact_assistant',
+        kind: 'message',
+        role: 'assistant',
+        title: 'Compacted context',
+        text: 'Keep the plan.',
+        status: 'completed'
+      }
+    ]
+  });
+  assert.equal(bound.selectedBackendId, 'codex');
+  assert.equal(bound.activeThreadId, 'codex_thread');
+  assert.equal(bound.transcript.length, 3);
+  assert.equal(bound.transcript[1]?.text, 'Keep the plan.');
+  assert.equal(bound.transcript[2]?.text, 'continue over there');
+});
+
 test('switching conversation clears a failure banner from the previous chat', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 't1' });
   const failed = reduce(active, {

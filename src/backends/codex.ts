@@ -43,6 +43,12 @@ import { questionRequestFromToolParams, SKIPPED_ANSWER, type QuestionAnswer } fr
 import { todoStepsFromNative } from './plan';
 import { readDefaultMode, readDefaultPermissionLevel } from './defaults';
 import { DICTATION_INSTRUCTIONS, dictationText } from '../dictation/prompt';
+import {
+  COMPACTION_INSTRUCTIONS,
+  compactionSource,
+  fitCompactionSource,
+  instructionsWithHandover
+} from './compaction';
 import { isItemTerminal, translateItem, translateTurnItems } from './appserver/items';
 import { itemDeltaFor } from './appserver/deltas';
 import {
@@ -198,6 +204,8 @@ export class CodexBackend implements AgentBackend {
     threadId: string;
     text: string;
     settled: boolean;
+    emptyMessage: string;
+    failedMessage: string;
     resolve: (text: string) => void;
     reject: (error: Error) => void;
   };
@@ -444,7 +452,7 @@ export class CodexBackend implements AgentBackend {
         // life of the loaded thread and ignores a later replacement, so a Plan
         // instruction written at start would still block Build. The snapshot
         // is the only persisted instruction. The mode is sent on each turn.
-        developerInstructions: options?.context?.snapshot ?? null
+        developerInstructions: instructionsWithHandover(options?.context?.snapshot, options?.handover)
       })
       .catch((error: unknown) => this.fail(error));
     const threadId = response.thread.id;
@@ -485,7 +493,7 @@ export class CodexBackend implements AgentBackend {
         threadId,
         // Prefer the snapshot service's root as cwd, mirroring `startThread`.
         cwd: options?.context?.workspaceRoot ?? this.cwd,
-        developerInstructions: options?.context?.snapshot ?? null,
+        developerInstructions: instructionsWithHandover(options?.context?.snapshot, options?.handover),
         approvalsReviewer: 'user'
       })
       .catch((error: unknown) => {
@@ -561,9 +569,6 @@ export class CodexBackend implements AgentBackend {
    * afterwards and none of its events are shown in the conversation.
    */
   async cleanDictation(model: string, text: string): Promise<string> {
-    if (this.pendingTurn) {
-      throw new BackendError('provider', 'Codex is busy. The transcript was left in the draft.');
-    }
     const selected = model.trim();
     const source = text.trim();
     if (!selected) {
@@ -572,6 +577,73 @@ export class CodexBackend implements AgentBackend {
     if (!source) {
       throw new BackendError('provider', 'No speech was heard.');
     }
+    const cleaned = await this.completeQuiet({
+      model: selected,
+      instructions: DICTATION_INSTRUCTIONS,
+      source,
+      emptyMessage: 'Dictation cleanup returned nothing.',
+      failedMessage: 'Dictation cleanup failed.',
+      timeoutMessage: 'Dictation cleanup did not finish.',
+      busyMessage: 'Codex is busy. The transcript was left in the draft.'
+    });
+    const value = dictationText(cleaned);
+    if (!value) {
+      throw new BackendError('provider', 'Dictation cleanup returned nothing.');
+    }
+    return value;
+  }
+
+  /**
+   * Summarize the stored transcript on a throwaway read-only thread.
+   * The open Codex thread is left as it is; the host carries the text onto
+   * the next provider.
+   */
+  async summarize(request: CompactRequest): Promise<string> {
+    const model = (request.model ?? this.defaultModel)?.trim();
+    if (!model) {
+      throw new BackendError('provider', 'No Codex model selected.');
+    }
+    const source = fitCompactionSource(
+      compactionSource(request.transcript),
+      request.maxTokens ?? request.modelSettings?.contextWindow
+    );
+    if (!source.trim()) {
+      throw new BackendError('provider', 'There is no conversation to compact.');
+    }
+    const summary = await this.completeQuiet({
+      model,
+      instructions: COMPACTION_INSTRUCTIONS,
+      source,
+      modelSettings: request.modelSettings,
+      emptyMessage: 'Compaction did not return a summary.',
+      failedMessage: 'Compaction failed.',
+      timeoutMessage: 'Compaction did not finish.',
+      busyMessage: 'Codex is busy. Stay on this provider until the current request finishes.'
+    });
+    const text = summary.trim();
+    if (!text) {
+      throw new BackendError('provider', 'Compaction did not return a summary.');
+    }
+    return text;
+  }
+
+  /**
+   * One read-only turn whose reply is returned and never shown in the chat.
+   * The thread is deleted afterwards.
+   */
+  private async completeQuiet(options: {
+    model: string;
+    instructions: string;
+    source: string;
+    modelSettings?: CompactRequest['modelSettings'];
+    emptyMessage: string;
+    failedMessage: string;
+    timeoutMessage: string;
+    busyMessage: string;
+  }): Promise<string> {
+    if (this.pendingTurn) {
+      throw new BackendError('provider', options.busyMessage);
+    }
     const connection = await this.connect();
     const mapping = codexPermissionMapping('read-only');
     this.expectQuietThread = true;
@@ -579,35 +651,47 @@ export class CodexBackend implements AgentBackend {
     try {
       const started = await connection
         .startThread({
-          model: selected,
+          model: options.model,
           cwd: this.cwd,
           approvalPolicy: mapping.approvalPolicy,
           approvalsReviewer: 'user',
           sandbox: mapping.sandbox,
-          developerInstructions: DICTATION_INSTRUCTIONS
+          developerInstructions: options.instructions
         })
         .catch((error: unknown) => this.fail(error));
       threadId = started.thread.id;
       this.quietThreads.add(threadId);
       this.threadModes.set(threadId, 'ask');
-      const cleaned = await new Promise<string>((resolve, reject) => {
-        this.quietCapture = { threadId: threadId as string, text: '', settled: false, resolve, reject };
+      return await new Promise<string>((resolve, reject) => {
+        this.quietCapture = {
+          threadId: threadId as string,
+          text: '',
+          settled: false,
+          emptyMessage: options.emptyMessage,
+          failedMessage: options.failedMessage,
+          resolve,
+          reject
+        };
         const timer = setTimeout(() => {
-          this.finishQuiet(threadId as string, 'failed', 'Dictation cleanup did not finish.');
+          this.finishQuiet(threadId as string, 'failed', options.timeoutMessage);
         }, 90_000);
         void connection
           .startTurn({
             threadId: threadId as string,
-            input: [{ type: 'text', text: source, text_elements: [] }],
-            model: selected,
+            input: [{ type: 'text', text: options.source, text_elements: [] }],
+            model: options.model,
             approvalPolicy: mapping.approvalPolicy,
             approvalsReviewer: 'user',
             sandboxPolicy: codexSandboxPolicy('read-only', this.cwd),
-            ...codexNativeRequest({ thinking: 'low' })
+            ...codexNativeRequest(options.modelSettings ?? { thinking: 'low' })
           })
           .catch((error: unknown) => {
             clearTimeout(timer);
-            this.finishQuiet(threadId as string, 'failed', error instanceof Error ? error.message : 'Dictation cleanup failed.');
+            this.finishQuiet(
+              threadId as string,
+              'failed',
+              error instanceof Error ? error.message : options.failedMessage
+            );
           });
         const capture = this.quietCapture;
         const settle = (action: () => void) => {
@@ -619,11 +703,6 @@ export class CodexBackend implements AgentBackend {
         capture.resolve = (value) => settle(() => originalResolve(value));
         capture.reject = (error) => settle(() => originalReject(error));
       });
-      const text = dictationText(cleaned);
-      if (!text) {
-        throw new BackendError('provider', 'Dictation cleanup returned nothing.');
-      }
-      return text;
     } finally {
       this.expectQuietThread = false;
       if (threadId) {
@@ -936,11 +1015,11 @@ export class CodexBackend implements AgentBackend {
       if (text) {
         capture.resolve(text);
       } else {
-        capture.reject(new BackendError('provider', 'Dictation cleanup returned nothing.'));
+        capture.reject(new BackendError('provider', capture.emptyMessage));
       }
       return;
     }
-    capture.reject(new BackendError('provider', errorMessage || 'Dictation cleanup failed.'));
+    capture.reject(new BackendError('provider', errorMessage || capture.failedMessage));
   }
 
   private announceThread(threadId: string, model?: string): void {

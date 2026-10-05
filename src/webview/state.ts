@@ -182,6 +182,11 @@ export interface AppState {
    */
   contextView?: ContextView;
   /**
+   * Open workspace folders, used only to pretty-print paths in the transcript.
+   * Empty until the host sends a context snapshot.
+   */
+  workspaceRoots: readonly string[];
+  /**
    * False when every context category is disabled in settings, so the strip can
    * say context is off rather than reading as a workspace with nothing in it.
    */
@@ -315,6 +320,7 @@ export type Action =
       settingsEnabled: boolean;
       exclusions: string[];
       includeViewedFile: boolean;
+      workspaceRoots?: string[];
     }
   /** Toggle one item or category off for the next turn (or back on). */
   | { type: 'toggleContextExclusion'; key: string }
@@ -378,6 +384,7 @@ export const initialState: AppState = {
   attachments: [],
   modelCapabilityStatus: 'idle',
   contextSettingsEnabled: true,
+  workspaceRoots: [],
   contextExclusions: [],
   includeViewedFile: false,
   changeDeciding: false
@@ -535,10 +542,9 @@ export function reduce(state: AppState, action: Action): AppState {
       };
     case 'conversation': {
       const replay = action.replay ? action.replay.map(toTranscriptItemView(action.backendId)) : [];
-      const pendingUser =
-        action.keepPendingUserMessage && replay.length === 0
-          ? [...state.transcript].reverse().find((item) => item.kind === 'message' && item.role === 'user' && item.id.startsWith('local_'))
-          : undefined;
+      const pendingUser = action.keepPendingUserMessage
+        ? [...state.transcript].reverse().find((item) => item.kind === 'message' && item.role === 'user' && item.id.startsWith('local_'))
+        : undefined;
       // Exactly one pending prompt per request: drop any replayed
       // `approval-requested` card that is not the still-open request, then
       // re-inject the live one so a reload can never show none or two.
@@ -762,7 +768,8 @@ export function reduce(state: AppState, action: Action): AppState {
         contextView: action.view,
         contextSettingsEnabled: action.settingsEnabled,
         contextExclusions: action.exclusions,
-        includeViewedFile: action.includeViewedFile
+        includeViewedFile: action.includeViewedFile,
+        workspaceRoots: action.workspaceRoots ?? state.workspaceRoots
       };
     case 'setIncludeViewedFile':
       return { ...state, includeViewedFile: action.included };

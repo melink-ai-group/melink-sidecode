@@ -355,6 +355,11 @@ export type HostToWebviewMessage =
       exclusions: string[];
       /** Whether the file the user is viewing is included on the next turn. */
       includeViewedFile: boolean;
+      /**
+       * Open workspace folders. Chat cards use these to show a project path
+       * instead of a path that starts at the drive root.
+       */
+      workspaceRoots?: string[];
     }
   /**
    * The files the thread has changed, pushed on turn end and on webview reload.

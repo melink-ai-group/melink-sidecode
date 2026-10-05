@@ -33,6 +33,12 @@ export interface PersistedThreadRef {
    * path, which has no runtime session.
    */
   opencodeSessionId?: string;
+  /**
+   * Summary carried in from another provider. A resumed thread sends it again
+   * as standing context, because the destination runtime did not see the
+   * earlier turns.
+   */
+  handoverSummary?: string;
 }
 
 export interface LastUsedModel {

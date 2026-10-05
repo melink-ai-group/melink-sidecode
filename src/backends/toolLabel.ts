@@ -139,14 +139,6 @@ function firstLine(value: string): string {
   return value.split(/\r?\n/, 1)[0]?.trim() || value.trim();
 }
 
-function clip(value: string, max = 80): string {
-  const trimmed = value.trim();
-  if (trimmed.length <= max) {
-    return trimmed;
-  }
-  return `${trimmed.slice(0, max - 1)}…`;
-}
-
 function humanizeTool(tool: string): string {
   const words = tool.replace(/[._:-]+/g, ' ').trim();
   if (!words) {
@@ -166,16 +158,16 @@ export function friendlyToolTitle(tool: string, target?: string): string {
     case 'search':
     case 'codesearch':
     case 'rg':
-      return name ? `Searching for ${clip(name)}` : 'Searching';
+      return name ? `Searching for ${name}` : 'Searching';
     case 'glob':
     case 'find':
-      return name ? `Finding files ${clip(name)}` : 'Finding files';
+      return name ? `Finding files ${name}` : 'Finding files';
     case 'bash':
     case 'shell':
     case 'command':
     case 'exec':
     case 'powershell':
-      return name ? `Running ${clip(firstLine(name))}` : 'Running command';
+      return name ? `Running ${firstLine(name)}` : 'Running command';
     case 'edit':
     case 'patch':
     case 'strreplace':
@@ -193,13 +185,13 @@ export function friendlyToolTitle(tool: string, target?: string): string {
     case 'webfetch':
     case 'web_fetch':
     case 'fetch':
-      return name ? `Fetching ${clip(name)}` : 'Fetching';
+      return name ? `Fetching ${name}` : 'Fetching';
     case 'websearch':
     case 'web_search':
-      return name ? `Searching the web for ${clip(name)}` : 'Searching the web';
+      return name ? `Searching the web for ${name}` : 'Searching the web';
     default: {
       const verb = humanizeTool(tool);
-      return name ? `${verb} ${clip(name)}` : verb;
+      return name ? `${verb} ${name}` : verb;
     }
   }
 }
