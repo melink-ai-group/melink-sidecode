@@ -1,0 +1,79 @@
+name: Release
+
+# GitHub runs a push workflow from the branch that received the push.
+# This file must stay on main so a push to main packages and publishes.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  package-and-release:
+    name: Build, package, and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package extension
+        run: npm run package
+
+      - name: Write release notes
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}.${GITHUB_RUN_NUMBER}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "name=SideCode ${tag}" >> "$GITHUB_OUTPUT"
+
+          prev="$(git tag --list 'v*' --sort=-creatordate | head -n 1 || true)"
+          {
+            echo "## SideCode ${version}"
+            echo
+            echo "Install the attached \`.vsix\`: Extensions view → \`...\` → **Install from VSIX…**."
+            echo
+            echo "### Changes"
+            echo
+            if [ -n "${prev}" ]; then
+              git log "${prev}..HEAD" --no-merges --pretty=format:'- %s'
+            else
+              git log --no-merges -30 --pretty=format:'- %s'
+            fi
+            echo
+          } > release-notes.md
+
+          if ! grep -q '^- ' release-notes.md; then
+            echo "- Packaged SideCode ${version} from ${GITHUB_SHA::7}." >> release-notes.md
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.notes.outputs.tag }}
+          name: ${{ steps.notes.outputs.name }}
+          body_path: release-notes.md
+          files: melink-sidecode-*.vsix
+          make_latest: true
