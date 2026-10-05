@@ -11,10 +11,10 @@ import type {
 import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
 import { splitReplyClose } from './replyClose';
+import { plainRowText } from './plainRowText';
 import { visibleTranscriptText } from './visibleTranscript';
 import {
   AlertIcon,
-  ArrowIcon,
   BackIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -25,7 +25,7 @@ import {
   FileIcon,
   HistoryIcon,
   InfoIcon,
-  MicIcon,
+  MicSolidIcon,
   PaperclipIcon,
   PlusIcon,
   RefreshIcon,
@@ -35,7 +35,9 @@ import {
   ShieldIcon,
   SlidersIcon,
   SparkIcon,
+  SendSolidIcon,
   StopIcon,
+  StopSolidIcon,
   TerminalIcon
 } from './Icons';
 import { SettingsScreen } from './SettingsScreen';
@@ -1845,7 +1847,7 @@ export function App(): JSX.Element {
                   }}
                   onContextMenu={(event) => event.preventDefault()}
                 >
-                  <MicIcon />
+                  <MicSolidIcon />
                 </button>
               ) : null}
               {state.busy && !canSteer ? (
@@ -1856,7 +1858,7 @@ export function App(): JSX.Element {
                   title="Stop"
                   onClick={cancel}
                 >
-                  <StopIcon />
+                  <StopSolidIcon />
                 </button>
               ) : showMic ? null : (
                 <button
@@ -1867,7 +1869,7 @@ export function App(): JSX.Element {
                   disabled={!canSend}
                   onClick={send}
                 >
-                  <ArrowIcon />
+                  <SendSolidIcon />
                 </button>
               )}
             </div>
@@ -2918,7 +2920,7 @@ function AssistantReply({ text, settled }: { text: string; settled: boolean }): 
 }
 
 function reasoningSnippet(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+  return plainRowText(text);
 }
 
 function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
@@ -2998,7 +3000,7 @@ function NarrationRow({
   hideQuestions?: boolean;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const text = visibleTranscriptText(message.text, { hideQuestions });
+  const text = plainRowText(visibleTranscriptText(message.text, { hideQuestions }));
   const running = items.some((item) => item.status === 'streaming' || item.status === 'pending') || message.status === 'streaming';
   return (
     <article className={`narration${expanded ? ' narration--open' : ''}`}>

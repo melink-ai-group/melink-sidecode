@@ -33,6 +33,15 @@ test('a mixed lookup burst is one line with file and search counts', () => {
   assert.equal(activitySummary(entries[0].items).status, 'completed');
 });
 
+test('a thought used as the row title drops markdown markers', () => {
+  const summary = activitySummary([
+    row({ id: 't1', kind: 'reasoning', text: '**Adding tests**' }),
+    row({ id: 'c1', title: 'Running npm test' })
+  ]);
+  assert.equal(summary.label, 'Adding tests');
+  assert.equal(summary.detail, 'Ran 1 command');
+});
+
 test('a message starts a new line and reasoning stays inside the investigation', () => {
   const entries = groupTranscript([
     row({ id: 'r1', tool: 'read', title: 'Reading a.ts' }),

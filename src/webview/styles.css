@@ -2012,14 +2012,14 @@ body {
 }
 
 .composer-actions .context-meter {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   margin-left: 0;
 }
 
 .composer-actions .context-meter__ring {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
 }
 
 .composer-attach {
@@ -2035,9 +2035,15 @@ body {
 .composer-row .composer-action {
   --composer-mode: var(--melink-primary);
   --composer-mode-ink: var(--melink-surface);
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
+}
+
+.composer-row .composer-action .ico,
+.composer-row .icon-btn.icon-btn--primary.composer-action .ico {
+  width: 12px;
+  height: 12px;
 }
 
 .composer-row .composer-action--mode-plan {
@@ -2107,14 +2113,14 @@ body {
 }
 
 .icon-btn.composer-action--stop {
-  background: var(--composer-mode);
-  color: var(--composer-mode-ink);
+  background: color-mix(in srgb, var(--melink-surface) 82%, var(--vscode-foreground));
+  color: var(--melink-text-primary);
   border: 0;
 }
 
 .icon-btn.composer-action--stop:hover {
-  background: color-mix(in srgb, var(--composer-mode) 85%, black);
-  color: var(--composer-mode-ink);
+  background: var(--melink-surface);
+  color: var(--melink-text-primary);
 }
 
 @keyframes mic-pulse {
