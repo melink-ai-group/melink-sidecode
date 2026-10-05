@@ -36,7 +36,6 @@ import {
   effectivePermissionLevel,
   isDefaultMode,
   modeForcesReadOnly,
-  modeInstructions,
   modeRefusalReason
 } from './modes';
 import { questionRequestFromToolParams, SKIPPED_ANSWER, type QuestionAnswer } from '../questions';
@@ -58,7 +57,7 @@ import {
   classifyCodexAuthFailure,
   describeCodexAuth
 } from './codex/auth';
-import { buildCodexTurnInput } from './codex/turnInput';
+import { buildCodexTurnInput, planEscapeInstructions } from './codex/turnInput';
 import { refreshStoredChatgptAuth } from './codex/tokenRefresh';
 import type { Thread } from '../../schemas/v2/Thread';
 import type { ThreadItem } from '../../schemas/v2/ThreadItem';
@@ -172,6 +171,16 @@ export class CodexBackend implements AgentBackend {
    * replaces that field with the snapshot alone.
    */
   private readonly bakedMode = new Map<string, DefaultMode>();
+  /**
+   * Host thread ids whose saved developer instruction may still require Plan
+   * mode. A resume cannot replace that field while the thread is loaded, so
+   * the next Agent turn forks a new thread that does not carry it.
+   */
+  private readonly needsPlanEscape = new Set<string>();
+  /** Host thread id to the Codex thread that actually receives turns. */
+  private readonly liveThreads = new Map<string, string>();
+  /** Codex thread id back to the host thread id the sidebar is showing. */
+  private readonly hostThreads = new Map<string, string>();
   /** Snapshot last written into `developerInstructions`, so a refresh can replace it. */
   private readonly bakedSnapshot = new Map<string, string>();
   /** True while a resume is rewriting instructions, so its history is not replayed. */
@@ -430,11 +439,11 @@ export class CodexBackend implements AgentBackend {
         // decide without showing a prompt.
         approvalsReviewer: 'user',
         sandbox: mapping.sandbox,
-        // The pinned Codex schema exposes a native `developerInstructions` field
-        // on `thread/start` (verified against codex-cli 0.156.1 bindings in
-        // `schemas/`), so the mode instructions and the rendered project snapshot
-        // are delivered natively rather than as a synthetic first turn.
-        developerInstructions: combineInstructions(modeInstructions(mode), options?.context?.snapshot) ?? null
+        // Mode is not stored here. Codex keeps `developerInstructions` for the
+        // life of the loaded thread and ignores a later replacement, so a Plan
+        // instruction written at start would still block Build. The snapshot
+        // is the only persisted instruction. The mode is sent on each turn.
+        developerInstructions: options?.context?.snapshot ?? null
       })
       .catch((error: unknown) => this.fail(error));
     const threadId = response.thread.id;
@@ -442,6 +451,7 @@ export class CodexBackend implements AgentBackend {
     this.threadPermissions.set(threadId, requestedLevel);
     this.threadModes.set(threadId, mode);
     this.bakedMode.set(threadId, mode);
+    this.needsPlanEscape.delete(threadId);
     if (options?.context?.snapshot) {
       this.bakedSnapshot.set(threadId, options.context.snapshot);
     }
@@ -485,9 +495,10 @@ export class CodexBackend implements AgentBackend {
         throw failure;
       });
     this.threads.add(threadId);
-    // Resume replaces developerInstructions with the snapshot alone, so the
-    // baked mode no longer matches that field until the next mode change.
+    // A loaded thread keeps the developer instruction it was started with.
+    // Resume does not replace that field, so an Agent turn must fork first.
     this.bakedMode.delete(threadId);
+    this.needsPlanEscape.add(threadId);
     if (options?.context?.snapshot) {
       this.bakedSnapshot.set(threadId, options.context.snapshot);
     } else {
@@ -536,7 +547,7 @@ export class CodexBackend implements AgentBackend {
     // Fire the interrupt; the server answers with a `turn/completed` whose status
     // is `interrupted`, which resolves the turn as canceled. The result is not
     // awaited so `cancel()` stays synchronous, as the interface requires.
-    void connection.interruptTurn({ threadId: pending.threadId, turnId: pending.turnId });
+    void connection.interruptTurn({ threadId: this.liveThreadId(pending.threadId), turnId: pending.turnId });
   }
 
   /**
@@ -626,37 +637,36 @@ export class CodexBackend implements AgentBackend {
     const connection = await this.connect();
     const model = request.model ?? this.defaultModel;
 
-    // `developerInstructions` is set on thread/start and thread/resume. A mode
-    // switch or a re-primed snapshot rewrites that field before the turn. The
-    // workspace delta, the viewed file, and attachments ride on this turn's
-    // provider input. The stored user message stays `request.text`.
+    // Mode rides on this turn. A resumed thread may still be carrying the Plan
+    // instruction from when it was started; that is replaced by a fork before
+    // the turn. The workspace delta, the viewed file, and attachments ride on
+    // this turn's provider input. The stored user message stays `request.text`.
     const mode = isDefaultMode(request.mode) ? request.mode : this.threadModes.get(handle.threadId) ?? 'agent';
     const bakedMode = this.bakedMode.get(handle.threadId);
     const nextSnapshot = request.context?.snapshot;
-    // `undefined` means this process has not applied a mode since the thread was
-    // loaded (a resume, or a rewrite the server ignored). That must be written
-    // before the turn, or a Plan instruction from thread start stays in force.
-    const modeChanged = bakedMode !== mode;
-    const snapshotChanged = Boolean(
-      request.context?.priming && nextSnapshot && nextSnapshot !== this.bakedSnapshot.get(handle.threadId)
-    );
-    if (modeChanged || snapshotChanged) {
-      const instructions = combineInstructions(
-        modeInstructions(mode),
-        nextSnapshot ?? this.bakedSnapshot.get(handle.threadId)
-      );
-      if (instructions) {
-        try {
-          await this.rewriteInstructions(connection, handle.threadId, instructions, request.context?.workspaceRoot);
-          this.bakedMode.set(handle.threadId, mode);
-          if (nextSnapshot) {
-            this.bakedSnapshot.set(handle.threadId, nextSnapshot);
-          }
-        } catch {
-          logDiagnostic('Codex thread instructions could not be updated.');
-        }
+    // Build leaves Plan mode. The saved developer instruction still forbids
+    // implementation, and Codex will not replace it on this thread. Fork first.
+    let revokePlan = false;
+    if (mode === 'agent' && this.needsPlanEscape.has(handle.threadId)) {
+      revokePlan = true;
+      // Forking echoes the old thread. Hold those events until the fork returns,
+      // then release them before the real turn starts.
+      this.suppressHistory = true;
+      try {
+        await this.escapePlanInstruction(
+          connection,
+          handle.threadId,
+          nextSnapshot ?? this.bakedSnapshot.get(handle.threadId),
+          request.context?.workspaceRoot
+        );
+        this.needsPlanEscape.delete(handle.threadId);
+      } catch {
+        logDiagnostic('Codex could not leave the Plan-mode instruction.');
+      } finally {
+        this.suppressHistory = false;
       }
     }
+    this.bakedMode.set(handle.threadId, mode);
     this.threadModes.set(handle.threadId, mode);
     const input = buildCodexTurnInput({
       mode,
@@ -664,6 +674,7 @@ export class CodexBackend implements AgentBackend {
       context: request.context,
       attachments: request.attachments,
       bakedMode,
+      revokePlan,
       includeSnapshot: Boolean(request.context?.priming && nextSnapshot)
     });
 
@@ -687,7 +698,7 @@ export class CodexBackend implements AgentBackend {
     try {
       response = await connection
         .startTurn({
-          threadId: handle.threadId,
+          threadId: this.liveThreadId(handle.threadId),
           input,
           model: model || null,
           approvalPolicy: mapping.approvalPolicy,
@@ -729,7 +740,7 @@ export class CodexBackend implements AgentBackend {
       }
     }, 120_000);
     try {
-      await connection.compactThread({ threadId: handle.threadId }).catch((error: unknown) => this.fail(error));
+      await connection.compactThread({ threadId: this.liveThreadId(handle.threadId) }).catch((error: unknown) => this.fail(error));
       await turnDone;
     } catch (error) {
       if (this.pendingTurn?.threadId === handle.threadId && this.pendingTurn.compact) {
@@ -749,7 +760,7 @@ export class CodexBackend implements AgentBackend {
     }
     const connection = await this.connect();
     await connection.steerTurn({
-      threadId: handle.threadId,
+      threadId: this.liveThreadId(handle.threadId),
       expectedTurnId: pending.turnId,
       clientUserMessageId,
       input: [{ type: 'text', text, text_elements: [] }]
@@ -940,16 +951,17 @@ export class CodexBackend implements AgentBackend {
   }
 
   private handleNotification(notification: { method: string; params?: unknown }): void {
-    const params = notification.params ?? {};
+    const params = this.retargetParams(notification.params ?? {});
     if (this.swallowQuiet(notification.method, params)) {
       return;
     }
-    // Unsubscribing and resuming to replace instructions can echo history and
-    // thread lifecycle events. Drop them so the open chat is not replayed.
+    // Forking off a Plan-mode thread echoes that thread's history. Drop it so
+    // the open chat is not replayed under the same conversation.
     if (
       this.suppressHistory &&
       (notification.method.startsWith('item/') ||
         notification.method.startsWith('turn/') ||
+        notification.method === 'thread/started' ||
         notification.method === 'thread/status/changed' ||
         notification.method === 'thread/closed' ||
         notification.method === 'thread/deleted')
@@ -1223,16 +1235,17 @@ export class CodexBackend implements AgentBackend {
    * "always" or "session" for exactly this request.
    */
   private handleServerRequest(request: { id: number; method: string; params?: unknown }): void {
+    const params = this.retargetParams(request.params);
     if (request.method === 'account/chatgptAuthTokens/refresh') {
-      void this.handleAuthRefresh(request.id, request.params);
+      void this.handleAuthRefresh(request.id, params);
       return;
     }
     if (request.method === 'item/tool/requestUserInput') {
-      this.handleUserInputRequest(request.id, request.params);
+      this.handleUserInputRequest(request.id, params);
       return;
     }
     const origin = this.cwd;
-    const translated = translateApprovalRequest(request.method, request.params, origin);
+    const translated = translateApprovalRequest(request.method, params, origin);
     if (!translated) {
       // A method we do not know is answered method-not-found rather than left
       // hanging, so an unsupported request can never wedge the server.
@@ -1320,47 +1333,66 @@ export class CodexBackend implements AgentBackend {
     this.events.fire({ type: 'approval/requested', backendId: this.id, threadId, approval });
   }
 
+  /** The Codex thread that receives turns for a sidebar conversation. */
+  private liveThreadId(hostThreadId: string): string {
+    return this.liveThreads.get(hostThreadId) ?? hostThreadId;
+  }
+
+  /** Map a Codex thread id back to the conversation the sidebar is showing. */
+  private hostThreadId(codexThreadId: string): string {
+    return this.hostThreads.get(codexThreadId) ?? codexThreadId;
+  }
+
   /**
-   * Replace `developerInstructions` on a live thread.
-   *
-   * A resume of a thread that is still running ignores `developerInstructions`
-   * (Codex logs "override was provided and ignored while running"), so the Plan
-   * instruction from thread start stays in force. Unsubscribe first, then
-   * resume, so the new instructions are applied. `excludeTurns` keeps the
-   * response to metadata, and history notifications are swallowed until it
-   * returns. If the replacement resume fails, the thread is loaded again so
-   * the following turn still has a session.
+   * Rewrite thread ids on a server payload so a forked Codex thread stays
+   * attached to the conversation the user is looking at.
    */
-  private async rewriteInstructions(
+  private retargetParams(params: unknown): unknown {
+    if (!params || typeof params !== 'object') {
+      return params;
+    }
+    const record = { ...(params as Record<string, unknown>) };
+    if (typeof record.threadId === 'string') {
+      record.threadId = this.hostThreadId(record.threadId);
+    }
+    if (record.thread && typeof record.thread === 'object') {
+      const thread = { ...(record.thread as Record<string, unknown>) };
+      if (typeof thread.id === 'string') {
+        thread.id = this.hostThreadId(thread.id);
+      }
+      record.thread = thread;
+    }
+    return record;
+  }
+
+  /**
+   * Leave a saved Plan-mode developer instruction by forking.
+   *
+   * Codex ignores `developerInstructions` on a thread that is already loaded,
+   * and unsubscribing does not unload it. A fork is a new thread, so the
+   * replacement instruction is the one the model actually receives. Events are
+   * translated back to the original thread id.
+   */
+  private async escapePlanInstruction(
     connection: AppServerConnection,
-    threadId: string,
-    developerInstructions: string,
+    hostThreadId: string,
+    snapshot: string | undefined,
     cwd?: string
   ): Promise<void> {
-    const root = cwd ?? this.cwd;
-    this.suppressHistory = true;
-    try {
-      await connection.unsubscribeThread(threadId);
-      try {
-        await connection.resumeThread(
-          {
-            threadId,
-            cwd: root,
-            developerInstructions,
-            approvalsReviewer: 'user',
-            excludeTurns: true
-          },
-          15_000
-        );
-      } catch (error) {
-        await connection
-          .resumeThread({ threadId, cwd: root, approvalsReviewer: 'user', excludeTurns: true }, 15_000)
-          .catch(() => undefined);
-        throw error;
-      }
-    } finally {
-      this.suppressHistory = false;
-    }
+    const response = await connection.forkThread(
+      {
+        threadId: this.liveThreadId(hostThreadId),
+        cwd: cwd ?? this.cwd,
+        developerInstructions: planEscapeInstructions(snapshot),
+        approvalsReviewer: 'user',
+        excludeTurns: true
+      },
+      15_000
+    );
+    const forkedId = response.thread.id;
+    this.liveThreads.set(hostThreadId, forkedId);
+    this.hostThreads.set(forkedId, hostThreadId);
+    this.threads.add(forkedId);
   }
 
   /**
@@ -1493,15 +1525,6 @@ export class CodexBackend implements AgentBackend {
   }
 }
 
-/**
- * Combine a mode's developer instructions with the rendered project snapshot
- * into the single native `developerInstructions` string.
- *
- * A native instructions field exists on `thread/start` and `thread/resume` in
- * the pinned bindings, so context is delivered natively rather than as a
- * synthetic first turn. Either part may be absent; both absent yields
- * `undefined`, which leaves the CLI default untouched.
- */
 /** One answer string per question id, in the Codex user-input response shape. */
 function userInputResponse(
   questionIds: readonly string[],
@@ -1515,11 +1538,6 @@ function userInputResponse(
     body[id] = { answers: [text] };
   }
   return { answers: body };
-}
-
-function combineInstructions(mode: string | undefined, snapshot: string | undefined): string | undefined {
-  const parts = [mode, snapshot].filter((part): part is string => Boolean(part && part.trim().length > 0));
-  return parts.length > 0 ? parts.join('\n\n') : undefined;
 }
 
 /**
