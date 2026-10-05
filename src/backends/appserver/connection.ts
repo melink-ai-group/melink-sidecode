@@ -547,8 +547,12 @@ export class AppServerConnection implements Disposable {
     return this.request<unknown>('thread/delete', { threadId });
   }
 
-  resumeThread(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
-    return this.request<ThreadResumeResponse>('thread/resume', params);
+  resumeThread(params: ThreadResumeParams, timeoutMs?: number): Promise<ThreadResumeResponse> {
+    return this.request<ThreadResumeResponse>(
+      'thread/resume',
+      params,
+      timeoutMs === undefined ? {} : { timeoutMs, retryable: false }
+    );
   }
 
   listThreads(params: ThreadListParams): Promise<ThreadListResponse> {
