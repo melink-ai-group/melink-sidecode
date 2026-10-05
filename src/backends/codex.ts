@@ -58,11 +58,12 @@ import {
   classifyCodexAuthFailure,
   describeCodexAuth
 } from './codex/auth';
+import { buildCodexTurnInput } from './codex/turnInput';
+import { refreshStoredChatgptAuth } from './codex/tokenRefresh';
 import type { Thread } from '../../schemas/v2/Thread';
 import type { ThreadItem } from '../../schemas/v2/ThreadItem';
 import type { Turn } from '../../schemas/v2/Turn';
 import type { ThreadStatus as WireThreadStatus } from '../../schemas/v2/ThreadStatus';
-import type { UserInput } from '../../schemas/v2/UserInput';
 import type { ItemStartedNotification } from '../../schemas/v2/ItemStartedNotification';
 import type { ItemCompletedNotification } from '../../schemas/v2/ItemCompletedNotification';
 import type { TurnStartedNotification } from '../../schemas/v2/TurnStartedNotification';
@@ -77,6 +78,7 @@ import type { ContextCompactedNotification } from '../../schemas/v2/ContextCompa
 import { codexContextUsed, finiteTokenCount } from './contextUsage';
 import type { FileChangePatchUpdatedNotification } from '../../schemas/v2/FileChangePatchUpdatedNotification';
 import type { PermissionsRequestApprovalParams } from '../../schemas/v2/PermissionsRequestApprovalParams';
+import type { ChatgptAuthTokensRefreshParams } from '../../schemas/v2/ChatgptAuthTokensRefreshParams';
 import type { RequestPermissionProfile } from '../../schemas/v2/RequestPermissionProfile';
 import {
   commandDecision,
@@ -165,6 +167,15 @@ export class CodexBackend implements AgentBackend {
   private readonly threadPermissions = new Map<string, PermissionLevel>();
   /** Mode each live thread was started in, so a turn re-applies it. */
   private readonly threadModes = new Map<string, DefaultMode>();
+  /**
+   * Mode last written into `developerInstructions`. Absent after a resume, which
+   * replaces that field with the snapshot alone.
+   */
+  private readonly bakedMode = new Map<string, DefaultMode>();
+  /** Snapshot last written into `developerInstructions`, so a refresh can replace it. */
+  private readonly bakedSnapshot = new Map<string, string>();
+  /** True while a resume is rewriting instructions, so its history is not replayed. */
+  private suppressHistory = false;
   private connection?: AppServerConnection;
   private connecting?: Promise<AppServerConnection>;
   private pendingTurn?: PendingTurn;
@@ -430,6 +441,10 @@ export class CodexBackend implements AgentBackend {
     this.threads.add(threadId);
     this.threadPermissions.set(threadId, requestedLevel);
     this.threadModes.set(threadId, mode);
+    this.bakedMode.set(threadId, mode);
+    if (options?.context?.snapshot) {
+      this.bakedSnapshot.set(threadId, options.context.snapshot);
+    }
     const resolvedModel = response.model || model || undefined;
     const handle: ThreadHandle = {
       backendId: this.id,
@@ -470,6 +485,14 @@ export class CodexBackend implements AgentBackend {
         throw failure;
       });
     this.threads.add(threadId);
+    // Resume replaces developerInstructions with the snapshot alone, so the
+    // baked mode no longer matches that field until the next mode change.
+    this.bakedMode.delete(threadId);
+    if (options?.context?.snapshot) {
+      this.bakedSnapshot.set(threadId, options.context.snapshot);
+    } else {
+      this.bakedSnapshot.delete(threadId);
+    }
     const model = response.model || undefined;
     this.announceThread(threadId, model);
     return {
@@ -590,6 +613,8 @@ export class CodexBackend implements AgentBackend {
         await connection.deleteThread(threadId).catch(() => undefined);
         this.quietThreads.delete(threadId);
         this.threadModes.delete(threadId);
+        this.bakedMode.delete(threadId);
+        this.bakedSnapshot.delete(threadId);
         if (this.quietCapture?.threadId === threadId) {
           this.quietCapture = undefined;
         }
@@ -601,30 +626,46 @@ export class CodexBackend implements AgentBackend {
     const connection = await this.connect();
     const model = request.model ?? this.defaultModel;
 
-    // Project context. The pinned Codex app-server (verified against the
-    // `schemas/` bindings for codex-cli 0.156.1) exposes native
-    // `baseInstructions`/`developerInstructions` only on `thread/start` and
-    // `thread/resume`, and no per-turn instructions field on `turn/start`. The
-    // snapshot is therefore primed natively at session start and re-primed on
-    // resume (see `startThread` / `resumeThread`); mid-thread workspace changes
-    // are left to Codex's own file access, which is rooted at the workspace cwd.
-    // `request.context.delta` is deliberately unused here: `thread/inject_items`
-    // would append to the model-visible history and could resurface on replay,
-    // and fabricating a user-role turn would be both wrong and visible. This is
-    // a deliberate limitation of the pinned protocol, not an oversight.
-
+    // `developerInstructions` is set on thread/start and thread/resume. A mode
+    // switch or a re-primed snapshot rewrites that field before the turn. The
+    // workspace delta, the viewed file, and attachments ride on this turn's
+    // provider input. The stored user message stays `request.text`.
     const mode = isDefaultMode(request.mode) ? request.mode : this.threadModes.get(handle.threadId) ?? 'agent';
-    this.threadModes.set(handle.threadId, mode);
-    // Mode instructions exist on thread/start only. This turn's provider input
-    // carries the current mode so a later switch still reaches the model.
-    // The stored user message stays `request.text`.
-    const input: UserInput[] = [
-      {
-        type: 'text',
-        text: providerTurnText(mode, request.text, request.context?.attachedFile),
-        text_elements: []
+    const bakedMode = this.bakedMode.get(handle.threadId);
+    const nextSnapshot = request.context?.snapshot;
+    const modeChanged = bakedMode !== undefined && bakedMode !== mode;
+    const snapshotChanged = Boolean(
+      request.context?.priming && nextSnapshot && nextSnapshot !== this.bakedSnapshot.get(handle.threadId)
+    );
+    if (modeChanged || snapshotChanged) {
+      const instructions = combineInstructions(
+        modeInstructions(mode),
+        nextSnapshot ?? this.bakedSnapshot.get(handle.threadId)
+      );
+      if (instructions) {
+        try {
+          await this.rewriteInstructions(connection, handle.threadId, instructions, request.context?.workspaceRoot);
+          this.bakedMode.set(handle.threadId, mode);
+          if (nextSnapshot) {
+            this.bakedSnapshot.set(handle.threadId, nextSnapshot);
+          }
+        } catch {
+          logDiagnostic('Codex thread instructions could not be updated.');
+        }
       }
-    ];
+    }
+    if (!this.bakedMode.has(handle.threadId)) {
+      this.bakedMode.set(handle.threadId, mode);
+    }
+    this.threadModes.set(handle.threadId, mode);
+    const input = buildCodexTurnInput({
+      mode,
+      text: request.text,
+      context: request.context,
+      attachments: request.attachments,
+      bakedMode,
+      includeSnapshot: Boolean(request.context?.priming && nextSnapshot)
+    });
 
     // A level change applies to this turn and subsequent ones, and both the
     // approval policy and the sandbox policy are overridden together so a level
@@ -903,6 +944,14 @@ export class CodexBackend implements AgentBackend {
     if (this.swallowQuiet(notification.method, params)) {
       return;
     }
+    // A resume that only rewrites instructions can echo the thread's history.
+    // Drop those item and turn events so the open chat is not replayed.
+    if (
+      this.suppressHistory &&
+      (notification.method.startsWith('item/') || notification.method.startsWith('turn/'))
+    ) {
+      return;
+    }
     switch (notification.method) {
       case 'thread/started': {
         const { thread } = params as ThreadStartedNotification;
@@ -1170,6 +1219,10 @@ export class CodexBackend implements AgentBackend {
    * "always" or "session" for exactly this request.
    */
   private handleServerRequest(request: { id: number; method: string; params?: unknown }): void {
+    if (request.method === 'account/chatgptAuthTokens/refresh') {
+      void this.handleAuthRefresh(request.id, request.params);
+      return;
+    }
     if (request.method === 'item/tool/requestUserInput') {
       this.handleUserInputRequest(request.id, request.params);
       return;
@@ -1261,6 +1314,51 @@ export class CodexBackend implements AgentBackend {
       this.refuseApproval(pending, APPROVAL_TIMEOUT_REASON);
     }, APPROVAL_WAIT_MS);
     this.events.fire({ type: 'approval/requested', backendId: this.id, threadId, approval });
+  }
+
+  /**
+   * Replace `developerInstructions` on a live thread. `excludeTurns` keeps the
+   * response to metadata, and history notifications are swallowed until it
+   * returns. A timeout or a refusal leaves the turn free to carry the update
+   * in its own provider input.
+   */
+  private async rewriteInstructions(
+    connection: AppServerConnection,
+    threadId: string,
+    developerInstructions: string,
+    cwd?: string
+  ): Promise<void> {
+    this.suppressHistory = true;
+    try {
+      await connection.resumeThread(
+        {
+          threadId,
+          cwd: cwd ?? this.cwd,
+          developerInstructions,
+          approvalsReviewer: 'user',
+          excludeTurns: true
+        },
+        15_000
+      );
+    } finally {
+      this.suppressHistory = false;
+    }
+  }
+
+  /**
+   * Answer `account/chatgptAuthTokens/refresh` from the CLI's saved ChatGPT
+   * login. The request is answered either way, so an expired token cannot
+   * leave the turn waiting. The token itself is never logged or shown.
+   */
+  private async handleAuthRefresh(rpcId: number, params: unknown): Promise<void> {
+    const previousAccountId = (params as ChatgptAuthTokensRefreshParams | undefined)?.previousAccountId;
+    try {
+      const refreshed = await refreshStoredChatgptAuth(previousAccountId);
+      this.connection?.respond(rpcId, refreshed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Codex could not refresh the ChatGPT login.';
+      this.connection?.respondError(rpcId, -32000, message);
+    }
   }
 
   /**
@@ -1386,15 +1484,6 @@ export class CodexBackend implements AgentBackend {
  * synthetic first turn. Either part may be absent; both absent yields
  * `undefined`, which leaves the CLI default untouched.
  */
-/** Provider-only turn text. Mode instructions are not written into the transcript. */
-function providerTurnText(mode: DefaultMode, text: string, attachedFile?: string): string {
-  const instructions = modeInstructions(mode);
-  const parts = [instructions, attachedFile, text].filter(
-    (part): part is string => Boolean(part && part.trim().length > 0)
-  );
-  return parts.join('\n\n');
-}
-
 /** One answer string per question id, in the Codex user-input response shape. */
 function userInputResponse(
   questionIds: readonly string[],
