@@ -15,6 +15,19 @@ export interface OpenChatTab {
   blank: boolean;
 }
 
+/** Unsent composer text is capped so a workspace-state write stays bounded. */
+export const COMPOSER_DRAFT_LIMIT = 200_000;
+
+/** Attachment metadata stored with an open tab. File bytes are never included. */
+export interface DraftAttachment {
+  id: string;
+  name: string;
+  path?: string;
+  mimeType: string;
+  size?: number;
+  kind: 'image' | 'audio' | 'text' | 'file';
+}
+
 export interface ChatTabState {
   backendId?: string;
   threadId?: string;
@@ -22,6 +35,10 @@ export interface ChatTabState {
   title?: string;
   /** The tab that was visible when the sidebar was last saved. */
   active?: boolean;
+  /** Unsent composer text for this tab. */
+  draftText?: string;
+  /** Unsent composer files for this tab. Metadata only. */
+  draftAttachments?: DraftAttachment[];
 }
 
 /**
@@ -80,6 +97,8 @@ export function reorderById<T extends { id: string }>(
   return next;
 }
 
+const DRAFT_KINDS = new Set<DraftAttachment['kind']>(['image', 'audio', 'text', 'file']);
+
 /** One saved sidebar tab, from workspace state. */
 export function parseChatTabState(state: unknown): ChatTabState {
   if (!state || typeof state !== 'object') {
@@ -89,11 +108,61 @@ export function parseChatTabState(state: unknown): ChatTabState {
   const threadId = typeof record.threadId === 'string' && record.threadId ? record.threadId : undefined;
   const backendId = typeof record.backendId === 'string' && record.backendId ? record.backendId : undefined;
   const title = typeof record.title === 'string' && record.title.trim() ? record.title : undefined;
+  const draftText = parseDraftText(record.draftText);
+  const draftAttachments = parseDraftAttachments(record.draftAttachments);
   return {
     blank: !(threadId && backendId),
     ...(backendId ? { backendId } : {}),
     ...(threadId ? { threadId } : {}),
     ...(title ? { title } : {}),
-    ...(record.active === true ? { active: true } : {})
+    ...(record.active === true ? { active: true } : {}),
+    ...(draftText ? { draftText } : {}),
+    ...(draftAttachments.length > 0 ? { draftAttachments } : {})
   };
+}
+
+function parseDraftText(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const text = value.slice(0, COMPOSER_DRAFT_LIMIT);
+  return text.length > 0 ? text : undefined;
+}
+
+/** Drop malformed chips. Inline bytes are ignored even if a saved record has them. */
+export function parseDraftAttachments(value: unknown): DraftAttachment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const attachments: DraftAttachment[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const kind = record.kind;
+    if (typeof record.id !== 'string' || !record.id) {
+      continue;
+    }
+    if (typeof record.name !== 'string' || !record.name) {
+      continue;
+    }
+    if (typeof record.mimeType !== 'string' || !record.mimeType) {
+      continue;
+    }
+    if (typeof kind !== 'string' || !DRAFT_KINDS.has(kind as DraftAttachment['kind'])) {
+      continue;
+    }
+    const path = typeof record.path === 'string' && record.path ? record.path : undefined;
+    const size = typeof record.size === 'number' && Number.isFinite(record.size) ? record.size : undefined;
+    attachments.push({
+      id: record.id,
+      name: record.name,
+      mimeType: record.mimeType,
+      kind: kind as DraftAttachment['kind'],
+      ...(path ? { path } : {}),
+      ...(size !== undefined ? { size } : {})
+    });
+  }
+  return attachments;
 }

@@ -49,3 +49,21 @@ test('restored tab state resumes a thread and treats anything else as blank', ()
     title: 'Fix the login'
   });
 });
+
+test('restored tab state keeps the unsent composer and drops file bytes', () => {
+  assert.deepEqual(
+    parseChatTabState({
+      blank: true,
+      draftText: 'finish this',
+      draftAttachments: [
+        { id: 'a1', name: 'shot.png', path: '/w/shot.png', mimeType: 'image/png', kind: 'image', dataUrl: 'data:image/png;base64,aaaa' },
+        { id: 'bad', name: 'nope.txt', mimeType: 'text/plain', kind: 'other' }
+      ]
+    }),
+    {
+      blank: true,
+      draftText: 'finish this',
+      draftAttachments: [{ id: 'a1', name: 'shot.png', path: '/w/shot.png', mimeType: 'image/png', kind: 'image' }]
+    }
+  );
+});

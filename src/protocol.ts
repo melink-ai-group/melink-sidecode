@@ -297,6 +297,12 @@ export type HostToWebviewMessage =
   | { type: 'threads'; backendId: string; threads: ThreadSummary[] }
   /** Open sidebar chat tabs. The webview paints the strip and shows the active one. */
   | { type: 'chatTabs'; tabs: ChatTabView[] }
+  /**
+   * Unsent composer text and files for one tab. Sent when that tab is shown so a
+   * reload can put the same draft back. Inline image bytes are included only so
+   * the chip can preview a file the host just re-read.
+   */
+  | { type: 'composerDraft'; tabId: string; text: string; attachments: Attachment[] }
   | { type: 'settings'; settings: SettingsSnapshot }
   | { type: 'permissions'; permissions: PermissionSnapshot }
   | { type: 'modes'; modes: ModeSnapshot }
@@ -495,8 +501,13 @@ export type WebviewToHostMessage =
   | { type: 'compactContext'; usedTokens: number; maxTokens: number }
   | { type: 'listThreads'; backendId: string }
   | { type: 'resumeThread'; backendId: string; threadId: string }
-  /** Open another sidebar chat tab. An existing blank tab is focused instead of stacking another. */
-  | { type: 'newChat' }
+  /**
+   * Open another sidebar chat tab. An existing blank tab is focused instead of
+   * stacking another. The unsent composer is copied onto that tab.
+   */
+  | { type: 'newChat'; text?: string; attachments?: Attachment[] }
+  /** Save the unsent composer for one open tab so a reload can restore it. */
+  | { type: 'composerDraft'; tabId?: string; text: string; attachments: Attachment[] }
   /** Show the sidebar tab for this thread, or open one and resume it. */
   | { type: 'openThread'; backendId: string; threadId: string }
   /** Bring one open sidebar chat tab to the front. */
