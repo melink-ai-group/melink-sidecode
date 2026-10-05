@@ -17,6 +17,12 @@ export function hasIgnoredSegment(relPath: string): boolean {
     .some((segment) => IGNORED_SEGMENTS.has(segment));
 }
 
+/** One `.gitignore`, rooted at a workspace-relative directory. `''` is the workspace root. */
+export interface GitignoreSource {
+  directory: string;
+  text: string;
+}
+
 /**
  * True when a workspace-relative path is gitignored or sits in an ignored
  * directory. `gitignore` is the text of the root `.gitignore`, when one exists.
@@ -24,19 +30,134 @@ export function hasIgnoredSegment(relPath: string): boolean {
  * directory names above.
  */
 export function isIgnoredRelPath(relPath: string, gitignore?: string): boolean {
+  const sources = gitignore ? [{ directory: '', text: gitignore }] : [];
+  return excludedByIgnore(relPath, sources);
+}
+
+/**
+ * True when any `.gitignore` from the workspace root down to the file excludes
+ * the path. Parent files are applied first; a later rule, including one in a
+ * deeper `.gitignore`, wins. A negation cannot bring back a file whose parent
+ * directory is excluded.
+ */
+export function excludedByIgnore(relPath: string, sources: readonly GitignoreSource[]): boolean {
   const normalized = posix(relPath).replace(/^\.\//, '').replace(/^\/+/, '');
   if (normalized.length === 0 || hasIgnoredSegment(normalized)) {
     return true;
   }
-  if (!gitignore) {
-    return false;
+  const state: IgnoreState = { ignored: false, excludedDirs: [] };
+  const ordered = [...sources].sort((a, b) => directoryDepth(a.directory) - directoryDepth(b.directory));
+  for (const source of ordered) {
+    const directory = posix(source.directory).replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/$/, '');
+    if (directory && normalized !== directory && !normalized.startsWith(`${directory}/`)) {
+      continue;
+    }
+    const local = directory ? normalized.slice(directory.length + 1) : normalized;
+    if (local.length === 0) {
+      continue;
+    }
+    applyRules(normalized, directory, local, source.text, state);
   }
-  return gitignoreMatches(normalized, gitignore);
+  return state.ignored;
 }
 
-/** Last matching rule wins, including a later `!` negation. */
-function gitignoreMatches(relPath: string, text: string): boolean {
-  let ignored = false;
+/** A binary, an ignored directory, or a gitignored path is not a review row. */
+export function listedForReview(
+  file: { binary: boolean; relPath: string },
+  sources: readonly GitignoreSource[]
+): boolean {
+  return !file.binary && !excludedByIgnore(file.relPath, sources);
+}
+
+/**
+ * The workspace root that contains `relPath`, derived from the absolute path.
+ * Undefined when the relative path is not a suffix of the absolute path.
+ */
+export function workspaceRootOf(absPath: string, relPath: string): string | undefined {
+  const abs = posix(absPath).replace(/\/+$/, '');
+  const rel = posix(relPath).replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/+$/, '');
+  if (rel.length === 0) {
+    return abs;
+  }
+  const suffix = `/${rel}`;
+  if (!abs.endsWith(suffix)) {
+    return undefined;
+  }
+  return abs.slice(0, -suffix.length);
+}
+
+/**
+ * Every `.gitignore` from the workspace root down to the parent of `relPath`.
+ * A missing file is cached as absent so a review of many files reads each
+ * `.gitignore` once.
+ */
+export async function reviewSources(
+  root: string,
+  relPath: string,
+  readFile: (absPath: string) => Promise<Uint8Array | undefined>,
+  cache: Map<string, string | null>
+): Promise<GitignoreSource[]> {
+  const base = posix(root).replace(/\/+$/, '');
+  const sources: GitignoreSource[] = [];
+  for (const directory of parentDirectories(relPath)) {
+    const filePath = directory ? `${base}/${directory}/.gitignore` : `${base}/.gitignore`;
+    let text = cache.get(filePath);
+    if (text === undefined) {
+      const bytes = await readFile(filePath);
+      text = bytes ? new TextDecoder().decode(bytes) : null;
+      cache.set(filePath, text);
+    }
+    if (text) {
+      sources.push({ directory, text });
+    }
+  }
+  return sources;
+}
+
+/** Files the changes strip and the review page should show, in the same order. */
+export async function filterListedFiles<T extends { absPath: string; relPath: string; binary: boolean }>(
+  files: readonly T[],
+  readFile: (absPath: string) => Promise<Uint8Array | undefined>
+): Promise<T[]> {
+  const cache = new Map<string, string | null>();
+  const listed: T[] = [];
+  for (const file of files) {
+    const root = workspaceRootOf(file.absPath, file.relPath);
+    const sources = root ? await reviewSources(root, file.relPath, readFile, cache) : [];
+    if (listedForReview(file, sources)) {
+      listed.push(file);
+    }
+  }
+  return listed;
+}
+
+interface IgnoreState {
+  ignored: boolean;
+  /** Workspace-relative directory prefixes a rule excluded. */
+  excludedDirs: string[];
+}
+
+type RuleMatch = { kind: 'file' } | { kind: 'dir'; prefix: string };
+
+function directoryDepth(directory: string): number {
+  const normalized = posix(directory).replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/$/, '');
+  return normalized.length === 0 ? 0 : normalized.split('/').length;
+}
+
+/** Parent directories of a file, starting at the workspace root. */
+function parentDirectories(relPath: string): string[] {
+  const parts = posix(relPath).replace(/^\.\//, '').replace(/^\/+/, '').split('/').filter((part) => part.length > 0);
+  parts.pop();
+  const dirs = [''];
+  let acc = '';
+  for (const part of parts) {
+    acc = acc ? `${acc}/${part}` : part;
+    dirs.push(acc);
+  }
+  return dirs;
+}
+
+function applyRules(fullPath: string, directory: string, localPath: string, text: string, state: IgnoreState): void {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (line.length === 0 || line.startsWith('#')) {
@@ -47,14 +168,45 @@ function gitignoreMatches(relPath: string, text: string): boolean {
     if (pattern.length === 0 || pattern.startsWith('#')) {
       continue;
     }
-    if (ruleMatches(relPath, pattern)) {
-      ignored = !negated;
+    const matched = classifyMatch(localPath, pattern);
+    if (!matched) {
+      continue;
+    }
+    if (!negated) {
+      state.ignored = true;
+      if (matched.kind === 'dir') {
+        state.excludedDirs.push(joinDir(directory, matched.prefix));
+      }
+      continue;
+    }
+    if (matched.kind === 'dir') {
+      const prefix = joinDir(directory, matched.prefix);
+      if (parentExcluded(prefix, state.excludedDirs)) {
+        continue;
+      }
+      state.excludedDirs = state.excludedDirs.filter((dir) => dir !== prefix && !dir.startsWith(`${prefix}/`));
+      state.ignored = contained(fullPath, state.excludedDirs);
+      continue;
+    }
+    if (!contained(fullPath, state.excludedDirs)) {
+      state.ignored = false;
     }
   }
-  return ignored;
 }
 
-function ruleMatches(relPath: string, pattern: string): boolean {
+function joinDir(directory: string, prefix: string): string {
+  return directory.length === 0 ? prefix : `${directory}/${prefix}`;
+}
+
+function contained(relPath: string, dirs: readonly string[]): boolean {
+  return dirs.some((dir) => relPath === dir || relPath.startsWith(`${dir}/`));
+}
+
+function parentExcluded(dir: string, dirs: readonly string[]): boolean {
+  return dirs.some((excluded) => excluded !== dir && dir.startsWith(`${excluded}/`));
+}
+
+function classifyMatch(relPath: string, pattern: string): RuleMatch | undefined {
   const anchored = pattern.startsWith('/');
   let body = anchored ? pattern.slice(1) : pattern;
   const directory = body.endsWith('/');
@@ -62,33 +214,42 @@ function ruleMatches(relPath: string, pattern: string): boolean {
     body = body.slice(0, -1);
   }
   if (body.length === 0) {
-    return false;
+    return undefined;
   }
   const expression = globToRegExp(body);
   if (anchored || pattern.includes('/')) {
-    return pathMatches(relPath, expression, directory);
+    return classifyPath(relPath, expression, directory);
   }
   const parts = relPath.split('/');
   for (let index = 0; index < parts.length; index += 1) {
     const suffix = parts.slice(index).join('/');
-    if (pathMatches(suffix, expression, directory)) {
-      return true;
+    const found = classifyPath(suffix, expression, directory);
+    if (!found) {
+      continue;
     }
+    if (found.kind === 'file') {
+      return found;
+    }
+    const lead = parts.slice(0, index);
+    const prefix = [...lead, ...found.prefix.split('/')].filter((part) => part.length > 0).join('/');
+    return { kind: 'dir', prefix };
   }
-  return false;
+  return undefined;
 }
 
-/** A pattern matches the path itself, or a directory and everything inside it. */
-function pathMatches(relPath: string, expression: RegExp, directory: boolean): boolean {
+function classifyPath(relPath: string, expression: RegExp, directory: boolean): RuleMatch | undefined {
   if (expression.test(relPath)) {
-    return true;
+    return directory ? { kind: 'dir', prefix: relPath } : { kind: 'file' };
   }
   const slash = relPath.indexOf('/');
   if (slash === -1) {
-    return false;
+    return undefined;
   }
   const parent = relPath.slice(0, slash);
-  return expression.test(parent) && (directory || true);
+  if (!expression.test(parent)) {
+    return undefined;
+  }
+  return { kind: 'dir', prefix: parent };
 }
 
 function globToRegExp(pattern: string): RegExp {

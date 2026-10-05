@@ -310,8 +310,8 @@ function TodoList({
           </span>
         </button>
         {plan.path ? (
-          <button className="btn btn--link" type="button" onClick={onOpenPlan}>
-            Open plan
+          <button className="icon-btn" type="button" title="Open plan" aria-label="Open plan" onClick={onOpenPlan}>
+            <FileIcon />
           </button>
         ) : null}
       </header>
@@ -361,29 +361,39 @@ function TodoRow({ step, live }: { step: TodoStep; live: boolean }): JSX.Element
           : '';
   return (
     <li className={`todo__item${statusClass}`}>
-      <span className="todo__mark" aria-hidden="true">
-        {step.status === 'completed' ? (
-          <CheckIcon className="ico ico--xs" />
-        ) : step.status === 'denied' ? (
-          <CrossIcon className="ico ico--xs" />
-        ) : running ? (
-          <span className="spinner" />
-        ) : (
-          <span className="todo__dot" />
-        )}
-      </span>
+      <TodoStatus status={step.status} running={running} />
       <span className="todo__text">{step.text}</span>
-      <span className="spacer" />
-      <span
-        className={
-          'todo__status' +
-          (step.status === 'completed' ? ' todo__status--done' : '') +
-          (step.status === 'denied' ? ' todo__status--denied' : '')
-        }
-      >
-        {statusLabel(step.status, running)}
-      </span>
     </li>
+  );
+}
+
+function TodoStatus({ status, running }: { status: TodoStepStatus; running: boolean }): JSX.Element {
+  const label = statusLabel(status, running);
+  if (running) {
+    return (
+      <span className="status-chip status-chip--icon status-chip--running" title={label} role="status" aria-label={label}>
+        <span className="spinner" aria-hidden="true" />
+      </span>
+    );
+  }
+  if (status === 'completed') {
+    return (
+      <span className="status-chip status-chip--icon status-chip--done" title={label} role="img" aria-label={label}>
+        <CheckIcon />
+      </span>
+    );
+  }
+  if (status === 'denied') {
+    return (
+      <span className="status-chip status-chip--icon status-chip--failed" title={label} role="img" aria-label={label}>
+        <CrossIcon />
+      </span>
+    );
+  }
+  return (
+    <span className="status-chip status-chip--icon" title={label} role="img" aria-label={label}>
+      <span className="todo__dot" />
+    </span>
   );
 }
 

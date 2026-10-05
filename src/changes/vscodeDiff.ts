@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ChangeStatus } from '../backends/types';
+import { filterListedFiles } from './ignore';
 import type { JournalFileEntry, JournalTurn } from './journal';
 import { sessionChangeSet, type SessionFile } from './sessionFiles';
 import {
@@ -165,7 +166,8 @@ export class NativeDiffService implements vscode.Disposable {
    * path so the user can walk file to file the way Source Control does.
    */
   async openTurnChanges(input: OpenTurnChangesInput): Promise<NativeDiffResult> {
-    const files = this.sessionFiles(input.turnId);
+    const recorded = this.sessionFiles(input.turnId);
+    const files = recorded ? await listedSessionFiles(recorded) : undefined;
     if (!files || files.length === 0) {
       return this.report('That turn has no recorded changes to open.');
     }
@@ -332,6 +334,22 @@ export class NativeDiffService implements vscode.Disposable {
       // A host that does not register the command degrades to a no-op.
     }
   }
+}
+
+/** The same rows the review page shows: no binaries, no gitignored paths. */
+async function listedSessionFiles(files: readonly SessionFile[]): Promise<SessionFile[]> {
+  const listed = await filterListedFiles(
+    files.map((file) => file.entry),
+    async (path) => {
+      try {
+        return await vscode.workspace.fs.readFile(vscode.Uri.file(path));
+      } catch {
+        return undefined;
+      }
+    }
+  );
+  const visible = new Set(listed.map((entry) => entry.relPath));
+  return files.filter((file) => visible.has(file.entry.relPath));
 }
 
 /** A human title for a diff, honest about the status being shown. */

@@ -428,11 +428,88 @@ export function userAsksToRevisePlan(text: string): boolean {
   return /\b(?:the\s+|this\s+)?plan\b(?:\s+\w+){0,4}\s+\b(?:update|revision|revise|rewrite)\b/.test(normalized);
 }
 
+/** Collapse whitespace so a wrapped checkbox line still matches its step. */
+function stepTextKey(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+const STEP_STATUS_RANK: Record<TodoStepStatus, number> = {
+  pending: 0,
+  inProgress: 1,
+  completed: 2,
+  denied: 3
+};
+
+/**
+ * Keep the further-along status. A later "- [ ]" does not clear a step that
+ * was already started or finished, and a denied step stays denied.
+ */
+export function preferStepStatus(current: TodoStepStatus, incoming: TodoStepStatus): TodoStepStatus {
+  if (current === 'denied') {
+    return current;
+  }
+  if (incoming === 'denied') {
+    return incoming;
+  }
+  return STEP_STATUS_RANK[incoming] >= STEP_STATUS_RANK[current] ? incoming : current;
+}
+
+/**
+ * Apply reported statuses onto an existing todo list. Matching is by step text.
+ * A step that is reported more than once keeps the further-along status, so a
+ * later empty box does not clear one that already started or finished.
+ * Duplicate step texts take the latest reports in order, one each. Steps with
+ * no report keep their status.
+ */
+export function assignStepStatuses(
+  steps: readonly TodoStep[],
+  updates: ReadonlyMap<string, readonly TodoStepStatus[]>
+): TodoStep[] {
+  if (updates.size === 0) {
+    return [...steps];
+  }
+  const counts = new Map<string, number>();
+  for (const step of steps) {
+    const key = stepTextKey(step.text);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const windows = new Map<string, readonly TodoStepStatus[]>();
+  for (const [text, list] of updates) {
+    const key = stepTextKey(text);
+    const count = counts.get(key) ?? 0;
+    if (count === 0 || list.length === 0) {
+      continue;
+    }
+    const latest = list.length > count ? list.slice(list.length - count) : [...list];
+    if (list.length > count) {
+      const prefix = list.slice(0, list.length - count).reduce((current, next) => preferStepStatus(current, next));
+      latest[0] = preferStepStatus(prefix, latest[0]);
+    }
+    windows.set(key, latest);
+  }
+  const used = new Map<string, number>();
+  return steps.map((step) => {
+    const key = stepTextKey(step.text);
+    const list = windows.get(key);
+    if (!list) {
+      return step;
+    }
+    const index = used.get(key) ?? 0;
+    if (index >= list.length) {
+      return step;
+    }
+    used.set(key, index + 1);
+    const status = preferStepStatus(step.status, list[index]);
+    return status === step.status ? step : { ...step, status };
+  });
+}
+
 /**
  * Apply checkbox lines from a reply onto an existing todo list. Matching is by
- * step text, in order, so a duplicate step takes the next matching line.
- * Unmatched steps keep their status. A reply with no checkbox lines leaves
- * the list unchanged.
+ * step text. The latest line for a step wins, so a later "- [x]" replaces an
+ * earlier "- [~]" for that same step. Duplicate step texts take the latest
+ * lines in order. Unmatched steps keep their status. A reply with no checkbox
+ * lines leaves the list unchanged.
  */
 export function mergeCheckboxStatuses(steps: readonly TodoStep[], reply: string): TodoStep[] {
   const updates = new Map<string, TodoStepStatus[]>();
@@ -441,27 +518,85 @@ export function mergeCheckboxStatuses(steps: readonly TodoStep[], reply: string)
     if (!match) {
       continue;
     }
-    const text = match[2].trim();
+    const text = stepTextKey(match[2]);
     const list = updates.get(text) ?? [];
     list.push(statusForMarker(match[1]));
     updates.set(text, list);
   }
-  if (updates.size === 0) {
+  return assignStepStatuses(steps, updates);
+}
+
+/**
+ * Steps run in order. Once a later step is started or finished, earlier open
+ * steps are complete. A denied step stays denied. The running step itself is
+ * left running.
+ */
+export function completeStepsBeforeFrontier(steps: readonly TodoStep[]): TodoStep[] {
+  let frontier = -1;
+  for (let index = 0; index < steps.length; index += 1) {
+    const status = steps[index]?.status;
+    if (status === 'inProgress' || status === 'completed') {
+      frontier = index;
+    }
+  }
+  if (frontier < 0) {
     return [...steps];
   }
-  const used = new Map<string, number>();
-  return steps.map((step) => {
-    const list = updates.get(step.text);
-    if (!list) {
-      return step;
+  return steps.map((step, index) => {
+    if (index < frontier && (step.status === 'pending' || step.status === 'inProgress')) {
+      return { ...step, status: 'completed' };
     }
-    const index = used.get(step.text) ?? 0;
-    if (index >= list.length) {
-      return step;
-    }
-    used.set(step.text, index + 1);
-    return { ...step, status: list[index] };
+    return step;
   });
+}
+
+/**
+ * Fold a native todo update onto an approved plan. Matching steps take the
+ * reported status. A report that shares no step text did not update this plan.
+ */
+export function mergeReportedStepStatuses(
+  existing: readonly TodoStep[],
+  incoming: readonly TodoStep[]
+): { steps: TodoStep[]; matched: boolean } {
+  const known = new Set(existing.map((step) => stepTextKey(step.text)));
+  const updates = new Map<string, TodoStepStatus[]>();
+  let matched = false;
+  for (const step of incoming) {
+    const key = stepTextKey(step.text);
+    if (!known.has(key)) {
+      continue;
+    }
+    matched = true;
+    const list = updates.get(key) ?? [];
+    list.push(step.status);
+    updates.set(key, list);
+  }
+  if (!matched) {
+    return { steps: existing.map((step) => ({ ...step })), matched: false };
+  }
+  return { steps: assignStepStatuses(existing, updates), matched: true };
+}
+
+/**
+ * Statuses to take from the plan file when an edit checked steps off in place.
+ * The step texts have to be the same list. A file that rewrote the steps is
+ * ignored so an unrelated edit cannot replace the approved todo list. Returns
+ * `undefined` when nothing changed.
+ */
+export function adoptedPlanSteps(
+  existing: readonly TodoStep[],
+  fileSteps: readonly TodoStep[]
+): TodoStep[] | undefined {
+  if (existing.length === 0 || fileSteps.length !== existing.length) {
+    return undefined;
+  }
+  if (!fileSteps.every((step, index) => stepTextKey(step.text) === stepTextKey(existing[index]?.text ?? ''))) {
+    return undefined;
+  }
+  if (fileSteps.every((step, index) => step.status === existing[index]?.status)) {
+    return undefined;
+  }
+  return fileSteps.map((step, index) => ({ text: existing[index]?.text ?? step.text, status: step.status }));
 }
 
 /**
@@ -492,6 +627,69 @@ export type PlanAutopilotDecision = 'continue' | 'hold';
 
 export function planHasRemainingSteps(steps: readonly TodoStep[]): boolean {
   return steps.some((step) => step.status === 'pending' || step.status === 'inProgress');
+}
+
+/** Every step finished. An empty list is not a completed plan. */
+export function planFullyComplete(steps: readonly TodoStep[]): boolean {
+  return steps.length > 0 && steps.every((step) => step.status === 'completed');
+}
+
+/**
+ * A finished plan's status row stays until the user sends another message.
+ * Automatic continuations are still the plan itself, so they leave the row up.
+ */
+export function shouldDismissCompletedPlan(
+  plan: { built?: boolean; steps: readonly TodoStep[]; completedDismissed?: boolean } | undefined,
+  automatic: boolean
+): boolean {
+  if (automatic || !plan?.built || plan.completedDismissed === true) {
+    return false;
+  }
+  return planFullyComplete(plan.steps);
+}
+
+/**
+ * A dismissal applies only while the plan is still fully complete. New or
+ * unfinished steps bring the progress row back.
+ */
+export function carriedPlanDismissal(
+  steps: readonly TodoStep[],
+  dismissed: boolean | undefined
+): true | undefined {
+  return planFullyComplete(steps) && dismissed === true ? true : undefined;
+}
+
+/** The built-plan dock. Hidden once a completed plan has been followed by another message. */
+export function showBuiltPlanDock<T extends { built?: boolean; steps: readonly TodoStep[]; completedDismissed?: boolean }>(
+  plan: T | undefined
+): plan is T {
+  if (!plan?.built) {
+    return false;
+  }
+  return !(plan.completedDismissed === true && planFullyComplete(plan.steps));
+}
+
+/**
+ * Assistant prose since the latest user message. Checkbox progress is read
+ * from every message in the turn, so a line written before a tool call still
+ * counts when a later message arrives.
+ */
+export function assistantProgressText(items: readonly TranscriptItem[]): string {
+  let start = 0;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.kind === 'message' && item.role === 'user') {
+      start = index + 1;
+      break;
+    }
+  }
+  const parts: string[] = [];
+  for (const item of items.slice(start)) {
+    if (item.kind === 'message' && item.role === 'assistant' && item.text) {
+      parts.push(item.text);
+    }
+  }
+  return parts.join('\n');
 }
 
 /** Tools and files from the latest turn, ignoring the prose around them. */
@@ -558,7 +756,7 @@ export function continuePlanInstruction(steps: readonly TodoStep[]): string {
   const remaining = steps.filter((step) => step.status === 'pending' || step.status === 'inProgress');
   const list = remaining.map((step) => `- [ ] ${step.text}`).join('\n');
   return [
-    'Continue the remaining steps of this plan. Do not stop to ask whether to continue. Execute the remaining steps in order, and report progress with checkbox lines that repeat the step text exactly: "- [~] ..." while a step is in progress and "- [x] ..." when it is done. Leave the plan document prose unchanged.',
+    'Continue the remaining steps of this plan. Do not stop to ask whether to continue. Execute the remaining steps in order. As soon as you start a step, write a checkbox line on its own line that repeats the step text exactly: "- [~] ...". As soon as you finish it, write "- [x] ...". The plan document and the todo list update from those lines while you work. Leave the plan document prose unchanged.',
     '',
     list
   ].join('\n');

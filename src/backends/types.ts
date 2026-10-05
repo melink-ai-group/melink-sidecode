@@ -444,10 +444,11 @@ export type AttachmentKind = 'image' | 'audio' | 'text' | 'file';
 /**
  * A file carried on an outgoing user message.
  *
- * A picked file names its absolute `path` and never carries bytes. A clipboard
- * image carries its bytes inline as a `dataUrl` and no path; those bytes are
- * rendered in the webview only and are stripped before the attachment is
- * persisted, so no file content is ever written to workspace state.
+ * A picked file names its absolute `path`. An image also carries a `dataUrl`
+ * so the webview can show a thumbnail and open a viewer. A clipboard image
+ * carries its bytes the same way and has no path. Those bytes stay in the
+ * webview and are stripped before the attachment is persisted, so no file
+ * content is ever written to workspace state.
  */
 export interface Attachment {
   id: string;
@@ -641,6 +642,11 @@ export interface PlanArtifact {
    * list becomes the single step surface.
    */
   built?: boolean;
+  /**
+   * True once every step is complete and the user has sent a later message.
+   * The "Plan complete" row stays visible until that message, then hides.
+   */
+  completedDismissed?: boolean;
   /** Epoch milliseconds the plan was last written. */
   updatedAt: number;
 }

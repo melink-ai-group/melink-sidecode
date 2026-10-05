@@ -37,15 +37,21 @@ import {
 import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import {
+  adoptedPlanSteps,
   applyPlanDecisions,
+  assistantProgressText,
+  carriedPlanDismissal,
+  completeStepsBeforeFrontier,
   continuePlanInstruction,
   decidePlanAutopilot,
   hasPlanStepsHeading,
   mergeCheckboxStatuses,
+  mergeReportedStepStatuses,
   planDocumentFromReply,
   planRelativePath,
   planTurnWork,
   shouldAutoOpenPlanDocument,
+  shouldDismissCompletedPlan,
   updateStepStatus,
   userAsksToRevisePlan
 } from './backends/plan';
@@ -204,6 +210,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private readonly contextDelivery: ContextDelivery;
   /** Coalesces a burst of editor/selection events into one context read. */
   private contextViewTimer?: ReturnType<typeof setTimeout>;
+  /** Serializes plan-file writes so a live status update cannot clobber another. */
+  private planStepChain: Promise<void> = Promise.resolve();
+  /** Latest thread whose running turn should refresh todo status. */
+  private todoProgressTarget?: { backendId: string; threadId: string };
+  private todoProgressQueued = false;
+  private todoProgressAgain = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -271,6 +283,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         }
       })
     );
+    const planFiles = vscode.workspace.createFileSystemWatcher('**/.melink/plans/*.md');
+    context.subscriptions.push(
+      planFiles,
+      planFiles.onDidChange((uri) => {
+        this.adoptExternalPlanFile(uri);
+      }),
+      planFiles.onDidCreate((uri) => {
+        this.adoptExternalPlanFile(uri);
+      })
+    );
     this.registry.onDidChangeAvailability((availability) => this.post({ type: 'snapshot', availability }));
     this.registry.onEvent((event) => {
       const owner = event.threadId ? this.sessionForThread(event.backendId, event.threadId) : undefined;
@@ -326,8 +348,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // partial progress instead of a spinner that never stops. A denied step
         // (set by the `approval/denied` branch below) is terminal and left alone.
         if (event.threadId && !(event.type === 'turn/completed' && this.mode === 'agent')) {
-          void this.settlePlanProgress(event.backendId, event.threadId);
+          void this.flushBuiltPlanProgress(event.backendId, event.threadId);
         }
+      }
+      if (
+        event.threadId &&
+        (event.type === 'item/delta' || event.type === 'item/completed') &&
+        this.mode === 'agent'
+      ) {
+        this.noteTodoProgress(event.backendId, event.threadId);
       }
       if (event.type === 'turn/completed' || event.type === 'turn/interrupted') {
         // Close the change boundary on a real turn terminus only: an `error`
@@ -361,7 +390,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // permitted host-side write in Plan mode; the provider follows its
         // selected permission level.
         this.nativePlanThisTurn = true;
-        void this.recordNativePlan(event.backendId, event.threadId, event.steps, event.explanation);
+        void this.enqueuePlanSteps(() =>
+          this.recordNativePlan(event.backendId, event.threadId, event.steps, event.explanation)
+        );
       }
       if (event.type === 'turn/completed' && event.threadId && (this.mode === 'plan' || this.mode === 'agent')) {
         // Strip a question fence before the plan is read from the same reply.
@@ -566,7 +597,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!set) {
       return;
     }
-    const session = this.changeTracker.sessionFor(set.threadId);
+    const session = await this.changeTracker.sessionFor(set.threadId);
     if (!session) {
       return;
     }
@@ -592,12 +623,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * every step, not only the latest turn. Nothing is pushed when the thread
    * never observed a change, so a reload cannot manufacture a verified empty set.
    */
-  private postLatestChanges(): void {
+  private async postLatestChanges(): Promise<void> {
     const thread = this.activeThread;
     if (!thread) {
       return;
     }
-    const set = this.changeTracker.sessionFor(thread.threadId);
+    const set = await this.changeTracker.sessionFor(thread.threadId);
     if (!set) {
       return;
     }
@@ -941,7 +972,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       if (session.activeThread) {
         this.repaintSession();
-        this.postLatestChanges();
+        await this.postLatestChanges();
         await this.postActiveCheckpoints();
         return;
       }
@@ -1777,7 +1808,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       // Repaint the resumed thread's own recorded change set, so the change
       // surface matches the thread now in view rather than carrying the previous
       // conversation's files.
-      this.postLatestChanges();
+      await this.postLatestChanges();
       await this.postActiveCheckpoints();
     } catch (error) {
       this.post({
@@ -2015,6 +2046,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.contextDelivery.setExclusions([]);
       void this.postContextView();
     }
+    if (!automatic) {
+      await this.dismissCompletedPlan(activeBackendId, threadId);
+    }
     const messageId = await this.store.appendUserMessage(activeBackendId, threadId, text, persisted);
     const indexed = this.store.listThreads(activeBackendId).find((entry) => entry.threadId === threadId);
     const title = indexed?.title ?? ThreadStore.titleFromText(text);
@@ -2172,10 +2206,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Builds an attachment descriptor from a picked file. Only the basename, the
-   * type and the size cross the protocol; file contents are never read here.
-   * An oversized or unreadable file returns `undefined` so the pick can report
-   * it as one skipped item.
+   * Builds an attachment descriptor from a picked file. The basename, type, and
+   * size always cross the protocol. An image is also read into a data URL so
+   * the webview can paint a thumbnail and a viewer; that payload is stripped
+   * before anything is persisted. An oversized or unreadable file returns
+   * `undefined` so the pick can report it as one skipped item.
    */
   private async describeFile(uri: vscode.Uri): Promise<Attachment | undefined> {
     const stat = await vscode.workspace.fs.stat(uri).then(
@@ -2190,14 +2225,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const name = path.basename(uri.fsPath);
     const mimeType = mimeForName(name);
-    return {
+    const kind = kindForMime(mimeType);
+    const attachment: Attachment = {
       id: createAttachmentId(),
       name,
       path: uri.fsPath,
       mimeType,
       size: stat.size,
-      kind: kindForMime(mimeType)
+      kind
     };
+    if (kind === 'image') {
+      const bytes = await vscode.workspace.fs.readFile(uri).then(
+        (value) => value,
+        () => undefined
+      );
+      if (bytes) {
+        attachment.dataUrl = `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`;
+      }
+    }
+    return attachment;
   }
 
   /** Aborts the in-flight turn; the adapter emits the interrupted state. */
@@ -2465,7 +2511,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!state) {
       return;
     }
-    await this.store.setPlanState(backendId, threadId, { ...state, built: false, updatedAt: Date.now() });
+    await this.store.setPlanState(backendId, threadId, {
+      ...state,
+      built: false,
+      completedDismissed: undefined,
+      updatedAt: Date.now()
+    });
     this.post({ type: 'plan', plan: this.planArtifact(backendId, threadId) });
     this.post({
       type: 'notice',
@@ -2491,7 +2542,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const { backendId, threadId } = this.activeThread;
     const artifact = await this.plans.write({ threadId, title, summary, body, steps });
     const previous = this.store.getPlanState(backendId, threadId);
-    const plan = { ...artifact, built: previous?.built ?? false };
+    const completedDismissed = carriedPlanDismissal(artifact.steps, previous?.completedDismissed);
+    const plan = { ...artifact, built: previous?.built ?? false, completedDismissed };
     await this.store.setPlanState(backendId, threadId, {
       path: plan.path,
       title: plan.title,
@@ -2499,6 +2551,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       body: plan.body,
       steps: plan.steps,
       built: plan.built,
+      completedDismissed: plan.completedDismissed,
       updatedAt: plan.updatedAt
     });
     this.post({ type: 'plan', plan });
@@ -2519,6 +2572,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     explanation?: string
   ): Promise<void> {
     const existing = this.store.getPlanState(backendId, threadId);
+    const reported =
+      existing?.built && existing.steps.length > 0 ? mergeReportedStepStatuses(existing.steps, steps) : undefined;
+    // A built plan document keeps its own steps. A native todo list that does
+    // not name those steps must not replace them.
+    if (existing?.built && existing.body && existing.steps.length > 0 && reported && !reported.matched) {
+      return;
+    }
+    const nextSteps = reported?.matched ? reported.steps : steps;
     // Only write the file for the thread the sidebar is actually showing, so a
     // background thread's notification cannot overwrite the visible plan.
     if (this.activeThread?.backendId === backendId && this.activeThread?.threadId === threadId) {
@@ -2529,9 +2590,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         title: existing?.title ?? 'Plan',
         body: existing?.body,
         summary: existing?.body ? existing.summary : (existing?.summary ?? explanation),
-        steps
+        steps: nextSteps
       });
       const built = existing?.built ?? this.mode !== 'plan';
+      const completedDismissed = carriedPlanDismissal(artifact.steps, existing?.completedDismissed);
       await this.store.setPlanState(backendId, threadId, {
         path: artifact.path,
         title: artifact.title,
@@ -2543,9 +2605,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // Native agent todo lists are already execution plans. Keep Plan mode's
         // explicit review/build transition, but surface Agent mode lists live.
         built,
+        completedDismissed,
         updatedAt: artifact.updatedAt
       });
-      const visible = { ...artifact, body: existing?.body ? artifact.body : undefined, built };
+      const visible = { ...artifact, body: existing?.body ? artifact.body : undefined, built, completedDismissed };
       this.post({ type: 'plan', plan: visible });
       this.publishPlanDocument(visible, false);
       return;
@@ -2555,8 +2618,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       title: existing?.title ?? 'Plan',
       summary: existing?.summary,
       body: existing?.body,
-      steps,
+      steps: nextSteps,
       built: existing?.built ?? false,
+      completedDismissed: carriedPlanDismissal(nextSteps, existing?.completedDismissed),
       updatedAt: Date.now()
     });
   }
@@ -2666,7 +2730,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       body: applyPlanDecisions(draft.body ?? existing?.body, this.planDecisions),
       steps
     });
-    const plan = { ...artifact, built: existing?.built ?? false };
+    const completedDismissed = carriedPlanDismissal(artifact.steps, existing?.completedDismissed);
+    const plan = { ...artifact, built: existing?.built ?? false, completedDismissed };
     await this.store.setPlanState(backendId, threadId, {
       path: plan.path,
       title: plan.title,
@@ -2674,6 +2739,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       body: plan.body,
       steps: plan.steps,
       built: plan.built,
+      completedDismissed: plan.completedDismissed,
       updatedAt: plan.updatedAt
     });
     this.post({ type: 'plan', plan });
@@ -2692,8 +2758,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const epoch = session.planEpoch;
-    await this.settlePlanProgress(backendId, threadId);
-    await this.mergeTodoProgressFromReply(backendId, threadId);
+    await this.flushBuiltPlanProgress(backendId, threadId);
     if (this.session !== session || session.disposed || session.planEpoch !== epoch) {
       return;
     }
@@ -2705,7 +2770,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const decision = decidePlanAutopilot({
-      built: existing.built,
+      built: existing.built === true,
       steps: existing.steps,
       automatic: session.planRunAutomatic,
       previousSignature: session.planRunSignature,
@@ -2741,7 +2806,109 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Fold checkbox lines from the latest assistant reply into a built plan.
+   * Run plan-step writes one at a time. The callback keeps the chat session
+   * that queued it, so a later write still updates that thread's document.
+   */
+  private enqueuePlanSteps(work: () => Promise<void>): Promise<void> {
+    const session = this.session;
+    const run = this.planStepChain.then(
+      () => this.sessionStore.run(session, work) ?? Promise.resolve(),
+      () => this.sessionStore.run(session, work) ?? Promise.resolve()
+    );
+    this.planStepChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
+   * Queue a todo-status refresh for the running turn. Streaming tokens share
+   * one refresh, and a line that arrives mid-refresh is applied next.
+   */
+  private noteTodoProgress(backendId: string, threadId: string): void {
+    if (this.mode !== 'agent') {
+      return;
+    }
+    const existing = this.store.getPlanState(backendId, threadId);
+    if (!existing?.built || existing.steps.length === 0) {
+      return;
+    }
+    this.todoProgressTarget = { backendId, threadId };
+    this.todoProgressAgain = true;
+    if (this.todoProgressQueued) {
+      return;
+    }
+    this.todoProgressQueued = true;
+    void this.enqueuePlanSteps(async () => {
+      try {
+        while (this.todoProgressAgain) {
+          this.todoProgressAgain = false;
+          const target = this.todoProgressTarget;
+          if (!target) {
+            return;
+          }
+          await this.mergeTodoProgressFromReply(target.backendId, target.threadId);
+        }
+      } finally {
+        this.todoProgressQueued = false;
+        if (this.todoProgressAgain && this.todoProgressTarget) {
+          this.noteTodoProgress(this.todoProgressTarget.backendId, this.todoProgressTarget.threadId);
+        }
+      }
+    });
+  }
+
+  /**
+   * Apply checkbox progress from the turn, then clear a step left running.
+   * Called when the turn ends so the document and the todo list agree with
+   * the work that actually finished.
+   */
+  private flushBuiltPlanProgress(backendId: string, threadId: string): Promise<void> {
+    return this.enqueuePlanSteps(async () => {
+      await this.mergeTodoProgressFromReply(backendId, threadId);
+      await this.settlePlanProgress(backendId, threadId);
+    });
+  }
+
+  /**
+   * Take checkbox statuses from the plan file when the agent edited that file
+   * directly. Host writes land in the store first, so the echo of our own
+   * write finds nothing to change.
+   */
+  private adoptExternalPlanFile(uri: vscode.Uri): void {
+    const relative = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+    const session = this.sessions.find((entry) => {
+      const threadId = entry.activeThread?.threadId;
+      return threadId !== undefined && planRelativePath(threadId) === relative;
+    });
+    const thread = session?.activeThread;
+    if (!session || !thread) {
+      return;
+    }
+    void this.sessionStore.run(session, () => {
+      void this.enqueuePlanSteps(() => this.adoptPlanFile(thread.backendId, thread.threadId));
+    });
+  }
+
+  private async adoptPlanFile(backendId: string, threadId: string): Promise<void> {
+    const existing = this.store.getPlanState(backendId, threadId);
+    if (!existing?.built || existing.steps.length === 0) {
+      return;
+    }
+    const artifact = await this.plans.read(threadId);
+    if (!artifact) {
+      return;
+    }
+    const steps = adoptedPlanSteps(existing.steps, artifact.steps);
+    if (!steps) {
+      return;
+    }
+    await this.persistPlanSteps(backendId, threadId, steps);
+  }
+
+  /**
+   * Fold checkbox lines from this turn's assistant replies into a built plan.
    * Used when the provider does not emit `plan/updated`. The plan body is
    * left as it was; only step status changes.
    */
@@ -2753,11 +2920,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!existing?.built || existing.steps.length === 0) {
       return;
     }
-    const lastReply = [...this.store.getTranscript(backendId, threadId)]
-      .reverse()
-      .find((item) => item.kind === 'message' && item.role === 'assistant');
-    const steps = mergeCheckboxStatuses(existing.steps, lastReply?.text ?? '');
-    if (!steps.some((step, index) => step.status !== existing.steps[index].status)) {
+    const reply = assistantProgressText(this.store.getTranscript(backendId, threadId));
+    const merged = mergeCheckboxStatuses(existing.steps, reply);
+    const steps = /^\s*[-*+]\s+\[[^\]]\]/m.test(reply) ? completeStepsBeforeFrontier(merged) : merged;
+    if (!steps.some((step, index) => step.status !== existing.steps[index]?.status)) {
       return;
     }
     await this.persistPlanSteps(backendId, threadId, steps);
@@ -2779,11 +2945,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       body: existing.body,
       steps
     });
+    const completedDismissed = carriedPlanDismissal(artifact.steps, existing.completedDismissed);
     const plan = {
       ...artifact,
       body: existing.body ? artifact.body : undefined,
       summary: existing.body ? artifact.summary : existing.summary,
-      built: existing.built
+      built: existing.built,
+      completedDismissed
     };
     await this.store.setPlanState(backendId, threadId, {
       path: plan.path,
@@ -2792,6 +2960,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       body: plan.body,
       steps: plan.steps,
       built: plan.built,
+      completedDismissed: plan.completedDismissed,
       updatedAt: plan.updatedAt
     });
     if (this.activeThread?.backendId === backendId && this.activeThread?.threadId === threadId) {
@@ -2814,8 +2983,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       body: state?.body,
       steps: state?.steps ?? [],
       built: state?.built,
+      completedDismissed: state?.completedDismissed,
       updatedAt: state?.updatedAt ?? Date.now()
     };
+  }
+
+  /**
+   * Hide the "Plan complete" row once the user sends a message after the plan
+   * finished. The row stays through the turn that completed it.
+   */
+  private async dismissCompletedPlan(backendId: string, threadId: string): Promise<void> {
+    const existing = this.store.getPlanState(backendId, threadId);
+    if (!existing || !shouldDismissCompletedPlan(existing, false)) {
+      return;
+    }
+    await this.store.setPlanState(backendId, threadId, { ...existing, completedDismissed: true });
+    if (this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
+      this.post({ type: 'plan', plan: this.planArtifact(backendId, threadId) });
+    }
   }
 
   /**
@@ -3024,7 +3209,7 @@ function isCancellation(error: unknown): boolean {
 function buildTurnInstruction(steps: readonly TodoStep[]): string {
   const list = steps.map((step) => `- [ ] ${step.text}`).join('\n');
   return [
-    'Build the approved plan. Execute each step in order. As you work, report progress with checkbox lines that repeat the step text exactly: "- [~] ..." while a step is in progress and "- [x] ..." when it is done. Leave the plan document prose unchanged.',
+    'Build the approved plan. Execute each step in order. As soon as you start a step, write a checkbox line on its own line that repeats the step text exactly: "- [~] ...". As soon as you finish it, write "- [x] ...". The plan document and the todo list update from those lines while you work. Leave the plan document prose unchanged.',
     '',
     list
   ].join('\n');

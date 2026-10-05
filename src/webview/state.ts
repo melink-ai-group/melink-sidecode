@@ -17,6 +17,7 @@ import type {
 } from '../backends/types';
 import { cleanToolTarget, isStatusText } from '../backends/toolLabel.ts';
 import { tokensFromText } from '../backends/contextUsage.ts';
+import { carriedPlanDismissal, shouldDismissCompletedPlan } from '../backends/plan.ts';
 import { estimateConversationTokens } from './modelControls.ts';
 import type {
   ConnectionTestResult,
@@ -513,6 +514,12 @@ export function reduce(state: AppState, action: Action): AppState {
         notice: withoutFailureNotice(state.notice),
         attachments: [],
         attachmentError: undefined,
+        // A finished plan's status row is for that result. The next message
+        // moves the conversation on, so the row hides with the send.
+        plan:
+          state.plan && shouldDismissCompletedPlan(state.plan, false)
+            ? { ...state.plan, completedDismissed: true }
+            : state.plan,
         contextUsedTokens: (state.contextUsedTokens ?? 0) + tokensFromText(action.text),
         transcript: [
           ...state.transcript,
@@ -1196,6 +1203,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
           body: state.plan?.body,
           steps: event.steps,
           built: state.plan?.built,
+          completedDismissed: carriedPlanDismissal(event.steps, state.plan?.completedDismissed),
           updatedAt: Date.now()
         }
       };

@@ -1,5 +1,5 @@
 import type { ChangeEntry, ChangeStatus, ReportedChange } from '../backends/types';
-import { hasIgnoredSegment } from './ignore.ts';
+import { filterListedFiles } from './ignore.ts';
 import type { ChangeJournal, JournalFileEntry } from './journal';
 import { sessionChangeSet } from './sessionFiles.ts';
 
@@ -136,7 +136,7 @@ export class ChangeTracker {
    * reload; a thread whose latest turn observed nothing yields `undefined`, so a
    * reload never fabricates a verified empty set.
    */
-  latestFor(threadId: string): TurnChangeSet | undefined {
+  async latestFor(threadId: string): Promise<TurnChangeSet | undefined> {
     const turn = this.journal.listTurns(threadId)[0];
     if (!turn || !turn.observed) {
       return undefined;
@@ -145,7 +145,7 @@ export class ChangeTracker {
       backendId: turn.backendId,
       threadId: turn.threadId,
       turnId: turn.turnId,
-      entries: turn.files.filter(reviewableFile).map(toChangeEntry)
+      entries: (await this.listed(turn.files)).map(toChangeEntry)
     };
   }
 
@@ -157,16 +157,17 @@ export class ChangeTracker {
    * touched on an earlier step stays listed, and a path a later step restored
    * does not.
    */
-  sessionFor(threadId: string): TurnChangeSet | undefined {
+  async sessionFor(threadId: string): Promise<TurnChangeSet | undefined> {
     const session = sessionChangeSet(this.journal.listTurns(threadId));
     if (!session) {
       return undefined;
     }
+    const files = await this.listed(session.files.map((file) => file.entry));
     return {
       backendId: session.backendId,
       threadId: session.threadId,
       turnId: session.turnId,
-      entries: session.files.map((file) => toChangeEntry(file.entry))
+      entries: files.map(toChangeEntry)
     };
   }
 
@@ -196,7 +197,7 @@ export class ChangeTracker {
       backendId: active.backendId,
       threadId: active.threadId,
       turnId: active.turnId,
-      entries: turn.files.filter(reviewableFile).map(toChangeEntry)
+      entries: (await this.listed(turn.files)).map(toChangeEntry)
     };
     for (const listener of this.listeners) {
       try {
@@ -207,11 +208,15 @@ export class ChangeTracker {
     }
     return set;
   }
-}
 
-/** Ignored directories are not part of the conversation, even on an older recorded turn. */
-function reviewableFile(file: JournalFileEntry): boolean {
-  return !hasIgnoredSegment(file.relPath);
+  /**
+   * Rows for the changes strip. A binary stays in the journal and is omitted
+   * here. A path excluded by any `.gitignore` is omitted too, including one
+   * recorded before that rule existed.
+   */
+  private listed(files: readonly JournalFileEntry[]): Promise<JournalFileEntry[]> {
+    return filterListedFiles(files, (path) => this.journal.readWorkspaceFile(path));
+  }
 }
 
 /** Map the journal's stored entry onto the protocol-facing change entry. */
