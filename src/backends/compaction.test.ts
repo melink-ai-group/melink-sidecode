@@ -7,7 +7,8 @@ import {
   compactedTranscript,
   compactionPreface,
   compactionSource,
-  fitCompactionSource
+  fitCompactionSource,
+  instructionsWithHandover
 } from './compaction.ts';
 
 test('the summary source keeps user and assistant turns and drops other cards', () => {
@@ -39,4 +40,12 @@ test('the replacement transcript is a notice plus the summary the next turn send
   assert.equal(compactedSummary(items), 'Keep the plan.');
   assert.match(compactionPreface('Keep the plan.'), /Keep the plan\./);
   assert.ok(compactedTokenEstimate(items) > 0);
+});
+
+test('a handover keeps the summary ahead of the project snapshot', () => {
+  const instructions = instructionsWithHandover('Project: sidebar', 'Keep the plan.');
+  assert.match(instructions ?? '', /Keep the plan\./);
+  assert.match(instructions ?? '', /Project: sidebar/);
+  assert.ok((instructions ?? '').indexOf('Keep the plan.') < (instructions ?? '').indexOf('Project: sidebar'));
+  assert.equal(instructionsWithHandover(undefined, undefined), null);
 });

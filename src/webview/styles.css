@@ -317,7 +317,8 @@ body {
   background: color-mix(in srgb, var(--vscode-foreground) 55%, transparent);
 }
 
-.provider-dot--ollama {
+.provider-dot--ollama,
+.provider-dot--codex {
   background: var(--melink-shell);
 }
 
@@ -336,10 +337,6 @@ body {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.provider-badge--codex .provider-name {
-  color: var(--vscode-descriptionForeground);
 }
 
 .meta-sep {
@@ -1270,10 +1267,6 @@ body {
 .item-card--change:not([open]) > .item-head {
   min-height: 32px;
 }
-.item-card--command:not([open]) .item-path,
-.item-card--change:not([open]) .item-path { white-space: normal; }
-.item-card--command[open] .item-path,
-.item-card--change[open] .item-path { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
 .item-card--command[open] .item-head,
 .item-card--change[open] .item-head { border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
 .item-card--command .item-body code,
@@ -1397,19 +1390,27 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow: hidden;
 }
 
 .item-kind {
-  flex: 0 0 auto;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   color: var(--vscode-foreground);
 }
 
 .item-path {
+  display: block;
   min-width: 0;
-  overflow: visible;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--vscode-editor-font-family, monospace);
   color: var(--vscode-descriptionForeground);
 }
@@ -1534,7 +1535,9 @@ body {
   padding: 4px 8px;
   color: var(--vscode-descriptionForeground);
   background: color-mix(in srgb, var(--vscode-textCodeBlock-background) 60%, transparent);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .diff-line {
@@ -3850,9 +3853,9 @@ body {
 .file-name {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: visible;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: var(--vscode-editor-font-size, 12px);
   color: var(--vscode-foreground);

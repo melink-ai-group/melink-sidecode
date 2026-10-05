@@ -74,6 +74,7 @@ import {
   type TranscriptItemView
 } from './state';
 import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
+import { prettyPath, setPrettyPathRoots } from './prettyPath.ts';
 import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, type ActivityFamily } from './activityGroups.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
 import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
@@ -170,6 +171,7 @@ function usePopupSide(open: boolean): { ref: RefObject<HTMLDivElement>; classNam
 
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reduce, initialState);
+  setPrettyPathRoots(state.workspaceRoots);
   const [draft, setDraft] = useState('');
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [modelFilter, setModelFilter] = useState('');
@@ -305,7 +307,8 @@ export function App(): JSX.Element {
             view: message.view,
             settingsEnabled: message.settingsEnabled,
             exclusions: message.exclusions,
-            includeViewedFile: message.includeViewedFile
+            includeViewedFile: message.includeViewedFile,
+            workspaceRoots: message.workspaceRoots
           });
           break;
         case 'modelCapability':
@@ -3058,12 +3061,7 @@ function ActivityGroup({ family, items }: { family: ActivityFamily; items: Trans
         <span className="item-icon" aria-hidden="true">
           <Icon />
         </span>
-        <span className="item-main">
-          <span className="item-kind" title={summary.label}>
-            {summary.label}
-          </span>
-          {summary.detail ? <span className="item-path">{summary.detail}</span> : null}
-        </span>
+        <CardLines title={summary.label} detail={summary.detail} />
         <StatusChip status={summary.status} doneLabel={family === 'change' ? 'Applied' : 'Passed'} />
       </button>
       {expanded ? (
@@ -3109,9 +3107,7 @@ function NestedBurst({ family, items }: { family: ActivityFamily; items: Transcr
         <span className="item-icon" aria-hidden="true">
           <Icon />
         </span>
-        <span className="item-main">
-          <span className="item-kind">{summary.label}</span>
-        </span>
+        <CardLines title={summary.label} detail={summary.detail} />
         <StatusChip status={summary.status} doneLabel="Passed" />
       </button>
       {expanded ? (
@@ -3138,14 +3134,7 @@ function GroupChild({ item }: { item: TranscriptItemView }): JSX.Element {
         <span className="item-icon" aria-hidden="true">
           <SearchIcon />
         </span>
-        <span className="item-main">
-          <span className="item-kind">{item.title || 'Web search'}</span>
-          {item.text ? (
-            <span className="item-path" title={item.text}>
-              {item.text}
-            </span>
-          ) : null}
-        </span>
+        <CardLines title={item.title || 'Web search'} detail={item.text || undefined} />
         <StatusChip status={item.status} doneLabel="Passed" />
       </div>
     </div>
@@ -3161,14 +3150,7 @@ function ToolCard({ item }: { item: TranscriptItemView }): JSX.Element {
         <span className="item-icon" aria-hidden="true">
           <TerminalIcon />
         </span>
-        <span className="item-main">
-          <span className="item-kind">{presentation.title}</span>
-          {presentation.detail ? (
-            <span className="item-path" title={presentation.detail}>
-              {presentation.detail}
-            </span>
-          ) : null}
-        </span>
+        <CardLines title={presentation.title} detail={presentation.detail} />
         <StatusChip status={item.status} doneLabel="Passed" />
       </summary>
       {output ? (
@@ -3251,8 +3233,8 @@ function ApprovalPrompt({
             <p className="affected-label">Changes it would touch</p>
             {files.map((file) => (
               <div className="file-row" key={file.path}>
-                <span className="file-name" title={file.path}>
-                  {file.path}
+                <span className="file-name" title={prettyPath(file.path)}>
+                  {prettyPath(file.path)}
                 </span>
                 <span className="diffstat" aria-label={diffStatsLabel([file])}>
                   <span className="add">+{file.additions ?? 0}</span>
@@ -3266,8 +3248,8 @@ function ApprovalPrompt({
             <p className="affected-label">Files it would touch</p>
             {paths.map((path) => (
               <div className="file-row" key={path}>
-                <span className="file-name" title={path}>
-                  {path}
+                <span className="file-name" title={prettyPath(path)}>
+                  {prettyPath(path)}
                 </span>
               </div>
             ))}
@@ -3374,12 +3356,7 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
         <span className="item-icon" aria-hidden="true">
           <FileIcon />
         </span>
-        <span className="item-main">
-          <span className="item-kind">{title}</span>
-          <span className="item-path" title={filePathLabel(files)}>
-            {filePathLabel(files)}
-          </span>
-        </span>
+        <CardLines title={title} detail={filePathLabel(files)} />
         {totals(files) ? (
           <span className="diff-stats" aria-label={diffStatsLabel(files)}>
             {totals(files)?.additions ? <span className="add">+{totals(files)?.additions}</span> : null}
@@ -3392,7 +3369,11 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
         <div className="diff-body" role="figure" aria-label={`Diff for ${diffs.length} changed ${diffs.length === 1 ? 'file' : 'files'}`}>
           {diffs.map((file) => (
             <section className="diff-file" key={file.path}>
-              {diffs.length > 1 ? <div className="diff-file__path">{file.path}</div> : null}
+              {diffs.length > 1 ? (
+                <div className="diff-file__path" title={prettyPath(file.path)}>
+                  {prettyPath(file.path)}
+                </div>
+              ) : null}
               {file.lines?.map((line, index) => (
                 <div className={`diff-line diff-line--${line.kind === 'add' ? 'add' : line.kind === 'del' ? 'del' : 'ctx'}`} key={`${index}-${line.kind}`}>
                   <span className="sign" aria-hidden="true">
@@ -3457,16 +3438,16 @@ function StatusMark({
 function describeApprovalSubject(request: ApprovalRequest): string {
   switch (request.kind) {
     case 'command':
-      return request.command ?? 'a command';
+      return request.command ? prettyPath(request.command) : 'a command';
     case 'file-change': {
       const paths = request.paths ?? [];
       if (paths.length === 0) {
         return 'file changes';
       }
       if (paths.length === 1) {
-        return paths[0];
+        return prettyPath(paths[0]);
       }
-      return `${paths[0]} +${paths.length - 1} more`;
+      return `${prettyPath(paths[0])} +${paths.length - 1} more`;
     }
     case 'permissions':
       return request.network ? `network access to ${request.network}` : 'extra permissions';
@@ -3480,9 +3461,27 @@ function filePathLabel(files: FileChange[]): string {
     return '';
   }
   if (files.length === 1) {
-    return files[0].path;
+    return prettyPath(files[0].path);
   }
-  return `${files[0].path} +${files.length - 1} more`;
+  return `${prettyPath(files[0].path)} +${files.length - 1} more`;
+}
+
+/** Title and optional path, each one line. The tooltip is the full visual text. */
+function CardLines({ title, detail }: { title: string; detail?: string }): JSX.Element {
+  const heading = prettyPath(title);
+  const sub = detail ? prettyPath(detail) : '';
+  return (
+    <span className="item-main">
+      <span className="item-kind" title={heading}>
+        {heading}
+      </span>
+      {sub ? (
+        <span className="item-path" title={sub}>
+          {sub}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function totals(files: FileChange[]): { additions: number; deletions: number } | undefined {

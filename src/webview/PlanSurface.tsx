@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
 import { Markdown } from './Markdown';
+import { prettyPath } from './prettyPath.ts';
 import {
   AlertIcon,
   CheckIcon,
@@ -124,9 +125,9 @@ function PlanCard({
         </span>
         <span className="spacer" />
         {plan.path ? (
-          <button className="plan-card__path" type="button" title="Open the rendered plan" onClick={onOpenPlan}>
+          <button className="plan-card__path" type="button" title={prettyPath(plan.path)} aria-label={`Open ${prettyPath(plan.path)}`} onClick={onOpenPlan}>
             <FileIcon className="ico ico--xs" />
-            <span className="plan-card__path-text">{plan.path}</span>
+            <span className="plan-card__path-text">{prettyPath(plan.path)}</span>
           </button>
         ) : null}
         <button

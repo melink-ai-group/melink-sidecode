@@ -602,6 +602,19 @@ export class OllamaBackend implements AgentBackend {
    * this adapter does not write it.
    */
   async compact(handle: ThreadHandle, request: CompactRequest): Promise<CompactResult> {
+    const summary = await this.summarize(request);
+    // Drop the live session only after a summary exists, so a failed compact
+    // leaves the conversation where it was.
+    await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
+    return { transcript: compactedTranscript(summary) };
+  }
+
+  /**
+   * Summarize the stored transcript with the same model. The thread and its
+   * opencode session stay as they are; a provider switch carries the text
+   * onto the next thread instead of shrinking this one.
+   */
+  async summarize(request: CompactRequest): Promise<string> {
     const token = await this.token();
     if (!token) {
       throw new BackendError('unauthenticated', 'Set an Ollama Cloud token before compacting context.');
@@ -610,7 +623,10 @@ export class OllamaBackend implements AgentBackend {
     if (!model) {
       throw new BackendError('provider', 'No Ollama Cloud model selected.');
     }
-    const source = fitCompactionSource(compactionSource(request.transcript), request.maxTokens);
+    const source = fitCompactionSource(
+      compactionSource(request.transcript),
+      request.maxTokens ?? request.modelSettings?.contextWindow
+    );
     if (!source.trim()) {
       throw new BackendError('provider', 'There is no conversation to compact.');
     }
@@ -659,10 +675,7 @@ export class OllamaBackend implements AgentBackend {
     if (!summary) {
       throw new BackendError('provider', 'Compaction did not return a summary.');
     }
-    // Drop the live session only after a summary exists, so a failed compact
-    // leaves the conversation where it was.
-    await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
-    return { transcript: compactedTranscript(summary) };
+    return summary;
   }
 
   /**

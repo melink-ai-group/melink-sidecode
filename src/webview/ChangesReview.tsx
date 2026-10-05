@@ -22,6 +22,7 @@ import {
   SearchIcon,
   TrashIcon
 } from './Icons';
+import { prettyPath } from './prettyPath.ts';
 
 /**
  * The change review surface: what a turn changed, with per-file keep/reject.
@@ -463,9 +464,10 @@ function fileCountLabel(files: readonly ChangeFileView[]): string {
  * which is what places the ellipsis on the left.
  */
 function PathLabel({ full }: { full: string }): JSX.Element {
+  const visual = prettyPath(full);
   return (
-    <span className="change-row__path" title={full}>
-      {`\u202A${full}\u202C`}
+    <span className="change-row__path" title={visual}>
+      {`\u202A${visual}\u202C`}
     </span>
   );
 }

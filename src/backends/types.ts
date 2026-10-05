@@ -239,6 +239,12 @@ export interface StartThreadOptions {
    * can only prime per turn receives it on `SendTurnRequest.context` instead.
    */
   context?: ContextPayload;
+  /**
+   * Compacted summary of the chat this thread continues. An adapter that stores
+   * instructions on the thread includes it once at start. The host also seeds
+   * the stored transcript, which is what a stateless adapter sends.
+   */
+  handover?: string;
 }
 
 export interface SendTurnRequest {
@@ -290,6 +296,12 @@ export interface ResumeThreadOptions {
    * can only prime per turn receives it on `SendTurnRequest.context` instead.
    */
   context?: ContextPayload;
+  /**
+   * Compacted summary this thread was started with. A resume replaces the
+   * thread's instructions, so the summary has to be sent again or the model
+   * loses the chat it continued.
+   */
+  handover?: string;
 }
 
 /** Role of a transcript message item. */
@@ -1108,6 +1120,13 @@ export interface AgentBackend {
    * the host persists. Safe to call only while no turn is running.
    */
   compact(handle: ThreadHandle, request: CompactRequest): Promise<CompactResult>;
+
+  /**
+   * Summarize a stored transcript so another provider can continue the chat.
+   * Must not modify the thread. The host turns the text into the compacted
+   * transcript it seeds onto the next provider.
+   */
+  summarize(request: CompactRequest): Promise<string>;
 
   /**
    * Adds a user message to the active turn.
