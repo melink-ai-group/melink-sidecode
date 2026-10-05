@@ -1443,13 +1443,40 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
+.status-chip--icon {
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  gap: 0;
+  border-radius: 50%;
+  line-height: 0;
+}
+
+.status-chip--icon .ico {
+  width: 11px;
+  height: 11px;
+}
+
 .status-chip--running {
   color: var(--melink-primary);
   border-color: color-mix(in srgb, var(--melink-primary) 40%, transparent);
 }
 
+.status-chip--icon.status-chip--running {
+  border-color: transparent;
+  background: transparent;
+}
+
 .status-chip--running .spinner {
   color: var(--melink-shell);
+}
+
+.status-chip--icon.status-chip--running .spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+  color: var(--vscode-foreground);
 }
 
 .status-chip--done {
@@ -2233,12 +2260,12 @@ body {
   outline-offset: 1px;
 }
 
-/* ---- Attachments (composer chips + sent-message list) ---- */
+/* ---- Attachments (composer thumbnails + sent-message list) ---- */
 
 .attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
   margin: 0;
   padding: 8px 8px 0;
   list-style: none;
@@ -2249,51 +2276,153 @@ body {
 }
 
 .attachment {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  padding: 2px 4px 2px 6px;
+  position: relative;
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-sm, 4px);
   background: var(--vscode-editorWidget-background);
-  color: var(--vscode-foreground);
-  font-size: 11px;
-  line-height: 1.4;
+  overflow: hidden;
 }
 
-.attachments--sent .attachment {
-  padding-right: 6px;
+.attachment-open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.attachment-open:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }
 
 .attachment-thumb {
-  width: 18px;
-  height: 18px;
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: var(--melink-radius-sm, 4px);
 }
 
-.attachment-icon {
+.attachment-fallback {
   display: grid;
   place-items: center;
+  width: 100%;
+  height: 100%;
   color: var(--vscode-descriptionForeground);
-}
-
-.attachment-name {
-  max-width: 18ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.attachment-size {
-  color: var(--vscode-descriptionForeground);
-  font-variant-numeric: tabular-nums;
 }
 
 .attachment-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
   width: 16px;
   height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, #000 62%, transparent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.attachment-remove .ico {
+  width: 10px;
+  height: 10px;
+}
+
+.attachment-remove:hover {
+  background: color-mix(in srgb, #000 80%, transparent);
+}
+
+.attachment-remove:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: color-mix(in srgb, #000 72%, transparent);
+}
+
+.image-viewer__dialog {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.image-viewer__image {
+  display: block;
+  max-width: min(100%, 960px);
+  max-height: calc(100vh - 56px);
+  object-fit: contain;
+  border-radius: var(--melink-radius-sm, 4px);
+}
+
+.image-viewer__close,
+.image-viewer__nav {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, #000 62%, transparent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.image-viewer__close {
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+}
+
+.image-viewer__nav {
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  transform: translateY(-50%);
+}
+
+.image-viewer__nav--prev {
+  left: 8px;
+}
+
+.image-viewer__nav--prev .ico {
+  transform: rotate(180deg);
+}
+
+.image-viewer__nav--next {
+  right: 8px;
+}
+
+.image-viewer__close:hover,
+.image-viewer__nav:hover {
+  background: color-mix(in srgb, #000 80%, transparent);
+}
+
+.image-viewer__close:focus-visible,
+.image-viewer__nav:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
 }
 
 .composer-error {
@@ -5256,20 +5385,25 @@ button.context-meter:hover {
 .todo__list {
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: 4px 6px 6px;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 .todo__item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 5px 6px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
+  padding: 3px 4px;
   border: 1px solid transparent;
   border-radius: var(--melink-radius-sm, 4px);
   min-width: 0;
+}
+
+.todo__item > .status-chip {
+  margin-top: 0;
 }
 
 .todo__item--active {
@@ -5277,37 +5411,10 @@ button.context-meter:hover {
   background: var(--vscode-list-hoverBackground);
 }
 
-.todo__mark {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  margin-top: 1px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-  border-radius: var(--melink-radius-sm, 4px);
-  background: var(--vscode-input-background);
-  color: var(--vscode-descriptionForeground);
-}
-
-.todo__item--done .todo__mark {
-  border-color: var(--todo-done, color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background)));
-  color: var(--todo-done, color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background)));
-}
-
-/* A denied step never ran: the cross glyph and the "Denied" label carry the
- * state, so it is legible without relying on color. */
-.todo__item--denied .todo__mark {
-  border-color: var(--vscode-errorForeground);
-  color: var(--vscode-errorForeground);
-}
-
+/* A denied step never ran. The red cross sits with the label, and the word
+ * stays in the tooltip, so it remains legible without relying on color alone. */
 .todo__item--denied .todo__text {
   color: var(--vscode-descriptionForeground);
-}
-
-.todo__status--denied {
-  color: var(--vscode-errorForeground);
 }
 
 .todo__dot {
@@ -5319,6 +5426,7 @@ button.context-meter:hover {
 
 .todo__text {
   font-size: 13px;
+  line-height: 18px;
   color: var(--vscode-foreground);
   overflow-wrap: anywhere;
   min-width: 0;
@@ -5327,18 +5435,6 @@ button.context-meter:hover {
 .todo__item:not(.todo__item--active):not(.todo__item--done) .todo__text,
 .todo__item--done .todo__text {
   color: var(--vscode-descriptionForeground);
-}
-
-.todo__status {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-  white-space: nowrap;
-}
-
-.todo__item--active .todo__status {
-  color: var(--vscode-foreground);
 }
 
 .todo__retry {

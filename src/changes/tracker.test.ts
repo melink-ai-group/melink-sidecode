@@ -143,6 +143,64 @@ test('a root gitignore excludes matching creates', async () => {
   );
 });
 
+test('a nested gitignore excludes its own paths and can keep a negated file', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/.gitignore', text('*.log\n'));
+  fs.files.set('/ws/pkg/.gitignore', text('secret.txt\n'));
+  fs.files.set('/ws/src/.gitignore', text('!keep.log\n'));
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  fs.files.set('/ws/pkg/secret.txt', text('hidden'));
+  fs.files.set('/ws/pkg/keep.ts', text('kept'));
+  fs.files.set('/ws/src/keep.log', text('kept log'));
+  fs.files.set('/ws/src/other.log', text('hidden log'));
+  change.watch('/ws/pkg/secret.txt', 'created');
+  change.watch('/ws/pkg/keep.ts', 'created');
+  change.watch('/ws/src/keep.log', 'created');
+  change.watch('/ws/src/other.log', 'created');
+  const set = await change.endTurn();
+
+  assert.ok(set);
+  assert.deepEqual(set.entries.map((entry) => entry.path).sort(), ['pkg/keep.ts', 'src/keep.log']);
+});
+
+test('a binary file is recorded but omitted from the change list', async () => {
+  const fs = new FakeFs();
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  const change = new ChangeTracker(journal, () => 1_000);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  fs.files.set('/ws/blob.bin', new Uint8Array([1, 0, 2]));
+  fs.files.set('/ws/src/app.ts', text('source'));
+  change.watch('/ws/blob.bin', 'created');
+  change.watch('/ws/src/app.ts', 'created');
+  const set = await change.endTurn();
+
+  assert.ok(set);
+  assert.deepEqual(
+    set.entries.map((entry) => entry.path),
+    ['src/app.ts']
+  );
+  assert.equal(journal.getTurn('t1')?.files.some((file) => file.relPath === 'blob.bin' && file.binary), true);
+});
+
+test('a file recorded earlier drops off the list once a gitignore excludes it', async () => {
+  const fs = new FakeFs();
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  const change = new ChangeTracker(journal, () => 1_000);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  fs.files.set('/ws/notes.txt', text('note'));
+  change.watch('/ws/notes.txt', 'created');
+  await change.endTurn();
+  fs.files.set('/ws/.gitignore', text('notes.txt\n'));
+
+  const session = await change.sessionFor('thr');
+  assert.deepEqual(session?.entries ?? [], []);
+  assert.equal(journal.getTurn('t1')?.files.some((file) => file.relPath === 'notes.txt'), true);
+});
+
 test('a shell-only change first seen after the write is still recorded', async () => {
   // The watcher fires only after the formatter has run: there is no pre-turn
   // snapshot, so the observation itself must be what records the change.
@@ -271,7 +329,7 @@ test('sessionFor keeps every step, not only the latest turn', async () => {
   change.reportChanges([{ absPath: '/ws/b.ts', status: 'created' }]);
   await change.endTurn();
 
-  const session = change.sessionFor('thr');
+  const session = await change.sessionFor('thr');
   assert.ok(session);
   assert.equal(session.turnId, 't2');
   assert.deepEqual(
@@ -290,7 +348,7 @@ test('latestFor returns the recorded set for a reload and skips unobserved turns
   change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }]);
   await change.endTurn();
 
-  const latest = change.latestFor('thr');
+  const latest = await change.latestFor('thr');
   assert.ok(latest);
   assert.equal(latest.turnId, 't1');
   assert.equal(latest.entries[0].path, 'a.ts');
@@ -304,7 +362,7 @@ test('latestFor keeps a verified no-op distinct from no observation', async () =
   await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 'noop', candidates: ['/ws/a.ts'] });
   change.watch('/ws/a.ts', 'modified');
   await change.endTurn();
-  const verified = change.latestFor('thr');
+  const verified = await change.latestFor('thr');
   assert.ok(verified, 'an observed no-op is a real, empty set');
   assert.deepEqual(verified.entries, []);
 
@@ -312,7 +370,7 @@ test('latestFor keeps a verified no-op distinct from no observation', async () =
   await change.endTurn();
   // The latest turn observed nothing, so a reload must not surface a set at all:
   // silence is never repainted as a verified empty change set.
-  assert.equal(change.latestFor('thr'), undefined);
+  assert.equal(await change.latestFor('thr'), undefined);
 });
 
 test('a report for a different thread is dropped, not attached to the active turn', async () => {

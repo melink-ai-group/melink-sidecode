@@ -189,7 +189,9 @@ export function ChangesReview({
             Files changed
           </span>
           {busy ? (
-            <span className="chip chip--scope">Running</span>
+            <span className="status-chip status-chip--icon status-chip--running" title="Running" role="status" aria-label="Running">
+              <span className="spinner" aria-hidden="true" />
+            </span>
           ) : countLabel ? (
             <span className="changes-review__counts">{countLabel}</span>
           ) : null}

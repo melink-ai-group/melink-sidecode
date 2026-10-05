@@ -1,5 +1,5 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
-import { hasIgnoredSegment } from './ignore.ts';
+import { filterListedFiles, listedForReview, reviewSources, workspaceRootOf } from './ignore.ts';
 import type { JournalFileEntry, JournalStorage, JournalTurn } from './journal';
 import { sessionChangeSet } from './sessionFiles.ts';
 import { applyRejectedHunks, diffLines, type DiffLine } from './diff.ts';
@@ -267,10 +267,7 @@ export class ChangeStore {
   private async compose(backendId: string, threadId: string, turn: JournalTurn): Promise<ChangeView> {
     const decisions = this.validDecisions(backendId, threadId, turn.turnId, turn);
     const files: ChangeFileView[] = [];
-    for (const entry of turn.files) {
-      if (hasIgnoredSegment(entry.relPath)) {
-        continue;
-      }
+    for (const entry of await filterListedFiles(turn.files, (path) => this.fs.readFile(path))) {
       files.push(await this.fileView(turn.turnId, entry, decisions));
     }
     const additions = files.reduce((sum, file) => sum + file.additions, 0);
@@ -281,6 +278,15 @@ export class ChangeStore {
         (file) => file.decision !== 'pending' && file.hunks.every((hunk) => hunk.decision !== 'pending')
       );
     return { backendId, threadId, turnId: turn.turnId, files, additions, deletions, fullyDecided };
+  }
+
+  /** True when the strip and the review page show this file. */
+  private async listedFile(entry: JournalFileEntry): Promise<boolean> {
+    const root = workspaceRootOf(entry.absPath, entry.relPath);
+    const sources = root
+      ? await reviewSources(root, entry.relPath, (path) => this.fs.readFile(path), new Map())
+      : [];
+    return listedForReview(entry, sources);
   }
 
   /** The stored side of a file. A session row carries the blob key of the turn that owns that side. */
@@ -318,7 +324,7 @@ export class ChangeStore {
   async decide(input: DecideChangeInput): Promise<ChangeDecisionResult> {
     const turn = this.reviewedTurn(input.turnId);
     const entry = turn?.files.find((file) => file.relPath === toPosixRel(input.relPath));
-    if (!turn || !entry) {
+    if (!turn || !entry || !(await this.listedFile(entry))) {
       return { relPath: input.relPath, decision: 'pending', ok: false, error: 'That file is no longer part of this turn.' };
     }
 
@@ -346,10 +352,7 @@ export class ChangeStore {
       return [];
     }
     const results: ChangeDecisionResult[] = [];
-    for (const entry of turn.files) {
-      if (hasIgnoredSegment(entry.relPath)) {
-        continue;
-      }
+    for (const entry of await filterListedFiles(turn.files, (path) => this.fs.readFile(path))) {
       results.push(
         await this.decide({
           backendId: input.backendId,

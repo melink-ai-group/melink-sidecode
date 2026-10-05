@@ -1,6 +1,6 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import { hashBytes } from './hash.ts';
-import { isIgnoredRelPath } from './ignore.ts';
+import { excludedByIgnore, reviewSources } from './ignore.ts';
 import { contentBeforePatches, contentBeforeReplacements } from './patchReverse.ts';
 
 /**
@@ -310,7 +310,7 @@ interface Draft {
 
 export class ChangeJournal {
   private readonly storage: JournalStorage;
-  /** Root `.gitignore` text, loaded once per workspace root. `null` means there is none. */
+  /** `.gitignore` text, keyed by absolute path. `null` means the file is absent. */
   private readonly gitignoreCache = new Map<string, string | null>();
   private readonly fs: JournalFs;
   private readonly maxTurns: number;
@@ -695,6 +695,11 @@ export class ChangeJournal {
     return this.fs.readBlob(key);
   }
 
+  /** Workspace bytes for listing rules that read `.gitignore`. Missing is `undefined`. */
+  readWorkspaceFile(absPath: string): Promise<Uint8Array | undefined> {
+    return this.fs.readFile(absPath);
+  }
+
   /* ----------------------------- internals --------------------------------- */
 
   private findFile(turnId: string, relPath: string): JournalFileEntry | undefined {
@@ -708,26 +713,21 @@ export class ChangeJournal {
 
   /**
    * Paths the review must not attribute to the agent: ignored directories, and
-   * anything the workspace root `.gitignore` excludes. A missing gitignore
-   * ignores only the fixed directory names.
+   * anything excluded by a `.gitignore` from the workspace root down to the
+   * file. A missing gitignore ignores only the fixed directory names.
    */
   private async ignored(absPath: string): Promise<boolean> {
     const located = workspaceRelative(absPath, this.fs.workspaceRoots());
     if (!located) {
       return false;
     }
-    return isIgnoredRelPath(located.relPath, await this.gitignore(located.root));
-  }
-
-  private async gitignore(root: string): Promise<string | undefined> {
-    const key = toPosix(root);
-    if (this.gitignoreCache.has(key)) {
-      return this.gitignoreCache.get(key) ?? undefined;
-    }
-    const bytes = await this.fs.readFile(`${stripTrailingSlash(key)}/.gitignore`);
-    const text = bytes ? new TextDecoder().decode(bytes) : null;
-    this.gitignoreCache.set(key, text);
-    return text ?? undefined;
+    const sources = await reviewSources(
+      located.root,
+      located.relPath,
+      (path) => this.fs.readFile(path),
+      this.gitignoreCache
+    );
+    return excludedByIgnore(located.relPath, sources);
   }
 
   private async snapshot(absPath: string): Promise<FileSnapshot | null> {

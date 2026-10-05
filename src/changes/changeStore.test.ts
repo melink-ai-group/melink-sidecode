@@ -448,21 +448,48 @@ test('decideAll reports the files whose writes failed', async () => {
   assert.ok(results.every((result) => !result.ok && result.error));
 });
 
-test('a binary file is listed but not diffable', async () => {
+test('a binary file is omitted from the review and undo-all leaves it untouched', async () => {
   const fs = new FakeFs();
-  fs.files.set('/ws/blob.bin', new Uint8Array([1, 0, 2]));
+  fs.files.set('/ws/a.ts', text('before\n'));
   const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
-  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/blob.bin'] });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('after\n'));
   fs.files.set('/ws/blob.bin', new Uint8Array([1, 0, 3]));
+  await journal.observe('t1', '/ws/blob.bin', 'reported', 'created');
   await journal.endTurn('t1');
   const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
 
   const view = await store.view('codex', 'thr', 't1');
   assert.ok(view);
-  assert.equal(view.files[0].binary, true);
-  assert.equal(view.files[0].diffable, false);
-  assert.equal(view.files[0].hunks.length, 0);
-  assert.ok(view.files[0].detail);
+  assert.deepEqual(view.files.map((file) => file.path), ['a.ts']);
+  assert.equal(journal.getTurn('t1')?.files.some((file) => file.relPath === 'blob.bin' && file.binary), true);
+
+  const results = await store.decideAll({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't1',
+    decision: 'rejected'
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].relPath, 'a.ts');
+  assert.deepEqual(fs.files.get('/ws/blob.bin'), new Uint8Array([1, 0, 3]));
+});
+
+test('a nested gitignore keeps a file out of the review', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/pkg/.gitignore', text('secret.txt\n'));
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex' });
+  fs.files.set('/ws/pkg/secret.txt', text('hidden'));
+  fs.files.set('/ws/pkg/keep.ts', text('kept'));
+  await journal.observe('t1', '/ws/pkg/secret.txt', 'watched', 'created');
+  await journal.observe('t1', '/ws/pkg/keep.ts', 'watched', 'created');
+  await journal.endTurn('t1');
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const view = await store.view('codex', 'thr', 't1');
+  assert.ok(view);
+  assert.deepEqual(view.files.map((file) => file.path), ['pkg/keep.ts']);
 });
 
 test('a session review lists every step and undoes a file back to the first baseline', async () => {

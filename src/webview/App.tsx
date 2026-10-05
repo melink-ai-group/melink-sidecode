@@ -18,6 +18,7 @@ import {
   BackIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   ContextIcon,
   CopyIcon,
   CrossIcon,
@@ -42,6 +43,7 @@ import { TabList, type TabItem } from './Tabs';
 import { ContextMeter, ContextStrip } from './ContextStrip';
 import { ChangesReview } from './ChangesReview';
 import { ChangedFilesStrip } from './ChangedFilesStrip';
+import { showBuiltPlanDock } from '../backends/plan';
 import { PlanSurface } from './PlanSurface';
 import { backendStatusView, incompatibleBackends, authMismatchBackends } from './backendStatus';
 import {
@@ -174,6 +176,7 @@ export function App(): JSX.Element {
   const [modePanelOpen, setModePanelOpen] = useState(false);
   const [permissionPanelOpen, setPermissionPanelOpen] = useState(false);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [imageViewer, setImageViewer] = useState<{ images: ViewableImage[]; index: number } | undefined>();
   const permissionPopup = usePopupSide(permissionPanelOpen);
   const modelPopup = usePopupSide(modelPanelOpen);
   const modelSettingsPopup = usePopupSide(modelSettingsOpen);
@@ -1463,6 +1466,7 @@ export function App(): JSX.Element {
                 onDecide={decide}
                 onOpenRules={() => dispatch({ type: 'openRules' })}
                 onRestore={restoreCheckpoint}
+                onViewImage={(images, index) => setImageViewer({ images, index })}
               />
             )
           )
@@ -1517,7 +1521,7 @@ export function App(): JSX.Element {
       </div>
 
       <footer className={chatEmpty ? 'composer composer--expanded' : 'composer'}>
-        {state.plan?.built ? (
+        {showBuiltPlanDock(state.plan) ? (
           <div className="todo-dock">
             <PlanSurface
               plan={state.plan}
@@ -1608,33 +1612,11 @@ export function App(): JSX.Element {
         ) : null}
         <div className="composer-box">
           {state.attachments.length > 0 ? (
-            <ul className="attachments" aria-label="Attachments">
-              {state.attachments.map((attachment) => (
-                <li className="attachment" key={attachment.id}>
-                  {attachment.kind === 'image' && attachment.dataUrl ? (
-                    <img className="attachment-thumb" src={attachment.dataUrl} alt="" />
-                  ) : (
-                    <span className="attachment-icon" aria-hidden="true">
-                      <PaperclipIcon />
-                    </span>
-                  )}
-                  <span className="attachment-name" title={attachment.name}>
-                    {attachment.name}
-                  </span>
-                  {typeof attachment.size === 'number' ? (
-                    <span className="attachment-size">{formatBytes(attachment.size)}</span>
-                  ) : null}
-                  <button
-                    className="icon-btn attachment-remove"
-                    type="button"
-                    aria-label={`Remove ${attachment.name}`}
-                    onClick={() => removeAttachment(attachment.id)}
-                  >
-                    <CrossIcon />
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <AttachmentList
+              attachments={state.attachments}
+              onRemove={removeAttachment}
+              onView={(images, index) => setImageViewer({ images, index })}
+            />
           ) : null}
           <p className="sr-only" role="status" aria-live="polite">
             {dictationStatus ?? ''}
@@ -1890,6 +1872,14 @@ export function App(): JSX.Element {
         </div>
         <span className="composer-hint">Enter to send, Shift+Enter for a new line</span>
       </footer>
+      {imageViewer ? (
+        <ImageViewer
+          images={imageViewer.images}
+          index={imageViewer.index}
+          onIndex={(index) => setImageViewer({ images: imageViewer.images, index })}
+          onClose={() => setImageViewer(undefined)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -2756,7 +2746,8 @@ function TranscriptRow({
   checkpoint,
   onDecide,
   onOpenRules,
-  onRestore
+  onRestore,
+  onViewImage
 }: {
   item: TranscriptItemView;
   providerId: string;
@@ -2770,6 +2761,7 @@ function TranscriptRow({
   onDecide: (decision: ApprovalDecision) => void;
   onOpenRules: () => void;
   onRestore: (messageId: string, fileCount: number, paths: string[]) => void;
+  onViewImage: (images: ViewableImage[], index: number) => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
     const text = visibleTranscriptText(item.text);
@@ -2794,21 +2786,7 @@ function TranscriptRow({
         </div>
         <div className="turn-body">
           {item.attachments && item.attachments.length > 0 ? (
-            <ul className="attachments attachments--sent" aria-label="Attachments">
-              {item.attachments.map((attachment) => (
-                <li className="attachment" key={attachment.id}>
-                  <span className="attachment-icon" aria-hidden="true">
-                    <PaperclipIcon />
-                  </span>
-                  <span className="attachment-name" title={attachment.name}>
-                    {attachment.name}
-                  </span>
-                  {typeof attachment.size === 'number' ? (
-                    <span className="attachment-size">{formatBytes(attachment.size)}</span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+            <AttachmentList attachments={item.attachments} sent onView={onViewImage} />
           ) : null}
           {text ? <p>{text}</p> : null}
         </div>
@@ -2864,15 +2842,9 @@ function TranscriptRow({
   }
   const statusChip =
     item.status === 'streaming' ? (
-      <span className="stream-status" role="status">
-        <span className="spinner" aria-hidden="true" />
-        Generating
-      </span>
+      <StatusMark tone="running" label="Generating" />
     ) : item.status === 'canceled' ? (
-      <span className="stream-status stream-status--warning">
-        <StopIcon />
-        Stopped
-      </span>
+      <StatusMark label="Stopped" icon={<StopIcon />} />
     ) : null;
   return (
     <article className="turn turn--agent" aria-live="polite">
@@ -2984,12 +2956,7 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
             {preview}
           </span>
         ) : null}
-        {item.status === 'streaming' ? (
-          <span className="stream-status" role="status">
-            <span className="spinner" aria-hidden="true" />
-            Thinking
-          </span>
-        ) : null}
+        {item.status === 'streaming' ? <StatusMark tone="running" label="Thinking" /> : null}
         <span className="reasoning-toggle__hint">{expanded ? 'Hide' : 'Show'}</span>
       </button>
       {expanded ? (
@@ -3050,12 +3017,7 @@ function NarrationRow({
           {text}
           {message.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
         </span>
-        {running ? (
-          <span className="stream-status" role="status">
-            <span className="spinner" aria-hidden="true" />
-            Working
-          </span>
-        ) : null}
+        {running ? <StatusMark tone="running" label="Working" /> : null}
       </button>
       {expanded ? (
         <div className="narration__details">
@@ -3455,43 +3417,41 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
 function StatusChip({ status, doneLabel = 'Passed' }: { status: ItemStatus; doneLabel?: string }): JSX.Element | null {
   switch (status) {
     case 'streaming':
-      return (
-        <span className="status-chip status-chip--running">
-          <span className="spinner" aria-hidden="true" />
-          Running
-        </span>
-      );
+      return <StatusMark tone="running" label="Running" />;
     case 'completed':
-      return (
-        <span className="status-chip status-chip--done">
-          <CheckIcon />
-          {doneLabel}
-        </span>
-      );
+      return <StatusMark tone="done" label={doneLabel} icon={<CheckIcon />} />;
     case 'failed':
-      return (
-        <span className="status-chip status-chip--failed">
-          <CrossIcon />
-          Failed
-        </span>
-      );
+      return <StatusMark tone="failed" label="Failed" icon={<CrossIcon />} />;
     case 'warning':
-      return (
-        <span className="status-chip status-chip--warning">
-          <AlertIcon />
-          Check
-        </span>
-      );
+      return <StatusMark tone="warning" label="Check" icon={<AlertIcon />} />;
     case 'canceled':
-      return (
-        <span className="status-chip">
-          <StopIcon />
-          Stopped
-        </span>
-      );
+      return <StatusMark label="Stopped" icon={<StopIcon />} />;
     default:
       return null;
   }
+}
+
+/** Icon-only status. The word stays in the tooltip and the accessible name. */
+function StatusMark({
+  label,
+  tone,
+  icon
+}: {
+  label: string;
+  tone?: 'running' | 'done' | 'failed' | 'warning';
+  icon?: JSX.Element;
+}): JSX.Element {
+  const toneClass = tone ? ` status-chip--${tone}` : '';
+  return (
+    <span
+      className={`status-chip status-chip--icon${toneClass}`}
+      title={label}
+      role={tone === 'running' ? 'status' : 'img'}
+      aria-label={label}
+    >
+      {tone === 'running' ? <span className="spinner" aria-hidden="true" /> : icon}
+    </span>
+  );
 }
 
 /** A short, honest label for what a settled approval concerned. */
@@ -3608,14 +3568,139 @@ function kindForMime(mimeType: string): Attachment['kind'] {
   return 'file';
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+/** An image the viewer can show. `src` is a data URL already held in the webview. */
+type ViewableImage = { id: string; src: string; name: string };
+
+function viewableImages(attachments: Attachment[]): ViewableImage[] {
+  return attachments.flatMap((attachment) =>
+    attachment.kind === 'image' && attachment.dataUrl
+      ? [{ id: attachment.id, src: attachment.dataUrl, name: attachment.name }]
+      : []
+  );
+}
+
+function AttachmentList({
+  attachments,
+  sent,
+  onRemove,
+  onView
+}: {
+  attachments: Attachment[];
+  sent?: boolean;
+  onRemove?: (id: string) => void;
+  onView: (images: ViewableImage[], index: number) => void;
+}): JSX.Element {
+  const images = viewableImages(attachments);
+  return (
+    <ul className={sent ? 'attachments attachments--sent' : 'attachments'} aria-label="Attachments">
+      {attachments.map((attachment) => {
+        const imageIndex = images.findIndex((image) => image.id === attachment.id);
+        const preview = imageIndex >= 0 ? images[imageIndex] : undefined;
+        return (
+          <li className="attachment" key={attachment.id}>
+            {preview ? (
+              <button
+                className="attachment-open"
+                type="button"
+                aria-label={`View ${attachment.name}`}
+                onClick={() => onView(images, imageIndex)}
+              >
+                <img className="attachment-thumb" src={preview.src} alt="" />
+              </button>
+            ) : (
+              <span className="attachment-fallback" title={attachment.name} aria-label={attachment.name}>
+                <PaperclipIcon />
+              </span>
+            )}
+            {onRemove ? (
+              <button
+                className="attachment-remove"
+                type="button"
+                aria-label={`Remove ${attachment.name}`}
+                onClick={() => onRemove(attachment.id)}
+              >
+                <CrossIcon />
+              </button>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ImageViewer({
+  images,
+  index,
+  onIndex,
+  onClose
+}: {
+  images: ViewableImage[];
+  index: number;
+  onIndex: (index: number) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const current = images[Math.min(Math.max(index, 0), images.length - 1)];
+  const several = images.length > 1;
+
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === 'ArrowLeft' && several) {
+        event.preventDefault();
+        onIndex((index - 1 + images.length) % images.length);
+      } else if (event.key === 'ArrowRight' && several) {
+        event.preventDefault();
+        onIndex((index + 1) % images.length);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [images.length, index, onClose, onIndex, several]);
+
+  return (
+    <div className="image-viewer" role="presentation" onClick={onClose}>
+      <div
+        className="image-viewer__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={current?.name ?? 'Image'}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {several ? (
+          <button
+            className="image-viewer__nav image-viewer__nav--prev"
+            type="button"
+            aria-label="Previous image"
+            onClick={() => onIndex((index - 1 + images.length) % images.length)}
+          >
+            <ChevronRightIcon />
+          </button>
+        ) : null}
+        {current ? <img className="image-viewer__image" src={current.src} alt={current.name} /> : null}
+        {several ? (
+          <button
+            className="image-viewer__nav image-viewer__nav--next"
+            type="button"
+            aria-label="Next image"
+            onClick={() => onIndex((index + 1) % images.length)}
+          >
+            <ChevronRightIcon />
+          </button>
+        ) : null}
+        <button className="image-viewer__close" type="button" aria-label="Close image" ref={closeRef} onClick={onClose}>
+          <CrossIcon />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**

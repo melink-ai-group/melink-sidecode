@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hasIgnoredSegment, isIgnoredRelPath } from './ignore.ts';
+import { excludedByIgnore, hasIgnoredSegment, isIgnoredRelPath } from './ignore.ts';
 
 test('dependency and tool directories are ignored at any depth', () => {
   assert.equal(hasIgnoredSegment('node_modules/left-pad/index.js'), true);
@@ -21,4 +21,26 @@ dist/
   assert.equal(isIgnoredRelPath('keep.log', gitignore), false);
   assert.equal(isIgnoredRelPath('src/app.ts', gitignore), false);
   assert.equal(isIgnoredRelPath('.opencode/bun.lock', gitignore), true);
+});
+
+test('a directory rule blocks a later negation of a file inside it', () => {
+  const gitignore = `
+dist/
+!dist/app.js
+`;
+  assert.equal(isIgnoredRelPath('dist/app.js', gitignore), true);
+  assert.equal(isIgnoredRelPath('src/app.js', gitignore), false);
+});
+
+test('a nested gitignore excludes its own paths and can un-ignore a file rule', () => {
+  const sources = [
+    { directory: '', text: '*.log\npkg/\n' },
+    { directory: 'src', text: '!keep.log\n' },
+    { directory: 'pkg', text: '!secret.txt\n' }
+  ];
+  assert.equal(excludedByIgnore('src/keep.log', sources), false);
+  assert.equal(excludedByIgnore('src/other.log', sources), true);
+  assert.equal(excludedByIgnore('pkg/secret.txt', sources), true);
+  assert.equal(excludedByIgnore('pkg/keep.ts', sources), true);
+  assert.equal(excludedByIgnore('src/app.ts', sources), false);
 });

@@ -607,6 +607,38 @@ test('a native plan update keeps the artifact summary and built flag', () => {
   assert.equal(updated.plan?.steps.length, 2);
 });
 
+test('a later message hides a finished plan row, and new work brings it back', () => {
+  const plan = {
+    path: '.melink/plans/t.md',
+    title: 'Fix the bug',
+    built: true,
+    steps: [
+      { text: 'a', status: 'completed' as const },
+      { text: 'b', status: 'completed' as const }
+    ],
+    updatedAt: 1
+  };
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't' });
+  const withPlan = reduce(active, { type: 'plan', plan });
+  const sent = reduce(withPlan, { type: 'localUserMessage', text: 'what is left?' });
+  assert.equal(sent.plan?.completedDismissed, true);
+
+  const resumed = reduce(sent, {
+    type: 'agentEvent',
+    event: {
+      type: 'plan/updated',
+      backendId: 'codex',
+      threadId: 't',
+      turnId: 'turn_2',
+      steps: [
+        { text: 'a', status: 'completed' },
+        { text: 'b', status: 'pending' }
+      ]
+    }
+  });
+  assert.equal(resumed.plan?.completedDismissed, undefined);
+});
+
 test('checkpoints are carried for the active thread and dropped on a conversation switch', () => {
   const withCheckpoints = reduce(initialState, {
     type: 'checkpoints',

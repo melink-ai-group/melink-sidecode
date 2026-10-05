@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PLAN_DIRECTORY,
+  adoptedPlanSteps,
+  assistantProgressText,
+  completeStepsBeforeFrontier,
   mergeCheckboxStatuses,
+  mergeReportedStepStatuses,
   parsePlanBody,
   parsePlanSteps,
   parsePlanSummary,
@@ -23,9 +27,13 @@ import {
   todoStepsFromNative,
   updateStepStatus,
   userAsksToRevisePlan,
+  carriedPlanDismissal,
   continuePlanInstruction,
   decidePlanAutopilot,
-  planTurnWork
+  planFullyComplete,
+  planTurnWork,
+  shouldDismissCompletedPlan,
+  showBuiltPlanDock
 } from './plan.ts';
 import { denyInProgressStep, settleInProgressSteps } from './types.ts';
 import { modeRefusalReason } from './modes.ts';
@@ -379,6 +387,103 @@ test('checkbox lines update matching steps and leave the rest of the list alone'
   assert.deepEqual(mergeCheckboxStatuses(steps, 'No checklist here.'), steps.map((step) => ({ ...step })));
 });
 
+test('a later checkbox for the same step replaces the earlier status', () => {
+  const steps: TodoStep[] = [
+    { text: 'Add the accessor', status: 'pending' },
+    { text: 'Cover the fallback', status: 'pending' }
+  ];
+  const reply = ['- [~] Add the accessor', 'working', '- [x] Add the accessor', '- [~] Cover the fallback'].join('\n');
+  assert.deepEqual(mergeCheckboxStatuses(steps, reply), [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' }
+  ]);
+});
+
+test('progress is read from every assistant message in the turn', () => {
+  const text = assistantProgressText([
+    { id: 'u1', kind: 'message', role: 'user', text: 'Build it' },
+    { id: 'a1', kind: 'message', role: 'assistant', text: '- [x] Add the accessor' },
+    { id: 't1', kind: 'tool', title: 'Edit' },
+    { id: 'a2', kind: 'message', role: 'assistant', text: '- [~] Cover the fallback' }
+  ]);
+  assert.match(text, /- \[x\] Add the accessor/);
+  assert.match(text, /- \[~\] Cover the fallback/);
+  const earlier = assistantProgressText([
+    { id: 'old', kind: 'message', role: 'assistant', text: '- [x] old' },
+    { id: 'u2', kind: 'message', role: 'user', text: 'next' },
+    { id: 'a3', kind: 'message', role: 'assistant', text: 'Starting now.' }
+  ]);
+  assert.equal(earlier.includes('[x]'), false);
+  assert.match(earlier, /Starting now/);
+});
+
+test('a later empty checkbox does not clear a finished step', () => {
+  const steps: TodoStep[] = [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' }
+  ];
+  assert.deepEqual(mergeCheckboxStatuses(steps, '- [ ] Add the accessor\n- [ ] Cover the fallback'), [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' }
+  ]);
+});
+
+test('starting a later step completes the open steps before it', () => {
+  const steps: TodoStep[] = [
+    { text: 'Add the accessor', status: 'pending' },
+    { text: 'Cover the fallback', status: 'pending' },
+    { text: 'Ship it', status: 'pending' }
+  ];
+  const merged = mergeCheckboxStatuses(steps, '- [~] Cover the fallback');
+  assert.deepEqual(completeStepsBeforeFrontier(merged), [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' },
+    { text: 'Ship it', status: 'pending' }
+  ]);
+  const denied: TodoStep[] = [
+    { text: 'Refused', status: 'denied' },
+    { text: 'Next', status: 'inProgress' }
+  ];
+  assert.equal(completeStepsBeforeFrontier(denied)[0]?.status, 'denied');
+});
+
+test('a native todo update changes matching plan steps and leaves the rest', () => {
+  const steps: TodoStep[] = [
+    { text: 'Add the accessor', status: 'pending' },
+    { text: 'Cover the fallback', status: 'pending' },
+    { text: 'Ship it', status: 'pending' }
+  ];
+  const matched = mergeReportedStepStatuses(steps, [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' }
+  ]);
+  assert.equal(matched.matched, true);
+  assert.deepEqual(matched.steps, [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' },
+    { text: 'Ship it', status: 'pending' }
+  ]);
+  const unrelated = mergeReportedStepStatuses(steps, [{ text: 'Something else', status: 'completed' }]);
+  assert.equal(unrelated.matched, false);
+  assert.deepEqual(unrelated.steps, steps.map((step) => ({ ...step })));
+});
+
+test('a plan file edit adopts checkbox statuses when the steps are the same', () => {
+  const steps: TodoStep[] = [
+    { text: 'Add the accessor', status: 'pending' },
+    { text: 'Cover the fallback', status: 'pending' }
+  ];
+  assert.deepEqual(adoptedPlanSteps(steps, [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' }
+  ]), [
+    { text: 'Add the accessor', status: 'completed' },
+    { text: 'Cover the fallback', status: 'inProgress' }
+  ]);
+  assert.equal(adoptedPlanSteps(steps, steps), undefined);
+  assert.equal(adoptedPlanSteps(steps, [{ text: 'Rewritten', status: 'completed' }]), undefined);
+});
+
 test('rewriting steps keeps the document body', () => {
   const body = 'Read the editor model first.\n\nThen fall back to disk.';
   const markdown = renderPlanMarkdown({
@@ -464,6 +569,24 @@ test('a built plan continues on its own until an automatic turn repeats the same
   assert.equal(asked.decision, 'hold');
   assert.match(continuePlanInstruction(steps), /Write the service/);
   assert.doesNotMatch(continuePlanInstruction(steps), /Write the schema/);
+});
+
+test('a completed plan row hides only after a later user message', () => {
+  const done = [{ text: 'Ship it', status: 'completed' as const }];
+  const open = [
+    { text: 'Ship it', status: 'completed' as const },
+    { text: 'Verify it', status: 'pending' as const }
+  ];
+  const finished = { built: true, steps: done };
+  assert.equal(planFullyComplete(done), true);
+  assert.equal(planFullyComplete(open), false);
+  assert.equal(showBuiltPlanDock(finished), true);
+  assert.equal(shouldDismissCompletedPlan(finished, false), true);
+  assert.equal(shouldDismissCompletedPlan(finished, true), false);
+  assert.equal(showBuiltPlanDock({ ...finished, completedDismissed: true }), false);
+  assert.equal(showBuiltPlanDock({ built: true, steps: open, completedDismissed: true }), true);
+  assert.equal(carriedPlanDismissal(open, true), undefined);
+  assert.equal(carriedPlanDismissal(done, true), true);
 });
 
 test('plan work is the latest turn’s tools and files, not the prose', () => {

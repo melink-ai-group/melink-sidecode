@@ -58,6 +58,11 @@ export interface PersistedPlanState {
   steps: TodoStep[];
   /** True once the plan has been built (the thread moved to execution). */
   built?: boolean;
+  /**
+   * True once a fully completed plan was followed by another user message, so
+   * the "Plan complete" row stays hidden after a reload.
+   */
+  completedDismissed?: boolean;
   /** Epoch milliseconds the plan was last written or updated. */
   updatedAt: number;
 }
