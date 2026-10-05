@@ -848,6 +848,14 @@ body {
   background: color-mix(in srgb, var(--vscode-list-hoverBackground) 75%, transparent);
 }
 
+.turn--user .turn-body .md > * {
+  margin-bottom: 0;
+}
+
+.turn--user .turn-body .md > * + * {
+  margin-top: 8px;
+}
+
 .turn--reasoning .turn-body {
   padding: 8px 10px;
   border-left: 2px solid color-mix(in srgb, var(--melink-shell) 55%, transparent);
@@ -932,12 +940,22 @@ body {
   text-overflow: ellipsis;
 }
 
-.reasoning-toggle__hint {
+.reasoning-toggle__chevron {
   flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   margin-left: auto;
-  padding-left: 8px;
   color: var(--vscode-descriptionForeground);
-  font-size: 11px;
+  transform: rotate(-90deg);
+}
+
+.reasoning-toggle__chevron .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.reasoning-toggle__chevron--open {
+  transform: none;
 }
 
 .turn--reasoning .stream-status {
@@ -950,9 +968,6 @@ body {
   margin-left: 8px;
 }
 
-.turn--reasoning .stream-status + .reasoning-toggle__hint {
-  margin-left: 8px;
-}
 
 .turn--reasoning .turn-body {
   cursor: pointer;
@@ -1850,6 +1865,8 @@ body {
   line-height: 1.45;
   resize: none;
   outline: none;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 .composer-input::placeholder {

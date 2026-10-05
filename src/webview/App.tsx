@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -188,6 +188,7 @@ export function App(): JSX.Element {
   const [historyQuery, setHistoryQuery] = useState('');
   const historyRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
   /** Follow new transcript content only while the reader is already at the bottom. */
   const stickToBottomRef = useRef(true);
   /** Thread last painted with its messages visible, so a restore or history switch can jump to the end. */
@@ -705,6 +706,43 @@ export function App(): JSX.Element {
       decision
     });
   };
+
+  const fitComposerInput = useCallback(() => {
+    const element = composerInputRef.current;
+    if (!element) {
+      return;
+    }
+    element.style.height = 'auto';
+    const max = Number.parseFloat(getComputedStyle(element).maxHeight);
+    const content = element.scrollHeight;
+    const next = Number.isFinite(max) ? Math.min(content, max) : content;
+    element.style.height = `${next}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    fitComposerInput();
+  }, [draft, state.settingsOpen, state.rulesOpen, fitComposerInput]);
+
+  useEffect(() => {
+    const box = composerInputRef.current?.parentElement;
+    if (!box) {
+      return;
+    }
+    let width = box.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (box.clientWidth === width) {
+        return;
+      }
+      width = box.clientWidth;
+      fitComposerInput();
+    });
+    observer.observe(box);
+    window.addEventListener('resize', fitComposerInput);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fitComposerInput);
+    };
+  }, [state.settingsOpen, state.rulesOpen, fitComposerInput]);
 
   const send = (): void => {
     const text = draft.trim();
@@ -1637,6 +1675,7 @@ export function App(): JSX.Element {
           </label>
           <textarea
             id="prompt"
+            ref={composerInputRef}
             className="composer-input"
             value={draft}
             placeholder={
@@ -2792,7 +2831,7 @@ function TranscriptRow({
           {item.attachments && item.attachments.length > 0 ? (
             <AttachmentList attachments={item.attachments} sent onView={onViewImage} />
           ) : null}
-          {text ? <p>{text}</p> : null}
+          {text ? <Markdown text={text} /> : null}
         </div>
       </article>
     );
@@ -2963,7 +3002,12 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
         <span className="status-slot">
           {item.status === 'streaming' ? <StatusMark tone="running" label="Thinking" /> : null}
         </span>
-        <span className="reasoning-toggle__hint">{expanded ? 'Hide' : 'Show'}</span>
+        <span
+          className={`reasoning-toggle__chevron${expanded ? ' reasoning-toggle__chevron--open' : ''}`}
+          aria-hidden="true"
+        >
+          <ChevronDownIcon />
+        </span>
       </button>
       {expanded ? (
         <div className="turn-body md" onClick={toggle}>
