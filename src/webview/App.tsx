@@ -2958,7 +2958,9 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
             {preview}
           </span>
         ) : null}
-        {item.status === 'streaming' ? <StatusMark tone="running" label="Thinking" /> : null}
+        <span className="status-slot">
+          {item.status === 'streaming' ? <StatusMark tone="running" label="Thinking" /> : null}
+        </span>
         <span className="reasoning-toggle__hint">{expanded ? 'Hide' : 'Show'}</span>
       </button>
       {expanded ? (
@@ -3019,7 +3021,9 @@ function NarrationRow({
           {text}
           {message.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
         </span>
-        {running ? <StatusMark tone="running" label="Working" /> : null}
+        <span className="status-slot">
+          {running ? <StatusMark tone="running" label="Working" /> : null}
+        </span>
       </button>
       {expanded ? (
         <div className="narration__details">
@@ -3394,7 +3398,7 @@ function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Element {
   );
 }
 
-function StatusChip({ status, doneLabel = 'Passed' }: { status: ItemStatus; doneLabel?: string }): JSX.Element | null {
+function StatusChip({ status, doneLabel = 'Passed' }: { status: ItemStatus; doneLabel?: string }): JSX.Element {
   switch (status) {
     case 'streaming':
       return <StatusMark tone="running" label="Running" />;
@@ -3407,7 +3411,7 @@ function StatusChip({ status, doneLabel = 'Passed' }: { status: ItemStatus; done
     case 'canceled':
       return <StatusMark label="Stopped" icon={<StopIcon />} />;
     default:
-      return null;
+      return <span className="status-slot" aria-hidden="true" />;
   }
 }
 
