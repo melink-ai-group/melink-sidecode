@@ -745,7 +745,10 @@ export function decidePlanAutopilot(input: {
   if (!remaining || input.blocked) {
     return { decision: 'hold', signature };
   }
-  if (input.automatic && input.previousSignature === signature) {
+  // A turn that did not touch the workspace, or that repeated the previous
+  // result, does not get another automatic turn. A refusal otherwise shows up
+  // twice: once for the user, then again for the continuation.
+  if (input.work.length === 0 || input.previousSignature === signature) {
     return { decision: 'hold', signature };
   }
   return { decision: 'continue', signature };

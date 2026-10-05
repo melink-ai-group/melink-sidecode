@@ -33,8 +33,6 @@ import type { ThreadStartParams } from '../../../schemas/v2/ThreadStartParams';
 import type { ThreadStartResponse } from '../../../schemas/v2/ThreadStartResponse';
 import type { ThreadResumeParams } from '../../../schemas/v2/ThreadResumeParams';
 import type { ThreadResumeResponse } from '../../../schemas/v2/ThreadResumeResponse';
-import type { ThreadForkParams } from '../../../schemas/v2/ThreadForkParams';
-import type { ThreadForkResponse } from '../../../schemas/v2/ThreadForkResponse';
 import type { ThreadListParams } from '../../../schemas/v2/ThreadListParams';
 import type { ThreadListResponse } from '../../../schemas/v2/ThreadListResponse';
 import type { TurnStartParams } from '../../../schemas/v2/TurnStartParams';
@@ -547,18 +545,6 @@ export class AppServerConnection implements Disposable {
 
   deleteThread(threadId: string): Promise<unknown> {
     return this.request<unknown>('thread/delete', { threadId });
-  }
-
-  /**
-   * Copy a thread into a new one. A new thread takes `developerInstructions`;
-   * a resume of a thread that is still loaded does not.
-   */
-  forkThread(params: ThreadForkParams, timeoutMs?: number): Promise<ThreadForkResponse> {
-    return this.request<ThreadForkResponse>(
-      'thread/fork',
-      params,
-      timeoutMs === undefined ? {} : { timeoutMs, retryable: false }
-    );
   }
 
   resumeThread(params: ThreadResumeParams, timeoutMs?: number): Promise<ThreadResumeResponse> {

@@ -515,7 +515,7 @@ test('denying marks the running step as denied and leaves the rest alone', () =>
   assert.deepEqual(denyInProgressStep(none), none);
 });
 
-test('a built plan continues on its own until an automatic turn repeats the same result', () => {
+test('a built plan continues only after a turn that changed the workspace', () => {
   const steps: TodoStep[] = [
     { text: 'Write the schema', status: 'completed' },
     { text: 'Write the service', status: 'pending' }
@@ -527,7 +527,17 @@ test('a built plan continues on its own until an automatic turn repeats the same
     work: [],
     blocked: false
   });
-  assert.equal(quiet.decision, 'continue');
+  assert.equal(quiet.decision, 'hold');
+
+  const repeated = decidePlanAutopilot({
+    built: true,
+    steps,
+    automatic: false,
+    previousSignature: quiet.signature,
+    work: [],
+    blocked: false
+  });
+  assert.equal(repeated.decision, 'hold');
 
   const progressed = decidePlanAutopilot({
     built: true,
