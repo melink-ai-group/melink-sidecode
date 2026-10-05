@@ -36,6 +36,7 @@ import {
   effectivePermissionLevel,
   isDefaultMode,
   modeForcesReadOnly,
+  modeInstructions,
   modeRefusalReason
 } from './modes';
 import { questionRequestFromToolParams, SKIPPED_ANSWER, type QuestionAnswer } from '../questions';
@@ -57,7 +58,7 @@ import {
   classifyCodexAuthFailure,
   describeCodexAuth
 } from './codex/auth';
-import { buildCodexTurnInput, planEscapeInstructions } from './codex/turnInput';
+import { buildCodexTurnInput } from './codex/turnInput';
 import { refreshStoredChatgptAuth } from './codex/tokenRefresh';
 import type { Thread } from '../../schemas/v2/Thread';
 import type { ThreadItem } from '../../schemas/v2/ThreadItem';
@@ -172,9 +173,9 @@ export class CodexBackend implements AgentBackend {
    */
   private readonly bakedMode = new Map<string, DefaultMode>();
   /**
-   * Host thread ids whose saved developer instruction may still require Plan
-   * mode. A resume cannot replace that field while the thread is loaded, so
-   * the next Agent turn forks a new thread that does not carry it.
+   * Host thread ids whose saved history still contains the Plan-mode developer
+   * instruction. A fork keeps that history, so the next Agent turn starts a
+   * new thread that does not.
    */
   private readonly needsPlanEscape = new Set<string>();
   /** Host thread id to the Codex thread that actually receives turns. */
@@ -495,10 +496,15 @@ export class CodexBackend implements AgentBackend {
         throw failure;
       });
     this.threads.add(threadId);
-    // A loaded thread keeps the developer instruction it was started with.
-    // Resume does not replace that field, so an Agent turn must fork first.
+    // A loaded thread keeps the developer message it was started with. Resume
+    // does not remove it, and a fork keeps it in history. An Agent turn starts
+    // a new thread only when that Plan text is actually present.
     this.bakedMode.delete(threadId);
-    this.needsPlanEscape.add(threadId);
+    if (carriesPlanInstruction(response.collaborationMode?.settings?.developer_instructions, response.thread)) {
+      this.needsPlanEscape.add(threadId);
+    } else {
+      this.needsPlanEscape.delete(threadId);
+    }
     if (options?.context?.snapshot) {
       this.bakedSnapshot.set(threadId, options.context.snapshot);
     } else {
@@ -637,25 +643,32 @@ export class CodexBackend implements AgentBackend {
     const connection = await this.connect();
     const model = request.model ?? this.defaultModel;
 
-    // Mode rides on this turn. A resumed thread may still be carrying the Plan
-    // instruction from when it was started; that is replaced by a fork before
-    // the turn. The workspace delta, the viewed file, and attachments ride on
-    // this turn's provider input. The stored user message stays `request.text`.
+    // Mode rides on this turn. A resumed thread can still be carrying the Plan
+    // developer message in its history. That history is left behind before the
+    // turn. The workspace delta, the viewed file, and attachments ride on this
+    // turn's provider input. The stored user message stays `request.text`.
     const mode = isDefaultMode(request.mode) ? request.mode : this.threadModes.get(handle.threadId) ?? 'agent';
     const bakedMode = this.bakedMode.get(handle.threadId);
     const nextSnapshot = request.context?.snapshot;
-    // Build leaves Plan mode. The saved developer instruction still forbids
-    // implementation, and Codex will not replace it on this thread. Fork first.
+    const requestedLevel =
+      request.permissionLevel ?? this.threadPermissions.get(handle.threadId) ?? DEFAULT_PERMISSION_LEVEL;
+    const level = effectivePermissionLevel(mode, requestedLevel);
+    const mapping = codexPermissionMapping(level);
+    if (request.permissionLevel) {
+      this.threadPermissions.set(handle.threadId, requestedLevel);
+    }
+    // Build leaves Plan mode. The saved developer message still forbids
+    // implementation, and a fork keeps that message. Start a thread that does not.
     let revokePlan = false;
     if (mode === 'agent' && this.needsPlanEscape.has(handle.threadId)) {
       revokePlan = true;
-      // Forking echoes the old thread. Hold those events until the fork returns,
-      // then release them before the real turn starts.
       this.suppressHistory = true;
       try {
         await this.escapePlanInstruction(
           connection,
           handle.threadId,
+          model,
+          level,
           nextSnapshot ?? this.bakedSnapshot.get(handle.threadId),
           request.context?.workspaceRoot
         );
@@ -677,18 +690,6 @@ export class CodexBackend implements AgentBackend {
       revokePlan,
       includeSnapshot: Boolean(request.context?.priming && nextSnapshot)
     });
-
-    // A level change applies to this turn and subsequent ones, and both the
-    // approval policy and the sandbox policy are overridden together so a level
-    // can never be half-applied (a new sandbox with a stale prompt policy and
-    // vice versa). The request's level wins over the thread's remembered one.
-    const requestedLevel =
-      request.permissionLevel ?? this.threadPermissions.get(handle.threadId) ?? DEFAULT_PERMISSION_LEVEL;
-    const level = effectivePermissionLevel(mode, requestedLevel);
-    const mapping = codexPermissionMapping(level);
-    if (request.permissionLevel) {
-      this.threadPermissions.set(handle.threadId, requestedLevel);
-    }
 
     const turnDone = new Promise<void>((resolve, reject) => {
       this.pendingTurn = { threadId: handle.threadId, resolve, reject };
@@ -955,8 +956,8 @@ export class CodexBackend implements AgentBackend {
     if (this.swallowQuiet(notification.method, params)) {
       return;
     }
-    // Forking off a Plan-mode thread echoes that thread's history. Drop it so
-    // the open chat is not replayed under the same conversation.
+    // Starting the replacement thread emits its own lifecycle events. Drop them
+    // so the open chat is not given a second conversation.
     if (
       this.suppressHistory &&
       (notification.method.startsWith('item/') ||
@@ -1366,33 +1367,41 @@ export class CodexBackend implements AgentBackend {
   }
 
   /**
-   * Leave a saved Plan-mode developer instruction by forking.
+   * Leave a saved Plan-mode developer message by starting a new thread.
    *
-   * Codex ignores `developerInstructions` on a thread that is already loaded,
-   * and unsubscribing does not unload it. A fork is a new thread, so the
-   * replacement instruction is the one the model actually receives. Events are
-   * translated back to the original thread id.
+   * A fork copies the old history, including the developer message that says
+   * not to implement, and Codex does not replace that message. The new thread
+   * has only the Agent instruction. Events are translated back to the original
+   * thread id so the sidebar conversation stays put.
    */
   private async escapePlanInstruction(
     connection: AppServerConnection,
     hostThreadId: string,
+    model: string,
+    level: PermissionLevel,
     snapshot: string | undefined,
     cwd?: string
   ): Promise<void> {
-    const response = await connection.forkThread(
-      {
-        threadId: this.liveThreadId(hostThreadId),
-        cwd: cwd ?? this.cwd,
-        developerInstructions: planEscapeInstructions(snapshot),
-        approvalsReviewer: 'user',
-        excludeTurns: true
-      },
-      15_000
-    );
-    const forkedId = response.thread.id;
-    this.liveThreads.set(hostThreadId, forkedId);
-    this.hostThreads.set(forkedId, hostThreadId);
-    this.threads.add(forkedId);
+    const mapping = codexPermissionMapping(level);
+    const instructions = [
+      modeInstructions('agent'),
+      'The planning phase is finished. Implement the approved plan in the workspace. No instruction prohibits implementation.',
+      snapshot
+    ]
+      .filter((part): part is string => Boolean(part && part.trim().length > 0))
+      .join('\n\n');
+    const response = await connection.startThread({
+      model: model || null,
+      cwd: cwd ?? this.cwd,
+      approvalPolicy: mapping.approvalPolicy,
+      approvalsReviewer: 'user',
+      sandbox: mapping.sandbox,
+      developerInstructions: instructions
+    });
+    const startedId = response.thread.id;
+    this.liveThreads.set(hostThreadId, startedId);
+    this.hostThreads.set(startedId, hostThreadId);
+    this.threads.add(startedId);
   }
 
   /**
@@ -1538,6 +1547,16 @@ function userInputResponse(
     body[id] = { answers: [text] };
   }
   return { answers: body };
+}
+
+const PLAN_LOCK = 'Do not implement the plan';
+
+/** True when a saved thread still carries the Plan-mode developer text. */
+function carriesPlanInstruction(saved: string | null | undefined, thread: Thread): boolean {
+  if (saved?.includes(PLAN_LOCK)) {
+    return true;
+  }
+  return JSON.stringify(thread.turns).includes(PLAN_LOCK);
 }
 
 /**

@@ -51,12 +51,13 @@ test('the auth code maps the API-key rejection to its own status and never logs'
   assert.equal(/\boutputChannel\b/i.test(auth), false);
 });
 
-test('a resumed thread leaves a saved Plan instruction by forking, not by rewriting the running thread', async () => {
+test('a resumed Plan thread starts a new Codex thread so the saved Plan instruction is not inherited', async () => {
   const codex = await source('backends/codex.ts');
   assert.match(codex, /needsPlanEscape/);
-  assert.match(codex, /forkThread\(/);
-  assert.match(codex, /planEscapeInstructions/);
-  assert.equal(/unsubscribeThread/.test(codex), false);
+  assert.match(codex, /Do not implement the plan/);
+  const escape = codex.slice(codex.indexOf('private async escapePlanInstruction'));
+  assert.match(escape, /startThread\(/);
+  assert.equal(/forkThread\(/.test(codex), false);
   assert.equal(/modeInstructions\(mode\)/.test(codex), false);
 });
 
