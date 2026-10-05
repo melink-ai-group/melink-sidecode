@@ -357,12 +357,15 @@ export type HostToWebviewMessage =
       includeViewedFile: boolean;
     }
   /**
-   * The files a turn changed, pushed on turn end and on webview reload.
+   * The files the thread has changed, pushed on turn end and on webview reload.
    *
-   * `entries` is the authoritative set the host recorded for `turnId`: an empty
-   * array means the host verified no files changed (a real no-op), never that it
-   * failed to observe. When no change could be observed at all, the host sends
-   * no `changes/changed` message rather than an empty one, so the UI never
+   * `entries` is the net of every observed turn in the thread, not only `turnId`.
+   * A plan runs one turn per step, and a later step must not hide the files an
+   * earlier step wrote. `turnId` is the newest observed turn, which is the turn
+   * the review snapshot is addressed by. An empty array means the host verified
+   * the thread nets to no file changes (a real no-op), never that it failed to
+   * observe. When no change could be observed at all, the host sends no
+   * `changes/changed` message rather than an empty one, so the UI never
    * mistakes silence for a verified no-op.
    */
   | { type: 'changes/changed'; backendId: string; threadId: string; turnId: string; entries: ChangeEntry[] }

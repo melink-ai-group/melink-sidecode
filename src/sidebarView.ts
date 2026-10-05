@@ -550,6 +550,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * what was observed. A set is pushed only when the turn actually observed
    * something; a turn with no observation pushes nothing, so the UI never reads
    * silence as "the agent changed nothing".
+   *
+   * The set is the whole thread, not this turn alone. A plan runs one turn per
+   * step, and the surface has to keep every step's files.
    */
   private async finishChangeTurn(turnId: string): Promise<void> {
     // A terminus for a turn that is not the active one (a late event after a new
@@ -563,17 +566,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!set) {
       return;
     }
+    const session = this.changeTracker.sessionFor(set.threadId);
+    if (!session) {
+      return;
+    }
     // Only the active conversation's own turn is pushed: a background thread's
     // change set must not replace what the visible surface is showing.
-    if (this.activeThread?.backendId !== set.backendId || this.activeThread?.threadId !== set.threadId) {
+    if (this.activeThread?.backendId !== session.backendId || this.activeThread?.threadId !== session.threadId) {
       return;
     }
     this.post({
       type: 'changes/changed',
-      backendId: set.backendId,
-      threadId: set.threadId,
-      turnId: set.turnId,
-      entries: set.entries
+      backendId: session.backendId,
+      threadId: session.threadId,
+      turnId: session.turnId,
+      entries: session.entries
     });
     // A turn that just touched files makes its opening message a checkpoint, so
     // the per-message entry point offers it without waiting for a reload.
@@ -581,16 +588,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Push the active thread's most recent recorded change set, so a webview
-   * reload repaints the change surface. Nothing is pushed when the latest turn
-   * observed nothing, so a reload cannot manufacture a verified empty set.
+   * Push the active thread's session change set, so a webview reload repaints
+   * every step, not only the latest turn. Nothing is pushed when the thread
+   * never observed a change, so a reload cannot manufacture a verified empty set.
    */
   private postLatestChanges(): void {
     const thread = this.activeThread;
     if (!thread) {
       return;
     }
-    const set = this.changeTracker.latestFor(thread.threadId);
+    const set = this.changeTracker.sessionFor(thread.threadId);
     if (!set) {
       return;
     }
@@ -610,7 +617,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * never be left showing three different versions of the same turn.
    */
   private async postChangeReview(backendId: string, threadId: string, turnId: string): Promise<void> {
-    const review = await this.changeStore.view(backendId, threadId, turnId);
+    const review =
+      (await this.changeStore.viewSession(backendId, threadId)) ??
+      (await this.changeStore.view(backendId, threadId, turnId));
     if (!review) {
       return;
     }
@@ -633,13 +642,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   /** Hunk lines for one expanded row, capped so a large file cannot fill the sidebar. */
   private async postChangeHunks(backendId: string, threadId: string, turnId: string, path: string): Promise<void> {
-    const review = await this.changeStore.view(backendId, threadId, turnId);
+    const review =
+      (await this.changeStore.viewSession(backendId, threadId)) ??
+      (await this.changeStore.view(backendId, threadId, turnId));
     const file = review?.files.find((entry) => entry.path === path);
-    if (!file) {
+    if (!review || !file) {
       return;
     }
     const capped = capReviewLines(file.hunks, 120);
-    this.post({ type: 'changes/hunks', turnId, path, hunks: capped.hunks, truncated: capped.truncated });
+    this.post({ type: 'changes/hunks', turnId: review.turnId, path, hunks: capped.hunks, truncated: capped.truncated });
   }
 
   /**

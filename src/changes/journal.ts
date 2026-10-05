@@ -686,6 +686,15 @@ export class ChangeJournal {
     return this.fs.readBlob(entry.afterKey);
   }
 
+  /**
+   * The blob stored under `key`, or `undefined` when it is gone. A session
+   * review reads the baseline from an earlier turn and the result from a later
+   * one, so it addresses the keys directly instead of one turn's path.
+   */
+  async readBlob(key: string): Promise<Uint8Array | undefined> {
+    return this.fs.readBlob(key);
+  }
+
   /* ----------------------------- internals --------------------------------- */
 
   private findFile(turnId: string, relPath: string): JournalFileEntry | undefined {

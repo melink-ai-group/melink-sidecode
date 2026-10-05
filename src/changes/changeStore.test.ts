@@ -465,6 +465,45 @@ test('a binary file is listed but not diffable', async () => {
   assert.ok(view.files[0].detail);
 });
 
+test('a session review lists every step and undoes a file back to the first baseline', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/a.ts', text('one\n'));
+  const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('two\n'));
+  await journal.endTurn('t1');
+
+  await journal.beginTurn({ turnId: 't2', threadId: 'thr', backendId: 'codex', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('three\n'));
+  fs.files.set('/ws/b.ts', text('bee\n'));
+  await journal.observe('t2', '/ws/b.ts', 'reported', 'created');
+  await journal.endTurn('t2', ['/ws/b.ts']);
+  const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
+
+  const session = await store.viewSession('codex', 'thr');
+  assert.ok(session);
+  assert.equal(session.turnId, 't2');
+  assert.deepEqual(
+    session.files.map((file) => file.path).sort(),
+    ['a.ts', 'b.ts']
+  );
+  const edited = session.files.find((file) => file.path === 'a.ts');
+  assert.equal(edited?.status, 'modified');
+  assert.ok(edited?.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'del' && line.text === 'one')));
+  assert.ok(edited?.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'add' && line.text === 'three')));
+
+  const rejected = await store.decide({
+    backendId: 'codex',
+    threadId: 'thr',
+    turnId: 't2',
+    relPath: 'a.ts',
+    decision: 'rejected'
+  });
+  assert.equal(rejected.ok, true);
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'one\n');
+  assert.equal(decode(fs.files.get('/ws/b.ts')), 'bee\n');
+});
+
 test('an unknown turn has no view', async () => {
   const fs = new FakeFs();
   const store = new ChangeStore({ storage: storage(), fs, artifacts: new ChangeJournal({ storage: storage(), fs }), now: () => 1_000 });

@@ -256,6 +256,30 @@ test('onTurnChanges fires only for an observed turn', async () => {
   assert.equal(seen[0].turnId, 't1');
 });
 
+test('sessionFor keeps every step, not only the latest turn', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/a.ts', text('one'));
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('two'));
+  change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }]);
+  await change.endTurn();
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't2', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/b.ts', text('bee'));
+  change.reportChanges([{ absPath: '/ws/b.ts', status: 'created' }]);
+  await change.endTurn();
+
+  const session = change.sessionFor('thr');
+  assert.ok(session);
+  assert.equal(session.turnId, 't2');
+  assert.deepEqual(
+    session.entries.map((entry) => entry.path).sort(),
+    ['a.ts', 'b.ts']
+  );
+});
+
 test('latestFor returns the recorded set for a reload and skips unobserved turns', async () => {
   const fs = new FakeFs();
   fs.files.set('/ws/a.ts', text('one'));

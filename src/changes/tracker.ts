@@ -1,6 +1,7 @@
 import type { ChangeEntry, ChangeStatus, ReportedChange } from '../backends/types';
 import { hasIgnoredSegment } from './ignore.ts';
 import type { ChangeJournal, JournalFileEntry } from './journal';
+import { sessionChangeSet } from './sessionFiles.ts';
 
 /**
  * Coordinates the per-turn change journal for a backend turn.
@@ -145,6 +146,27 @@ export class ChangeTracker {
       threadId: turn.threadId,
       turnId: turn.turnId,
       entries: turn.files.filter(reviewableFile).map(toChangeEntry)
+    };
+  }
+
+  /**
+   * Every surviving file the thread changed, not only the latest turn.
+   *
+   * Plan execution is one turn per step. The review surface names the newest
+   * observed turn, and the entries are the net of the whole thread: a path
+   * touched on an earlier step stays listed, and a path a later step restored
+   * does not.
+   */
+  sessionFor(threadId: string): TurnChangeSet | undefined {
+    const session = sessionChangeSet(this.journal.listTurns(threadId));
+    if (!session) {
+      return undefined;
+    }
+    return {
+      backendId: session.backendId,
+      threadId: session.threadId,
+      turnId: session.turnId,
+      entries: session.files.map((file) => toChangeEntry(file.entry))
     };
   }
 
