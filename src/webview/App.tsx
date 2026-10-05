@@ -715,16 +715,32 @@ export function App(): JSX.Element {
     if (!element) {
       return;
     }
+    // The empty-chat field fills the composer by flex. A content height would
+    // either stop short of the box or push the control row past its bottom edge.
+    if (element.closest('.composer--expanded')) {
+      element.style.height = '';
+      return;
+    }
+    element.style.height = '0px';
+    const composer = element.closest('.composer');
+    let room = Number.POSITIVE_INFINITY;
+    if (composer instanceof HTMLElement) {
+      const limit = Number.parseFloat(getComputedStyle(composer).maxHeight);
+      if (Number.isFinite(limit)) {
+        const chrome = composer.scrollHeight - element.offsetHeight;
+        room = Math.max(44, limit - chrome);
+      }
+    }
     element.style.height = 'auto';
     const max = Number.parseFloat(getComputedStyle(element).maxHeight);
     const content = element.scrollHeight;
-    const next = Number.isFinite(max) ? Math.min(content, max) : content;
-    element.style.height = `${next}px`;
+    const cap = Number.isFinite(max) ? Math.min(content, max) : content;
+    element.style.height = `${Math.min(cap, room)}px`;
   }, []);
 
   useLayoutEffect(() => {
     fitComposerInput();
-  }, [draft, state.settingsOpen, state.rulesOpen, fitComposerInput]);
+  }, [draft, state.transcript.length, state.restoring, state.settingsOpen, state.rulesOpen, fitComposerInput]);
 
   useEffect(() => {
     const box = composerInputRef.current?.parentElement;
