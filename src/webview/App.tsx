@@ -5,14 +5,14 @@ import type {
   ApprovalRule,
   BackendAvailability,
   BackendModel,
-  FileChange,
-  ThreadSummary
+  FileChange
 } from '../backends/types';
 import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
 import { splitReplyClose } from './replyClose';
 import { plainRowText } from './plainRowText';
 import { visibleTranscriptText } from './visibleTranscript';
+import { historyEntries, historyLoading, type HistoryEntry } from './historyEntries';
 import {
   AlertIcon,
   BackIcon,
@@ -580,27 +580,30 @@ export function App(): JSX.Element {
     };
   }, [historyOpen]);
 
+  const history = useMemo(
+    () => historyEntries(state.availability, state.threads),
+    [state.availability, state.threads]
+  );
+  const historyPending = historyLoading(state.availability, state.threadLoading);
+
   const toggleHistory = (): void => {
     const open = !historyOpen;
     setHistoryOpen(open);
-    if (open) {
-      setHistoryQuery('');
+    if (!open) {
+      return;
     }
-    if (open && active) {
-      dispatch({ type: 'threadsLoading', backendId: active.id, value: true });
-      bridge.post({ type: 'listThreads', backendId: active.id });
+    setHistoryQuery('');
+    for (const backend of state.availability) {
+      dispatch({ type: 'threadsLoading', backendId: backend.id, value: true });
+      bridge.post({ type: 'listThreads', backendId: backend.id });
     }
   };
 
-  const resumeThread = (threadId: string): void => {
-    if (!active) {
-      setHistoryOpen(false);
-      return;
-    }
+  const resumeThread = (backendId: string, threadId: string): void => {
     setHistoryOpen(false);
     setHistoryQuery('');
     stickToBottomRef.current = true;
-    bridge.post({ type: 'openThread', backendId: active.id, threadId });
+    bridge.post({ type: 'openThread', backendId, threadId });
   };
 
   const toggleModelPanel = (): void => {
@@ -1378,17 +1381,17 @@ export function App(): JSX.Element {
               title="Conversation history"
               aria-expanded={historyOpen}
               aria-controls="history-panel"
-              disabled={!active}
+              disabled={state.availability.length === 0}
               onClick={toggleHistory}
             >
               <HistoryIcon />
             </button>
-            {historyOpen && active ? (
+            {historyOpen ? (
               <HistoryPanel
-                threads={state.threads[active.id] ?? []}
-                loading={state.threadLoading[active.id] ?? false}
+                threads={history}
+                loading={historyPending}
                 activeThreadId={state.activeThreadId}
-                backendId={active.id}
+                selectedBackendId={state.selectedBackendId}
                 threadActivity={state.threadActivity}
                 query={historyQuery}
                 onQueryChange={setHistoryQuery}
@@ -2501,27 +2504,28 @@ function HistoryPanel({
   threads,
   loading,
   activeThreadId,
-  backendId,
+  selectedBackendId,
   threadActivity,
   query,
   onQueryChange,
   onSelect
 }: {
-  threads: ThreadSummary[];
+  threads: HistoryEntry[];
   loading: boolean;
   activeThreadId?: string;
-  backendId: string;
+  selectedBackendId?: string;
   threadActivity: AppState['threadActivity'];
   query: string;
   onQueryChange: (value: string) => void;
-  onSelect: (threadId: string) => void;
+  onSelect: (backendId: string, threadId: string) => void;
 }): JSX.Element {
   const needle = query.trim().toLowerCase();
   const visible = needle
     ? threads.filter((thread) => {
         const title = (thread.title ?? 'Untitled conversation').toLowerCase();
         const model = (thread.model ?? '').toLowerCase();
-        return title.includes(needle) || model.includes(needle);
+        const provider = thread.backendLabel.toLowerCase();
+        return title.includes(needle) || model.includes(needle) || provider.includes(needle);
       })
     : threads;
   return (
@@ -2539,7 +2543,7 @@ function HistoryPanel({
           onKeyDown={(event) => {
             if (event.key === 'Enter' && visible[0]) {
               event.preventDefault();
-              onSelect(visible[0].threadId);
+              onSelect(visible[0].backendId, visible[0].threadId);
             }
           }}
         />
@@ -2560,20 +2564,21 @@ function HistoryPanel({
       ) : (
         <ul className="model-list" role="listbox" aria-label="Conversations">
           {visible.map((thread) => {
-            const selected = thread.threadId === activeThreadId;
-            const activity = threadActivity?.[`${backendId}:${thread.threadId}`];
+            const selected = thread.backendId === selectedBackendId && thread.threadId === activeThreadId;
+            const activity = threadActivity?.[`${thread.backendId}:${thread.threadId}`];
+            const detail = thread.model ? `${thread.backendLabel} · ${thread.model}` : thread.backendLabel;
             return (
               <li
                 className="model-option"
                 role="option"
                 aria-selected={selected}
-                key={thread.threadId}
+                key={`${thread.backendId}:${thread.threadId}`}
                 tabIndex={0}
-                onClick={() => onSelect(thread.threadId)}
+                onClick={() => onSelect(thread.backendId, thread.threadId)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    onSelect(thread.threadId);
+                    onSelect(thread.backendId, thread.threadId);
                   }
                 }}
               >
@@ -2584,7 +2589,7 @@ function HistoryPanel({
                 <span className="history-status-slot">
                   {activity?.unread ? <span className="history-status history-status--unread">Unread</span> : null}
                 </span>
-                <span className="history-model-slot">{thread.model ?? ''}</span>
+                <span className="history-model-slot">{detail}</span>
               </li>
             );
           })}
