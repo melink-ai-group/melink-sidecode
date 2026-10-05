@@ -633,7 +633,10 @@ export class CodexBackend implements AgentBackend {
     const mode = isDefaultMode(request.mode) ? request.mode : this.threadModes.get(handle.threadId) ?? 'agent';
     const bakedMode = this.bakedMode.get(handle.threadId);
     const nextSnapshot = request.context?.snapshot;
-    const modeChanged = bakedMode !== undefined && bakedMode !== mode;
+    // `undefined` means this process has not applied a mode since the thread was
+    // loaded (a resume, or a rewrite the server ignored). That must be written
+    // before the turn, or a Plan instruction from thread start stays in force.
+    const modeChanged = bakedMode !== mode;
     const snapshotChanged = Boolean(
       request.context?.priming && nextSnapshot && nextSnapshot !== this.bakedSnapshot.get(handle.threadId)
     );
@@ -653,9 +656,6 @@ export class CodexBackend implements AgentBackend {
           logDiagnostic('Codex thread instructions could not be updated.');
         }
       }
-    }
-    if (!this.bakedMode.has(handle.threadId)) {
-      this.bakedMode.set(handle.threadId, mode);
     }
     this.threadModes.set(handle.threadId, mode);
     const input = buildCodexTurnInput({
@@ -944,11 +944,15 @@ export class CodexBackend implements AgentBackend {
     if (this.swallowQuiet(notification.method, params)) {
       return;
     }
-    // A resume that only rewrites instructions can echo the thread's history.
-    // Drop those item and turn events so the open chat is not replayed.
+    // Unsubscribing and resuming to replace instructions can echo history and
+    // thread lifecycle events. Drop them so the open chat is not replayed.
     if (
       this.suppressHistory &&
-      (notification.method.startsWith('item/') || notification.method.startsWith('turn/'))
+      (notification.method.startsWith('item/') ||
+        notification.method.startsWith('turn/') ||
+        notification.method === 'thread/status/changed' ||
+        notification.method === 'thread/closed' ||
+        notification.method === 'thread/deleted')
     ) {
       return;
     }
@@ -1317,10 +1321,15 @@ export class CodexBackend implements AgentBackend {
   }
 
   /**
-   * Replace `developerInstructions` on a live thread. `excludeTurns` keeps the
+   * Replace `developerInstructions` on a live thread.
+   *
+   * A resume of a thread that is still running ignores `developerInstructions`
+   * (Codex logs "override was provided and ignored while running"), so the Plan
+   * instruction from thread start stays in force. Unsubscribe first, then
+   * resume, so the new instructions are applied. `excludeTurns` keeps the
    * response to metadata, and history notifications are swallowed until it
-   * returns. A timeout or a refusal leaves the turn free to carry the update
-   * in its own provider input.
+   * returns. If the replacement resume fails, the thread is loaded again so
+   * the following turn still has a session.
    */
   private async rewriteInstructions(
     connection: AppServerConnection,
@@ -1328,18 +1337,27 @@ export class CodexBackend implements AgentBackend {
     developerInstructions: string,
     cwd?: string
   ): Promise<void> {
+    const root = cwd ?? this.cwd;
     this.suppressHistory = true;
     try {
-      await connection.resumeThread(
-        {
-          threadId,
-          cwd: cwd ?? this.cwd,
-          developerInstructions,
-          approvalsReviewer: 'user',
-          excludeTurns: true
-        },
-        15_000
-      );
+      await connection.unsubscribeThread(threadId);
+      try {
+        await connection.resumeThread(
+          {
+            threadId,
+            cwd: root,
+            developerInstructions,
+            approvalsReviewer: 'user',
+            excludeTurns: true
+          },
+          15_000
+        );
+      } catch (error) {
+        await connection
+          .resumeThread({ threadId, cwd: root, approvalsReviewer: 'user', excludeTurns: true }, 15_000)
+          .catch(() => undefined);
+        throw error;
+      }
     } finally {
       this.suppressHistory = false;
     }

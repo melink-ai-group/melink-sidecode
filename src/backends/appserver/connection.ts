@@ -547,6 +547,14 @@ export class AppServerConnection implements Disposable {
     return this.request<unknown>('thread/delete', { threadId });
   }
 
+  /**
+   * Drop the live subscription so a following `thread/resume` is a load, not a
+   * rejoin. A rejoin ignores `developerInstructions`.
+   */
+  unsubscribeThread(threadId: string): Promise<unknown> {
+    return this.request<unknown>('thread/unsubscribe', { threadId }, { timeoutMs: 15_000, retryable: false });
+  }
+
   resumeThread(params: ThreadResumeParams, timeoutMs?: number): Promise<ThreadResumeResponse> {
     return this.request<ThreadResumeResponse>(
       'thread/resume',
