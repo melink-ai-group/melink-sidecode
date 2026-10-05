@@ -2099,12 +2099,6 @@ body {
   }
 }
 
-.composer-hint {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-}
-
 /* Clarifying question, in the composer column, in the plan yellow. */
 .question-card {
   display: flex;

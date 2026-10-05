@@ -1870,7 +1870,6 @@ export function App(): JSX.Element {
             </div>
           </div>
         </div>
-        <span className="composer-hint">Enter to send, Shift+Enter for a new line</span>
       </footer>
       {imageViewer ? (
         <ImageViewer

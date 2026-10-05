@@ -27,7 +27,6 @@ focuses that tab when it is already open.
 +--------------------------------------------------+
 | [ ask the agent...                          ]    |
 | [attach]                             [ Send ]    |
-| Enter to send, Shift+Enter for a new line        |
 +--------------------------------------------------+
 ```
 
