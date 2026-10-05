@@ -22,10 +22,12 @@
   color: var(--vscode-descriptionForeground);
 }
 
+/* Keep spinning when the OS asks for reduced motion. A frozen ring reads as a stuck step. */
 .melink-step--progress {
   color: var(--vscode-progressBar-background, var(--vscode-textLink-foreground));
   border-color: color-mix(in srgb, currentColor 30%, transparent);
   border-top-color: currentColor;
+  transform-origin: center;
   animation: melink-step-spin 0.9s linear infinite;
 }
 
@@ -72,15 +74,11 @@
 }
 
 @keyframes melink-step-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .melink-step--progress {
-    animation: none;
-    border-color: currentColor;
-    background: conic-gradient(currentColor 0 25%, transparent 0);
   }
 }
