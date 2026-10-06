@@ -107,6 +107,27 @@ test('fileChange maps its changes to renderable file entries with diff counts', 
   ]);
 });
 
+test('a historical user message drops the provider attachment list and keeps the file', () => {
+  const item: ThreadItem = {
+    type: 'userMessage',
+    id: 'u1',
+    clientId: null,
+    content: [
+      {
+        type: 'text',
+        text: 'Attached files:\nImage: shot.png (C:\\work\\shot.png)\n\nwhat is this',
+        text_elements: []
+      },
+      { type: 'localImage', path: 'C:\\work\\shot.png' }
+    ]
+  };
+  const translated = translateItem(item);
+  assert.equal(translated.item.text, 'what is this');
+  assert.equal(translated.item.attachments?.[0]?.name, 'shot.png');
+  assert.equal(translated.item.attachments?.[0]?.path, 'C:\\work\\shot.png');
+  assert.equal(translated.item.attachments?.length, 1);
+});
+
 test('translateTurnItems keeps the user message so a restored turn does not start at reasoning', () => {
   const items: ThreadItem[] = [
     {

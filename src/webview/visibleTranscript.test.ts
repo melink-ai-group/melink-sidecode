@@ -33,6 +33,11 @@ test('a real answer that mentions the tag later is kept', () => {
   assert.equal(visibleTranscriptText(text), text);
 });
 
+test('an attached-files section is hidden and the user words remain', () => {
+  const text = ['Attached files:', 'Image: image.png', '', 'I have innovate running and disabled "Tests".'].join('\n');
+  assert.equal(visibleTranscriptText(text), 'I have innovate running and disabled "Tests".');
+});
+
 test('a user message without instructions is unchanged', () => {
   assert.equal(visibleTranscriptText('widen the autopilot modal'), 'widen the autopilot modal');
 });

@@ -1,5 +1,7 @@
-import type { FileChange, FileChangeLine, TranscriptItem } from '../types';
+import type { Attachment, FileChange, FileChangeLine, TranscriptItem } from '../types';
 import { friendlyToolTitle, targetFromJson } from '../toolLabel.ts';
+import { takeAttachmentSection } from '../userPrompt.ts';
+import { visibleTranscriptText } from '../../webview/visibleTranscript.ts';
 import type { ThreadItem } from '../../../schemas/v2/ThreadItem';
 import type { CommandExecutionStatus } from '../../../schemas/v2/CommandExecutionStatus';
 import type { PatchApplyStatus } from '../../../schemas/v2/PatchApplyStatus';
@@ -30,7 +32,8 @@ export function itemId(item: ThreadItem): string {
 
 export function translateItem(item: ThreadItem): TranslatedItem {
   switch (item.type) {
-    case 'userMessage':
+    case 'userMessage': {
+      const recovered = recoverUserMessage(item.content);
       return {
         id: item.id,
         terminal: true,
@@ -38,9 +41,11 @@ export function translateItem(item: ThreadItem): TranslatedItem {
           id: item.id,
           kind: 'message',
           role: 'user',
-          text: userInputText(item.content)
+          text: recovered.text,
+          ...(recovered.attachments.length > 0 ? { attachments: recovered.attachments } : {})
         }
       };
+    }
     case 'agentMessage':
       return {
         id: item.id,
@@ -198,6 +203,76 @@ export function userInputText(content: UserInput[]): string {
     .map((part) => (part.type === 'text' ? part.text : ''))
     .filter((text) => text.length > 0)
     .join('\n');
+}
+
+/**
+ * The user's own words and the files they attached. Codex history stores the
+ * provider prompt, which also carries mode text, context, and an "Attached
+ * files" list. Those stay out of the bubble so a reload does not render them
+ * as the message between You and the agent.
+ */
+export function recoverUserMessage(content: UserInput[]): { text: string; attachments: Attachment[] } {
+  const listed = takeAttachmentSection(userInputText(content));
+  const attachments = mergeHistoricalAttachments(listed.attachments, attachmentsFromParts(content));
+  return { text: visibleTranscriptText(listed.text), attachments };
+}
+
+function attachmentsFromParts(content: UserInput[]): Attachment[] {
+  const attachments: Attachment[] = [];
+  for (const part of content) {
+    if (part.type === 'localImage') {
+      attachments.push(imageAttachment(basename(part.path), part.path));
+      continue;
+    }
+    if (part.type === 'image' && 'url' in part && part.url.startsWith('data:')) {
+      attachments.push({
+        id: `image_${attachments.length}`,
+        name: 'image.png',
+        mimeType: mimeFromDataUrl(part.url),
+        kind: 'image',
+        dataUrl: part.url
+      });
+    }
+  }
+  return attachments;
+}
+
+function mergeHistoricalAttachments(listed: Attachment[], parts: Attachment[]): Attachment[] {
+  const merged = listed.map((item) => ({ ...item }));
+  for (const part of parts) {
+    const match = merged.find((item) => (part.path && item.path === part.path) || item.name === part.name);
+    if (!match) {
+      merged.push(part);
+      continue;
+    }
+    if (!match.path && part.path) {
+      match.path = part.path;
+    }
+    if (!match.dataUrl && part.dataUrl) {
+      match.dataUrl = part.dataUrl;
+    }
+  }
+  return merged;
+}
+
+function imageAttachment(name: string, path: string): Attachment {
+  return {
+    id: `file_${path}`,
+    name,
+    path,
+    mimeType: 'image/png',
+    kind: 'image'
+  };
+}
+
+function basename(path: string): string {
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return slash >= 0 ? path.slice(slash + 1) : path;
+}
+
+function mimeFromDataUrl(url: string): string {
+  const match = /^data:([^;,]+)/.exec(url);
+  return match?.[1] || 'image/png';
 }
 
 /** Build a renderable file-change entry, deriving diff counts from the patch. */
