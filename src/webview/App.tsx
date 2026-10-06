@@ -3133,7 +3133,7 @@ function TranscriptRow({
             {text ? <Markdown text={text} /> : null}
           </div>
           {checkpoint ? (
-            <div className="turn-restore">
+            <div className="turn-actions">
               <button
                 type="button"
                 className="checkpoint-restore"

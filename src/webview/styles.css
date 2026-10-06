@@ -847,10 +847,14 @@ html body {
   font-weight: 600;
 }
 
-/* The per-message restore control. Icon only, at the bottom right of the bubble. */
-.turn-restore {
+/* Right-hand column for message actions. The group sits at the bottom of the
+ * bubble and stacks upward, so another control does not add a row under the text. */
+.turn-actions {
   display: flex;
-  justify-content: flex-end;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .checkpoint-restore {
@@ -886,17 +890,19 @@ html body {
 
 .turn-user-box {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 8px;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 8px 8px 8px 10px;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-lg, 8px);
   background: color-mix(in srgb, var(--vscode-list-hoverBackground) 75%, transparent);
   color: white;
 }
 
-.turn--user .turn-body {
+.turn-user-box > .turn-body {
+  flex: 1 1 auto;
   color: white;
 }
 
