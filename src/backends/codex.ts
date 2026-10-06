@@ -67,6 +67,7 @@ import {
   describeCodexAuth
 } from './codex/auth';
 import { buildCodexTurnInput } from './codex/turnInput';
+import { isMissingThreadError, recoveryHandover, recoveryInstructions, threadRecoveredNotice } from './threadRecovery';
 import { refreshStoredChatgptAuth } from './codex/tokenRefresh';
 import type { Thread } from '../../schemas/v2/Thread';
 import type { ThreadItem } from '../../schemas/v2/ThreadItem';
@@ -492,21 +493,29 @@ export class CodexBackend implements AgentBackend {
    */
   async resumeThread(threadId: string, options?: ResumeThreadOptions): Promise<ResumeResult> {
     const connection = await this.connect();
-    const response = await connection
-      .resumeThread({
+    let response;
+    try {
+      response = await connection.resumeThread({
         threadId,
         // Prefer the snapshot service's root as cwd, mirroring `startThread`.
         cwd: options?.context?.workspaceRoot ?? this.cwd,
         developerInstructions: instructionsWithHandover(options?.context?.snapshot, options?.handover),
         approvalsReviewer: 'user'
-      })
-      .catch((error: unknown) => {
-        const failure = this.toBackendError(error);
-        if (failure.code === 'provider') {
-          throw new BackendError('provider', `Codex thread ${threadId} is no longer available.`);
-        }
-        throw failure;
       });
+    } catch (error) {
+      const failure = this.toBackendError(error);
+      if (failure.code === 'provider' && isMissingThreadError(failure)) {
+        const recovered = await this.rebindMissingThread(connection, threadId, {
+          snapshot: options?.context?.snapshot,
+          workspaceRoot: options?.context?.workspaceRoot
+        });
+        if (recovered) {
+          return recovered;
+        }
+        throw new BackendError('provider', `Codex thread ${threadId} is no longer available.`);
+      }
+      throw failure;
+    }
     this.threads.add(threadId);
     // A loaded thread keeps the developer message it was started with. Resume
     // does not remove it, and a fork keeps it in history. An Agent turn starts
@@ -819,9 +828,8 @@ export class CodexBackend implements AgentBackend {
       this.pendingTurn = { threadId: handle.threadId, resolve, reject };
     });
 
-    let response;
-    try {
-      response = await connection
+    const start = () =>
+      connection
         .startTurn({
           threadId: this.liveThreadId(handle.threadId),
           input,
@@ -835,9 +843,40 @@ export class CodexBackend implements AgentBackend {
           ...codexNativeRequest(request.modelSettings)
         })
         .catch((error: unknown) => this.fail(error));
+
+    let response;
+    try {
+      response = await start();
     } catch (error) {
-      this.pendingTurn = undefined;
-      throw error;
+      if (!isMissingThreadError(error)) {
+        this.pendingTurn = undefined;
+        throw error;
+      }
+      const recovered = await this.rebindMissingThread(connection, handle.threadId, {
+        snapshot: nextSnapshot ?? this.bakedSnapshot.get(handle.threadId),
+        workspaceRoot: request.context?.workspaceRoot,
+        model,
+        mode,
+        permissionLevel: requestedLevel,
+        omitTrailingUserText: request.text
+      });
+      if (!recovered) {
+        this.pendingTurn = undefined;
+        throw error;
+      }
+      this.events.fire({
+        type: 'notice',
+        backendId: this.id,
+        threadId: handle.threadId,
+        level: 'info',
+        message: threadRecoveredNotice('Codex')
+      });
+      try {
+        response = await start();
+      } catch (retryError) {
+        this.pendingTurn = undefined;
+        throw retryError;
+      }
     }
     // Record the turn id so a fast `cancel()` can interrupt before `turn/started`
     // arrives; `turn/started` overwrites it with the same value.
@@ -1488,6 +1527,84 @@ export class CodexBackend implements AgentBackend {
       record.thread = thread;
     }
     return record;
+  }
+
+  /**
+   * The Codex rollout is gone. Start a new thread for the same sidebar
+   * conversation and give it the saved chat, file changes, and remaining work.
+   * Events stay on the original thread id, so the open chat does not split.
+   */
+  private async rebindMissingThread(
+    connection: AppServerConnection,
+    hostThreadId: string,
+    options: {
+      snapshot?: string;
+      workspaceRoot?: string;
+      model?: string;
+      mode?: DefaultMode;
+      permissionLevel?: PermissionLevel;
+      omitTrailingUserText?: string;
+    }
+  ): Promise<ResumeResult | undefined> {
+    const transcript = this.store?.getTranscript(this.id, hostThreadId) ?? [];
+    const plan = this.store?.getPlanState(this.id, hostThreadId);
+    const handover = recoveryHandover({
+      provider: 'Codex',
+      transcript,
+      plan,
+      omitTrailingUserText: options.omitTrailingUserText
+    });
+    if (!handover) {
+      return undefined;
+    }
+    const ref = this.store?.listThreads(this.id).find((entry) => entry.threadId === hostThreadId);
+    const mode = options.mode ?? ref?.mode ?? this.threadModes.get(hostThreadId) ?? 'agent';
+    const requestedLevel = options.permissionLevel ?? this.threadPermissions.get(hostThreadId) ?? readDefaultPermissionLevel();
+    const level = effectivePermissionLevel(mode, requestedLevel);
+    const mapping = codexPermissionMapping(level);
+    const model = options.model || ref?.modelId || this.defaultModel || '';
+    this.suppressHistory = true;
+    try {
+      const response = await connection.startThread({
+        model: model || null,
+        cwd: options.workspaceRoot ?? this.cwd,
+        approvalPolicy: mapping.approvalPolicy,
+        approvalsReviewer: 'user',
+        sandbox: mapping.sandbox,
+        developerInstructions: recoveryInstructions(handover, options.snapshot)
+      });
+      const startedId = response.thread.id;
+      this.liveThreads.set(hostThreadId, startedId);
+      this.hostThreads.set(startedId, hostThreadId);
+      this.threads.add(startedId);
+      this.threads.add(hostThreadId);
+      this.threadPermissions.set(hostThreadId, requestedLevel);
+      this.threadModes.set(hostThreadId, mode);
+      this.bakedMode.set(hostThreadId, mode);
+      this.needsPlanEscape.delete(hostThreadId);
+      if (options.snapshot) {
+        this.bakedSnapshot.set(hostThreadId, options.snapshot);
+      }
+      const resolvedModel = response.model || model || undefined;
+      return {
+        handle: {
+          backendId: this.id,
+          threadId: hostThreadId,
+          model: resolvedModel,
+          contextPrimed: Boolean(options.snapshot)
+        },
+        model: resolvedModel,
+        items: transcript,
+        hasOlderHistory: false,
+        recovered: true
+      };
+    } catch (error) {
+      logDiagnostic('Codex could not continue a missing thread on a new one.');
+      logDiagnostic(error instanceof Error ? error.message : String(error));
+      return undefined;
+    } finally {
+      this.suppressHistory = false;
+    }
   }
 
   /**

@@ -38,6 +38,7 @@ import {
 import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import { compactedSummary, compactedTranscript, compactionSource } from './backends/compaction';
+import { isMissingThreadError, threadRecoveredNotice } from './backends/threadRecovery';
 import {
   initialHistoryHidden,
   prependOlderHistory,
@@ -2410,17 +2411,56 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           ? this.planArtifact(backendId, threadId)
           : undefined
       });
+      if (result.recovered) {
+        const provider = backendId === 'codex' ? 'Codex' : 'OpenCode';
+        this.post({ type: 'notice', level: 'info', message: threadRecoveredNotice(provider) });
+      }
       // Repaint the resumed thread's own recorded change set, so the change
       // surface matches the thread now in view rather than carrying the previous
       // conversation's files.
       await this.postLatestChanges();
       await this.postActiveCheckpoints();
     } catch (error) {
-      this.post({
-        type: 'notice',
-        level: 'warning',
-        message: error instanceof Error ? error.message : String(error)
-      });
+      const message = error instanceof Error ? error.message : String(error);
+      const storedItems = this.store.getTranscript(backendId, threadId);
+      if (isMissingThreadError(error) && storedItems.length > 0) {
+        // The provider thread is gone, but the sidebar chat is not. Keep it on
+        // screen. The next turn starts a replacement thread with this record.
+        const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
+        this.activeThread = { backendId, threadId, model: ref?.modelId };
+        this.syncPlanPreviewThread(threadId);
+        this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+        const titled =
+          ref?.title ?? storedItems.find((item) => item.role === 'user' && item.text?.trim())?.text;
+        if (this.session) {
+          this.session.blank = false;
+          this.session.title = tabTitle(titled);
+          this.publishTabs();
+        }
+        const history = this.openHistory(this.store.mergeApprovalMarkers(backendId, threadId, storedItems));
+        this.post({
+          type: 'conversation',
+          backendId,
+          threadId,
+          model: ref?.modelId,
+          permissionLevel: this.permissionLevel,
+          mode: this.mode,
+          replay: await this.previewReplay(history.replay),
+          hasOlderHistory: history.hasOlderHistory,
+          pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
+          plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
+        });
+        await this.postLatestChanges();
+        await this.postActiveCheckpoints();
+        this.post({
+          type: 'notice',
+          level: 'info',
+          message:
+            'The provider thread was not found. This chat is still here, and the next message continues it on a new thread with the earlier context.'
+        });
+      } else {
+        this.post({ type: 'notice', level: 'warning', message });
+      }
     } finally {
       this.post({ type: 'restoring', value: false });
     }
