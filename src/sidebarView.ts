@@ -39,6 +39,14 @@ import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import { compactedSummary, compactedTranscript, compactionSource } from './backends/compaction';
 import {
+  initialHistoryHidden,
+  prependOlderHistory,
+  revealStoredHistory,
+  transcriptWithNewer,
+  visibleHistory,
+  withStoredUserIds
+} from './backends/historyWindow.ts';
+import {
   adoptedPlanSteps,
   applyPlanDecisions,
   assistantProgressText,
@@ -129,6 +137,12 @@ interface ChatSession {
   disposed: boolean;
   /** True while this tab's turn is still running, including after the tab is closed. */
   turnOpen: boolean;
+  /** History captured for this tab, oldest first. Absent until a chat is painted. */
+  loadedTranscript?: TranscriptItem[];
+  /** Index of the first painted row. Rows before it load when the reader scrolls up. */
+  historyHidden?: number;
+  /** The provider still has rows older than `loadedTranscript`. */
+  serverHasOlder?: boolean;
 }
 
 /** Open sidebar tabs, so a reload can put the same chats back. */
@@ -449,7 +463,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (storedPermission) {
       this.permissionLevel = storedPermission;
     }
+    this.transcriptsReady = this.store.hydrate();
   }
+
+  /** Full transcripts are read from disk before a chat is painted or flushed. */
+  private transcriptsReady: Promise<void> = Promise.resolve();
+  /** One older-page read at a time, so a fast scroll cannot issue overlapping pages. */
+  private olderHistoryInFlight = false;
 
   private get store(): ThreadStore {
     return this.registry.threads;
@@ -1293,6 +1313,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const { backendId, threadId, model } = thread;
     const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
     this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+    const history = this.currentHistory();
     this.post({
       type: 'conversation',
       backendId,
@@ -1300,7 +1321,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       model,
       permissionLevel: this.permissionLevel,
       mode: this.mode,
-      replay: this.store.getTranscript(backendId, threadId),
+      replay: history.replay,
+      hasOlderHistory: history.hasOlderHistory,
       pendingApproval: this.pendingApproval,
       pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
       plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
@@ -1515,6 +1537,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case 'ready': {
+        await this.transcriptsReady;
         this.post({ type: 'snapshot', availability: this.registry.snapshot() });
         if (this.liveSessions().length === 0) {
           this.loadSavedSessions();
@@ -1575,6 +1598,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'resumeThread':
         await this.resumeThread(message.backendId, message.threadId);
+        break;
+      case 'loadOlderHistory':
+        await this.loadOlderHistory();
         break;
       case 'startThread':
         await this.startThread(
@@ -1978,6 +2004,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   private postFreshConversation(): void {
+    this.clearHistory(this.session);
     const last = this.store.getLastUsedModel();
     const backendId = last && this.registry.get(last.backendId) ? last.backendId : this.defaultBackendId();
     this.permissionLevel = this.resolvePermission(backendId, this.permissionLevel);
@@ -1987,7 +2014,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       backendId,
       model: last?.modelId || undefined,
       permissionLevel: this.permissionLevel,
-      mode: this.mode
+      mode: this.mode,
+      hasOlderHistory: false
     });
   }
 
@@ -2070,6 +2098,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.contextDelivery.forget(ContextDelivery.key(previous.backendId, previous.threadId));
     }
     try {
+      this.clearHistory(this.session);
       await this.store.flush();
       // Open the session's context: a full snapshot, consumed natively by an
       // adapter that can, or queued for the first turn otherwise. A failed
@@ -2108,6 +2137,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       });
       await this.store.setLastUsedModel({ backendId, modelId: model ?? handle.model ?? '' });
       if (notify) {
+        const history = seeded ? this.openHistory(seeded) : undefined;
         this.post({
           type: 'conversation',
           backendId,
@@ -2116,7 +2146,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           permissionLevel: level,
           mode,
           pendingQuestion: this.pendingQuestionPayload(backendId, handle.threadId),
-          ...(seeded ? { replay: seeded } : {}),
+          ...(history ? { replay: history.replay, hasOlderHistory: history.hasOlderHistory } : { hasOlderHistory: false }),
           ...(this.store.getPlanState(backendId, handle.threadId)
             ? { plan: this.planArtifact(backendId, handle.threadId) }
             : {}),
@@ -2182,8 +2212,128 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     return supported.includes('default') ? 'default' : supported[0] ?? 'default';
   }
 
+  /** Drop a tab's captured history so the next conversation does not inherit it. */
+  private clearHistory(session: ChatSession | undefined): void {
+    if (!session) {
+      return;
+    }
+    session.loadedTranscript = undefined;
+    session.historyHidden = undefined;
+    session.serverHasOlder = false;
+  }
+
+  /**
+   * Paint the latest page of `items` and remember the rest. A later scroll
+   * reveals the hidden prefix before asking the provider for anything older.
+   */
+  private openHistory(items: TranscriptItem[], serverHasOlder = false): { replay: TranscriptItem[]; hasOlderHistory: boolean } {
+    const session = this.session;
+    const hidden = initialHistoryHidden(items);
+    if (session) {
+      session.loadedTranscript = items;
+      session.historyHidden = hidden;
+      session.serverHasOlder = serverHasOlder;
+    }
+    return { replay: visibleHistory(items, hidden), hasOlderHistory: hidden > 0 || serverHasOlder };
+  }
+
+  /** The painted page of the tab's current history, without resetting the window. */
+  private currentHistory(): { replay: TranscriptItem[]; hasOlderHistory: boolean } {
+    const session = this.session;
+    if (!session) {
+      return { replay: [], hasOlderHistory: false };
+    }
+    const items = this.historyItems(session);
+    let hidden = session.historyHidden;
+    if (hidden === undefined || hidden > items.length) {
+      hidden = initialHistoryHidden(items);
+      session.historyHidden = hidden;
+    }
+    return {
+      replay: visibleHistory(items, hidden),
+      hasOlderHistory: hidden > 0 || Boolean(session.serverHasOlder)
+    };
+  }
+
+  /** Loaded snapshot plus turns recorded after it. The local log stays the tail. */
+  private historyItems(session: ChatSession): TranscriptItem[] {
+    const thread = session.activeThread;
+    const stored = thread ? this.store.getTranscript(thread.backendId, thread.threadId) : [];
+    return transcriptWithNewer(session.loadedTranscript, stored);
+  }
+
+  /**
+   * Prepend the next older page. Stored rows are revealed first. When those
+   * run out, Codex is asked for the previous turn or item page.
+   */
+  private async loadOlderHistory(): Promise<void> {
+    if (this.olderHistoryInFlight) {
+      return;
+    }
+    const session = this.session;
+    const thread = session?.activeThread;
+    if (!session || !thread) {
+      return;
+    }
+    this.olderHistoryInFlight = true;
+    try {
+      const items = this.historyItems(session);
+      let hidden = session.historyHidden ?? initialHistoryHidden(items);
+      if (hidden > 0) {
+        const revealed = revealStoredHistory(items, hidden);
+        session.historyHidden = revealed.hidden;
+        this.postOlder(thread, revealed.added, revealed.hidden > 0 || Boolean(session.serverHasOlder));
+        return;
+      }
+      const backend = this.registry.get(thread.backendId);
+      if (!session.serverHasOlder || !backend?.loadOlderHistory) {
+        session.serverHasOlder = false;
+        this.postOlder(thread, [], false);
+        return;
+      }
+      let current = items;
+      let added: TranscriptItem[] = [];
+      let hasMore = true;
+      for (let attempt = 0; attempt < 4 && added.length === 0 && hasMore; attempt += 1) {
+        const page = await backend.loadOlderHistory(thread.threadId);
+        hasMore = page.hasMore;
+        const next = prependOlderHistory(current, hidden, page.items);
+        current = next.items;
+        hidden = next.hidden;
+        added = next.added;
+        if (page.items.length === 0) {
+          break;
+        }
+      }
+      session.loadedTranscript = current;
+      session.historyHidden = hidden;
+      session.serverHasOlder = hasMore;
+      this.postOlder(thread, added, hidden > 0 || hasMore);
+    } catch (error) {
+      this.post({
+        type: 'notice',
+        level: 'warning',
+        message: error instanceof Error ? error.message : 'Earlier messages could not be loaded.'
+      });
+      this.postOlder(thread, [], (session.historyHidden ?? 0) > 0 || Boolean(session.serverHasOlder));
+    } finally {
+      this.olderHistoryInFlight = false;
+    }
+  }
+
+  private postOlder(thread: ThreadHandle, items: TranscriptItem[], hasOlderHistory: boolean): void {
+    this.post({
+      type: 'olderHistory',
+      backendId: thread.backendId,
+      threadId: thread.threadId,
+      items,
+      hasOlderHistory
+    });
+  }
+
   /** Reconnects to a listed thread and replays its stored turns. */
   private async resumeThread(backendId: string, threadId: string): Promise<void> {
+    await this.transcriptsReady;
     this.post({ type: 'restoring', value: true });
     try {
       const backend = this.registry.get(backendId);
@@ -2229,6 +2379,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.session.title = tabTitle(titled);
         this.publishTabs();
       }
+      const storedItems = this.store.getTranscript(backendId, threadId);
+      const source =
+        result.items.length > 0
+          ? withStoredUserIds(
+              ref?.handoverSummary && !compactedSummary(result.items)
+                ? [...compactedTranscript(ref.handoverSummary), ...result.items]
+                : result.items,
+              storedItems
+            )
+          : storedItems;
+      const history = this.openHistory(
+        this.store.mergeApprovalMarkers(backendId, threadId, source),
+        Boolean(result.hasOlderHistory)
+      );
       this.post({
         type: 'conversation',
         backendId,
@@ -2236,13 +2400,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         model: result.model,
         permissionLevel: this.permissionLevel,
         mode: this.mode,
-        replay: this.store.mergeApprovalMarkers(
-          backendId,
-          threadId,
-          ref?.handoverSummary && !compactedSummary(result.items)
-            ? [...compactedTranscript(ref.handoverSummary), ...result.items]
-            : result.items
-        ),
+        replay: history.replay,
+        hasOlderHistory: history.hasOlderHistory,
         pendingApproval: this.pendingApproval,
         pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
         plan: this.store.getPlanState(backendId, threadId)
@@ -2374,6 +2533,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       if (result.transcript) {
         this.store.setTranscript(active.backendId, active.threadId, result.transcript);
         await this.store.flush();
+        const history = this.openHistory(result.transcript);
         this.post({
           type: 'conversation',
           backendId: active.backendId,
@@ -2381,7 +2541,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           model,
           permissionLevel: this.permissionLevel,
           mode: this.mode,
-          replay: result.transcript,
+          replay: history.replay,
+          hasOlderHistory: history.hasOlderHistory,
           pendingQuestion: this.pendingQuestionPayload(active.backendId, active.threadId),
           plan: this.store.getPlanState(active.backendId, active.threadId)
             ? this.planArtifact(active.backendId, active.threadId)

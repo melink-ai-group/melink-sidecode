@@ -17,6 +17,7 @@ import {
   DefaultMode,
   Disposable,
   ModelCapabilities,
+  OlderHistoryPage,
   PermissionLevel,
   ReportedChange,
   ResumeResult,
@@ -50,6 +51,7 @@ import {
   instructionsWithHandover
 } from './compaction';
 import { isItemTerminal, translateItem, translateTurnItems } from './appserver/items';
+import { chronological, cursorsAfterPage, historyCursors, nextOlderQuery, type HistoryCursors } from './codex/history.ts';
 import { itemDeltaFor } from './appserver/deltas';
 import {
   changesFromApplyPatch,
@@ -192,6 +194,8 @@ export class CodexBackend implements AgentBackend {
   private readonly bakedSnapshot = new Map<string, string>();
   /** True while a resume is rewriting instructions, so its history is not replayed. */
   private suppressHistory = false;
+  /** Backwards cursors for a resumed thread, so older turns can load on scroll. */
+  private readonly historyCursors = new Map<string, HistoryCursors>();
   private connection?: AppServerConnection;
   private connecting?: Promise<AppServerConnection>;
   private pendingTurn?: PendingTurn;
@@ -520,6 +524,8 @@ export class CodexBackend implements AgentBackend {
     }
     const model = response.model || undefined;
     this.announceThread(threadId, model);
+    const cursors = historyCursors(response.itemsBackwardsCursor, response.turnsBackwardsCursor);
+    this.historyCursors.set(threadId, cursors);
     return {
       handle: {
         backendId: this.id,
@@ -531,8 +537,47 @@ export class CodexBackend implements AgentBackend {
       model,
       // Prefer Codex's own turn history; fall back to the render cache only when
       // the server returns no turns (for example an ephemeral thread).
-      items: replayTranscript(response.thread, this.store)
+      items: replayTranscript(response.thread, this.store),
+      // A paginated thread returns a recent window plus cursors into the rest.
+      hasOlderHistory: nextOlderQuery(cursors) !== undefined
     };
+  }
+
+  /**
+   * The next older page of a resumed thread. Item cursors are followed first:
+   * that is the cut that leaves the painted history starting on a reasoning row.
+   */
+  async loadOlderHistory(threadId: string): Promise<OlderHistoryPage> {
+    const connection = await this.connect();
+    let cursors = this.historyCursors.get(threadId) ?? historyCursors(null, null);
+    const collected: TranscriptItem[] = [];
+    for (let attempt = 0; attempt < 3 && collected.length === 0; attempt += 1) {
+      const query = nextOlderQuery(cursors);
+      if (!query) {
+        break;
+      }
+      if (query.kind === 'items') {
+        const page = await connection
+          .listItems({ threadId, cursor: query.cursor, limit: query.limit, sortDirection: 'desc' })
+          .catch((error: unknown) => this.fail(error));
+        collected.push(...chronological(page.data).flatMap((entry) => translateTurnItems([entry.item])));
+        cursors = cursorsAfterPage(cursors, 'items', query.cursor, page.nextCursor);
+      } else {
+        const page = await connection
+          .listTurns({
+            threadId,
+            cursor: query.cursor,
+            limit: query.limit,
+            sortDirection: 'desc',
+            itemsView: 'full'
+          })
+          .catch((error: unknown) => this.fail(error));
+        collected.push(...chronological(page.data).flatMap((turn) => translateTurnItems(turn.items)));
+        cursors = cursorsAfterPage(cursors, 'turns', query.cursor, page.nextCursor);
+      }
+      this.historyCursors.set(threadId, cursors);
+    }
+    return { items: collected, hasMore: nextOlderQuery(cursors) !== undefined };
   }
 
   async listThreads(): Promise<ThreadSummary[]> {
@@ -1641,8 +1686,9 @@ function carriesPlanInstruction(saved: string | null | undefined, thread: Thread
 /**
  * Build replay items from the app-server's own turn history, falling back to the
  * render cache when the server returns no turns (for example an ephemeral
- * thread). Historical user messages are skipped: the host persists and repaints
- * those itself, so including them here would double them.
+ * thread). User messages stay in the list: the host overlays its stored ids
+ * so a checkpoint still matches, and dropping them left the thread starting
+ * at the reasoning row that follows the prompt.
  */
 function replayTranscript(thread: Thread, store?: ThreadStore): TranscriptItem[] {
   const fromServer = thread.turns.flatMap((turn) => translateTurnItems(turn.items));

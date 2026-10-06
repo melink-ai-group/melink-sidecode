@@ -35,6 +35,10 @@ import type { ThreadResumeParams } from '../../../schemas/v2/ThreadResumeParams'
 import type { ThreadResumeResponse } from '../../../schemas/v2/ThreadResumeResponse';
 import type { ThreadListParams } from '../../../schemas/v2/ThreadListParams';
 import type { ThreadListResponse } from '../../../schemas/v2/ThreadListResponse';
+import type { ThreadTurnsListParams } from '../../../schemas/v2/ThreadTurnsListParams';
+import type { ThreadTurnsListResponse } from '../../../schemas/v2/ThreadTurnsListResponse';
+import type { ThreadItemsListParams } from '../../../schemas/v2/ThreadItemsListParams';
+import type { ThreadItemsListResponse } from '../../../schemas/v2/ThreadItemsListResponse';
 import type { TurnStartParams } from '../../../schemas/v2/TurnStartParams';
 import type { TurnStartResponse } from '../../../schemas/v2/TurnStartResponse';
 import type { TurnInterruptParams } from '../../../schemas/v2/TurnInterruptParams';
@@ -557,6 +561,16 @@ export class AppServerConnection implements Disposable {
 
   listThreads(params: ThreadListParams): Promise<ThreadListResponse> {
     return this.request<ThreadListResponse>('thread/list', params);
+  }
+
+  /** Older turns of a paginated thread. `sortDirection: "desc"` walks backwards. */
+  listTurns(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
+    return this.request<ThreadTurnsListResponse>('thread/turns/list', params);
+  }
+
+  /** Older items of a paginated thread. `sortDirection: "desc"` walks backwards. */
+  listItems(params: ThreadItemsListParams): Promise<ThreadItemsListResponse> {
+    return this.request<ThreadItemsListResponse>('thread/items/list', params);
   }
 
   listModels(params: ModelListParams): Promise<ModelListResponse> {

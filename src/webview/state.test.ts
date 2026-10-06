@@ -68,6 +68,31 @@ test('a reload with no open request shows no prompt at all', () => {
   assert.equal(pendingApproval(state), undefined);
 });
 
+test('older history is prepended and a short page can still report more', () => {
+  const open = reduce(initialState, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 'thread_1',
+    hasOlderHistory: true,
+    replay: [{ id: 'reason', kind: 'reasoning', title: 'Reasoning', text: 'looking' }]
+  });
+  assert.equal(open.hasOlderHistory, true);
+  assert.equal(open.transcript[0]?.kind, 'reasoning');
+  const older = reduce(open, {
+    type: 'olderHistory',
+    backendId: 'codex',
+    threadId: 'thread_1',
+    hasOlderHistory: true,
+    items: [{ id: 'user_1', kind: 'message', role: 'user', text: 'earlier prompt' }]
+  });
+  assert.deepEqual(
+    older.transcript.map((item) => item.id),
+    ['user_1', 'reason']
+  );
+  assert.equal(older.loadingOlder, false);
+  assert.equal(older.hasOlderHistory, true);
+});
+
 test('a settled approval collapses to a decided card and clears the pending request', () => {
   const open = request({ id: 'req_live' });
   const requested: AppState = reduce(initialState, {

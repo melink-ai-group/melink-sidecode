@@ -83,7 +83,13 @@ const PLANS_KEY = 'melink.plans';
 
 /** Bounds so persisted state cannot grow without limit. */
 const MAX_THREADS_PER_BACKEND = 25;
+/**
+ * How many items `workspaceState` keeps as a fallback. The full transcript is
+ * written beside it, under the workspace storage directory, so a long Ollama
+ * chat is not cut off at this count when the window reloads.
+ */
 const MAX_ITEMS_PER_TRANSCRIPT = 200;
+const TRANSCRIPT_DIR = 'transcripts';
 /** Milliseconds to coalesce transcript writes while a turn streams. */
 const FLUSH_DELAY_MS = 750;
 
@@ -171,8 +177,13 @@ export class ThreadStore implements vscode.Disposable {
     index[backendId] = (index[backendId] ?? []).filter((entry) => entry.threadId !== threadId);
     await this.persistThreadIndex();
     const transcripts = this.loadTranscripts();
-    delete transcripts[transcriptKey(backendId, threadId)];
-    this.markDirty(transcriptKey(backendId, threadId));
+    const key = transcriptKey(backendId, threadId);
+    delete transcripts[key];
+    this.markDirty(key);
+    const file = this.transcriptFile(key);
+    if (file) {
+      await ignoreFsError(vscode.workspace.fs.delete(file));
+    }
     const plans = this.loadPlans();
     delete plans[transcriptKey(backendId, threadId)];
     await this.context.workspaceState.update(PLANS_KEY, plans);
@@ -246,8 +257,50 @@ export class ThreadStore implements vscode.Disposable {
   /** Replaces a thread's stored transcript; used when resuming from a live source. */
   setTranscript(backendId: string, threadId: string, items: TranscriptItem[]): void {
     const index = this.loadTranscripts();
-    index[transcriptKey(backendId, threadId)] = items.slice(-MAX_ITEMS_PER_TRANSCRIPT);
+    index[transcriptKey(backendId, threadId)] = items.slice();
     this.markDirty(transcriptKey(backendId, threadId));
+  }
+
+  /**
+   * Load full transcripts from workspace storage. `workspaceState` only keeps
+   * a tail, so this must finish before a chat is painted or a flush would
+   * write that tail back over the file. A file that is shorter than what is
+   * already in memory is left alone.
+   */
+  async hydrate(): Promise<void> {
+    const dir = this.transcriptDirectory();
+    if (!dir) {
+      return;
+    }
+    let names: [string, vscode.FileType][];
+    try {
+      names = await vscode.workspace.fs.readDirectory(dir);
+    } catch {
+      return;
+    }
+    const index = this.loadTranscripts();
+    for (const [name, type] of names) {
+      if (type !== vscode.FileType.File || !name.endsWith('.json')) {
+        continue;
+      }
+      const key = decodeURIComponent(name.slice(0, -'.json'.length));
+      try {
+        const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(dir, name));
+        const parsed = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown;
+        if (!Array.isArray(parsed)) {
+          continue;
+        }
+        const current = index[key] ?? [];
+        if (parsed.length < current.length) {
+          continue;
+        }
+        const ids = new Set(parsed.map((item: TranscriptItem) => item?.id));
+        const extra = current.filter((item) => item && !ids.has(item.id));
+        index[key] = extra.length > 0 ? [...(parsed as TranscriptItem[]), ...extra] : (parsed as TranscriptItem[]);
+      } catch {
+        // Keep the workspaceState tail when a file cannot be read.
+      }
+    }
   }
 
   /**
@@ -474,11 +527,58 @@ export class ThreadStore implements vscode.Disposable {
     if (this.dirty.size === 0) {
       return;
     }
+    const dirty = [...this.dirty];
     this.dirty.clear();
-    await this.context.workspaceState.update(TRANSCRIPTS_KEY, this.loadTranscripts());
+    const transcripts = this.loadTranscripts();
+    await this.writeTranscriptFiles(dirty, transcripts);
+    const tails: TranscriptIndex = {};
+    for (const [key, items] of Object.entries(transcripts)) {
+      tails[key] = items.slice(-MAX_ITEMS_PER_TRANSCRIPT);
+    }
+    await this.context.workspaceState.update(TRANSCRIPTS_KEY, tails);
+  }
+
+  private transcriptDirectory(): vscode.Uri | undefined {
+    const root = this.context.storageUri;
+    return root ? vscode.Uri.joinPath(root, TRANSCRIPT_DIR) : undefined;
+  }
+
+  private transcriptFile(key: string): vscode.Uri | undefined {
+    const dir = this.transcriptDirectory();
+    return dir ? vscode.Uri.joinPath(dir, `${encodeURIComponent(key)}.json`) : undefined;
+  }
+
+  /** Write the full transcript for each dirty key. A missing storage root keeps the workspaceState tail only. */
+  private async writeTranscriptFiles(keys: readonly string[], transcripts: TranscriptIndex): Promise<void> {
+    const dir = this.transcriptDirectory();
+    if (!dir) {
+      return;
+    }
+    await ignoreFsError(vscode.workspace.fs.createDirectory(dir));
+    for (const key of keys) {
+      const file = this.transcriptFile(key);
+      if (!file) {
+        continue;
+      }
+      const items = transcripts[key];
+      if (!items) {
+        await ignoreFsError(vscode.workspace.fs.delete(file));
+        continue;
+      }
+      await ignoreFsError(vscode.workspace.fs.writeFile(file, Buffer.from(JSON.stringify(items), 'utf8')));
+    }
   }
 
   dispose(): void {
     void this.flush();
+  }
+}
+
+/** A missing transcript file is not a failure. The workspaceState tail remains. */
+async function ignoreFsError(work: Thenable<void>): Promise<void> {
+  try {
+    await work;
+  } catch {
+    return;
   }
 }
