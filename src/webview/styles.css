@@ -5731,7 +5731,7 @@ button.context-meter:hover {
 
 .changes-review__head .btn:not(.btn--link) {
   min-height: 0;
-  height: 22px;
+  height: 26px;
   padding: 0 8px;
   font-size: 11px;
   gap: 3px;
@@ -5739,9 +5739,22 @@ button.context-meter:hover {
 }
 
 .changes-review__head .changes-review__icon-btn {
-  width: 22px;
+  width: 26px;
   padding: 0;
   justify-content: center;
+  overflow: hidden;
+}
+
+/* The check and diff paths sit inset in a 24px view box, so a 1:1 icon
+   leaves a hairline mark in the middle of the button. Scale the glyph up
+   until it fills the control. */
+.changes-review__head .changes-review__icon-btn .ico {
+  width: 20px;
+  height: 20px;
+  transform: scale(1.45);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .changes-review__head .btn--link {
