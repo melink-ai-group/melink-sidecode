@@ -65,6 +65,20 @@ export class PlanStore {
    * Returns `undefined` when the file is absent, so a missing plan degrades to
    * "no plan" rather than an error.
    */
+  /** Remove a thread's plan file. A missing file is not an error. */
+  async remove(threadId: string): Promise<void> {
+    const root = this.root;
+    if (!root) {
+      return;
+    }
+    const fileUri = vscode.Uri.joinPath(root, planRelativePath(threadId));
+    try {
+      await vscode.workspace.fs.delete(fileUri);
+    } catch {
+      // Already gone.
+    }
+  }
+
   async read(threadId: string): Promise<PlanArtifact | undefined> {
     const root = this.root;
     if (!root) {

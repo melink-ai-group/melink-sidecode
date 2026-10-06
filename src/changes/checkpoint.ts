@@ -3,27 +3,25 @@ import type { ChangeWorkspaceFs } from './changeStore';
 import { hashBytes } from './hash.ts';
 import type {
   CaptureRestorePointInput,
+  CheckpointPlanRecord,
   JournalFileEntry,
   JournalRestorePoint,
-  JournalTurn
+  JournalTurn,
+  MessageCheckpoint
 } from './journal';
 
 /**
  * Per-message checkpoints, with a restore that reverts files only.
  *
- * A checkpoint is not a new mechanism: it is the pre-turn snapshot set the
- * journal already holds for the turn a user message opened. This store makes
- * that snapshot addressable by message id and applies it back to the workspace,
- * mirroring Cursor's semantics:
+ * A checkpoint is the send-time snapshot the journal stored for a user message:
+ * workspace bytes and every thread's plan state, taken before the agent ran.
+ * This store applies the file half back to the workspace. The host rewinds the
+ * transcript and the plans; this module never imports the thread store.
  *
- * - **Restore reverts files only.** The transcript and the message list are the
- *   host's `ThreadStore`, which this module never touches. Nothing here can
- *   remove a message from the conversation.
- * - **Later turns are included.** Restoring the checkpoint for message `M`
- *   reverts every file touched between `M`'s turn and now, including files
- *   touched by later turns. Each file returns to the content the *earliest*
- *   affected turn recorded as its before side, which is its content at the
- *   checkpoint.
+ * - **The snapshot is the restore target.** Each path returns to the bytes
+ *   recorded when the message was sent. A file created after that, with no
+ *   before side, is deleted. A file another thread edited after that returns
+ *   to the same bytes.
  * - **A restore is itself undoable.** Before any workspace write, the current
  *   content of every file about to change is captured as a restore point. If
  *   that capture cannot be written, no file is modified and the restore aborts.
@@ -56,15 +54,40 @@ export interface CheckpointFile {
 /** The checkpoint summary a confirmation can be shown from. */
 export interface CheckpointView {
   messageId: string;
+  /** The turn this message opened, or the message id when the turn has not started. */
   turnId: string;
   threadId: string;
   backendId: string;
-  /** Epoch milliseconds the message's turn opened. */
+  /** Epoch milliseconds the message was sent. */
   createdAt: number;
-  /** Number of files a restore would touch (including skipped/conflict ones). */
+  /** Number of files the send-time snapshot recorded. */
   fileCount: number;
-  /** Every affected workspace-relative path, sorted. */
+  /** Workspace-relative paths in the snapshot, sorted. */
   paths: string[];
+}
+
+/** Another chat whose later file or plan work a restore would undo. */
+export interface CheckpointImpactChat {
+  backendId: string;
+  threadId: string;
+  /** Paths that chat changed after the snapshot and that a restore would touch. */
+  paths: string[];
+  /** True when that chat's plan or todos differ from the snapshot. */
+  planChanged: boolean;
+}
+
+/**
+ * What a restore would change, computed before anything is written. The host
+ * turns this into the confirmation, adding message previews and chat titles.
+ */
+export interface CheckpointImpact {
+  createdAt: number;
+  /** Paths whose workspace bytes are not already the snapshot. */
+  paths: string[];
+  /** True when this chat's plan or todos differ from the snapshot. */
+  thisPlanChanged: boolean;
+  /** Other chats, and only chats that would actually lose file or plan work. */
+  others: CheckpointImpactChat[];
 }
 
 /** The explicit choice a conflicting restore requires before it writes. */
@@ -101,12 +124,16 @@ export interface RestoreCheckpointResult {
 /** The recorded-artifact seam, satisfied by `ChangeJournal`. */
 export interface CheckpointArtifacts {
   listTurns(threadId: string): JournalTurn[];
+  listAllTurns(): JournalTurn[];
   getBefore(turnId: string, relPath: string): Promise<Uint8Array | undefined>;
   captureRestorePoint(input: CaptureRestorePointInput): Promise<JournalRestorePoint>;
   sealRestorePoint(id: string, expectedHashes: Readonly<Record<string, string | undefined>>): Promise<void>;
   getRestorePoint(id: string): JournalRestorePoint | undefined;
   getRestorePointContent(pointId: string, relPath: string): Promise<Uint8Array | undefined>;
   listRestorePoints(threadId: string): JournalRestorePoint[];
+  getMessageCheckpoint(threadId: string, messageId: string): MessageCheckpoint | undefined;
+  listMessageCheckpoints(threadId: string): MessageCheckpoint[];
+  readCheckpointFile(threadId: string, messageId: string, relPath: string): Promise<Uint8Array | undefined>;
 }
 
 /** A decision store that can drop a turn's decisions when its content is superseded. */
@@ -163,37 +190,117 @@ export class CheckpointStore {
   /* ------------------------------- views ----------------------------------- */
 
   /**
-   * Every message in a thread that opened a turn touching at least one file,
-   * newest first. A message whose turn touched nothing is omitted, so no empty
-   * checkpoint is ever offered.
+   * Every user message in a thread that has a send-time snapshot, newest first.
+   * A message is listed even when its turn touched no files, so a later message
+   * or another chat can still be rewound to that moment.
    */
   async listCheckpoints(threadId: string): Promise<CheckpointView[]> {
     const turns = this.artifacts.listTurns(threadId);
-    const seen = new Set<string>();
-    const views: CheckpointView[] = [];
-    for (const turn of turns) {
-      if (!turn.messageId || seen.has(turn.messageId)) {
-        continue;
-      }
-      if (!turn.observed || turn.files.length === 0) {
-        continue;
-      }
-      seen.add(turn.messageId);
-      const plan = await this.planForMessage(threadId, turn.messageId);
-      if (!plan || plan.files.length === 0) {
-        continue;
-      }
-      views.push({
-        messageId: turn.messageId,
-        turnId: turn.turnId,
-        threadId: turn.threadId,
-        backendId: turn.backendId,
-        createdAt: turn.startedAt,
-        fileCount: plan.files.length,
-        paths: plan.files.map((file) => file.relPath).sort()
-      });
+    return this.artifacts.listMessageCheckpoints(threadId).map((checkpoint) => {
+      const opened = turns.find((turn) => turn.messageId === checkpoint.messageId);
+      const paths = checkpoint.files.map((file) => file.relPath).sort();
+      return {
+        messageId: checkpoint.messageId,
+        turnId: opened?.turnId ?? checkpoint.messageId,
+        threadId: checkpoint.threadId,
+        backendId: checkpoint.backendId,
+        createdAt: checkpoint.createdAt,
+        fileCount: paths.length,
+        paths
+      };
+    });
+  }
+
+  /**
+   * Files and other chats a restore would touch, without writing. `plans` is
+   * the current plan state of every thread, compared with the snapshot.
+   */
+  async preview(input: {
+    threadId: string;
+    messageId: string;
+    plans: readonly CheckpointPlanRecord[];
+  }): Promise<CheckpointImpact | undefined> {
+    const checkpoint = this.artifacts.getMessageCheckpoint(input.threadId, input.messageId);
+    const plan = checkpoint ? await this.planForMessage(input.threadId, input.messageId) : undefined;
+    if (!checkpoint || !plan) {
+      return undefined;
     }
-    return views;
+    const paths: string[] = [];
+    for (const file of plan.files) {
+      if (file.target.kind === 'skipped') {
+        paths.push(file.relPath);
+        continue;
+      }
+      const current = await this.fs.readFile(file.absPath);
+      const currentHash = current ? hashBytes(current) : undefined;
+      const targetHash = file.target.kind === 'write' ? hashBytes(file.target.bytes) : undefined;
+      if (currentHash !== targetHash) {
+        paths.push(file.relPath);
+      }
+    }
+    paths.sort();
+    const pathSet = new Set(paths);
+    const others = new Map<string, CheckpointImpactChat>();
+    for (const turn of plan.turns) {
+      if (turn.threadId === checkpoint.threadId && turn.backendId === checkpoint.backendId) {
+        continue;
+      }
+      const touched = turn.files.map((file) => file.relPath).filter((relPath) => pathSet.has(relPath));
+      if (touched.length === 0) {
+        continue;
+      }
+      const key = `${turn.backendId}\0${turn.threadId}`;
+      const existing = others.get(key) ?? {
+        backendId: turn.backendId,
+        threadId: turn.threadId,
+        paths: [],
+        planChanged: false
+      };
+      for (const relPath of touched) {
+        if (!existing.paths.includes(relPath)) {
+          existing.paths.push(relPath);
+        }
+      }
+      others.set(key, existing);
+    }
+    const snapshotPlans = checkpoint.plans;
+    const consider = new Map<string, { backendId: string; threadId: string }>();
+    for (const record of [...snapshotPlans, ...input.plans]) {
+      consider.set(`${record.backendId}\0${record.threadId}`, { backendId: record.backendId, threadId: record.threadId });
+    }
+    for (const record of consider.values()) {
+      const changed = !samePlan(
+        planState(snapshotPlans, record.backendId, record.threadId),
+        planState(input.plans, record.backendId, record.threadId)
+      );
+      if (!changed) {
+        continue;
+      }
+      if (record.threadId === checkpoint.threadId && record.backendId === checkpoint.backendId) {
+        continue;
+      }
+      const key = `${record.backendId}\0${record.threadId}`;
+      const existing = others.get(key) ?? {
+        backendId: record.backendId,
+        threadId: record.threadId,
+        paths: [],
+        planChanged: false
+      };
+      existing.planChanged = true;
+      others.set(key, existing);
+    }
+    for (const chat of others.values()) {
+      chat.paths.sort();
+    }
+    return {
+      createdAt: checkpoint.createdAt,
+      paths,
+      thisPlanChanged: !samePlan(
+        planState(snapshotPlans, checkpoint.backendId, checkpoint.threadId),
+        planState(input.plans, checkpoint.backendId, checkpoint.threadId)
+      ),
+      others: [...others.values()]
+    };
   }
 
   /** The full file plan for a message checkpoint, for an on-demand confirmation. */
@@ -361,7 +468,7 @@ export class CheckpointStore {
     // decision points at content the restore has superseded.
     for (const turn of plan.turns) {
       try {
-        await this.decisions.clearTurn(input.backendId, input.threadId, turn.turnId);
+        await this.decisions.clearTurn(turn.backendId, turn.threadId, turn.turnId);
       } catch {
         // A decision store that is unavailable must not fail the restore.
       }
@@ -391,20 +498,17 @@ export class CheckpointStore {
   /* ----------------------------- resolution -------------------------------- */
 
   private async planForMessage(threadId: string, messageId: string): Promise<RestorePlan | undefined> {
-    const turns = this.artifacts.listTurns(threadId); // newest first
-    const checkpointIndex = turns.findIndex((turn) => turn.messageId === messageId);
-    if (checkpointIndex === -1) {
+    const checkpoint = this.artifacts.getMessageCheckpoint(threadId, messageId);
+    if (!checkpoint) {
       return undefined;
     }
-    const checkpoint = turns[checkpointIndex];
-    // The checkpoint and every later turn, in chronological order.
-    const affected = turns.slice(0, checkpointIndex + 1).reverse();
+    const resolved = await this.filesForCheckpoint(checkpoint);
     return {
       targetId: messageId,
       threadId,
       backendId: checkpoint.backendId,
-      turns: affected,
-      files: await this.resolveTurnFiles(affected)
+      turns: resolved.turns,
+      files: resolved.files
     };
   }
 
@@ -437,57 +541,80 @@ export class CheckpointStore {
   }
 
   /**
-   * Build the affected file set for a checkpoint. For each workspace path, the
-   * earliest affected turn is the one that saw its checkpoint content, so its
-   * before side is the restore target. The latest affected turn's after side is
-   * what the workspace should currently hold, so it is the conflict baseline.
+   * Build the file set for a send-time snapshot. Paths in the snapshot are
+   * written back, or deleted when the snapshot recorded them absent. A file
+   * created after the snapshot, with no before side, is deleted even when the
+   * snapshot did not name it. The conflict baseline is the newest recorded
+   * after-side at or after the snapshot.
    */
-  private async resolveTurnFiles(affected: JournalTurn[]): Promise<CheckpointFile[]> {
-    const order: string[] = [];
-    const earliest = new Map<string, { turnId: string; entry: JournalFileEntry }>();
-    const latest = new Map<string, { turnId: string; entry: JournalFileEntry }>();
-    for (const turn of affected) {
-      for (const file of turn.files) {
-        if (!earliest.has(file.relPath)) {
-          earliest.set(file.relPath, { turnId: turn.turnId, entry: file });
-          order.push(file.relPath);
+  private async filesForCheckpoint(
+    checkpoint: MessageCheckpoint
+  ): Promise<{ files: CheckpointFile[]; turns: JournalTurn[] }> {
+    const all = this.artifacts.listAllTurns();
+    const later = all.filter(
+      (turn) =>
+        turn.startedAt >= checkpoint.createdAt ||
+        (turn.endedAt !== undefined && turn.endedAt >= checkpoint.createdAt)
+    );
+    const byPath = new Map<string, CheckpointFile>();
+    for (const file of checkpoint.files) {
+      const bytes = file.blobKey
+        ? await this.artifacts.readCheckpointFile(checkpoint.threadId, checkpoint.messageId, file.relPath)
+        : undefined;
+      const target: CheckpointFile['target'] =
+        file.hash === undefined
+          ? { kind: 'delete' }
+          : bytes !== undefined
+            ? { kind: 'write', bytes }
+            : { kind: 'skipped', reason: 'The pre-message content was not stored, so it cannot be restored.' };
+      byPath.set(file.relPath, {
+        relPath: file.relPath,
+        absPath: file.absPath,
+        target,
+        expected: expectedAfter(later, file.relPath) ?? (file.hash ? { kind: 'hash', value: file.hash } : { kind: 'absent' }),
+        status: 'modified'
+      });
+    }
+
+    const createdAfter = all.filter((turn) => turn.startedAt >= checkpoint.createdAt);
+    for (const turn of createdAfter) {
+      for (const entry of turn.files) {
+        if (byPath.has(entry.relPath)) {
+          continue;
         }
-        latest.set(file.relPath, { turnId: turn.turnId, entry: file });
+        let target: CheckpointFile['target'];
+        if (entry.hasBefore && entry.beforeHash) {
+          const bytes = await this.artifacts.getBefore(turn.turnId, entry.relPath);
+          target =
+            bytes !== undefined
+              ? { kind: 'write', bytes }
+              : { kind: 'skipped', reason: 'The pre-checkpoint content was not stored, so it cannot be restored.' };
+        } else if (!entry.hasBefore && entry.status === 'created') {
+          target = { kind: 'delete' };
+        } else {
+          target = {
+            kind: 'skipped',
+            reason: 'No pre-checkpoint content was recorded for this file, so it cannot be restored.'
+          };
+        }
+        byPath.set(entry.relPath, {
+          relPath: entry.relPath,
+          absPath: entry.absPath,
+          target,
+          expected: expectedAfter(later, entry.relPath) ?? expectedFor(entry),
+          status: entry.status
+        });
       }
     }
 
-    const files: CheckpointFile[] = [];
-    for (const relPath of order) {
-      const first = earliest.get(relPath) as { turnId: string; entry: JournalFileEntry };
-      const last = latest.get(relPath) as { turnId: string; entry: JournalFileEntry };
-      let target: CheckpointFile['target'];
-      if (first.entry.hasBefore && first.entry.beforeHash) {
-        const bytes = await this.artifacts.getBefore(first.turnId, first.entry.relPath);
-        target =
-          bytes !== undefined
-            ? { kind: 'write', bytes }
-            : {
-                kind: 'skipped',
-                reason: 'The pre-checkpoint content was not stored, so it cannot be restored.'
-              };
-      } else if (!first.entry.hasBefore && first.entry.status === 'created') {
-        // Created by the checkpoint turn: restoring removes it again.
-        target = { kind: 'delete' };
-      } else {
-        target = {
-          kind: 'skipped',
-          reason: 'No pre-checkpoint content was recorded for this file, so it cannot be restored.'
-        };
-      }
-      files.push({
-        relPath,
-        absPath: first.entry.absPath,
-        target,
-        expected: expectedFor(last.entry),
-        status: first.entry.status
-      });
-    }
-    return files;
+    const files = [...byPath.values()];
+    const paths = new Set(files.map((file) => file.relPath));
+    const turns = later.filter(
+      (turn) =>
+        (turn.threadId === checkpoint.threadId && turn.backendId === checkpoint.backendId) ||
+        turn.files.some((file) => paths.has(file.relPath))
+    );
+    return { files, turns };
   }
 
   /** True when the current hash is consistent with what the agent last recorded. */
@@ -501,6 +628,44 @@ export class CheckpointStore {
     }
     return currentHash === expected.value;
   }
+}
+
+/** The newest after-side recorded at or after the snapshot, for one path. */
+function expectedAfter(turns: readonly JournalTurn[], relPath: string): CheckpointFile['expected'] | undefined {
+  let expected: CheckpointFile['expected'] | undefined;
+  for (const turn of turns) {
+    const entry = turn.files.find((file) => file.relPath === relPath);
+    if (entry) {
+      expected = expectedFor(entry);
+    }
+  }
+  return expected;
+}
+
+function planState(
+  records: readonly CheckpointPlanRecord[],
+  backendId: string,
+  threadId: string
+): CheckpointPlanRecord['state'] {
+  return records.find((record) => record.backendId === backendId && record.threadId === threadId)?.state;
+}
+
+function samePlan(left: CheckpointPlanRecord['state'], right: CheckpointPlanRecord['state']): boolean {
+  const normalize = (state: CheckpointPlanRecord['state']) => {
+    if (!state) {
+      return null;
+    }
+    return {
+      path: state.path,
+      title: state.title,
+      summary: state.summary ?? '',
+      body: state.body ?? '',
+      built: Boolean(state.built),
+      completedDismissed: Boolean(state.completedDismissed),
+      steps: state.steps.map((step) => ({ text: step.text, status: step.status }))
+    };
+  };
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 
 /** What the workspace should hold now, from the latest affected turn's after side. */

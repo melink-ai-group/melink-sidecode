@@ -400,16 +400,24 @@ export type HostToWebviewMessage =
    */
   | { type: 'changes/decisionResult'; results: ChangeDecisionResult[]; message?: string }
   /**
-   * The per-message checkpoints a thread offers: one entry per user message whose
-   * turn touched files, newest first. A message whose turn touched nothing is
-   * absent, so no empty checkpoint is ever offered. `files` is carried for the
-   * confirmation so the affected paths are shown before anything is reverted.
+   * The per-message checkpoints a thread offers: one entry per user message,
+   * newest first, including a message whose turn touched no files.
    */
   | { type: 'changes/checkpoints'; backendId: string; threadId: string; checkpoints: CheckpointView[] }
   /**
+   * The host message id for the user line just stored, so the live bubble can
+   * offer restore before a conversation replay replaces its temporary id.
+   */
+  | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string }
+  /**
+   * What a restore would rewind, computed when the user asks. Shown in the
+   * confirmation before anything is written.
+   */
+  | { type: 'changes/restorePreview'; preview: RestorePreview }
+  /**
    * The outcome of a checkpoint restore: per-file results and whether the
-   * operation was complete, partial, or aborted. Restoring reverts files only;
-   * the transcript is never altered, which the UI copy must state explicitly.
+   * operation was complete, partial, or aborted. A successful restore also
+   * rewinds this chat's later messages, todos, and plans.
    */
   | { type: 'changes/restoreResult'; result: RestoreCheckpointResult }
   /** A Plan or Agent question card. Replaces any card already on screen. */
@@ -623,15 +631,21 @@ export type WebviewToHostMessage =
       conflictResolution?: ConflictResolution;
     }
   /**
-   * Read the per-message checkpoints for a thread, so the per-message entry
-   * point can offer exactly the messages whose turn touched files.
+   * Read the per-message checkpoints for a thread. Every sent user message is
+   * included, whether or not its turn touched files.
    */
   | { type: 'changes/listCheckpoints'; backendId: string; threadId: string }
   /**
-   * Restore a checkpoint, reverting the affected files to their checkpoint
-   * content. The transcript and message list are never modified. Never sent by
-   * a timer: the host requires the caller to have confirmed, and a conflicting
-   * file requires an explicit `conflictResolution` to be overwritten.
+   * Ask what restoring one message would rewind, including other chats whose
+   * later file, todo, or plan changes would be undone. Nothing is written.
+   */
+  | { type: 'changes/previewRestore'; backendId: string; threadId: string; messageId: string }
+  /**
+   * Restore a checkpoint to the moment before that message was sent. The host
+   * rewinds this chat's later messages, files, todos, and plans. Other chats
+   * keep their messages. Never sent by a timer: the host requires the caller
+   * to have confirmed, and a conflicting file requires an explicit
+   * `conflictResolution` to be overwritten.
    */
   | {
       type: 'changes/restoreCheckpoint';
@@ -667,6 +681,34 @@ export type WebviewToHostMessage =
 export type { ChangeView, ChangeFileView, ChangeHunkView, ChangeDecision, ChangeDecisionResult, ConflictResolution } from './changes/changeStore';
 /** Re-exported so the checkpoint entry point names its read model without reaching in. */
 export type { CheckpointConflictResolution, CheckpointView, RestoreCheckpointResult, RestoreFileResult } from './changes/checkpoint';
+
+/** One message named in a restore confirmation. */
+export interface RestorePreviewMessage {
+  id: string;
+  /** First line, shortened. */
+  preview: string;
+}
+
+/** One chat a restore would affect. */
+export interface RestorePreviewChat {
+  backendId: string;
+  threadId: string;
+  title: string;
+  messages: RestorePreviewMessage[];
+  paths: string[];
+  planChanges: boolean;
+}
+
+/**
+ * The confirmation payload. `thisChat` is rewound, including its messages.
+ * `otherChats` keep their messages; the list is empty unless another chat
+ * would lose file, todo, or plan work.
+ */
+export interface RestorePreview {
+  messageId: string;
+  thisChat: RestorePreviewChat;
+  otherChats: RestorePreviewChat[];
+}
 
 /** Re-exported so the settings screen can build a permission picker generically. */
 export type { ApprovalDecision, ApprovalRequest, ApprovalRule };

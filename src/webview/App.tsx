@@ -28,6 +28,7 @@ import {
   InfoIcon,
   MicSolidIcon,
   PaperclipIcon,
+  PersonIcon,
   PlusIcon,
   RefreshIcon,
   RestoreIcon,
@@ -89,6 +90,7 @@ import type {
   ModelSettingOverrides,
   PermissionOption,
   RestoreCheckpointResult,
+  RestorePreview,
   SettingsPatch,
   ThinkingLevel
 } from '../protocol';
@@ -382,6 +384,17 @@ export function App(): JSX.Element {
           break;
         case 'changes/checkpoints':
           dispatch({ type: 'checkpoints', checkpoints: message.checkpoints });
+          break;
+        case 'userMessageId':
+          dispatch({
+            type: 'userMessageId',
+            backendId: message.backendId,
+            threadId: message.threadId,
+            messageId: message.messageId
+          });
+          break;
+        case 'changes/restorePreview':
+          dispatch({ type: 'restorePreview', preview: message.preview });
           break;
         case 'changes/restoreResult':
           dispatch({ type: 'restoreResult', result: message.result });
@@ -1236,11 +1249,15 @@ export function App(): JSX.Element {
   };
 
   // ---- Checkpoints --------------------------------------------------------
-  // Restoring a checkpoint reverts files only; the transcript is never touched.
-  // It is destructive and never implicit: the confirmation names the affected
-  // file count and paths first, and only an explicit confirm posts the restore.
-  const restoreCheckpoint = (messageId: string, fileCount: number, paths: string[]): void => {
-    dispatch({ type: 'requestRestoreConfirmation', messageId, fileCount, paths });
+  // Restoring is destructive and never implicit. The click asks the host what
+  // would be rewound, and only an explicit confirm posts the restore.
+  const restoreCheckpoint = (messageId: string): void => {
+    const threadId = state.activeThreadId;
+    const backendId = state.selectedBackendId;
+    if (!threadId || !backendId) {
+      return;
+    }
+    bridge.post({ type: 'changes/previewRestore', backendId, threadId, messageId });
   };
 
   const confirmRestore = (): void => {
@@ -1263,9 +1280,8 @@ export function App(): JSX.Element {
     });
   };
 
-  // Undo a restore by restoring the pre-restore snapshot it captured. The undo
-  // is a restore like any other: it reverts files only and never adds or removes
-  // a message.
+  // Undo a restore by restoring the snapshot captured just before it, including
+  // the messages and plans the restore removed.
   const undoRestore = (restorePointId?: string): void => {
     const threadId = state.activeThreadId;
     const backendId = state.selectedBackendId;
@@ -1753,14 +1769,6 @@ export function App(): JSX.Element {
             />
           </div>
         ) : null}
-        {state.restoreConfirmation ? (
-          <RestoreConfirmation
-            fileCount={state.restoreConfirmation.fileCount}
-            paths={state.restoreConfirmation.paths}
-            onConfirm={confirmRestore}
-            onCancel={() => dispatch({ type: 'cancelRestoreConfirmation' })}
-          />
-        ) : null}
         {state.permissionConfirmationOpen ? (
           <UnrestrictedConfirmation
             onConfirm={confirmPermissionChange}
@@ -1786,7 +1794,6 @@ export function App(): JSX.Element {
                 deciding={state.changeDeciding}
                 decisionResults={state.changeDecision?.results}
                 rejectConfirm={state.changeRejectConfirm}
-                checkpoint={state.checkpoints?.find((entry) => entry.turnId === state.changeReview?.turnId)}
                 onOpenFile={openChangeFile}
                 onOpenDiff={openChangeDiff}
                 onOpenAllInEditor={openChangeView}
@@ -1797,7 +1804,6 @@ export function App(): JSX.Element {
                 onConfirmReject={confirmChangeReject}
                 onKeepAll={keepAll}
                 onResolveConflict={resolveConflict}
-                onRestoreCheckpoint={(entry) => restoreCheckpoint(entry.messageId, entry.fileCount, entry.paths)}
                 onLoadHunks={loadChangeHunks}
               />
             ) : null}
@@ -2092,6 +2098,13 @@ export function App(): JSX.Element {
           </div>
         </div>
       </footer>
+      {state.restoreConfirmation ? (
+        <RestoreConfirmation
+          preview={state.restoreConfirmation}
+          onConfirm={confirmRestore}
+          onCancel={() => dispatch({ type: 'cancelRestoreConfirmation' })}
+        />
+      ) : null}
       {imageViewer ? (
         <ImageViewer
           images={imageViewer.images}
@@ -2978,11 +2991,11 @@ function TranscriptRow({
   /** Plan and Agent hide a sidecode-question fence. Ask leaves it as text. */
   hideQuestions?: boolean;
   pendingId?: string;
-  /** The checkpoint this message opened, when its turn touched files. */
+  /** The send-time snapshot for this message, when one was stored. */
   checkpoint?: CheckpointView;
   onDecide: (decision: ApprovalDecision) => void;
   onOpenRules: () => void;
-  onRestore: (messageId: string, fileCount: number, paths: string[]) => void;
+  onRestore: (messageId: string) => void;
   onViewImage: (images: ViewableImage[], index: number) => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
@@ -2993,24 +3006,29 @@ function TranscriptRow({
     return (
       <article className="turn turn--user">
         <div className="turn-meta">
+          <PersonIcon />
           <span className="meta-strong">You</span>
-          {checkpoint ? (
-            <button
-              type="button"
-              className="checkpoint-restore"
-              title={`Restore ${checkpoint.fileCount} file${checkpoint.fileCount === 1 ? '' : 's'} to before this message. Files only; this message and the rest of the conversation stay.`}
-              onClick={() => onRestore(checkpoint.messageId, checkpoint.fileCount, checkpoint.paths)}
-            >
-              <RestoreIcon />
-              <span>Restore checkpoint</span>
-            </button>
-          ) : null}
         </div>
-        <div className="turn-body">
-          {item.attachments && item.attachments.length > 0 ? (
-            <AttachmentList attachments={item.attachments} sent onView={onViewImage} />
+        <div className="turn-user-box">
+          <div className="turn-body">
+            {item.attachments && item.attachments.length > 0 ? (
+              <AttachmentList attachments={item.attachments} sent onView={onViewImage} />
+            ) : null}
+            {text ? <Markdown text={text} /> : null}
+          </div>
+          {checkpoint ? (
+            <div className="turn-restore">
+              <button
+                type="button"
+                className="checkpoint-restore"
+                aria-label="Restore to before this message"
+                title="Restore files, todos, and this chat to before this message was sent."
+                onClick={() => onRestore(checkpoint.messageId)}
+              >
+                <RestoreIcon />
+              </button>
+            </div>
           ) : null}
-          {text ? <Markdown text={text} /> : null}
         </div>
       </article>
     );
@@ -4521,56 +4539,111 @@ function UnrestrictedConfirmation({
 }
 
 /**
- * The confirmation before a checkpoint restore. Destructive and never implicit:
- * it names the affected file count and every path first. The copy is explicit
- * that files are reverted only; the message and the rest of the conversation are
- * left untouched.
+ * The confirmation before a checkpoint restore. This chat's later messages are
+ * removed. When other chats would lose file, todo, or plan work, they are
+ * listed before anything is written. Their messages stay.
  */
 function RestoreConfirmation({
-  fileCount,
-  paths,
+  preview,
   onConfirm,
   onCancel
 }: {
-  fileCount: number;
-  paths: string[];
+  preview: RestorePreview;
   onConfirm: () => void;
   onCancel: () => void;
 }): JSX.Element {
-  const shown = paths.slice(0, 8);
-  const remaining = paths.length - shown.length;
+  const messageCount = preview.thisChat.messages.length;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   return (
-    <div className="confirm-gate" role="alertdialog" aria-label="Confirm checkpoint restore">
-      <div className="confirm-gate__head">
-        <span className="confirm-gate__icon" aria-hidden="true">
-          <RestoreIcon />
-        </span>
-        <div>
-          <p className="confirm-gate__title">
-            Restore {fileCount} file{fileCount === 1 ? '' : 's'} to before this message?
-          </p>
-          <p className="confirm-gate__text">
-            The files below return to their checkpoint content. This message and the rest of the
-            conversation are not removed. You can undo the restore afterwards.
-          </p>
-          {shown.length > 0 ? (
-            <ul className="confirm-gate__paths">
-              {shown.map((path) => (
-                <li key={path}>{path}</li>
+    <div className="restore-modal" role="presentation" onClick={onCancel}>
+      <div
+        className="restore-modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm checkpoint restore"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <p className="restore-modal__title">Restore to before this message?</p>
+        <p className="restore-modal__text">
+          This chat goes back to the moment before the message was sent.
+          {messageCount > 0
+            ? ` ${messageCount} message${messageCount === 1 ? '' : 's'} in this chat will be removed.`
+            : ''}{' '}
+          Files, todos, and plans return to that point. You can undo the restore afterwards.
+        </p>
+        <PreviewList messages={preview.thisChat.messages} paths={preview.thisChat.paths} planChanges={preview.thisChat.planChanges} />
+        {preview.otherChats.length > 0 ? (
+          <div className="restore-modal__warn">
+            <p className="restore-modal__warn-title">Other chats will also lose work</p>
+            <p className="restore-modal__text">
+              These chats keep their messages, but the file, todo, and plan changes below will be undone.
+            </p>
+            <ul className="restore-modal__chats">
+              {preview.otherChats.map((chat) => (
+                <li key={`${chat.backendId}:${chat.threadId}`}>
+                  <p className="restore-modal__chat-title">{chat.title}</p>
+                  <PreviewList messages={chat.messages} paths={chat.paths} planChanges={chat.planChanges} />
+                </li>
               ))}
-              {remaining > 0 ? <li>and {remaining} more</li> : null}
             </ul>
-          ) : null}
+          </div>
+        ) : null}
+        <div className="restore-modal__actions">
+          <button className="btn" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn btn--danger" type="button" onClick={onConfirm}>
+            Restore
+          </button>
         </div>
       </div>
-      <div className="confirm-gate__actions">
-        <button className="btn" type="button" onClick={onCancel}>
-          Cancel
-        </button>
-        <button className="btn btn--danger" type="button" onClick={onConfirm}>
-          Restore files
-        </button>
-      </div>
+    </div>
+  );
+}
+
+function PreviewList({
+  messages,
+  paths,
+  planChanges
+}: {
+  messages: RestorePreview['thisChat']['messages'];
+  paths: string[];
+  planChanges: boolean;
+}): JSX.Element | null {
+  const shownMessages = messages.slice(0, 6);
+  const shownPaths = paths.slice(0, 8);
+  if (shownMessages.length === 0 && shownPaths.length === 0 && !planChanges) {
+    return null;
+  }
+  return (
+    <div className="restore-modal__detail">
+      {shownMessages.length > 0 ? (
+        <ul className="restore-modal__messages">
+          {shownMessages.map((message) => (
+            <li key={message.id}>{message.preview}</li>
+          ))}
+          {messages.length > shownMessages.length ? <li>and {messages.length - shownMessages.length} more</li> : null}
+        </ul>
+      ) : null}
+      {shownPaths.length > 0 ? (
+        <ul className="restore-modal__paths">
+          {shownPaths.map((path) => (
+            <li key={path}>{path}</li>
+          ))}
+          {paths.length > shownPaths.length ? <li>and {paths.length - shownPaths.length} more</li> : null}
+        </ul>
+      ) : null}
+      {planChanges ? <p className="restore-modal__text">The plan and todos will change.</p> : null}
     </div>
   );
 }

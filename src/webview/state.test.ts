@@ -668,6 +668,18 @@ test('a later message hides a finished plan row, and new work brings it back', (
   assert.equal(resumed.plan?.completedDismissed, undefined);
 });
 
+test('a live user bubble takes the host message id so its restore control can match', () => {
+  const sent = reduce(initialState, { type: 'localUserMessage', text: 'fix the header' });
+  assert.equal(sent.transcript[0]?.id.startsWith('local_'), true);
+  const bound = reduce(sent, {
+    type: 'userMessageId',
+    backendId: 'codex',
+    threadId: 'thr',
+    messageId: 'user_1_0'
+  });
+  assert.equal(bound.transcript[0]?.id, 'user_1_0');
+});
+
 test('checkpoints are carried for the active thread and dropped on a conversation switch', () => {
   const withCheckpoints = reduce(initialState, {
     type: 'checkpoints',
@@ -681,17 +693,38 @@ test('checkpoints are carried for the active thread and dropped on a conversatio
   assert.equal(switched.checkpoints, undefined, 'a thread switch drops the previous thread checkpoints');
 });
 
-test('a restore confirmation opens with the affected files and closes on confirm or cancel', () => {
-  const opened = reduce(initialState, {
-    type: 'requestRestoreConfirmation',
+test('a restore confirmation opens from a preview, including other chats, and closes on confirm or cancel', () => {
+  const preview = {
     messageId: 'u1',
-    fileCount: 2,
-    paths: ['a.ts', 'b.ts']
-  });
-  assert.deepEqual(opened.restoreConfirmation, { messageId: 'u1', fileCount: 2, paths: ['a.ts', 'b.ts'] });
+    thisChat: {
+      backendId: 'codex',
+      threadId: 'thr',
+      title: 'This chat',
+      messages: [{ id: 'u1', preview: 'fix the header' }],
+      paths: ['a.ts'],
+      planChanges: true
+    },
+    otherChats: [
+      {
+        backendId: 'codex',
+        threadId: 'other',
+        title: 'Other chat',
+        messages: [{ id: 'u9', preview: 'add tests' }],
+        paths: ['b.ts'],
+        planChanges: false
+      }
+    ]
+  };
+  const opened = reduce(initialState, { type: 'restorePreview', preview });
+  assert.equal(opened.restoreConfirmation?.otherChats.length, 1);
+  assert.equal(opened.restoreConfirmation?.otherChats[0].title, 'Other chat');
+  assert.equal(opened.restoreConfirmation?.thisChat.planChanges, true);
 
   const cancelled = reduce(opened, { type: 'cancelRestoreConfirmation' });
   assert.equal(cancelled.restoreConfirmation, undefined);
+
+  const switched = reduce(opened, { type: 'conversation', backendId: 'codex' });
+  assert.equal(switched.restoreConfirmation, undefined, 'a thread switch drops the restore confirmation');
 
   const restored = reduce(opened, {
     type: 'restoreResult',

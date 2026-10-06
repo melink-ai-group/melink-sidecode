@@ -3,7 +3,6 @@ import type {
   ChangeDecisionResult,
   ChangeFileView,
   ChangeView,
-  CheckpointView,
   ConflictResolution
 } from '../protocol';
 import {
@@ -52,8 +51,6 @@ export interface ChangesReviewProps {
   decisionResults?: ChangeDecisionResult[];
   /** The destructive reject awaiting an explicit confirmation, if any. */
   rejectConfirm?: { scope: 'file' | 'all'; paths: string[] };
-  /** The checkpoint this turn opened, when one exists, for the restore entry. */
-  checkpoint?: CheckpointView;
   /** Open one changed file in the editor (its working copy). */
   onOpenFile: (absPath: string) => void;
   /**
@@ -75,8 +72,6 @@ export interface ChangesReviewProps {
   onKeepAll: () => void;
   /** Resolve a conflict with an explicit choice; nothing overwrites silently. */
   onResolveConflict: (path: string, resolution: ConflictResolution) => void;
-  /** Open the existing checkpoint restore confirmation for this turn. */
-  onRestoreCheckpoint: (checkpoint: CheckpointView) => void;
   /** Load hunk lines for one expanded file. The snapshot omits them until then. */
   onLoadHunks: (path: string) => void;
 }
@@ -87,7 +82,6 @@ export function ChangesReview({
   deciding,
   decisionResults,
   rejectConfirm,
-  checkpoint,
   onOpenFile,
   onOpenDiff,
   onOpenAllInEditor,
@@ -97,8 +91,7 @@ export function ChangesReview({
   onCancelReject,
   onConfirmReject,
   onKeepAll,
-  onResolveConflict,
-  onRestoreCheckpoint
+  onResolveConflict
 }: ChangesReviewProps): JSX.Element {
   const [visibleFileCount, setVisibleFileCount] = useState(24);
   /** The file list stays closed until the user opens it. */
@@ -200,36 +193,25 @@ export function ChangesReview({
         <span className="spacer" />
         {allKept ? null : (
           <button
-            className="btn btn--primary"
+            className="btn btn--primary changes-review__icon-btn"
             type="button"
             disabled={locked || review.files.length === 0}
+            aria-label="Keep"
             title="Keep all changes from this session."
             onClick={onKeepAll}
           >
             <CheckIcon className="ico ico--xs" />
-            <span>Keep</span>
           </button>
         )}
         <button
-          className="btn changes-review__review"
+          className="btn changes-review__review changes-review__icon-btn"
           type="button"
+          aria-label="Review"
           title="Review every changed file in the workbench changes editor."
           onClick={onOpenAllInEditor}
         >
           <DiffIcon className="ico ico--sm" />
-          <span>Review</span>
         </button>
-        {checkpoint ? (
-          <button
-            className="btn btn--link"
-            type="button"
-            title={`Undo this turn by restoring ${checkpoint.fileCount} file${checkpoint.fileCount === 1 ? '' : 's'} to their pre-turn content. The conversation stays.`}
-            onClick={() => onRestoreCheckpoint(checkpoint)}
-          >
-            <RestoreIcon className="ico ico--sm" />
-            <span>Undo</span>
-          </button>
-        ) : null}
       </header>
 
       {expanded ? (
@@ -352,12 +334,13 @@ function ChangeRow({
           {reviewable ? <DecisionState decision={decision} conflicted={conflicted} failed={failed} /> : null}
         </span>
         <button
-          className="btn btn--link change-row__diff-btn"
+          className="btn btn--link change-row__icon-btn change-row__diff-btn"
           type="button"
+          aria-label="Open diff"
           title="Open this file's pre-turn vs current diff in the workbench diff editor"
           onClick={onOpenDiff}
         >
-          Open diff
+          <DiffIcon className="ico ico--xs" />
         </button>
         <span className="change-row__actions">
           {!reviewable && file.status !== 'deleted' ? (
@@ -384,34 +367,44 @@ function ChangeRow({
           ) : null}
           {conflicted ? (
             <>
-              <button className="btn" type="button" disabled={locked} onClick={() => onResolveConflict('keep-current')}>
-                Keep what is on disk
-              </button>
               <button
-                className="btn btn--danger"
+                className="btn btn--link change-row__icon-btn"
                 type="button"
                 disabled={locked}
+                aria-label="Keep what is on disk"
+                title="Keep what is on disk"
+                onClick={() => onResolveConflict('keep-current')}
+              >
+                <CheckIcon className="ico ico--xs" />
+              </button>
+              <button
+                className="btn btn--link change-row__icon-btn change-row__icon-btn--danger"
+                type="button"
+                disabled={locked}
+                aria-label="Overwrite with pre-turn"
+                title="Overwrite with the pre-turn snapshot"
                 onClick={() => onResolveConflict('overwrite-pre-turn')}
               >
-                Overwrite with pre-turn
+                <RestoreIcon className="ico ico--xs" />
               </button>
             </>
           ) : reviewable ? (
             <>
               {decision === 'accepted' ? null : (
                 <button
-                  className="btn"
+                  className="btn btn--link change-row__icon-btn"
                   type="button"
                   disabled={locked}
                   aria-label={`Keep changes to ${file.path}`}
+                  title="Keep changes to this file."
                   onClick={onKeep}
                 >
-                  Keep
+                  <CheckIcon className="ico ico--xs" />
                 </button>
               )}
               {decision === 'accepted' && file.restorable !== true ? null : (
                 <button
-                  className="btn btn--danger"
+                  className="btn btn--link change-row__icon-btn change-row__icon-btn--danger"
                   type="button"
                   aria-pressed={decision === 'rejected'}
                   disabled={locked || decision === 'rejected'}
@@ -423,7 +416,11 @@ function ChangeRow({
                   }
                   onClick={onReject}
                 >
-                  {file.restorable === true ? 'Undo' : 'Reject'}
+                  {file.restorable === true ? (
+                    <RestoreIcon className="ico ico--xs" />
+                  ) : (
+                    <CrossIcon className="ico ico--xs" />
+                  )}
                 </button>
               )}
             </>
@@ -508,8 +505,8 @@ function StatusMark({ file }: { file: ChangeFileView }): JSX.Element {
 
 /**
  * The per-file discard word. A restorable file puts the pre-change snapshot
- * back, which is the same operation as the header's Undo. Without that
- * snapshot the action only discards an unaccepted edit, so it stays Reject.
+ * back. Without that snapshot the action only discards an unaccepted edit, so
+ * the confirmation stays Reject.
  */
 function discardCopy(review: ChangeView, paths: readonly string[], kind: 'prompt' | 'confirm'): string {
   const file = review.files.find((entry) => entry.path === paths[0]);

@@ -116,6 +116,14 @@ export const CopyIcon = (props: IconProps): JSX.Element =>
     </>
   ));
 
+export const PersonIcon = (props: IconProps): JSX.Element =>
+  base('ico ico--xs', 1.8, props, (
+    <>
+      <circle cx="12" cy="8" r="3.25" />
+      <path d="M5.5 19.25c.7-3.1 3-4.75 6.5-4.75s5.8 1.65 6.5 4.75" />
+    </>
+  ));
+
 export const PaperclipIcon = (props: IconProps): JSX.Element =>
   base('ico ico--sm', 1.6, props, (
     <path d="M8 12.5 14.5 6a3 3 0 0 1 4.2 4.2L11 18a5 5 0 0 1-7-7l7.5-7.5" />

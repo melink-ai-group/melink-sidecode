@@ -123,18 +123,31 @@ async function turn(
     after: Record<string, string>;
     create?: string[];
     delete?: string[];
+    threadId?: string;
+    createdAt?: number;
   }
 ): Promise<void> {
+  const threadId = opts.threadId ?? 'thr';
   const candidates = Object.keys(opts.before).map((rel) => `/ws/${rel}`);
   for (const [rel, content] of Object.entries(opts.before)) {
     h.fs.files.set(`/ws/${rel}`, text(content));
   }
+  // The host snapshots at send time, before the turn mutates anything.
+  await h.journal.captureMessageCheckpoint({
+    messageId: opts.messageId,
+    threadId,
+    backendId: 'codex',
+    paths: candidates,
+    plans: [],
+    ...(opts.createdAt !== undefined ? { createdAt: opts.createdAt } : {})
+  });
   await h.journal.beginTurn({
     turnId: opts.turnId,
-    threadId: 'thr',
+    threadId,
     backendId: 'codex',
     messageId: opts.messageId,
-    candidates
+    candidates,
+    ...(opts.createdAt !== undefined ? { startedAt: opts.createdAt } : {})
   });
   for (const [rel, content] of Object.entries(opts.after)) {
     h.fs.files.set(`/ws/${rel}`, text(content));
@@ -148,7 +161,7 @@ async function turn(
   await h.journal.endTurn(opts.turnId, [...(opts.create ?? []).map((rel) => `/ws/${rel}`)]);
 }
 
-test('a checkpoint exists for a message whose turn touched files and none for an empty turn', async () => {
+test('a snapshot exists for every sent message, including one whose turn touched nothing', async () => {
   const h = harness();
   await turn(h, {
     turnId: 't1',
@@ -156,15 +169,25 @@ test('a checkpoint exists for a message whose turn touched files and none for an
     before: { 'a.ts': 'a1\n' },
     after: { 'a.ts': 'a2\n' }
   });
-  // A turn that touches nothing must not be offered as a checkpoint.
+  await h.journal.captureMessageCheckpoint({
+    messageId: 'm2',
+    threadId: 'thr',
+    backendId: 'codex',
+    paths: [],
+    plans: []
+  });
   await h.journal.beginTurn({ turnId: 't2', threadId: 'thr', backendId: 'codex', messageId: 'm2' });
   await h.journal.endTurn('t2');
 
   const checkpoints = await h.checkpoints.listCheckpoints('thr');
-  assert.equal(checkpoints.length, 1);
-  assert.equal(checkpoints[0].messageId, 'm1');
-  assert.equal(checkpoints[0].fileCount, 1);
-  assert.deepEqual(checkpoints[0].paths, ['a.ts']);
+  assert.equal(checkpoints.length, 2);
+  assert.deepEqual(
+    checkpoints.map((checkpoint) => checkpoint.messageId).sort(),
+    ['m1', 'm2']
+  );
+  const touched = checkpoints.find((checkpoint) => checkpoint.messageId === 'm1');
+  assert.equal(touched?.fileCount, 1);
+  assert.deepEqual(touched?.paths, ['a.ts']);
 });
 
 test('restoring a checkpoint returns every affected file to its checkpoint content, by hash', async () => {
@@ -204,6 +227,13 @@ test('a restore reverts files touched by later turns too, back to the checkpoint
 
 test('restoring a checkpoint that created a file removes it', async () => {
   const h = harness();
+  await h.journal.captureMessageCheckpoint({
+    messageId: 'm1',
+    threadId: 'thr',
+    backendId: 'codex',
+    paths: [],
+    plans: []
+  });
   await h.journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', messageId: 'm1' });
   h.fs.files.set('/ws/new.ts', text('brand new\n'));
   await h.journal.observe('t1', '/ws/new.ts', 'reported', 'created');
@@ -334,6 +364,72 @@ test('an unknown checkpoint is reported and nothing is written', async () => {
   assert.equal(result.aborted, true);
   assert.equal(result.fileCount, 0);
   assert.equal(decode(h.fs.files.get('/ws/a.ts')), 'untouched\n');
+});
+
+test('restoring uses the send-time snapshot when another thread edited the file later', async () => {
+  const h = harness();
+  await turn(h, {
+    turnId: 't1',
+    messageId: 'm1',
+    threadId: 'thr',
+    createdAt: 1_000,
+    before: { 'a.ts': 'base\n' },
+    after: { 'a.ts': 'base\n' }
+  });
+  await h.journal.captureMessageCheckpoint({
+    messageId: 'o1',
+    threadId: 'other',
+    backendId: 'codex',
+    paths: ['/ws/a.ts'],
+    plans: [],
+    createdAt: 2_000
+  });
+  await h.journal.beginTurn({
+    turnId: 't2',
+    threadId: 'other',
+    backendId: 'codex',
+    messageId: 'o1',
+    candidates: ['/ws/a.ts'],
+    startedAt: 2_000
+  });
+  h.fs.files.set('/ws/a.ts', text('from the other chat\n'));
+  await h.journal.endTurn('t2');
+
+  const preview = await h.checkpoints.preview({ threadId: 'thr', messageId: 'm1', plans: [] });
+  assert.equal(preview?.others.length, 1);
+  assert.equal(preview?.others[0].threadId, 'other');
+  assert.deepEqual(preview?.others[0].paths, ['a.ts']);
+
+  const result = await h.checkpoints.restore({ backendId: 'codex', threadId: 'thr', messageId: 'm1' });
+  assert.equal(result.ok, true);
+  assert.equal(decode(h.fs.files.get('/ws/a.ts')), 'base\n');
+});
+
+test('preview reports another chat when only its plan changed after the snapshot', async () => {
+  const h = harness();
+  await h.journal.captureMessageCheckpoint({
+    messageId: 'm1',
+    threadId: 'thr',
+    backendId: 'codex',
+    paths: [],
+    plans: [{ backendId: 'codex', threadId: 'other' }],
+    createdAt: 1_000
+  });
+  const preview = await h.checkpoints.preview({
+    threadId: 'thr',
+    messageId: 'm1',
+    plans: [
+      {
+        backendId: 'codex',
+        threadId: 'other',
+        state: { path: '.melink/plans/other.md', title: 'Later', steps: [], updatedAt: 2 }
+      }
+    ]
+  });
+  assert.equal(preview?.thisPlanChanged, false);
+  assert.equal(preview?.others.length, 1);
+  assert.equal(preview?.others[0].threadId, 'other');
+  assert.equal(preview?.others[0].planChanged, true);
 });
 
 test('a file already at its checkpoint content is a verified no-op, not a failure', async () => {
