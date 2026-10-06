@@ -142,15 +142,15 @@ test('restoring a checkpoint always captures a pre-restore snapshot before writi
   assert.match(store, /aborted: true/);
 });
 
-test('the checkpoint protocol messages are typed and the transcript is never removed', async () => {
+test('the checkpoint protocol messages are typed and only the restored thread is truncated', async () => {
   const protocol = await source('protocol.ts');
   assert.match(protocol, /type: 'changes\/listCheckpoints'/);
+  assert.match(protocol, /type: 'changes\/previewRestore'/);
   assert.match(protocol, /type: 'changes\/restoreCheckpoint'/);
   assert.match(protocol, /type: 'changes\/restoreResult'/);
-  // The restore message carries no message-removal vocabulary: restoring is
-  // files-only, so no protocol field can ask for the transcript to change.
-  const restoreBlock = protocol.slice(protocol.indexOf("type: 'changes/restoreCheckpoint'"));
-  assert.doesNotMatch(restoreBlock.slice(0, 600), /removeMessage|deleteMessage|clearTranscript/);
+  const view = await source('sidebarView.ts');
+  assert.match(view, /truncateBeforeMessage\(message\.backendId, message\.threadId, message\.messageId\)/);
+  assert.doesNotMatch(view, /clearTranscript|deleteThread/);
 });
 
 test('the native diff planner is host-free and writes no temp file', async () => {

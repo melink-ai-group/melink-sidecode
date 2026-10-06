@@ -9,7 +9,7 @@ import { parseDictationTarget } from './dictation/target';
 import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
 import { SettingsService } from './settings';
 import { PlanStore } from './planStore';
-import { ThreadStore } from './backends/threadStore';
+import { ThreadStore, type PersistedPlanState } from './backends/threadStore';
 import {
   BackendError,
   denyInProgressStep,
@@ -22,7 +22,8 @@ import {
   type PlanArtifact,
   type ThreadHandle,
   type TodoStep,
-  type TodoStepStatus
+  type TodoStepStatus,
+  type TranscriptItem
 } from './backends/types';
 import { permissionDescriptor } from './backends/permissions';
 import { modeDescriptor, supportedModes } from './backends/modes';
@@ -63,6 +64,7 @@ import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
 import { anyCategoryEnabled } from './context/contextView';
 import type { ChangeHunkView } from './changes/changeStore';
+import type { CheckpointPlanRecord, CheckpointPlanState } from './changes/journal';
 import { VscodeChangeJournal } from './changes/vscodeJournal';
 import { VscodeChangeStore } from './changes/vscodeChangeStore';
 import { VscodeCheckpointStore } from './changes/vscodeCheckpoint';
@@ -75,6 +77,8 @@ import type {
   HostToWebviewMessage,
   ModeSnapshot,
   PermissionSnapshot,
+  RestorePreview,
+  RestorePreviewMessage,
   WebviewToHostMessage
 } from './protocol';
 import {
@@ -191,11 +195,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private readonly changeStore: VscodeChangeStore;
   /**
-   * Per-message checkpoints over the journal's recorded snapshots. A restore
-   * reverts files only and never touches the transcript; the store owns the
-   * pre-restore capture that makes a restore itself undoable.
+   * Per-message checkpoints over the journal's send-time snapshots. The store
+   * reverts files. This view rewinds the transcript and the plans, and keeps
+   * the undo point that puts them back.
    */
   private readonly checkpointStore: VscodeCheckpointStore;
+  /**
+   * A note for the next provider turn after this chat was rewound. Codex keeps
+   * the discarded turns on the server; the note tells the model they are gone.
+   */
+  private readonly rewindNotes = new Map<string, string>();
   /**
    * The native workbench diff integration: the `melink-changes:` content
    * provider and the diff/changes commands the review surface invokes. Owned
@@ -753,9 +762,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Push the per-message checkpoints a thread offers. A message whose turn
-   * touched nothing is absent, so the entry point never offers an empty
-   * checkpoint.
+   * Push the per-message checkpoints a thread offers. Every sent user message
+   * is included, even when its turn touched no files.
    */
   private async postCheckpoints(backendId: string, threadId: string): Promise<void> {
     const checkpoints = await this.checkpointStore.listCheckpoints(threadId);
@@ -772,11 +780,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Restore a checkpoint, reverting the affected files to their checkpoint
-   * content. The transcript and message list are never modified: only files are
-   * written. A restore always captures the pre-restore content first, so it is
-   * itself undoable; if that capture fails, no file is changed. A conflicting
-   * file is reported and left alone unless the caller explicitly opted in.
+   * Restore a checkpoint to the moment before that message was sent. Files are
+   * written by the checkpoint store, which aborts if it cannot save an undo
+   * snapshot. This view then rewinds this chat's transcript and every thread's
+   * plan to the snapshot. Other chats keep their messages.
    */
   private async restoreCheckpoint(message: {
     backendId: string;
@@ -785,23 +792,285 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     restorePointId?: string;
     conflictResolution?: import('./changes/checkpoint').CheckpointConflictResolution;
   }): Promise<void> {
+    if (message.restorePointId) {
+      await this.undoCheckpointRestore(message);
+      return;
+    }
+    if (!message.messageId) {
+      return;
+    }
+    const checkpoint = this.changeJournal.getMessageCheckpoint(message.threadId, message.messageId);
+    const priorTranscript = this.store.getTranscript(message.backendId, message.threadId);
+    const priorPlans = this.collectPlanRecords();
     const result = await this.checkpointStore.restore({
       backendId: message.backendId,
       threadId: message.threadId,
-      ...(message.messageId !== undefined ? { messageId: message.messageId } : {}),
-      ...(message.restorePointId !== undefined ? { restorePointId: message.restorePointId } : {}),
+      messageId: message.messageId,
       ...(message.conflictResolution !== undefined ? { conflictResolution: message.conflictResolution } : {})
     });
-    this.post({ type: 'changes/restoreResult', result });
-    // A restore supersedes the recorded content for the affected turns; repaint
-    // the checkpoint list so a restored-to point is offered for undo. Every
-    // restore is itself undoable, which the result carries as `undoPointId`.
+    if (!result.aborted && result.undoPointId && checkpoint) {
+      const detached = await this.changeJournal.detachFromMessage(message.threadId, message.messageId);
+      await this.changeJournal.attachRewind(result.undoPointId, {
+        backendId: message.backendId,
+        threadId: message.threadId,
+        messageId: message.messageId,
+        transcript: priorTranscript,
+        plans: priorPlans,
+        turns: detached.turns,
+        checkpoints: detached.checkpoints
+      });
+      this.store.truncateBeforeMessage(message.backendId, message.threadId, message.messageId);
+      await this.store.flush();
+      await this.applyPlanSnapshot(checkpoint.plans);
+      this.rewindNotes.set(
+        rewindKey(message.backendId, message.threadId),
+        'The conversation and workspace were restored to before an earlier prompt. Later turns were discarded. Continue from the restored files and do not redo that discarded work.'
+      );
+    }
+    await this.repaintIfActive(message.backendId, message.threadId);
     await this.postCheckpoints(message.backendId, message.threadId);
+    await this.refreshChanges(message.backendId, message.threadId);
+    // Posted after the conversation repaint, which clears a previous result.
+    this.post({ type: 'changes/restoreResult', result });
     this.post({
       type: 'notice',
       level: result.ok ? 'info' : 'warning',
       message: result.message
     });
+  }
+
+  /** Put files, this chat's transcript, and plans back to the moment before a restore. */
+  private async undoCheckpointRestore(message: {
+    backendId: string;
+    threadId: string;
+    restorePointId?: string;
+    conflictResolution?: import('./changes/checkpoint').CheckpointConflictResolution;
+  }): Promise<void> {
+    const point = message.restorePointId ? this.changeJournal.getRestorePoint(message.restorePointId) : undefined;
+    const result = await this.checkpointStore.restore({
+      backendId: message.backendId,
+      threadId: message.threadId,
+      ...(message.restorePointId !== undefined ? { restorePointId: message.restorePointId } : {}),
+      ...(message.conflictResolution !== undefined ? { conflictResolution: message.conflictResolution } : {})
+    });
+    const rewind = point?.rewind;
+    if (!result.aborted && rewind) {
+      await this.changeJournal.reinsert(rewind.turns, rewind.checkpoints);
+      this.store.setTranscript(rewind.backendId, rewind.threadId, rewind.transcript as TranscriptItem[]);
+      await this.store.flush();
+      await this.applyPlanSnapshot(rewind.plans);
+      this.rewindNotes.delete(rewindKey(rewind.backendId, rewind.threadId));
+      await this.repaintIfActive(rewind.backendId, rewind.threadId);
+      await this.refreshChanges(rewind.backendId, rewind.threadId);
+    }
+    await this.postCheckpoints(message.backendId, message.threadId);
+    this.post({ type: 'changes/restoreResult', result });
+    this.post({
+      type: 'notice',
+      level: result.ok ? 'info' : 'warning',
+      message: result.message
+    });
+  }
+
+  /** Describe a restore without writing, so the confirmation can name every affected chat. */
+  private async previewRestore(message: { backendId: string; threadId: string; messageId: string }): Promise<void> {
+    const impact = await this.checkpointStore.preview({
+      threadId: message.threadId,
+      messageId: message.messageId,
+      plans: this.collectPlanRecords()
+    });
+    if (!impact) {
+      this.post({
+        type: 'notice',
+        level: 'warning',
+        message: 'That checkpoint is no longer available, so nothing was restored.'
+      });
+      return;
+    }
+    const known = this.store.listKnownThreads();
+    const titleFor = (backendId: string, threadId: string): string =>
+      known.find((thread) => thread.backendId === backendId && thread.threadId === threadId)?.title ?? 'Chat';
+    const preview: RestorePreview = {
+      messageId: message.messageId,
+      thisChat: {
+        backendId: message.backendId,
+        threadId: message.threadId,
+        title: titleFor(message.backendId, message.threadId),
+        messages: this.removedMessagePreviews(message.backendId, message.threadId, message.messageId),
+        paths: impact.paths,
+        planChanges: impact.thisPlanChanged
+      },
+      otherChats: impact.others.map((chat) => ({
+        backendId: chat.backendId,
+        threadId: chat.threadId,
+        title: titleFor(chat.backendId, chat.threadId),
+        messages: this.userMessagesAfter(chat.backendId, chat.threadId, impact.createdAt),
+        paths: chat.paths,
+        planChanges: chat.planChanged
+      }))
+    };
+    this.post({ type: 'changes/restorePreview', preview });
+  }
+
+  /** Snapshot files and plans for a user message, then tell the live bubble its id. */
+  private async captureSentMessage(backendId: string, threadId: string, messageId: string): Promise<void> {
+    try {
+      const paths = new Set(this.changeJournal.trackedAbsPaths());
+      for (const document of vscode.workspace.textDocuments) {
+        if (document.uri.scheme === 'file') {
+          paths.add(document.uri.fsPath);
+        }
+      }
+      await this.changeJournal.captureMessageCheckpoint({
+        messageId,
+        threadId,
+        backendId,
+        paths: [...paths],
+        plans: this.collectPlanRecords()
+      });
+    } catch (error) {
+      this.post({
+        type: 'notice',
+        level: 'warning',
+        message: `A checkpoint could not be saved (${error instanceof Error ? error.message : String(error)}).`
+      });
+    }
+    this.post({ type: 'userMessageId', backendId, threadId, messageId });
+    if (this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
+      await this.postCheckpoints(backendId, threadId);
+    }
+  }
+
+  private collectPlanRecords(): CheckpointPlanRecord[] {
+    const records: CheckpointPlanRecord[] = [];
+    const seen = new Set<string>();
+    const add = (backendId: string, threadId: string): void => {
+      const key = `${backendId}\0${threadId}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      const state = this.store.getPlanState(backendId, threadId);
+      records.push({
+        backendId,
+        threadId,
+        ...(state ? { state: planSnapshot(state) } : {})
+      });
+    };
+    for (const thread of this.store.listKnownThreads()) {
+      add(thread.backendId, thread.threadId);
+    }
+    if (this.activeThread) {
+      add(this.activeThread.backendId, this.activeThread.threadId);
+    }
+    return records;
+  }
+
+  /** Write snapshot plans back, and drop plans that did not exist at that moment. */
+  private async applyPlanSnapshot(snapshot: readonly CheckpointPlanRecord[]): Promise<void> {
+    const covered = new Set(snapshot.map((record) => `${record.backendId}\0${record.threadId}`));
+    for (const record of snapshot) {
+      await this.writePlanRecord(record);
+    }
+    for (const current of this.collectPlanRecords()) {
+      const key = `${current.backendId}\0${current.threadId}`;
+      if (!covered.has(key) && current.state) {
+        await this.writePlanRecord({ backendId: current.backendId, threadId: current.threadId });
+      }
+    }
+  }
+
+  private async writePlanRecord(record: CheckpointPlanRecord): Promise<void> {
+    if (!record.state) {
+      await this.store.clearPlanState(record.backendId, record.threadId);
+      await this.plans.remove(record.threadId);
+      return;
+    }
+    const steps = record.state.steps as TodoStep[];
+    await this.plans.write({
+      threadId: record.threadId,
+      title: record.state.title,
+      summary: record.state.summary,
+      body: record.state.body,
+      steps
+    });
+    await this.store.setPlanState(record.backendId, record.threadId, {
+      path: record.state.path,
+      title: record.state.title,
+      summary: record.state.summary,
+      body: record.state.body,
+      steps,
+      built: record.state.built,
+      completedDismissed: record.state.completedDismissed,
+      updatedAt: record.state.updatedAt
+    });
+  }
+
+  private removedMessagePreviews(backendId: string, threadId: string, messageId: string): RestorePreviewMessage[] {
+    const items = this.store.getTranscript(backendId, threadId);
+    const index = items.findIndex((item) => item.id === messageId);
+    if (index === -1) {
+      return [];
+    }
+    return items
+      .slice(index)
+      .filter((item) => item.kind === 'message')
+      .map((item) => ({ id: item.id, preview: messagePreview(item.text, item.role === 'user' ? 'Message' : 'Reply') }));
+  }
+
+  private userMessagesAfter(backendId: string, threadId: string, createdAt: number): RestorePreviewMessage[] {
+    const after = new Set(
+      this.changeJournal
+        .listMessageCheckpoints(threadId)
+        .filter((checkpoint) => checkpoint.createdAt >= createdAt)
+        .map((checkpoint) => checkpoint.messageId)
+    );
+    return this.store
+      .getTranscript(backendId, threadId)
+      .filter((item) => {
+        if (item.kind !== 'message' || item.role !== 'user') {
+          return false;
+        }
+        const time = userMessageTime(item.id);
+        return (time !== undefined && time >= createdAt) || after.has(item.id);
+      })
+      .map((item) => ({ id: item.id, preview: messagePreview(item.text, 'Message') }));
+  }
+
+  private async repaintIfActive(backendId: string, threadId: string): Promise<void> {
+    if (this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
+      this.repaintSession();
+    }
+  }
+
+  /** Repaint the change strip from the journal turns that survived a restore. */
+  private async refreshChanges(backendId: string, threadId: string): Promise<void> {
+    if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
+      return;
+    }
+    const set = await this.changeTracker.sessionFor(threadId);
+    if (!set) {
+      this.post({ type: 'changes/changed', backendId, threadId, turnId: '', entries: [] });
+      return;
+    }
+    this.post({
+      type: 'changes/changed',
+      backendId: set.backendId,
+      threadId: set.threadId,
+      turnId: set.turnId,
+      entries: set.entries
+    });
+    await this.postChangeReview(set.backendId, set.threadId, set.turnId);
+  }
+
+  /** Prefix the next provider turn once, then forget the note. */
+  private consumeRewindNote(backendId: string, threadId: string, text: string): string {
+    const note = this.rewindNotes.get(rewindKey(backendId, threadId));
+    if (!note) {
+      return text;
+    }
+    this.rewindNotes.delete(rewindKey(backendId, threadId));
+    return `${note}\n\n${text}`;
   }
 
   resolveWebviewView(
@@ -1458,6 +1727,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'changes/listCheckpoints':
         await this.postCheckpoints(message.backendId, message.threadId);
+        break;
+      case 'changes/previewRestore':
+        await this.previewRestore(message);
         break;
       case 'changes/restoreCheckpoint':
         await this.restoreCheckpoint(message);
@@ -2166,7 +2438,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     try {
       const messageId = await this.store.appendUserMessage(active.backendId, active.threadId, value);
-      await backend.steerTurn(active, value, messageId);
+      await this.captureSentMessage(active.backendId, active.threadId, messageId);
+      await backend.steerTurn(active, this.consumeRewindNote(active.backendId, active.threadId, value), messageId);
       await this.store.flush();
     } catch (error) {
       this.post({ type: 'notice', level: 'error', message: error instanceof Error ? error.message : String(error) });
@@ -2315,13 +2588,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // snapshot becomes this message's checkpoint. `turn/started` consumes it;
     // a send that never starts a turn must not strand it on a later turn.
     this.pendingTurnMessage = { messageId, backendId: activeBackendId, threadId };
+    await this.captureSentMessage(activeBackendId, threadId, messageId);
     if (this.session) {
       this.session.turnOpen = true;
     }
     try {
       await backend.sendTurn(
         { backendId: activeBackendId, threadId, model: resolvedModel },
-        { text, model: resolvedModel, permissionLevel: level, mode, modelSettings, context, attachments }
+        {
+          text: this.consumeRewindNote(activeBackendId, threadId, text),
+          model: resolvedModel,
+          permissionLevel: level,
+          mode,
+          modelSettings,
+          context,
+          attachments
+        }
       );
     } catch (error) {
       this.pendingTurnMessage = undefined;
@@ -3580,6 +3862,36 @@ function safeDraftFileName(id: string): string {
 }
 
 /** Strip inline bytes before an attachment is persisted to workspace state. */
+function rewindKey(backendId: string, threadId: string): string {
+  return `${backendId}\0${threadId}`;
+}
+
+function planSnapshot(state: PersistedPlanState): CheckpointPlanState {
+  return {
+    path: state.path,
+    title: state.title,
+    summary: state.summary,
+    body: state.body,
+    steps: state.steps.map((step) => ({ text: step.text, status: step.status })),
+    built: state.built,
+    completedDismissed: state.completedDismissed,
+    updatedAt: state.updatedAt
+  };
+}
+
+function messagePreview(text: string | undefined, fallback: string): string {
+  const line = (text ?? '').trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
+  if (!line) {
+    return fallback;
+  }
+  return line.length > 80 ? `${line.slice(0, 80)}...` : line;
+}
+
+function userMessageTime(id: string): number | undefined {
+  const match = /^user_(\d+)_/.exec(id);
+  return match ? Number(match[1]) : undefined;
+}
+
 function persistableAttachments(attachments?: readonly Attachment[]): Attachment[] | undefined {
   if (!attachments || attachments.length === 0) {
     return undefined;

@@ -27,6 +27,7 @@ import type {
   ChangeDecisionResult,
   CheckpointView,
   RestoreCheckpointResult,
+  RestorePreview,
   ChatTabView,
   HostToWebviewMessage,
   ModeSnapshot,
@@ -229,18 +230,17 @@ export interface AppState {
    */
   changeDeciding: boolean;
   /**
-   * The per-message checkpoints for the active thread, newest first. A message
-   * whose turn touched no files is absent, so no empty checkpoint is offered.
+   * The per-message checkpoints for the active thread, newest first. Every
+   * sent user message is included, even when its turn touched no files.
    */
   checkpoints?: CheckpointView[];
   /** The most recent restore outcome, so a partial restore is surfaced. */
   restoreResult?: RestoreCheckpointResult;
   /**
-   * The checkpoint awaiting an explicit confirmation before any file is
-   * reverted. Restoring is destructive and never implicit, so the affected file
-   * count and paths are shown here first.
+   * The restore awaiting an explicit confirmation. Carries this chat's messages
+   * and, when other chats would lose work, those chats too.
    */
-  restoreConfirmation?: { messageId: string; fileCount: number; paths: string[] };
+  restoreConfirmation?: RestorePreview;
 }
 
 export type Action =
@@ -254,6 +254,8 @@ export type Action =
   | { type: 'selectModel'; model: string }
   | { type: 'agentEvent'; event: AgentEvent }
   | { type: 'localUserMessage'; text: string; attachments?: Attachment[] }
+  /** Replace the optimistic user bubble id with the host message id. */
+  | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string }
   | {
       type: 'conversation';
       backendId: string;
@@ -352,8 +354,8 @@ export type Action =
   | { type: 'checkpoints'; checkpoints: CheckpointView[] }
   /** The outcome of a checkpoint restore, so a partial restore is surfaced. */
   | { type: 'restoreResult'; result: RestoreCheckpointResult }
-  /** Open the confirmation for one checkpoint, showing its affected files. */
-  | { type: 'requestRestoreConfirmation'; messageId: string; fileCount: number; paths: string[] }
+  /** Open the confirmation from a host preview. Nothing has been written yet. */
+  | { type: 'restorePreview'; preview: RestorePreview }
   | { type: 'cancelRestoreConfirmation' }
   /**
    * Open the destructive reject confirmation for one file or the whole turn.
@@ -518,6 +520,32 @@ export function reduce(state: AppState, action: Action): AppState {
         modelCapabilityStatus: 'loading',
         modelCapabilityError: undefined
       };
+    case 'userMessageId': {
+      if (state.activeThreadId && state.activeThreadId !== action.threadId) {
+        return state;
+      }
+      if (state.selectedBackendId && state.selectedBackendId !== action.backendId) {
+        return state;
+      }
+      let index = -1;
+      for (let cursor = state.transcript.length - 1; cursor >= 0; cursor -= 1) {
+        const item = state.transcript[cursor];
+        if (item?.kind === 'message' && item.role === 'user' && item.id.startsWith('local_')) {
+          index = cursor;
+          break;
+        }
+      }
+      if (index === -1) {
+        return state;
+      }
+      const transcript = state.transcript.slice();
+      const item = transcript[index];
+      if (!item) {
+        return state;
+      }
+      transcript[index] = { ...item, id: action.messageId };
+      return { ...state, transcript };
+    }
     case 'localUserMessage':
       return {
         ...state,
@@ -856,11 +884,8 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, checkpoints: action.checkpoints };
     case 'restoreResult':
       return { ...state, restoreResult: action.result, restoreConfirmation: undefined };
-    case 'requestRestoreConfirmation':
-      return {
-        ...state,
-        restoreConfirmation: { messageId: action.messageId, fileCount: action.fileCount, paths: action.paths }
-      };
+    case 'restorePreview':
+      return { ...state, restoreConfirmation: action.preview };
     case 'cancelRestoreConfirmation':
       return { ...state, restoreConfirmation: undefined };
     case 'modelCapability':

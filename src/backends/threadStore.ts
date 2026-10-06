@@ -209,6 +209,40 @@ export class ThreadStore implements vscode.Disposable {
     return missing.length === 0 ? replay : [...replay, ...missing];
   }
 
+  /**
+   * Every persisted thread, so a send-time snapshot can record each thread's
+   * plan and a restore preview can name the other chats.
+   */
+  listKnownThreads(): { backendId: string; threadId: string; title?: string }[] {
+    const index = this.loadThreadIndex();
+    const threads: { backendId: string; threadId: string; title?: string }[] = [];
+    for (const [backendId, entries] of Object.entries(index)) {
+      for (const entry of entries ?? []) {
+        threads.push({
+          backendId,
+          threadId: entry.threadId,
+          ...(entry.title ? { title: entry.title } : {})
+        });
+      }
+    }
+    return threads;
+  }
+
+  /**
+   * Drop a user message and everything after it. Returns the transcript as it
+   * was, so the caller can put it back. Returns `undefined` when the message
+   * is not in the transcript and leaves it unchanged.
+   */
+  truncateBeforeMessage(backendId: string, threadId: string, messageId: string): TranscriptItem[] | undefined {
+    const items = this.getTranscript(backendId, threadId);
+    const index = items.findIndex((item) => item.id === messageId);
+    if (index === -1) {
+      return undefined;
+    }
+    this.setTranscript(backendId, threadId, items.slice(0, index));
+    return items;
+  }
+
   /** Replaces a thread's stored transcript; used when resuming from a live source. */
   setTranscript(backendId: string, threadId: string, items: TranscriptItem[]): void {
     const index = this.loadTranscripts();

@@ -811,21 +811,23 @@ html body {
   font-weight: 600;
 }
 
-/* The per-message checkpoint entry point. Quiet until hovered: it sits beside
-   the message meta, never competes with the message body, and is only rendered
-   for a message whose turn actually touched files. */
+/* The per-message restore control. Icon only, at the bottom right of the bubble. */
+.turn-restore {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .checkpoint-restore {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  padding: 2px 6px;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: 1px solid transparent;
   border-radius: var(--melink-radius-sm, 4px);
   background: transparent;
   color: var(--vscode-descriptionForeground);
-  font: inherit;
-  font-size: 11px;
   cursor: pointer;
 }
 
@@ -846,10 +848,28 @@ html body {
   word-break: break-word;
 }
 
-.turn--user .turn-body {
+.turn-user-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
   padding: 8px 10px;
-  border-radius: var(--melink-radius-md, 6px);
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-lg, 8px);
   background: color-mix(in srgb, var(--vscode-list-hoverBackground) 75%, transparent);
+  color: white;
+}
+
+.turn--user .turn-body {
+  color: white;
+}
+
+.turn--user .turn-body .md,
+.turn--user .turn-body .md__p,
+.turn--user .turn-body .md__heading,
+.turn--user .turn-body .md__list,
+.turn--user .turn-body .md__quote {
+  color: white;
 }
 
 .turn--user .turn-body .md > * {
@@ -4211,6 +4231,90 @@ html body {
 /* The affected paths a restore confirmation names, so destructive scope is
    visible before anything is reverted. Bounded height keeps the composer from
    being pushed off screen for a large change set. */
+.restore-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 72%, transparent);
+}
+
+.restore-modal__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, 100%);
+  max-height: min(560px, 100%);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-foreground);
+}
+
+.restore-modal__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.restore-modal__text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.restore-modal__warn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--vscode-editorWarning-foreground, var(--vscode-widget-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 8%, transparent);
+}
+
+.restore-modal__warn-title,
+.restore-modal__chat-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.restore-modal__chats,
+.restore-modal__messages,
+.restore-modal__paths {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.restore-modal__chats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: disc;
+}
+
+.restore-modal__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.restore-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .confirm-gate__paths {
   margin: 6px 0 0;
   padding: 0 0 0 16px;
@@ -5615,6 +5719,12 @@ button.context-meter:hover {
   line-height: 1;
 }
 
+.changes-review__head .changes-review__icon-btn {
+  width: 22px;
+  padding: 0;
+  justify-content: center;
+}
+
 .changes-review__head .btn--link {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -5784,6 +5894,14 @@ button.context-meter:hover {
 .change-row__icon-btn:hover:not(:disabled) {
   color: var(--vscode-foreground);
   text-decoration: none;
+}
+
+.change-row__icon-btn--danger {
+  color: var(--vscode-errorForeground);
+}
+
+.change-row__icon-btn--danger:hover:not(:disabled) {
+  color: var(--vscode-errorForeground);
 }
 
 .change-row:hover {

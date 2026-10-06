@@ -112,6 +112,74 @@ export interface JournalTurn {
   observed: boolean;
 }
 
+/**
+ * One thread's plan and todo list at the moment a message was sent. Absent
+ * `state` means the thread had no plan. Structural on purpose: the journal
+ * stores the snapshot and never imports the host thread store.
+ */
+export interface CheckpointPlanState {
+  path: string;
+  title: string;
+  summary?: string;
+  body?: string;
+  steps: { text: string; status: string }[];
+  built?: boolean;
+  completedDismissed?: boolean;
+  updatedAt: number;
+}
+
+/** Plan state for one thread, captured with a message checkpoint. */
+export interface CheckpointPlanRecord {
+  backendId: string;
+  threadId: string;
+  /** Absent when the thread had no plan at send time. */
+  state?: CheckpointPlanState;
+}
+
+/** One file in a send-time message checkpoint. No hash means the file was absent. */
+export interface MessageCheckpointFile {
+  absPath: string;
+  relPath: string;
+  hash?: string;
+  /** Blob key when the content was stored. Shared with an older blob when the hash matches. */
+  blobKey?: string;
+  sizeBytes: number;
+}
+
+/**
+ * Workspace and plan snapshot taken when a user message is sent, before the
+ * agent runs. Addressed by message id. Content lives in the blob store.
+ */
+export interface MessageCheckpoint {
+  messageId: string;
+  threadId: string;
+  backendId: string;
+  createdAt: number;
+  files: MessageCheckpointFile[];
+  plans: CheckpointPlanRecord[];
+  /** Newly written blob bytes, used by the size budget. Reused blobs are not counted twice. */
+  bytes: number;
+}
+
+/**
+ * Chat and journal state captured with a file undo point, so undoing a restore
+ * puts the transcript, plans, and review turns back too. The checkpoint module
+ * does not fill this; the host does, after the file snapshot succeeds.
+ */
+export interface RestoreRewind {
+  backendId: string;
+  threadId: string;
+  messageId: string;
+  /** The restored thread's full transcript before it was truncated. */
+  transcript: unknown[];
+  /** Every thread's plan state before the restore. */
+  plans: CheckpointPlanRecord[];
+  /** Journal turns removed from the restored thread. */
+  turns: JournalTurn[];
+  /** Message checkpoints removed from the restored thread. */
+  checkpoints: MessageCheckpoint[];
+}
+
 /** The persisted index shape. Metadata only; never file content. */
 export interface JournalIndex {
   turns: JournalTurn[];
@@ -122,6 +190,11 @@ export interface JournalIndex {
    * turn boundary.
    */
   restorePoints: JournalRestorePoint[];
+  /**
+   * Send-time snapshots, one per user message. Oldest first, same as turns.
+   * Absent on journals written before message checkpoints existed.
+   */
+  checkpoints?: MessageCheckpoint[];
 }
 
 /** One file captured in a restore point. */
@@ -156,6 +229,12 @@ export interface JournalRestorePoint {
   files: RestorePointFile[];
   /** Blob bytes stored for this point, used by the size budget. */
   bytes: number;
+  /**
+   * Transcript, plans, and journal entries to put back when this file snapshot
+   * is restored. Absent for a file-only undo captured before the host attached
+   * the chat rewind.
+   */
+  rewind?: RestoreRewind;
 }
 
 /** What `captureRestorePoint` needs to durably snapshot current content. */
@@ -175,6 +254,19 @@ export interface CaptureRestorePointInput {
    * the restore and refuse to clobber it. `undefined` means the file was absent.
    */
   expectedHashes: Readonly<Record<string, string | undefined>>;
+  /** Epoch milliseconds; injected so a test is deterministic. */
+  createdAt?: number;
+}
+
+/** What `captureMessageCheckpoint` needs to snapshot the workspace at send time. */
+export interface CaptureMessageCheckpointInput {
+  messageId: string;
+  threadId: string;
+  backendId: string;
+  /** Absolute paths to snapshot: tracked files plus open editors. Absent files are recorded as absent. */
+  paths: readonly string[];
+  /** Every thread's plan state at send time. */
+  plans: readonly CheckpointPlanRecord[];
   /** Epoch milliseconds; injected so a test is deterministic. */
   createdAt?: number;
 }
@@ -590,6 +682,9 @@ export class ChangeJournal {
       const index = this.loadIndex();
       const previous = index.restorePoints.find((entry) => entry.id === input.id);
       if (previous) {
+        // Drop the old point before deleting blobs, so a blob still referenced
+        // by a message checkpoint or another point is left in place.
+        index.restorePoints = index.restorePoints.filter((entry) => entry.id !== input.id);
         await this.deleteRestorePointBlobs(previous);
       }
       index.restorePoints = index.restorePoints.filter((entry) => entry.id !== input.id);
@@ -639,6 +734,29 @@ export class ChangeJournal {
       .map(copyRestorePoint);
   }
 
+  /**
+   * Attach the chat rewind to a file undo point the restore just captured.
+   * Called by the host after the file snapshot succeeds and before the
+   * transcript is truncated. A missing point is a no-op.
+   */
+  async attachRewind(id: string, rewind: RestoreRewind): Promise<void> {
+    return this.run(async () => {
+      const index = this.loadIndex();
+      const point = index.restorePoints.find((entry) => entry.id === id);
+      if (!point) {
+        return;
+      }
+      point.rewind = {
+        ...rewind,
+        transcript: rewind.transcript.slice(),
+        plans: rewind.plans.map(copyPlanRecord),
+        turns: rewind.turns.map(copyTurn),
+        checkpoints: rewind.checkpoints.map(copyCheckpoint)
+      };
+      await this.persist(index);
+    });
+  }
+
   /** The captured content for one file of a restore point, or `undefined`. */
   async getRestorePointContent(pointId: string, relPath: string): Promise<Uint8Array | undefined> {
     const point = this.loadIndex().restorePoints.find((entry) => entry.id === pointId);
@@ -647,6 +765,203 @@ export class ChangeJournal {
       return undefined;
     }
     return this.fs.readBlob(file.blobKey);
+  }
+
+  /* -------------------------- message checkpoints -------------------------- */
+
+  /**
+   * Snapshot the named paths and every thread's plan as they are now, and
+   * address the result by message id. Re-capturing the same message replaces
+   * it. A path outside the workspace or ignored by review rules is skipped.
+   * An absent file is recorded as absent so a later create can be deleted.
+   */
+  async captureMessageCheckpoint(input: CaptureMessageCheckpointInput): Promise<MessageCheckpoint> {
+    return this.run(async () => {
+      const roots = this.fs.workspaceRoots();
+      const files: MessageCheckpointFile[] = [];
+      const written: string[] = [];
+      let bytes = 0;
+      try {
+        const seen = new Set<string>();
+        for (const absPath of input.paths) {
+          const located = workspaceRelative(absPath, roots);
+          if (!located || seen.has(located.relPath) || (await this.ignored(absPath))) {
+            continue;
+          }
+          seen.add(located.relPath);
+          const snap = await this.snapshot(absPath);
+          if (!snap || !storable(snap, snap.binary, this.maxInlineBytes)) {
+            files.push({
+              absPath,
+              relPath: located.relPath,
+              ...(snap ? { hash: snap.hash } : {}),
+              sizeBytes: snap?.size ?? 0
+            });
+            continue;
+          }
+          const existing =
+            files.find((entry) => entry.hash === snap.hash && entry.blobKey)?.blobKey ?? this.blobKeyForHash(snap.hash);
+          let blobKey = existing;
+          if (!blobKey) {
+            blobKey = `checkpoints/${blobSafe(input.messageId)}/${files.length}.content`;
+            await this.fs.writeBlob(blobKey, snap.bytes);
+            written.push(blobKey);
+            bytes += snap.size;
+          }
+          files.push({
+            absPath,
+            relPath: located.relPath,
+            hash: snap.hash,
+            blobKey,
+            sizeBytes: snap.size
+          });
+        }
+      } catch (error) {
+        for (const key of written) {
+          await this.fs.deleteBlob(key);
+        }
+        throw error;
+      }
+
+      const checkpoint: MessageCheckpoint = {
+        messageId: input.messageId,
+        threadId: input.threadId,
+        backendId: input.backendId,
+        createdAt: input.createdAt ?? this.now(),
+        files,
+        plans: input.plans.map(copyPlanRecord),
+        bytes
+      };
+      const index = this.loadIndex();
+      const checkpoints = index.checkpoints ?? [];
+      const previous = checkpoints.find(
+        (entry) => entry.threadId === input.threadId && entry.messageId === input.messageId
+      );
+      const remaining = checkpoints.filter(
+        (entry) => !(entry.threadId === input.threadId && entry.messageId === input.messageId)
+      );
+      // Install the replacement before deleting the old blobs, so a blob the
+      // new snapshot reused is still referenced and is not removed.
+      index.checkpoints = [...remaining, checkpoint];
+      if (previous) {
+        await this.deleteCheckpointBlobs(previous);
+      }
+      await this.persist(index);
+      await this.prune();
+      return copyCheckpoint(checkpoint);
+    });
+  }
+
+  /** One message's send-time snapshot, or `undefined`. */
+  getMessageCheckpoint(threadId: string, messageId: string): MessageCheckpoint | undefined {
+    const checkpoint = this.checkpoints().find(
+      (entry) => entry.threadId === threadId && entry.messageId === messageId
+    );
+    return checkpoint ? copyCheckpoint(checkpoint) : undefined;
+  }
+
+  /** A thread's message checkpoints, newest first. */
+  listMessageCheckpoints(threadId: string): MessageCheckpoint[] {
+    return this.checkpoints()
+      .filter((entry) => entry.threadId === threadId)
+      .reverse()
+      .map(copyCheckpoint);
+  }
+
+  /** Stored bytes for one file of a message checkpoint, or `undefined`. */
+  async readCheckpointFile(threadId: string, messageId: string, relPath: string): Promise<Uint8Array | undefined> {
+    const checkpoint = this.getMessageCheckpoint(threadId, messageId);
+    const file = checkpoint?.files.find((entry) => entry.relPath === toPosix(relPath));
+    if (!file?.blobKey) {
+      return undefined;
+    }
+    return this.fs.readBlob(file.blobKey);
+  }
+
+  /**
+   * Absolute paths the journal has already recorded, across every thread.
+   * The host adds open editors and passes the union back into
+   * `captureMessageCheckpoint`.
+   */
+  trackedAbsPaths(): string[] {
+    const paths = new Set<string>();
+    for (const turn of this.loadIndex().turns) {
+      for (const file of turn.files) {
+        paths.add(file.absPath);
+      }
+    }
+    for (const checkpoint of this.checkpoints()) {
+      for (const file of checkpoint.files) {
+        paths.add(file.absPath);
+      }
+    }
+    return [...paths];
+  }
+
+  /** Every recorded turn, oldest first. */
+  listAllTurns(): JournalTurn[] {
+    return this.loadIndex().turns.map(copyTurn);
+  }
+
+  /**
+   * Remove this thread's message checkpoint and every later checkpoint, plus
+   * turns that were still open or finished at or after that moment. Blobs stay
+   * so the host can attach the removed entries to an undo point. Returns the
+   * removed entries.
+   */
+  async detachFromMessage(
+    threadId: string,
+    messageId: string
+  ): Promise<{ turns: JournalTurn[]; checkpoints: MessageCheckpoint[] }> {
+    return this.run(async () => {
+      const index = this.loadIndex();
+      const checkpoint = (index.checkpoints ?? []).find(
+        (entry) => entry.threadId === threadId && entry.messageId === messageId
+      );
+      if (!checkpoint) {
+        return { turns: [], checkpoints: [] };
+      }
+      const createdAt = checkpoint.createdAt;
+      const stored = index.checkpoints ?? [];
+      const checkpoints = stored.filter((entry) => entry.threadId === threadId && entry.createdAt >= createdAt);
+      const turns = index.turns.filter((turn) => {
+        if (turn.threadId !== threadId) {
+          return false;
+        }
+        const ended = turn.endedAt ?? Number.POSITIVE_INFINITY;
+        return turn.startedAt >= createdAt || ended >= createdAt;
+      });
+      const checkpointIds = new Set(checkpoints.map((entry) => entry.messageId));
+      const turnIds = new Set(turns.map((turn) => turn.turnId));
+      index.checkpoints = stored.filter((entry) => !(entry.threadId === threadId && checkpointIds.has(entry.messageId)));
+      index.turns = index.turns.filter((turn) => !turnIds.has(turn.turnId));
+      await this.persist(index);
+      return { turns: turns.map(copyTurn), checkpoints: checkpoints.map(copyCheckpoint) };
+    });
+  }
+
+  /** Put turns and message checkpoints back after an undo. Existing ids are left as they are. */
+  async reinsert(turns: readonly JournalTurn[], checkpoints: readonly MessageCheckpoint[]): Promise<void> {
+    return this.run(async () => {
+      const index = this.loadIndex();
+      for (const turn of turns) {
+        if (!index.turns.some((entry) => entry.turnId === turn.turnId)) {
+          index.turns.push(copyTurn(turn));
+        }
+      }
+      index.turns.sort((a, b) => a.startedAt - b.startedAt);
+      const stored = index.checkpoints ?? [];
+      for (const checkpoint of checkpoints) {
+        if (
+          !stored.some((entry) => entry.threadId === checkpoint.threadId && entry.messageId === checkpoint.messageId)
+        ) {
+          stored.push(copyCheckpoint(checkpoint));
+        }
+      }
+      stored.sort((a, b) => a.createdAt - b.createdAt);
+      index.checkpoints = stored;
+      await this.persist(index);
+    });
   }
 
   /* ------------------------------- reads ----------------------------------- */
@@ -994,60 +1309,167 @@ export class ChangeJournal {
    */
   private async prune(): Promise<void> {
     const index = this.loadIndex();
-    const turns = [...index.turns].sort((a, b) => a.startedAt - b.startedAt);
-    let total = turns.reduce((sum, turn) => sum + turn.bytes, 0);
     let changed = false;
+    const total = (): number =>
+      index.turns.reduce((sum, turn) => sum + turn.bytes, 0) +
+      index.restorePoints.reduce((sum, point) => sum + point.bytes, 0) +
+      (index.checkpoints ?? []).reduce((sum, checkpoint) => sum + checkpoint.bytes, 0);
 
-    while (turns.length > this.maxTurns || total > this.maxBlobBytes) {
-      const victim = turns.findIndex((turn) => turn.turnId !== this.reviewing);
-      if (victim === -1) {
+    while (index.turns.length > this.maxTurns || total() > this.maxBlobBytes) {
+      const ordered = [...index.turns].sort((a, b) => a.startedAt - b.startedAt);
+      const victim = ordered.find((turn) => turn.turnId !== this.reviewing);
+      if (!victim) {
         break;
       }
-      const [evicted] = turns.splice(victim, 1);
-      total -= evicted.bytes;
-      await this.deleteTurnBlobs(evicted);
+      index.turns = index.turns.filter((turn) => turn.turnId !== victim.turnId);
+      await this.deleteTurnBlobs(victim);
       changed = true;
+      if (index.turns.length <= this.maxTurns && total() <= this.maxBlobBytes) {
+        break;
+      }
     }
 
-    // Restore points share the same byte budget. They are pruned oldest-first,
-    // and a point that is itself the active undo target is never evicted while
-    // the caller still holds it (the host passes the protected id through
-    // `beginReview`-style protection by not pruning mid-restore).
-    const points = [...index.restorePoints].sort((a, b) => a.createdAt - b.createdAt);
-    total += points.reduce((sum, point) => sum + point.bytes, 0);
-    while (points.length > this.maxRestorePoints || total > this.maxBlobBytes) {
-      const [evicted] = points.splice(0, 1);
-      if (!evicted) {
+    const checkpointList = (): MessageCheckpoint[] => index.checkpoints ?? [];
+    while (checkpointList().length > this.maxTurns || total() > this.maxBlobBytes) {
+      const ordered = [...checkpointList()].sort((a, b) => a.createdAt - b.createdAt);
+      const victim = ordered[0];
+      if (!victim) {
         break;
       }
-      total -= evicted.bytes;
-      await this.deleteRestorePointBlobs(evicted);
+      index.checkpoints = checkpointList().filter(
+        (entry) => !(entry.threadId === victim.threadId && entry.messageId === victim.messageId)
+      );
+      await this.deleteCheckpointBlobs(victim);
       changed = true;
+      if (checkpointList().length <= this.maxTurns && total() <= this.maxBlobBytes) {
+        break;
+      }
+    }
+
+    // Restore points share the same byte budget. They are pruned oldest-first.
+    while (index.restorePoints.length > this.maxRestorePoints || total() > this.maxBlobBytes) {
+      const ordered = [...index.restorePoints].sort((a, b) => a.createdAt - b.createdAt);
+      const victim = ordered[0];
+      if (!victim) {
+        break;
+      }
+      index.restorePoints = index.restorePoints.filter((point) => point.id !== victim.id);
+      await this.deleteRestorePointBlobs(victim);
+      changed = true;
+      if (index.restorePoints.length <= this.maxRestorePoints && total() <= this.maxBlobBytes) {
+        break;
+      }
     }
 
     if (changed) {
-      index.turns = turns;
-      index.restorePoints = points;
       await this.persist(index);
     }
   }
 
+  private checkpoints(): MessageCheckpoint[] {
+    return this.loadIndex().checkpoints ?? [];
+  }
+
+  /** A blob key already stored for this hash, so a later snapshot can share it. */
+  private blobKeyForHash(hash: string): string | undefined {
+    const index = this.loadIndex();
+    for (const checkpoint of index.checkpoints ?? []) {
+      for (const file of checkpoint.files) {
+        if (file.hash === hash && file.blobKey) {
+          return file.blobKey;
+        }
+      }
+    }
+    for (const turn of index.turns) {
+      for (const file of turn.files) {
+        if (file.beforeHash === hash && file.beforeKey) {
+          return file.beforeKey;
+        }
+        if (file.afterHash === hash && file.afterKey) {
+          return file.afterKey;
+        }
+      }
+    }
+    for (const point of index.restorePoints) {
+      for (const file of point.files) {
+        if (file.hash === hash && file.blobKey) {
+          return file.blobKey;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /** True when some surviving index entry still points at this blob. */
+  private blobReferenced(key: string): boolean {
+    const index = this.loadIndex();
+    for (const turn of index.turns) {
+      for (const file of turn.files) {
+        if (file.beforeKey === key || file.afterKey === key) {
+          return true;
+        }
+      }
+    }
+    for (const checkpoint of index.checkpoints ?? []) {
+      for (const file of checkpoint.files) {
+        if (file.blobKey === key) {
+          return true;
+        }
+      }
+    }
+    for (const point of index.restorePoints) {
+      for (const file of point.files) {
+        if (file.blobKey === key) {
+          return true;
+        }
+      }
+      for (const turn of point.rewind?.turns ?? []) {
+        for (const file of turn.files) {
+          if (file.beforeKey === key || file.afterKey === key) {
+            return true;
+          }
+        }
+      }
+      for (const checkpoint of point.rewind?.checkpoints ?? []) {
+        for (const file of checkpoint.files) {
+          if (file.blobKey === key) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  private async deleteBlobIfUnused(key: string | undefined): Promise<void> {
+    if (!key || this.blobReferenced(key)) {
+      return;
+    }
+    await this.fs.deleteBlob(key);
+  }
+
   private async deleteTurnBlobs(turn: JournalTurn): Promise<void> {
     for (const file of turn.files) {
-      if (file.beforeKey) {
-        await this.fs.deleteBlob(file.beforeKey);
-      }
-      if (file.afterKey) {
-        await this.fs.deleteBlob(file.afterKey);
-      }
+      await this.deleteBlobIfUnused(file.beforeKey);
+      await this.deleteBlobIfUnused(file.afterKey);
+    }
+  }
+
+  private async deleteCheckpointBlobs(checkpoint: MessageCheckpoint): Promise<void> {
+    for (const file of checkpoint.files) {
+      await this.deleteBlobIfUnused(file.blobKey);
     }
   }
 
   private async deleteRestorePointBlobs(point: JournalRestorePoint): Promise<void> {
     for (const file of point.files) {
-      if (file.blobKey) {
-        await this.fs.deleteBlob(file.blobKey);
-      }
+      await this.deleteBlobIfUnused(file.blobKey);
+    }
+    for (const turn of point.rewind?.turns ?? []) {
+      await this.deleteTurnBlobs(turn);
+    }
+    for (const checkpoint of point.rewind?.checkpoints ?? []) {
+      await this.deleteCheckpointBlobs(checkpoint);
     }
   }
 
@@ -1056,8 +1478,15 @@ export class ChangeJournal {
       const stored = this.storage.get<JournalIndex | undefined>(JOURNAL_KEY, undefined);
       this.index =
         stored && Array.isArray(stored.turns)
-          ? { turns: stored.turns, restorePoints: Array.isArray(stored.restorePoints) ? stored.restorePoints : [] }
-          : { turns: [], restorePoints: [] };
+          ? {
+              turns: stored.turns,
+              restorePoints: Array.isArray(stored.restorePoints) ? stored.restorePoints : [],
+              checkpoints: Array.isArray(stored.checkpoints) ? stored.checkpoints : []
+            }
+          : { turns: [], restorePoints: [], checkpoints: [] };
+    }
+    if (!Array.isArray(this.index.checkpoints)) {
+      this.index.checkpoints = [];
     }
     return this.index;
   }
@@ -1085,7 +1514,38 @@ function copyTurn(turn: JournalTurn): JournalTurn {
 
 /** A shallow copy of a restore point, so a read cannot mutate the cached index. */
 function copyRestorePoint(point: JournalRestorePoint): JournalRestorePoint {
-  return { ...point, files: point.files.map((file) => ({ ...file })) };
+  return {
+    ...point,
+    files: point.files.map((file) => ({ ...file })),
+    ...(point.rewind
+      ? {
+          rewind: {
+            ...point.rewind,
+            transcript: point.rewind.transcript.slice(),
+            plans: point.rewind.plans.map(copyPlanRecord),
+            turns: point.rewind.turns.map(copyTurn),
+            checkpoints: point.rewind.checkpoints.map(copyCheckpoint)
+          }
+        }
+      : {})
+  };
+}
+
+function copyCheckpoint(checkpoint: MessageCheckpoint): MessageCheckpoint {
+  return {
+    ...checkpoint,
+    files: checkpoint.files.map((file) => ({ ...file })),
+    plans: checkpoint.plans.map(copyPlanRecord)
+  };
+}
+
+function copyPlanRecord(record: CheckpointPlanRecord): CheckpointPlanRecord {
+  return {
+    ...record,
+    ...(record.state
+      ? { state: { ...record.state, steps: record.state.steps.map((step) => ({ ...step })) } }
+      : {})
+  };
 }
 
 /**
