@@ -13,6 +13,7 @@ import { splitReplyClose } from './replyClose';
 import { plainRowText } from './plainRowText';
 import { visibleTranscriptText } from './visibleTranscript';
 import { historyEntries, historyLoading, type HistoryEntry } from './historyEntries';
+import { defaultProviderTab, sortModels } from './modelList';
 import { acceptComposerRestore, hostAttachments, switchComposerDraft, type ComposerDraft } from './composerDraft';
 import {
   AlertIcon,
@@ -190,6 +191,7 @@ export function App(): JSX.Element {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const historyRef = useRef<HTMLDivElement>(null);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   /** Follow new transcript content only while the reader is already at the bottom. */
@@ -690,6 +692,47 @@ export function App(): JSX.Element {
       document.removeEventListener('keydown', onKey);
     };
   }, [historyOpen]);
+
+  const composerPopupOpen = modePanelOpen || permissionPanelOpen || modelPanelOpen || modelSettingsOpen;
+  const closeComposerPopups = useCallback((): void => {
+    setModePanelOpen(false);
+    setPermissionPanelOpen(false);
+    setModelPanelOpen(false);
+    setModelFilter('');
+    setModelSettingsOpen(false);
+  }, []);
+
+  // Composer menus (mode, permission, model, model settings) dismiss on an
+  // outside press or Escape. The trigger sits inside the same root as the
+  // card, so pressing it still toggles instead of being treated as outside.
+  useEffect(() => {
+    if (!composerPopupOpen) {
+      return;
+    }
+    const onPointer = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      const inside = [modeMenuRef.current, permissionPopup.ref.current, modelPopup.ref.current, modelSettingsPopup.ref.current].some(
+        (node) => node?.contains(target)
+      );
+      if (!inside) {
+        closeComposerPopups();
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        closeComposerPopups();
+      }
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [composerPopupOpen, closeComposerPopups, permissionPopup.ref, modelPopup.ref, modelSettingsPopup.ref]);
 
   const history = useMemo(
     () => historyEntries(state.availability, state.threads),
@@ -1947,7 +1990,7 @@ export function App(): JSX.Element {
           />
           <div className="composer-row">
             {modeSnapshot ? (
-              <div className="mode-menu">
+              <div className="mode-menu" ref={modeMenuRef}>
                 <ModeTrigger
                   snapshot={modeSnapshot}
                   open={modePanelOpen}
@@ -2211,22 +2254,20 @@ function ModelPanel({
   const filterRef = useRef<HTMLInputElement>(null);
   const query = filter.trim().toLowerCase();
 
-  // Move focus into the panel on open so arrow keys and typing land here, and
-  // return focus to the trigger when it closes.
+  // Move focus into the panel on open so arrow keys and typing land here.
+  // Focus returns to the trigger only for Escape; an outside click should
+  // leave focus on whatever was pressed.
   useEffect(() => {
     const target =
       filterRef.current ??
       listRef.current?.querySelector<HTMLButtonElement>('.model-option') ??
       document.querySelector<HTMLButtonElement>('#model-panel .btn');
     target?.focus();
-    return () => {
-      document.querySelector<HTMLButtonElement>('.model-trigger')?.focus();
-    };
   }, []);
 
   const groups = providers.map((backend) => {
     const list = models[backend.id];
-    const matches = (list ?? []).filter(
+    const matches = sortModels(list ?? []).filter(
       (model) => !query || `${model.label} ${model.id}`.toLowerCase().includes(query)
     );
     return {
@@ -2243,10 +2284,19 @@ function ModelPanel({
 
   // Providers are the panel's major sections. Exactly one is visible at a time,
   // so a long provider list scrolls inside its own tab body instead of stacking
-  // every provider vertically. The selection falls back to the first provider
-  // whenever the current one drops out (a refresh can remove a provider).
-  const [activeProvider, setActiveProvider] = useState(providers[0]?.id ?? '');
-  const activeGroup = groups.find((group) => group.backend.id === activeProvider) ?? groups[0];
+  // every provider vertically. Open on the provider of the model already in
+  // use (Codex stays on Codex). If that provider drops out, fall back.
+  const [activeProvider, setActiveProvider] = useState(() =>
+    defaultProviderTab(
+      providers.map((backend) => backend.id),
+      selectedBackendId
+    )
+  );
+  const providerIds = groups.map((group) => group.backend.id);
+  const visibleProvider = providerIds.includes(activeProvider)
+    ? activeProvider
+    : defaultProviderTab(providerIds, selectedBackendId);
+  const activeGroup = groups.find((group) => group.backend.id === visibleProvider) ?? groups[0];
   const activeMatches = activeGroup?.matches ?? [];
   const noMatches =
     query.length > 0 &&
@@ -2278,6 +2328,7 @@ function ModelPanel({
   const onPanelKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Escape') {
       event.preventDefault();
+      document.querySelector<HTMLButtonElement>('.model-trigger')?.focus();
       onClose();
       return;
     }
@@ -2447,7 +2498,7 @@ function ModelPanel({
           className="model-panel__tabs"
           label="Providers"
           tabs={providerTabs}
-          active={activeGroup?.backend.id ?? ''}
+          active={visibleProvider}
           onChange={setActiveProvider}
         />
       ) : null}
