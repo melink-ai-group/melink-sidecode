@@ -48,6 +48,7 @@ import {
   compactionSource,
   fitCompactionSource
 } from './compaction';
+import { recoveryHandover, threadRecoveredNotice } from './threadRecovery';
 import { cleanToolTarget, friendlyToolTitle, isStatusText } from './toolLabel.ts';
 import { DICTATION_INSTRUCTIONS, dictationText } from '../dictation/prompt';
 import type { OpencodeEvent } from './opencode/events';
@@ -117,16 +118,28 @@ function isAbortError(error: unknown): boolean {
  * compact delta, keeping the stable prefix cacheable and per-turn cost flat. The
  * context exists only in this prompt and is never written to any transcript.
  */
-function opencodePrompt(request: SendTurnRequest, freshSession: boolean, summary?: string): string {
+function opencodePrompt(
+  request: SendTurnRequest,
+  freshSession: boolean,
+  summary?: string,
+  recovery?: string
+): string {
   const context = request.context;
   const block = freshSession
     ? context?.snapshot ?? context?.notice
     : context?.delta ?? context?.notice;
   const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
   const instructions = modeInstructions(mode);
-  // A fresh session has no memory of the thread. The compaction summary is
-  // included once here; later turns resume the session and do not repeat it.
-  const preface = freshSession && summary ? compactionPreface(summary) : undefined;
+  // A fresh session has no memory of the thread. A replacement for a missing
+  // session gets the saved chat once. Otherwise the compaction summary is
+  // included once; later turns resume the session and do not repeat it.
+  const preface = !freshSession
+    ? undefined
+    : recovery?.trim()
+      ? recovery.trim()
+      : summary
+        ? compactionPreface(summary)
+        : undefined;
   const parts = [instructions, preface, block, context?.attachedFile, request.text].filter(
     (part): part is string => Boolean(part && part.trim().length > 0)
   );
@@ -930,6 +943,9 @@ export class OllamaBackend implements AgentBackend {
     // exists, the text is still primed with the snapshot.
     let visibleText = request.text;
     let barePrompt = false;
+    // Set when a saved session is gone, so the replacement session receives the
+    // sidebar chat instead of only the current turn.
+    let recovery: string | undefined;
 
     // The cwd the child is spawned with, reused to anchor a relative tool path.
     // It is the same root the snapshot service supplied, or the adapter's own
@@ -943,7 +959,8 @@ export class OllamaBackend implements AgentBackend {
         : opencodePrompt(
             { ...request, text: visibleText },
             !sessionId,
-            !sessionId ? summary : undefined
+            !sessionId && !recovery ? summary : undefined,
+            !sessionId ? recovery : undefined
           );
 
     try {
@@ -982,12 +999,21 @@ export class OllamaBackend implements AgentBackend {
           await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
           sessionId = undefined;
           barePrompt = false;
+          const transcript = this.store?.getTranscript(this.id, handle.threadId) ?? [];
+          recovery = recoveryHandover({
+            provider: 'OpenCode',
+            transcript,
+            plan: this.store?.getPlanState(this.id, handle.threadId),
+            omitTrailingUserText: visibleText
+          });
           this.events.fire({
             type: 'notice',
             backendId: this.id,
             threadId: handle.threadId,
             level: 'info',
-            message: 'The saved opencode session was not available, so a new one was started.'
+            message: recovery
+              ? threadRecoveredNotice('OpenCode')
+              : 'The saved opencode session was not available, so a new one was started.'
           });
           result = await runOnce(promptFor(), undefined);
         }

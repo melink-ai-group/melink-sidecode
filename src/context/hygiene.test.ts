@@ -66,7 +66,8 @@ test('the opencode prompt priming is documented as a deliberate fallback', async
   const text = await source('backends/ollama.ts');
   assert.match(text, /native system\/instructions field/i);
   assert.match(text, /deliberate fallback, not an oversight/i);
-  assert.match(text, /opencodePrompt\(request, fresh, fresh \? summary : undefined\)/);
+  assert.match(text, /!sessionId && !recovery \? summary : undefined/);
+  assert.match(text, /!sessionId \? recovery : undefined/);
 });
 
 test('the snapshot service owns the workspace root; adapters prefer it over the host', async () => {

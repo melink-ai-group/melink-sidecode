@@ -734,6 +734,11 @@ export interface ResumeResult {
    * a page and loads the rest when the reader scrolls up.
    */
   hasOlderHistory?: boolean;
+  /**
+   * True when the provider thread was gone and this result is a new thread
+   * carrying the saved chat. The sidebar conversation id stays the same.
+   */
+  recovered?: boolean;
 }
 
 /** One page of transcript rows older than those already painted. */
@@ -1111,8 +1116,9 @@ export interface AgentBackend {
 
   /**
    * Reconnects to an existing thread and returns its prior turns for replay.
-   * Throws `BackendError('provider')` when the thread no longer exists, so a
-   * stale reference can degrade to a fresh conversation rather than block.
+   * Throws `BackendError('provider')` when the thread no longer exists and there
+   * is nothing saved to continue from. A Codex thread that is gone, but whose
+   * sidebar chat is still stored, is continued on a new thread instead.
    *
    * `options.context` is supplied again because a resumed thread must be
    * re-primed: the upstream provider may have lost its own context across the
