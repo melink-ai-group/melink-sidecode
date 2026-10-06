@@ -33,8 +33,12 @@ body,
   }
 }
 
-body {
+/* The webview host injects `body { padding: 0 20px }` after this sheet.
+ * `html body` wins that rule so inset lives on .composer, .transcript, and
+ * the other surfaces, not on a parent the composer cannot override. */
+html body {
   overflow-x: hidden;
+  padding: 0;
   background: var(--vscode-sideBar-background);
   color: var(--vscode-foreground);
   font-family: var(--vscode-font-family, 'Inter', -apple-system, 'Segoe UI', sans-serif);
