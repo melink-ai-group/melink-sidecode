@@ -809,6 +809,23 @@ html body {
   scrollbar-gutter: stable;
 }
 
+/* Trailing padding on an overflowing flex column is omitted from scroll
+ * height, so a spacer item reserves the room instead. Scroll-to-end and
+ * stick-to-bottom both use scrollHeight, which includes this gap. */
+.transcript::after {
+  content: "";
+  flex: 0 0 35vh;
+  height: 35vh;
+  margin-top: -16px;
+}
+
+@supports (height: 100dvh) {
+  .transcript::after {
+    flex-basis: 35dvh;
+    height: 35dvh;
+  }
+}
+
 .turn {
   display: flex;
   flex-direction: column;
@@ -1921,6 +1938,10 @@ html body {
 .app--chat-empty .transcript {
   flex: 0 1 auto;
   min-height: 148px;
+}
+
+.app--chat-empty .transcript::after {
+  content: none;
 }
 
 .app--chat-empty .composer.composer--expanded {
