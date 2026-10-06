@@ -13,6 +13,7 @@ import { splitReplyClose } from './replyClose';
 import { plainRowText } from './plainRowText';
 import { visibleTranscriptText } from './visibleTranscript';
 import { historyEntries, historyLoading, type HistoryEntry } from './historyEntries';
+import { pinnedUserMessage, userMessagePinText, type UserMessageFrame } from './pinnedUserMessage';
 import { defaultProviderTab, sortModels } from './modelList';
 import { acceptComposerRestore, hostAttachments, switchComposerDraft, type ComposerDraft } from './composerDraft';
 import {
@@ -188,6 +189,7 @@ export function App(): JSX.Element {
   const permissionPopup = usePopupSide(permissionPanelOpen);
   const modelPopup = usePopupSide(modelPanelOpen);
   const modelSettingsPopup = usePopupSide(modelSettingsOpen);
+  const [pinnedUserId, setPinnedUserId] = useState<string | undefined>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const historyRef = useRef<HTMLDivElement>(null);
@@ -200,6 +202,8 @@ export function App(): JSX.Element {
   const pinnedThreadRef = useRef<string | undefined>(undefined);
   /** Ignore the scroll event fired by our own jump to the bottom. */
   const ignoreTranscriptScrollRef = useRef(false);
+  /** While a click is scrolling back to a user message, leave that message expanded. */
+  const pinLockRef = useRef(false);
   /** Scroll height before older rows were prepended, so the reader stays on the same line. */
   const olderAnchorRef = useRef<{ height: number; top: number } | null>(null);
   /** A page that added nothing should not immediately request another. */
@@ -518,6 +522,28 @@ export function App(): JSX.Element {
     bridge.post({ type: 'loadOlderHistory' });
   };
 
+  const syncPinnedUser = useCallback((): void => {
+    if (pinLockRef.current) {
+      return;
+    }
+    const el = transcriptRef.current;
+    if (!el) {
+      return;
+    }
+    const edge = el.getBoundingClientRect().top;
+    const frames: UserMessageFrame[] = [];
+    el.querySelectorAll<HTMLElement>('[data-user-message]').forEach((node) => {
+      const id = node.dataset.userMessage;
+      if (!id) {
+        return;
+      }
+      const box = node.getBoundingClientRect();
+      frames.push({ id, top: box.top - edge, bottom: box.bottom - edge });
+    });
+    const next = pinnedUserMessage(frames);
+    setPinnedUserId((current) => (current === next ? current : next));
+  }, []);
+
   const onTranscriptScroll = (): void => {
     if (ignoreTranscriptScrollRef.current) {
       return;
@@ -534,6 +560,32 @@ export function App(): JSX.Element {
     if (el.scrollTop < 48) {
       requestOlder();
     }
+    syncPinnedUser();
+  };
+
+  const jumpToUserMessage = (id: string): void => {
+    const el = transcriptRef.current;
+    const message = el?.querySelector<HTMLElement>(`[data-user-message="${CSS.escape(id)}"]`);
+    if (!el || !message) {
+      return;
+    }
+    const top = message.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    stickToBottomRef.current = false;
+    pinLockRef.current = true;
+    setPinnedUserId(undefined);
+    const target = Math.max(0, top - 8);
+    if (Math.abs(el.scrollTop - target) < 2) {
+      pinLockRef.current = false;
+      return;
+    }
+    el.scrollTo({ top: target, behavior: 'smooth' });
+    window.setTimeout(() => {
+      if (!pinLockRef.current) {
+        return;
+      }
+      pinLockRef.current = false;
+      syncPinnedUser();
+    }, 700);
   };
 
   const scrollTranscriptToBottom = (): void => {
@@ -544,6 +596,7 @@ export function App(): JSX.Element {
     ignoreTranscriptScrollRef.current = true;
     el.scrollTop = el.scrollHeight;
     ignoreTranscriptScrollRef.current = false;
+    syncPinnedUser();
   };
 
   useLayoutEffect(() => {
@@ -597,7 +650,34 @@ export function App(): JSX.Element {
     if (nextTop < 48 && state.hasOlderHistory) {
       olderStallRef.current = true;
     }
-  }, [state.transcript, state.loadingOlder, state.hasOlderHistory]);
+    syncPinnedUser();
+  }, [state.transcript, state.loadingOlder, state.hasOlderHistory, syncPinnedUser]);
+
+  useLayoutEffect(() => {
+    syncPinnedUser();
+  }, [state.transcript, state.restoring, state.activeThreadId, state.settingsOpen, state.rulesOpen, syncPinnedUser]);
+
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) {
+      return;
+    }
+    const release = (): void => {
+      if (!pinLockRef.current) {
+        return;
+      }
+      pinLockRef.current = false;
+      syncPinnedUser();
+    };
+    el.addEventListener('scrollend', release);
+    el.addEventListener('wheel', release, { passive: true });
+    el.addEventListener('touchstart', release, { passive: true });
+    return () => {
+      el.removeEventListener('scrollend', release);
+      el.removeEventListener('wheel', release);
+      el.removeEventListener('touchstart', release);
+    };
+  }, [state.settingsOpen, state.rulesOpen, syncPinnedUser]);
 
   // Read the review snapshot for a turn the host recorded. The host pushes the
   // authoritative change set (and reposts the latest one on reload); the review
@@ -1756,6 +1836,12 @@ export function App(): JSX.Element {
   const chatEmpty = state.transcript.length === 0 && !state.restoring;
   const transcriptEntries = groupTranscript(state.transcript);
   const speakers = speakerRows(transcriptEntries, !state.busy);
+  const pinnedItem = pinnedUserId
+    ? state.transcript.find((item) => item.id === pinnedUserId && item.kind === 'message' && item.role === 'user')
+    : undefined;
+  const pinnedPreview = pinnedItem
+    ? userMessagePinText(pinnedItem.text, pinnedItem.attachments?.map((attachment) => attachment.name) ?? [])
+    : undefined;
 
   return (
     <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
@@ -1767,6 +1853,22 @@ export function App(): JSX.Element {
         aria-label="Conversation transcript"
         onScroll={onTranscriptScroll}
       >
+        <div className="user-pin-anchor">
+          {pinnedPreview && pinnedUserId ? (
+            <button
+              key={pinnedUserId}
+              type="button"
+              className="user-pin"
+              aria-label="Show this message"
+              title="Show this message"
+              onClick={() => jumpToUserMessage(pinnedUserId)}
+            >
+              <span className={pinnedPreview.length > 140 ? 'user-pin__text user-pin__text--fade' : 'user-pin__text'}>
+                {pinnedPreview}
+              </span>
+            </button>
+          ) : null}
+        </div>
         {!state.restoring && state.hasOlderHistory ? (
           <div className="history-more">
             <button type="button" onClick={() => requestOlder(true)} disabled={state.loadingOlder}>
@@ -3120,7 +3222,7 @@ function TranscriptRow({
       return null;
     }
     return (
-      <article className="turn turn--user">
+      <article className="turn turn--user" data-user-message={item.id}>
         <div className="turn-meta">
           <PersonIcon />
           <span className="meta-strong">You</span>
