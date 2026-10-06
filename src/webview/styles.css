@@ -774,6 +774,25 @@ html body {
   color: var(--melink-shell);
 }
 
+.history-more {
+  display: flex;
+  justify-content: center;
+}
+
+.history-more button {
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.history-more button:disabled {
+  cursor: default;
+  color: var(--vscode-descriptionForeground);
+}
+
 /* ---- Transcript ---- */
 
 .transcript {

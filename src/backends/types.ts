@@ -729,6 +729,18 @@ export interface ResumeResult {
   handle: ThreadHandle;
   model?: string;
   items: TranscriptItem[];
+  /**
+   * True when the provider still has turns older than `items`. The host paints
+   * a page and loads the rest when the reader scrolls up.
+   */
+  hasOlderHistory?: boolean;
+}
+
+/** One page of transcript rows older than those already painted. */
+export interface OlderHistoryPage {
+  items: TranscriptItem[];
+  /** True when another page exists beyond `items`. */
+  hasMore: boolean;
 }
 
 export interface ThreadStartedEvent {
@@ -1107,6 +1119,12 @@ export interface AgentBackend {
    * resume, and a snapshot is cheap next to a confused session.
    */
   resumeThread(threadId: string, options?: ResumeThreadOptions): Promise<ResumeResult>;
+
+  /**
+   * The next older page of a resumed thread. Codex reads it from the app-server
+   * cursors. Absent when the backend's own transcript is already complete.
+   */
+  loadOlderHistory?(threadId: string): Promise<OlderHistoryPage>;
 
   /** Lists threads this backend still knows about, newest first. */
   listThreads(): Promise<ThreadSummary[]>;

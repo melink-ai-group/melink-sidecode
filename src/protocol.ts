@@ -293,6 +293,19 @@ export type HostToWebviewMessage =
        * normal conversation switch still replaces the transcript.
        */
       keepPendingUserMessage?: boolean;
+      /**
+       * True when rows older than `replay` exist. The webview loads them when
+       * the reader scrolls to the top.
+       */
+      hasOlderHistory?: boolean;
+    }
+  /** Rows prepended to the open transcript. The reader stays on the same line. */
+  | {
+      type: 'olderHistory';
+      backendId: string;
+      threadId: string;
+      items: TranscriptItem[];
+      hasOlderHistory: boolean;
     }
   | { type: 'threads'; backendId: string; threads: ThreadSummary[] }
   /** Open sidebar chat tabs. The webview paints the strip and shows the active one. */
@@ -518,6 +531,8 @@ export type WebviewToHostMessage =
   | { type: 'composerDraft'; tabId?: string; text: string; attachments: Attachment[] }
   /** Show the sidebar tab for this thread, or open one and resume it. */
   | { type: 'openThread'; backendId: string; threadId: string }
+  /** Load the next older page of the open chat. Sent when the reader reaches the top. */
+  | { type: 'loadOlderHistory' }
   /** Bring one open sidebar chat tab to the front. */
   | { type: 'selectChatTab'; tabId: string }
   /** Close one sidebar chat tab. The thread stays in history. */

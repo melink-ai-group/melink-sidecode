@@ -241,16 +241,16 @@ export function parsePatch(diff: string | undefined): FileChangeLine[] | undefin
  * Flatten a `Turn.items` payload into transcript items. Used when resuming a
  * thread, where the app-server returns historical turns rather than replaying
  * item notifications.
+ *
+ * User messages are included. A resumed transcript replaces what is on screen,
+ * so dropping them left the scrollback starting at the next row, which is the
+ * turn's reasoning. The host overlays its own message ids afterwards so a
+ * checkpoint still addresses the bubble it recorded.
  */
 export function translateTurnItems(items: ThreadItem[]): TranscriptItem[] {
   const seen = new Set<string>();
   const transcript: TranscriptItem[] = [];
   for (const item of items) {
-    if (item.type === 'userMessage') {
-      // The host renders the user turn optimistically and persists it; a replayed
-      // user message would double it, so it is skipped here on purpose.
-      continue;
-    }
     if (seen.has(item.id)) {
       continue;
     }

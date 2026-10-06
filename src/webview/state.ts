@@ -110,6 +110,10 @@ export interface AppState {
   /** Host-side conversation id, present once a thread exists. */
   activeThreadId?: string;
   transcript: TranscriptItemView[];
+  /** True when the host can prepend rows older than `transcript`. */
+  hasOlderHistory: boolean;
+  /** True while an older page is being read. */
+  loadingOlder: boolean;
   /**
    * Tokens currently occupying the context window. Provider counts replace this;
    * streamed text adds to it between those counts so the ring moves while a
@@ -274,6 +278,16 @@ export type Action =
       plan?: PlanArtifact;
       /** Keep the optimistic user line when a send opens a new thread. */
       keepPendingUserMessage?: boolean;
+      /** True when rows older than `replay` can still be loaded. */
+      hasOlderHistory?: boolean;
+    }
+  | { type: 'olderHistoryLoading' }
+  | {
+      type: 'olderHistory';
+      backendId: string;
+      threadId?: string;
+      items: TranscriptItem[];
+      hasOlderHistory: boolean;
     }
   | { type: 'questionAsked'; request: QuestionRequest }
   | { type: 'questionCleared' }
@@ -378,6 +392,8 @@ export const initialState: AppState = {
   permissionEpoch: 0,
   mode: 'agent',
   transcript: [],
+  hasOlderHistory: false,
+  loadingOlder: false,
   busy: false,
   startingTurn: false,
   restoring: true,
@@ -624,6 +640,8 @@ export function reduce(state: AppState, action: Action): AppState {
         // A replay replaces the transcript; a fresh conversation clears it.
         // A send that just opened this thread keeps the optimistic user line.
         transcript: nextTranscript,
+        hasOlderHistory: action.hasOlderHistory ?? false,
+        loadingOlder: false,
         contextUsedTokens: estimateConversationTokens(nextTranscript),
         contextWindowTokens: changedModel ? undefined : state.contextWindowTokens,
         // A plan is carried with the conversation so a resumed thread reopens it.
@@ -645,6 +663,23 @@ export function reduce(state: AppState, action: Action): AppState {
         checkpoints: undefined,
         restoreResult: undefined,
         restoreConfirmation: undefined
+      };
+    }
+    case 'olderHistoryLoading':
+      return { ...state, loadingOlder: true };
+    case 'olderHistory': {
+      if (action.threadId !== state.activeThreadId || action.backendId !== state.selectedBackendId) {
+        return { ...state, loadingOlder: false };
+      }
+      const seen = new Set(state.transcript.map((item) => item.id));
+      const older = action.items.map(toTranscriptItemView(action.backendId)).filter((item) => !seen.has(item.id));
+      const transcript = older.length > 0 ? [...older, ...state.transcript] : state.transcript;
+      return {
+        ...state,
+        loadingOlder: false,
+        hasOlderHistory: action.hasOlderHistory,
+        transcript,
+        contextUsedTokens: estimateConversationTokens(transcript)
       };
     }
     case 'questionAsked':

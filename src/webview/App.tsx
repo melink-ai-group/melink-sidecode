@@ -198,6 +198,10 @@ export function App(): JSX.Element {
   const pinnedThreadRef = useRef<string | undefined>(undefined);
   /** Ignore the scroll event fired by our own jump to the bottom. */
   const ignoreTranscriptScrollRef = useRef(false);
+  /** Scroll height before older rows were prepended, so the reader stays on the same line. */
+  const olderAnchorRef = useRef<{ height: number; top: number } | null>(null);
+  /** A page that added nothing should not immediately request another. */
+  const olderStallRef = useRef(false);
   /**
    * The in-flight attach request. A late `attachmentsPicked` from a superseded
    * pick is ignored, so an old response cannot repopulate cleared chips.
@@ -290,6 +294,8 @@ export function App(): JSX.Element {
           dispatch({ type: 'questionCleared' });
           break;
         case 'conversation':
+          olderStallRef.current = false;
+          olderAnchorRef.current = null;
           dispatch({
             type: 'conversation',
             backendId: message.backendId,
@@ -301,7 +307,20 @@ export function App(): JSX.Element {
             pendingApproval: message.pendingApproval,
             pendingQuestion: message.pendingQuestion,
             plan: message.plan,
-            keepPendingUserMessage: message.keepPendingUserMessage
+            keepPendingUserMessage: message.keepPendingUserMessage,
+            hasOlderHistory: message.hasOlderHistory
+          });
+          break;
+        case 'olderHistory':
+          if (message.items.length === 0) {
+            olderStallRef.current = true;
+          }
+          dispatch({
+            type: 'olderHistory',
+            backendId: message.backendId,
+            threadId: message.threadId,
+            items: message.items,
+            hasOlderHistory: message.hasOlderHistory
           });
           break;
         case 'restoring':
@@ -481,6 +500,22 @@ export function App(): JSX.Element {
     }
   }, [state.selectedBackendId, state.selectedModel]);
 
+  const requestOlder = (fromReader = false): void => {
+    if (fromReader) {
+      olderStallRef.current = false;
+    }
+    if (state.restoring || !state.hasOlderHistory || state.loadingOlder || olderStallRef.current) {
+      return;
+    }
+    const el = transcriptRef.current;
+    if (el) {
+      olderAnchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+    }
+    stickToBottomRef.current = false;
+    dispatch({ type: 'olderHistoryLoading' });
+    bridge.post({ type: 'loadOlderHistory' });
+  };
+
   const onTranscriptScroll = (): void => {
     if (ignoreTranscriptScrollRef.current) {
       return;
@@ -491,6 +526,12 @@ export function App(): JSX.Element {
     }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distance <= 48;
+    if (el.scrollTop > 120) {
+      olderStallRef.current = false;
+    }
+    if (el.scrollTop < 48) {
+      requestOlder();
+    }
   };
 
   const scrollTranscriptToBottom = (): void => {
@@ -507,7 +548,7 @@ export function App(): JSX.Element {
     // While restoring, the transcript shows a placeholder instead of the
     // messages. Scrolling then would pin the short placeholder; wait until the
     // conversation is actually on screen.
-    if (state.restoring) {
+    if (state.restoring || olderAnchorRef.current) {
       return;
     }
     const threadChanged = pinnedThreadRef.current !== state.activeThreadId;
@@ -538,6 +579,23 @@ export function App(): JSX.Element {
     state.settingsOpen,
     state.rulesOpen
   ]);
+
+  useLayoutEffect(() => {
+    const anchor = olderAnchorRef.current;
+    const el = transcriptRef.current;
+    if (!anchor || !el || state.loadingOlder) {
+      return;
+    }
+    olderAnchorRef.current = null;
+    const nextTop = anchor.top + (el.scrollHeight - anchor.height);
+    ignoreTranscriptScrollRef.current = true;
+    el.scrollTop = nextTop;
+    stickToBottomRef.current = false;
+    ignoreTranscriptScrollRef.current = false;
+    if (nextTop < 48 && state.hasOlderHistory) {
+      olderStallRef.current = true;
+    }
+  }, [state.transcript, state.loadingOlder, state.hasOlderHistory]);
 
   // Read the review snapshot for a turn the host recorded. The host pushes the
   // authoritative change set (and reposts the latest one on reload); the review
@@ -1666,6 +1724,13 @@ export function App(): JSX.Element {
         aria-label="Conversation transcript"
         onScroll={onTranscriptScroll}
       >
+        {!state.restoring && state.hasOlderHistory ? (
+          <div className="history-more">
+            <button type="button" onClick={() => requestOlder(true)} disabled={state.loadingOlder}>
+              {state.loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
+            </button>
+          </div>
+        ) : null}
         {state.restoring ? (
           <div className="restoring" role="status">
             <span className="spinner" aria-hidden="true" />

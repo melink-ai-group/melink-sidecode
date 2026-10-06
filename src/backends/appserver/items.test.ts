@@ -107,7 +107,7 @@ test('fileChange maps its changes to renderable file entries with diff counts', 
   ]);
 });
 
-test('translateTurnItems skips user messages so a replay cannot double them', () => {
+test('translateTurnItems keeps the user message so a restored turn does not start at reasoning', () => {
   const items: ThreadItem[] = [
     {
       type: 'userMessage',
@@ -115,12 +115,18 @@ test('translateTurnItems skips user messages so a replay cannot double them', ()
       clientId: null,
       content: [{ type: 'text', text: 'hi', text_elements: [] }]
     },
+    { type: 'reasoning', id: 'r1', summary: ['looking'], content: [] },
     { type: 'agentMessage', id: 'a1', text: 'hello', phase: null, memoryCitation: null, delivery: null, questions: null }
   ];
   const transcript = translateTurnItems(items);
-  assert.equal(transcript.length, 1);
-  assert.equal(transcript[0]?.id, 'a1');
-  assert.equal(transcript[0]?.status, 'completed');
+  assert.deepEqual(
+    transcript.map((item) => item.id),
+    ['u1', 'r1', 'a1']
+  );
+  assert.equal(transcript[0]?.role, 'user');
+  assert.equal(transcript[0]?.text, 'hi');
+  assert.equal(transcript[1]?.kind, 'reasoning');
+  assert.equal(transcript.every((item) => item.status === 'completed'), true);
 });
 
 test('dynamicToolCall labels the tool and keeps the real argument, not the status', () => {
