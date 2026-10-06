@@ -814,8 +814,8 @@ html body {
  * stick-to-bottom both use scrollHeight, which includes this gap. */
 .transcript::after {
   content: "";
-  flex: 0 0 35vh;
-  height: 35vh;
+  flex: 0 0 25vh;
+  height: 25vh;
   margin-top: -16px;
 }
 
@@ -5634,12 +5634,23 @@ button.context-meter:hover {
   color: var(--vscode-descriptionForeground);
 }
 
-.todo__retry {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 0 8px 8px;
+.todo__resume {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--melink-radius-sm, 4px);
+  border-color: var(--vscode-editorWarning-foreground);
+  background: var(--vscode-editorWarning-foreground);
+  color: var(--vscode-editor-background);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.todo__resume:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, black);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, black);
+  color: var(--vscode-editor-background);
 }
 
 @media (max-width: 340px) {

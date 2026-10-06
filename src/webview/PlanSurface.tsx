@@ -7,8 +7,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CrossIcon,
-  FileIcon,
-  RefreshIcon
+  FileIcon
 } from './Icons';
 
 /**
@@ -310,6 +309,16 @@ function TodoList({
             <span className="todo__progress-text">{progressText}</span>
           </span>
         </button>
+        {stopped ? (
+          <button
+            className="btn todo__resume"
+            type="button"
+            title="Resume remaining steps"
+            onClick={() => onRevise('Continue the remaining steps of this plan.')}
+          >
+            Resume
+          </button>
+        ) : null}
         {plan.path ? (
           <button className="icon-btn" type="button" title="Open plan" aria-label="Open plan" onClick={onOpenPlan}>
             <FileIcon />
@@ -333,15 +342,6 @@ function TodoList({
             <TodoRow key={`${index}-${step.text}`} step={step} live={busy} />
           ))}
         </ul>
-      ) : null}
-
-      {stopped ? (
-        <p className="todo__retry">
-          <button className="btn" type="button" onClick={() => onRevise('Continue the remaining steps of this plan.')}>
-            <RefreshIcon />
-            Resume remaining steps
-          </button>
-        </p>
       ) : null}
     </section>
   );
