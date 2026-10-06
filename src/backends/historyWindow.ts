@@ -1,4 +1,5 @@
-import type { TranscriptItem } from './types.ts';
+import type { Attachment, TranscriptItem } from './types.ts';
+import { takeAttachmentSection } from './userPrompt.ts';
 
 /**
  * How many transcript items a restored chat paints at first, and how many more
@@ -98,10 +99,10 @@ export function withStoredUserIds(serverItems: readonly TranscriptItem[], stored
     if (item.kind !== 'message' || item.role !== 'user') {
       return item;
     }
-    const text = (item.text ?? '').trim();
+    const text = promptKey(item.text);
     let found = -1;
     for (let index = cursor; index < storedUsers.length; index += 1) {
-      if ((storedUsers[index].text ?? '').trim() === text) {
+      if (promptKey(storedUsers[index].text) === text) {
         found = index;
         break;
       }
@@ -111,10 +112,46 @@ export function withStoredUserIds(serverItems: readonly TranscriptItem[], stored
     }
     const match = storedUsers[found];
     cursor = found + 1;
-    return { ...item, id: match.id, attachments: match.attachments ?? item.attachments };
+    return {
+      ...item,
+      id: match.id,
+      text: match.text ?? item.text,
+      attachments: preferStoredAttachments(match.attachments, item.attachments)
+    };
   });
-  const rest = storedUsers.slice(cursor);
+  const seen = new Set(overlaid.filter((item) => item.kind === 'message' && item.role === 'user').map((item) => promptKey(item.text)));
+  const rest = storedUsers.slice(cursor).filter((item) => !seen.has(promptKey(item.text)));
   return rest.length > 0 ? [...overlaid, ...rest] : overlaid;
+}
+
+/** The words the user typed, without the provider's attachment list. */
+function promptKey(text: string | undefined): string {
+  return takeAttachmentSection(text ?? '').text.trim();
+}
+
+/**
+ * The stored row is the one the composer saved: its id is what a checkpoint
+ * addresses, and its file list is the one the user attached. A path or preview
+ * recovered from the provider fills a gap, and never replaces that list.
+ */
+function preferStoredAttachments(
+  stored: Attachment[] | undefined,
+  recovered: Attachment[] | undefined
+): Attachment[] | undefined {
+  if (!stored || stored.length === 0) {
+    return recovered && recovered.length > 0 ? recovered : undefined;
+  }
+  return stored.map((item) => {
+    const match = recovered?.find((entry) => (item.path && entry.path === item.path) || entry.name === item.name);
+    if (!match) {
+      return item;
+    }
+    return {
+      ...item,
+      ...(item.path ? {} : match.path ? { path: match.path } : {}),
+      ...(item.dataUrl ? {} : match.dataUrl ? { dataUrl: match.dataUrl } : {})
+    };
+  });
 }
 
 /**

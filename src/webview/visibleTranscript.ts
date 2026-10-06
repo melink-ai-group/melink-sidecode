@@ -11,6 +11,7 @@
  */
 
 import { PROVIDER_ONLY_LINES } from '../context/providerCopy.ts';
+import { takeAttachmentSection } from '../backends/userPrompt.ts';
 import { hideQuestionFence } from '../questions.ts';
 
 const CLOSED_BLOCK =
@@ -18,13 +19,22 @@ const CLOSED_BLOCK =
 
 const MODE_LINE = /^Work in (?:Agent|Plan|Ask) mode\.[^\n]*$/gm;
 
+/** One paragraph Codex adds when a resumed thread leaves Plan mode. */
+const REVOKED_MODE = /^The developer instruction that required [\s\S]*?(?=\n\n|$)/;
+
+/** The sentence in front of a replacement project snapshot. */
+const SNAPSHOT_INTRO = /^The project context below replaces the project context from the start of this thread\.\n*/;
+
 const OPEN_BLOCK = /<(project-context|project-context-update|attached-file)>/;
 
 const PROVIDER_LINE = new Set<string>(PROVIDER_ONLY_LINES);
 
 /** Transcript text with injected instructions and context blocks removed. */
 export function visibleTranscriptText(text: string, options?: { hideQuestions?: boolean }): string {
-  let next = text.replace(CLOSED_BLOCK, '');
+  let next = takeAttachmentSection(text).text;
+  next = next.replace(REVOKED_MODE, '');
+  next = next.replace(SNAPSHOT_INTRO, '');
+  next = next.replace(CLOSED_BLOCK, '');
   next = next.replace(MODE_LINE, '');
   next = stripProviderLines(next);
   next = stripUnclosedPrompt(next);

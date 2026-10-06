@@ -70,6 +70,27 @@ test('a server user row keeps the stored message id so a checkpoint still addres
   );
 });
 
+test('a provider attachment list matches the stored prompt and keeps its files', () => {
+  const server = [
+    item(
+      'server-user',
+      'user',
+      'Attached files:\nImage: image.png\n\nI have innovate running and disabled "Tests".'
+    )
+  ];
+  const stored = [
+    {
+      ...item('user_2', 'user', 'I have innovate running and disabled "Tests".'),
+      attachments: [{ id: 'a1', name: 'image.png', path: 'C:\\work\\image.png', mimeType: 'image/png', kind: 'image' as const }]
+    }
+  ];
+  const merged = withStoredUserIds(server, stored);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.id, 'user_2');
+  assert.equal(merged[0]?.text, 'I have innovate running and disabled "Tests".');
+  assert.equal(merged[0]?.attachments?.[0]?.path, 'C:\\work\\image.png');
+});
+
 test('a user message sent after the server snapshot stays at the end', () => {
   const server = [item('server-user', 'user', 'first')];
   const stored = [item('user_1', 'user', 'first'), item('user_2', 'user', 'second')];

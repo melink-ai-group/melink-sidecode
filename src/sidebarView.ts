@@ -1059,7 +1059,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private async repaintIfActive(backendId: string, threadId: string): Promise<void> {
     if (this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
-      this.repaintSession();
+      await this.repaintSession();
     }
   }
 
@@ -1291,7 +1291,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       if (session.activeThread) {
-        this.repaintSession();
+        await this.repaintSession();
         await this.postLatestChanges();
         await this.postActiveCheckpoints();
         return;
@@ -1303,7 +1303,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Re-send the visible tab's stored conversation without starting a new thread. */
-  private repaintSession(): void {
+  private async repaintSession(): Promise<void> {
     const thread = this.activeThread;
     if (!thread) {
       this.postFreshConversation();
@@ -1321,7 +1321,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       model,
       permissionLevel: this.permissionLevel,
       mode: this.mode,
-      replay: history.replay,
+      replay: await this.previewReplay(history.replay),
       hasOlderHistory: history.hasOlderHistory,
       pendingApproval: this.pendingApproval,
       pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
@@ -2146,7 +2146,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           permissionLevel: level,
           mode,
           pendingQuestion: this.pendingQuestionPayload(backendId, handle.threadId),
-          ...(history ? { replay: history.replay, hasOlderHistory: history.hasOlderHistory } : { hasOlderHistory: false }),
+          ...(history
+            ? { replay: await this.previewReplay(history.replay), hasOlderHistory: history.hasOlderHistory }
+            : { hasOlderHistory: false }),
           ...(this.store.getPlanState(backendId, handle.threadId)
             ? { plan: this.planArtifact(backendId, handle.threadId) }
             : {}),
@@ -2282,13 +2284,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       if (hidden > 0) {
         const revealed = revealStoredHistory(items, hidden);
         session.historyHidden = revealed.hidden;
-        this.postOlder(thread, revealed.added, revealed.hidden > 0 || Boolean(session.serverHasOlder));
+        await this.postOlder(thread, revealed.added, revealed.hidden > 0 || Boolean(session.serverHasOlder));
         return;
       }
       const backend = this.registry.get(thread.backendId);
       if (!session.serverHasOlder || !backend?.loadOlderHistory) {
         session.serverHasOlder = false;
-        this.postOlder(thread, [], false);
+        await this.postOlder(thread, [], false);
         return;
       }
       let current = items;
@@ -2308,25 +2310,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       session.loadedTranscript = current;
       session.historyHidden = hidden;
       session.serverHasOlder = hasMore;
-      this.postOlder(thread, added, hidden > 0 || hasMore);
+      await this.postOlder(thread, added, hidden > 0 || hasMore);
     } catch (error) {
       this.post({
         type: 'notice',
         level: 'warning',
         message: error instanceof Error ? error.message : 'Earlier messages could not be loaded.'
       });
-      this.postOlder(thread, [], (session.historyHidden ?? 0) > 0 || Boolean(session.serverHasOlder));
+      await this.postOlder(thread, [], (session.historyHidden ?? 0) > 0 || Boolean(session.serverHasOlder));
     } finally {
       this.olderHistoryInFlight = false;
     }
   }
 
-  private postOlder(thread: ThreadHandle, items: TranscriptItem[], hasOlderHistory: boolean): void {
+  private async postOlder(thread: ThreadHandle, items: TranscriptItem[], hasOlderHistory: boolean): Promise<void> {
     this.post({
       type: 'olderHistory',
       backendId: thread.backendId,
       threadId: thread.threadId,
-      items,
+      items: await this.previewReplay(items),
       hasOlderHistory
     });
   }
@@ -2400,7 +2402,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         model: result.model,
         permissionLevel: this.permissionLevel,
         mode: this.mode,
-        replay: history.replay,
+        replay: await this.previewReplay(history.replay),
         hasOlderHistory: history.hasOlderHistory,
         pendingApproval: this.pendingApproval,
         pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
@@ -2541,7 +2543,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           model,
           permissionLevel: this.permissionLevel,
           mode: this.mode,
-          replay: history.replay,
+          replay: await this.previewReplay(history.replay),
           hasOlderHistory: history.hasOlderHistory,
           pendingQuestion: this.pendingQuestionPayload(active.backendId, active.threadId),
           plan: this.store.getPlanState(active.backendId, active.threadId)
@@ -2695,9 +2697,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!backend) {
       return;
     }
-    // Inline clipboard image bytes are for the outgoing turn only; the durable
-    // transcript keeps names and sizes, never file contents.
-    const persisted = persistableAttachments(attachments);
+    // Clipboard images have no path. Copy them into workspace storage first so
+    // a reload can show the same thumbnail. The transcript then keeps the path,
+    // not the bytes, and workspace state stays free of file contents.
+    const persisted = persistableAttachments(await this.retainClipboardAttachments(attachments));
     const resolvedModel = model ?? this.activeThread.model;
     const level = this.resolvePermission(activeBackendId, permissionLevel ?? this.permissionLevel);
     await this.rememberPermission(level);
@@ -3857,6 +3860,68 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   </body>
 </html>`;
   }
+
+  /**
+   * Read image bytes for the webview preview. The stored attachment keeps only
+   * its path, so this copy is what the bubble shows and is not written back.
+   */
+  private async previewReplay(items: TranscriptItem[]): Promise<TranscriptItem[]> {
+    return Promise.all(
+      items.map(async (item) => {
+        if (!item.attachments?.some((attachment) => attachment.kind === 'image' && attachment.path && !attachment.dataUrl)) {
+          return item;
+        }
+        const attachments = await Promise.all(item.attachments.map((attachment) => this.previewAttachment(attachment)));
+        return { ...item, attachments };
+      })
+    );
+  }
+
+  /** A clipboard image has no path until its bytes are copied into workspace storage. */
+  private async retainClipboardAttachments(attachments: readonly Attachment[] | undefined): Promise<Attachment[] | undefined> {
+    if (!attachments || attachments.length === 0) {
+      return undefined;
+    }
+    const root = this.context.storageUri;
+    const saved: Attachment[] = [];
+    for (const attachment of attachments) {
+      if (!attachment.dataUrl || attachment.path || !root) {
+        saved.push(attachment);
+        continue;
+      }
+      const bytes = decodeDataUrl(attachment.dataUrl);
+      if (!bytes || bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        saved.push(attachment);
+        continue;
+      }
+      try {
+        const folder = vscode.Uri.joinPath(root, 'attachments');
+        await vscode.workspace.fs.createDirectory(folder);
+        const file = vscode.Uri.joinPath(folder, `${safeDraftFileName(attachment.id)}${extensionForAttachment(attachment)}`);
+        await vscode.workspace.fs.writeFile(file, bytes);
+        saved.push({ ...attachment, path: file.fsPath });
+      } catch {
+        saved.push(attachment);
+      }
+    }
+    return saved;
+  }
+
+  private async previewAttachment(attachment: Attachment): Promise<Attachment> {
+    if (attachment.kind !== 'image' || !attachment.path || attachment.dataUrl) {
+      return attachment;
+    }
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(attachment.path));
+      if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        return attachment;
+      }
+      const mime = attachment.mimeType || 'image/png';
+      return { ...attachment, dataUrl: `data:${mime};base64,${Buffer.from(bytes).toString('base64')}` };
+    } catch {
+      return attachment;
+    }
+  }
 }
 
 /**
@@ -4022,7 +4087,6 @@ function safeDraftFileName(id: string): string {
   return cleaned || 'attachment';
 }
 
-/** Strip inline bytes before an attachment is persisted to workspace state. */
 function rewindKey(backendId: string, threadId: string): string {
   return `${backendId}\0${threadId}`;
 }
@@ -4053,6 +4117,24 @@ function userMessageTime(id: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+function extensionForAttachment(attachment: Attachment): string {
+  const fromName = attachment.name.includes('.') ? attachment.name.slice(attachment.name.lastIndexOf('.')) : '';
+  if (fromName) {
+    return fromName;
+  }
+  if (attachment.mimeType === 'image/jpeg') {
+    return '.jpg';
+  }
+  if (attachment.mimeType === 'image/gif') {
+    return '.gif';
+  }
+  if (attachment.mimeType === 'image/webp') {
+    return '.webp';
+  }
+  return '.png';
+}
+
+/** Strip inline bytes before an attachment is persisted. The path, when one was saved, stays. */
 function persistableAttachments(attachments?: readonly Attachment[]): Attachment[] | undefined {
   if (!attachments || attachments.length === 0) {
     return undefined;
