@@ -848,7 +848,8 @@ html body {
   display: block;
   width: auto;
   margin: 0;
-  padding: 12px 12px 6px;
+  padding: 14px 12px 10px;
+  line-height: 1.5;
   border: 0;
   border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: 0;
@@ -868,17 +869,16 @@ html body {
   overflow: hidden;
   color: white;
   font-size: 13px;
-  line-height: 1.35;
-  max-height: calc(1.35em * 3);
-  padding: 6px 10px;
+  line-height: 1.5;
+  padding: 10px 12px;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-lg, 8px);
   background: color-mix(in srgb, var(--vscode-list-hoverBackground) 75%, transparent);
 }
 
 .user-pin__text--fade {
-  -webkit-mask-image: linear-gradient(to bottom, #000 58%, #000 78%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 58%, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 70%, #000 88%, transparent 100%);
 }
 
 .user-pin:hover .user-pin__text {
