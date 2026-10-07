@@ -599,6 +599,13 @@ export function App(): JSX.Element {
     syncPinnedUser();
   };
 
+  /** A message the reader just sent should land in view, even after they scrolled up. */
+  const followSentMessage = (): void => {
+    stickToBottomRef.current = true;
+    pinLockRef.current = false;
+    olderAnchorRef.current = null;
+  };
+
   useLayoutEffect(() => {
     // While restoring, the transcript shows a placeholder instead of the
     // messages. Scrolling then would pin the short placeholder; wait until the
@@ -1004,6 +1011,7 @@ export function App(): JSX.Element {
     }
     if (state.busy) {
       if (!text || state.attachments.length > 0 || !acceptsSteer(active?.id)) return;
+      followSentMessage();
       dispatch({ type: 'localUserMessage', text });
       bridge.post({ type: 'steerTurn', text });
       dispatch({ type: 'dismissNotice' });
@@ -1011,6 +1019,7 @@ export function App(): JSX.Element {
       publishComposer(activeChatTabIdRef.current, '', state.attachments);
       return;
     }
+    followSentMessage();
     dispatch({ type: 'localUserMessage', text, attachments: state.attachments });
     dispatch({ type: 'dismissNotice' });
     bridge.post({
@@ -1293,6 +1302,7 @@ export function App(): JSX.Element {
       return;
     }
     const text = next.trim();
+    followSentMessage();
     dispatch({ type: 'localUserMessage', text, attachments: state.attachments });
     dispatch({ type: 'dismissNotice' });
     dispatch({ type: 'dismissAttachmentError' });
@@ -1486,6 +1496,7 @@ export function App(): JSX.Element {
       return;
     }
     dispatch({ type: 'planRevising' });
+    followSentMessage();
     dispatch({ type: 'localUserMessage', text });
     bridge.post({
       type: 'sendTurn',
@@ -2037,6 +2048,7 @@ export function App(): JSX.Element {
                 return;
               }
               dispatch({ type: 'questionCleared' });
+              followSentMessage();
               dispatch({ type: 'localUserMessage', text: formatQuestionAnswers(request.questions, answers) });
               bridge.post({ type: 'answerQuestion', requestId: request.id, answers });
             }}

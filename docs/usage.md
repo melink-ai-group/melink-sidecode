@@ -47,7 +47,7 @@ There are four possible states per provider:
 |---|---|
 | **available** | Usable now; its models appear in the picker. |
 | **unauthenticated** | Runs, but has no usable credential. Shown with a **Set token** action (Ollama) or a jump to settings (Codex). |
-| **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0–0.156.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
+| **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0–0.160.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
 | **unavailable** | Cannot run at all (e.g. the Codex CLI is not installed). Hidden entirely — never rendered as broken. |
 
 **Providers are isolated.** If one provider is missing, unauthenticated, or

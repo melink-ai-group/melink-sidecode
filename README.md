@@ -234,7 +234,7 @@ opencode and Codex paths were verified against the versions pinned below.
   expose `baseInstructions`/`developerInstructions` on `thread/start` and
   `thread/resume`, and no per-turn instructions field on `turn/start`. That is
   why Codex priming is native at start/resume and left to Codex's own file access
-  mid-thread. The supported protocol window is `0.154.0–0.156.x`; a server
+  mid-thread. The supported protocol window is `0.154.0–0.160.x`; a server
   outside it is reported as `incompatible` with its version rather than used.
 - **opencode: `1.1.65`** — `opencode run --help` exposes no
   system/instructions flag, so the snapshot is delivered by priming the turn text.
@@ -426,7 +426,7 @@ Generated protocol bindings are checked in under `schemas/` and the extension
 compiles against them, so a protocol drift surfaces as a build/type error rather
 than a runtime mystery. At runtime, the server's own version (from the
 `initialize` user agent, or `codex --version` when the handshake times out) is
-checked against the pinned protocol window: a version outside `0.154.0–0.156.x`
+checked against the pinned protocol window: a version outside `0.154.0–0.160.x`
 is reported as the specific `incompatible` status carrying that version, never the
 generic `unavailable` state and never a silent no-op.
 
