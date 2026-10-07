@@ -246,6 +246,11 @@ export class BackendRegistry implements Disposable {
     return this.settings.resolve(providerId, modelId, capabilities, appDefaults);
   }
 
+  /** The shared override for one model, before this chat pins its own copy. */
+  modelSettingOverrides(providerId: string, modelId: string): ModelSettingOverrides {
+    return { ...this.settings.getOverrides(providerId, modelId) };
+  }
+
   /**
    * Persist a per-model override, clamped against the model's reported range
    * before it is stored, and return the freshly resolved settings.

@@ -228,6 +228,29 @@ test('a permission pick survives a stale permissions snapshot and a new conversa
   assert.equal(nextChat.permissionLevel, 'read-only');
 });
 
+test('switching chats applies that chat\'s mode to the mode menu', () => {
+  const withModes = reduce(initialState, {
+    type: 'modes',
+    modes: {
+      backendId: 'codex',
+      options: [
+        { mode: 'agent', label: 'Agent', description: '' },
+        { mode: 'plan', label: 'Plan', description: '' }
+      ],
+      selected: 'agent'
+    }
+  });
+  const planned = reduce(withModes, {
+    type: 'conversation',
+    backendId: 'codex',
+    mode: 'plan',
+    model: 'gpt-6'
+  });
+  assert.equal(planned.mode, 'plan');
+  assert.equal(planned.modeOptions?.selected, 'plan');
+  assert.equal(planned.selectedModel, 'gpt-6');
+});
+
 test('attachments accumulate, dedupe by path, and remove one chip at a time', () => {
   const image = { id: 'a1', name: 'shot.png', path: '/w/shot.png', mimeType: 'image/png', kind: 'image' as const };
   const note = { id: 'a2', name: 'notes.txt', path: '/w/notes.txt', mimeType: 'text/plain', kind: 'text' as const };

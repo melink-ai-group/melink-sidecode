@@ -620,6 +620,10 @@ export function reduce(state: AppState, action: Action): AppState {
         permissionLevel: action.permissionLevel ?? state.permissionLevel,
         permissionEpoch: action.permissionLevel !== undefined ? state.permissionEpoch + 1 : state.permissionEpoch,
         mode: action.mode ?? state.mode,
+        modeOptions:
+          state.modeOptions?.backendId === action.backendId
+            ? { ...state.modeOptions, selected: action.mode ?? state.mode }
+            : state.modeOptions,
         activeThreadId: action.threadId,
         // A failure banner belongs to the conversation that produced it.
         notice:
@@ -955,7 +959,14 @@ export function reduce(state: AppState, action: Action): AppState {
         modelCapabilityError: undefined
       };
     case 'modelCapabilityLoading':
-      return { ...state, modelCapabilityStatus: 'loading', modelCapabilityError: undefined };
+      // Drop the previous snapshot so a tab switch cannot keep showing another
+      // chat's thinking level while this chat's settings are read.
+      return {
+        ...state,
+        modelCapability: undefined,
+        modelCapabilityStatus: 'loading',
+        modelCapabilityError: undefined
+      };
     case 'modelCapabilityError':
       // Ignore a failure for a model that is no longer selected, so a slow
       // failed read never errors the panel showing the current model.
