@@ -3231,6 +3231,40 @@ html body {
   }
 }
 
+/* OpenCode and semantic search sit under the Ollama provider as their own
+   subsections, inset from the credential fields. */
+
+.settings-subs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.settings-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+}
+
+.settings-sub__title {
+  margin: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--vscode-foreground);
+}
+
+.settings-sub .field-help {
+  margin: 0;
+}
+
 /* Optional opencode runtime: a labelled switch, a conditional CLI path, and a
    three-state status line. The control colour is the neutral button/input
    token, never the brand hue; state is carried by text and dot so it is not

@@ -178,7 +178,7 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       { "melink.ollama.opencode.enabled": true }
       ```
       Reload the window and open the sidebar.
-- [ ] 14a1. **zvec-grep.** Open settings with opencode on and turn **Use zvec-grep**
+- [ ] 14a1. **zvec-grep.** Open settings with opencode on and, under **OpenCode Semantic Search**, turn **Use semantic search**
       on. If `zg` is missing and Node.js is 22 or newer, the sidebar installs
       `@zvec/zvec-grep`, then runs `zg install --target opencode --yes`.
       Confirm the checkbox stays on and the user OpenCode config

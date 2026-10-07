@@ -47,6 +47,27 @@ function asToolString(value: unknown): string | undefined {
   return typeof value === 'string' ? cleanToolTarget(value) : undefined;
 }
 
+/** OpenCode names this `zvec_grep_zvec_grep_search`; other hosts drop or prefix the server. */
+export function isZvecSemanticSearch(tool: string): boolean {
+  const id = tool.trim().toLowerCase();
+  return id === 'zvec_grep_search' || id.endsWith('_zvec_grep_search');
+}
+
+function searchPhrase(input: Record<string, unknown> | undefined): string | undefined {
+  const query = pick(input, ['query']);
+  if (query) {
+    return query;
+  }
+  const listed = input?.fts ?? input?.queries;
+  if (Array.isArray(listed)) {
+    const terms = listed.map((entry) => asToolString(entry)).filter((entry): entry is string => entry !== undefined);
+    if (terms.length > 0) {
+      return terms.join(', ');
+    }
+  }
+  return pick(input, ['pattern', 'search', 'regex']);
+}
+
 function pick(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
   if (!record) {
     return undefined;
@@ -70,6 +91,9 @@ export function targetForTool(
   metadata?: Record<string, unknown>
 ): string | undefined {
   const id = tool.trim().toLowerCase();
+  if (isZvecSemanticSearch(id)) {
+    return searchPhrase(input) ?? searchPhrase(metadata);
+  }
   const file =
     pick(metadata, ['filepath', 'filePath', 'file_path', 'path']) ??
     pick(input, ['filePath', 'file_path', 'filepath', 'path', 'file', 'filename', 'directory', 'dir']);
@@ -151,6 +175,9 @@ function humanizeTool(tool: string): string {
 export function friendlyToolTitle(tool: string, target?: string): string {
   const id = tool.trim().toLowerCase();
   const name = cleanToolTarget(target);
+  if (isZvecSemanticSearch(id)) {
+    return name ? `Searching for ${name}` : 'Searching';
+  }
   switch (id) {
     case 'read':
       return name ? `Reading ${fileLabel(name)}` : 'Reading';

@@ -162,7 +162,7 @@ streams chat and does not spawn opencode.
 
 - **Path.** `melink.ollama.opencode.path` defaults to `opencode`, resolved from
   `PATH` when it is a bare name, exactly like `melink.codex.path`.
-- **zvec-grep.** With the runtime on, **Use zvec-grep** connects
+- **zvec-grep.** With the runtime on, **OpenCode Semantic Search** → **Use semantic search** connects
   [zvec-grep](https://github.com/zvec-ai/zvec-grep) through its official
   OpenCode installer (`zg install --target opencode`). If `zg` is not on
   `PATH`, the sidebar installs `@zvec/zvec-grep` (Node.js 22 or newer) first.

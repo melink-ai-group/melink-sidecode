@@ -7,7 +7,7 @@
  * A single item stays the row it already is.
  */
 
-import { isRawToolName } from '../backends/toolLabel.ts';
+import { isRawToolName, isZvecSemanticSearch } from '../backends/toolLabel.ts';
 import { plainRowText } from './plainRowText.ts';
 import type { ItemStatus, TranscriptItemView } from './state.ts';
 
@@ -461,7 +461,7 @@ function fromToolId(tool: string): Classified | undefined {
   if (FILE_TOOLS.has(tool)) {
     return { family: 'lookup', bucket: 'file' };
   }
-  if (SEARCH_TOOLS.has(tool)) {
+  if (SEARCH_TOOLS.has(tool) || isZvecSemanticSearch(tool)) {
     return { family: 'lookup', bucket: 'search' };
   }
   if (EDIT_TOOLS.has(tool)) {
