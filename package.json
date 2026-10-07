@@ -101,6 +101,11 @@
           "default": "opencode",
           "description": "Path to the opencode CLI executable used when melink.ollama.opencode.enabled is on. Resolved from PATH when it is a bare name."
         },
+        "melink.ollama.opencode.zvecGrep": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. Turning it on installs the `zg` CLI when it is missing and runs `zg --install --target opencode`. Turning it off removes that integration and leaves the CLI installed. Stored in user settings because the installer edits the user OpenCode config."
+        },
         "melink.codex.path": {
           "type": "string",
           "default": "codex",

@@ -16,6 +16,7 @@ import {
   type OpencodeProbeResult,
   type OpencodeUpgradeResult
 } from './backends/opencode/status';
+import { applyZvecGrep, detectZvecGrep, type ZvecGrepApplyResult, type ZvecGrepStatus } from './backends/opencode/zvecGrep';
 import {
   CONTEXT_SECTION,
   DEFAULT_CONTEXT_SETTINGS,
@@ -293,12 +294,43 @@ export class SettingsService {
     const enabled = this.opencodeEnabled(config);
     const path = this.opencodePath(config);
     if (!enabled) {
-      return { enabled, path, status: 'missing' };
+      return { enabled, path, status: 'missing', zvecGrep: { enabled: false, cli: 'missing' } };
     }
     const result: OpencodeProbeResult = await probeOpencode(path);
+    const zvecGrep = await this.zvecGrepStatus();
     return result.version !== undefined
-      ? { enabled, path, status: result.status, version: result.version }
-      : { enabled, path, status: result.status };
+      ? { enabled, path, status: result.status, version: result.version, zvecGrep }
+      : { enabled, path, status: result.status, zvecGrep };
+  }
+
+  /**
+   * Whether zvec-grep is connected to OpenCode. Probed only while the runtime
+   * is on, and never installed or removed from here: a default of off must not
+   * uninstall an integration the user created outside the sidebar.
+   */
+  private async zvecGrepStatus(): Promise<ZvecGrepStatus> {
+    const config = vscode.workspace.getConfiguration();
+    if (!this.opencodeEnabled(config)) {
+      return { enabled: false, cli: 'missing' };
+    }
+    return detectZvecGrep();
+  }
+
+  /**
+   * Turn zvec-grep's OpenCode integration on or off. The stored flag is global,
+   * matching the user OpenCode config the installer edits, and it is written
+   * only after the CLI succeeds.
+   */
+  async setZvecGrep(enabled: boolean): Promise<ZvecGrepApplyResult> {
+    const config = vscode.workspace.getConfiguration();
+    if (!this.opencodeEnabled(config)) {
+      return { ok: false, enabled: false, cli: 'missing', message: 'Turn on opencode before using zvec-grep.' };
+    }
+    const result = await applyZvecGrep(enabled);
+    if (result.ok) {
+      await config.update(`${OLLAMA_OPENCODE_SECTION}.zvecGrep`, enabled, vscode.ConfigurationTarget.Global);
+    }
+    return result;
   }
 
   /** Write the Ollama token to secret storage only. Never to settings. */

@@ -370,6 +370,15 @@ export function App(): JSX.Element {
             path: message.path
           });
           break;
+        case 'zvecGrep':
+          dispatch({
+            type: 'zvecGrep',
+            pending: message.pending,
+            requested: message.requested,
+            ok: message.ok,
+            message: message.message
+          });
+          break;
         case 'context':
           dispatch({
             type: 'context',
@@ -891,6 +900,11 @@ export function App(): JSX.Element {
   const installOpencode = (): void => {
     dispatch({ type: 'opencodeInstall', pending: true });
     bridge.post({ type: 'installOpencode' });
+  };
+
+  const setZvecGrep = (enabled: boolean): void => {
+    dispatch({ type: 'zvecGrep', pending: true, requested: enabled });
+    bridge.post({ type: 'setZvecGrep', enabled });
   };
 
   const testConnection = (backendId: string): void => {
@@ -1823,6 +1837,8 @@ export function App(): JSX.Element {
         onUpgradeOpencode={upgradeOpencode}
         opencodeInstall={state.opencodeInstall}
         onInstallOpencode={installOpencode}
+        zvecGrep={state.zvecGrep}
+        onSetZvecGrep={setZvecGrep}
       />
       </div>
       </main>

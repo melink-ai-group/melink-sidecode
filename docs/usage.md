@@ -100,7 +100,11 @@ Ollama region carries a **Use opencode as the agentic runtime** switch (off by
 default) and, while it is on, an **opencode CLI path** field. The status line
 shows one of three distinct states — detected (with the CLI version), missing or
 not runnable, and off — and an invalid path is refused inline without
-overwriting a previously stored valid one.
+overwriting a previously stored valid one. While the runtime is on, **Use
+zvec-grep** applies or removes zvec-grep's OpenCode integration immediately.
+The click installs `@zvec/zvec-grep` when `zg` is missing, then runs
+`zg --install --target opencode` or `zg --uninstall --target opencode`. It does
+not index the workspace and does not uninstall the npm package.
 
 
 ## Choosing a model
@@ -220,6 +224,7 @@ refresh. The **gear** button opens the extension's settings
 | `melink.ollama.defaultModel` | *(empty)* | Default Ollama model; empty uses the first model reported. |
 | `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the opencode agentic runtime (tool execution, file edits, session resume). Off uses the direct `/api/chat` adapter and spawns no opencode process. |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI used when the runtime is enabled; a bare name is resolved from `PATH`. |
+| `melink.ollama.opencode.zvecGrep` | `false` | Connect zvec-grep to OpenCode. Turning it on installs the `zg` CLI when it is missing (Node.js 22+) and runs `zg --install --target opencode`. Turning it off runs `zg --uninstall --target opencode` and leaves the CLI and workspace indexes in place. Stored in user settings. A new OpenCode session picks up the change. |
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
 | `melink.codex.defaultModel` | *(empty)* | Default model for Codex; empty uses the CLI default. |
 | `melink.defaults.permissionLevel` | `default` | Permission level for a new conversation (`read-only` / `default` / `unrestricted`). A per-conversation choice overrides it; `unrestricted` must be confirmed. |
