@@ -29,6 +29,20 @@ test('tool targets come from the call payload, not the status', () => {
   assert.equal(targetForTool('read', { filePath: 'completed' }), undefined);
 });
 
+test('a zvec-grep semantic search says what is being searched', () => {
+  const query = 'An unseen creature left a few marks. What did the detective infer?';
+  assert.equal(
+    targetForTool('zvec_grep_zvec_grep_search', { root: '/ws', query, fts: ['marks', 'detective'], fuse: true }),
+    query
+  );
+  assert.equal(friendlyToolTitle('zvec_grep_zvec_grep_search', query), `Searching for ${query}`);
+  assert.equal(friendlyToolTitle('zvec_grep_search'), 'Searching');
+  assert.equal(
+    targetForTool('mcp__zvec_grep__zvec_grep_search', { fts: ['marks', 'detective'] }),
+    'marks, detective'
+  );
+});
+
 test('a collapsed card relabels a raw tool id and hides a status detail', () => {
   assert.deepEqual(toolCardPresentation({ title: 'glob', detail: 'completed' }), {
     title: 'Finding files',

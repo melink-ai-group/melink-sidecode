@@ -515,68 +515,112 @@ export function SettingsScreen({
               {ollamaStatus ? <TestResult backendLabel="Ollama Cloud" test={ollamaStatus} onRetry={() => onTestConnection('ollama')} /> : null}
             </div>
 
-            <div className="field">
-              <div className="field__head">
-                <span className="field-label field-label--row">opencode</span>
-              </div>
-              <p className="field-help">
-                Optional runtime for Ollama Cloud. Turns use the opencode CLI when this is on, and the direct adapter when it is off.
-              </p>
-              <div className="runtime">
-                <label className="check" htmlFor="opencode-enabled">
-                  <input
-                    className="check-input"
-                    id="opencode-enabled"
-                    type="checkbox"
-                    checked={draft.opencodeEnabled}
-                    onChange={(event) => update('opencodeEnabled', event.target.checked)}
-                  />
-                  <span className="check-box" aria-hidden="true">
-                    <CheckIcon />
-                  </span>
-                  <span className="check-body">
-                    <span className="check-label">Use opencode for Ollama turns</span>
-                    <span className="check-text">Applies from the next turn. Save settings before installing or updating.</span>
-                  </span>
-                </label>
-
-                {draft.opencodeEnabled ? (
-                  <>
-                    <label className="field-label" htmlFor="opencode-path">
-                      opencode CLI path
-                    </label>
-                    <input
-                      className="input"
-                      id="opencode-path"
-                      type="text"
-                      value={draft.opencodePath}
-                      spellCheck={false}
-                      autoComplete="off"
-                      aria-invalid={errors.opencodePath ? true : undefined}
-                      aria-describedby={errors.opencodePath ? 'opencode-path-error' : 'opencode-status'}
-                      onChange={(event) => update('opencodePath', event.target.value)}
-                    />
-                    {errors.opencodePath ? (
-                      <p className="field-msg field-msg--error" id="opencode-path-error" role="alert">
-                        <AlertIcon />
-                        <span>{errors.opencodePath}</span>
-                      </p>
-                    ) : null}
-                  </>
-                ) : null}
-
-                <p
-                  className={`runtime-status runtime-status--${runtimeView.tone}`}
-                  id="opencode-status"
-                  role="status"
-                >
-                  <span className="runtime-dot" aria-hidden="true" />
-                  <span>{runtimeView.label}</span>
-                  {runtimeView.version ? <span className="runtime-version">{runtimeView.version}</span> : null}
+            <div className="settings-subs">
+              <section className="settings-sub" aria-labelledby="opencode-title">
+                <h3 className="settings-sub__title" id="opencode-title">
+                  OpenCode
+                </h3>
+                <p className="field-help">
+                  Optional runtime for Ollama Cloud. Turns use the opencode CLI when this is on, and the direct adapter when it is off.
                 </p>
+                <div className="runtime">
+                  <label className="check" htmlFor="opencode-enabled">
+                    <input
+                      className="check-input"
+                      id="opencode-enabled"
+                      type="checkbox"
+                      checked={draft.opencodeEnabled}
+                      onChange={(event) => update('opencodeEnabled', event.target.checked)}
+                    />
+                    <span className="check-box" aria-hidden="true">
+                      <CheckIcon />
+                    </span>
+                    <span className="check-body">
+                      <span className="check-label">Use opencode for Ollama turns</span>
+                      <span className="check-text">Applies from the next turn. Save settings before installing or updating.</span>
+                    </span>
+                  </label>
 
-                {settings.opencode.enabled ? (
-                  <>
+                  {draft.opencodeEnabled ? (
+                    <>
+                      <label className="field-label" htmlFor="opencode-path">
+                        opencode CLI path
+                      </label>
+                      <input
+                        className="input"
+                        id="opencode-path"
+                        type="text"
+                        value={draft.opencodePath}
+                        spellCheck={false}
+                        autoComplete="off"
+                        aria-invalid={errors.opencodePath ? true : undefined}
+                        aria-describedby={errors.opencodePath ? 'opencode-path-error' : 'opencode-status'}
+                        onChange={(event) => update('opencodePath', event.target.value)}
+                      />
+                      {errors.opencodePath ? (
+                        <p className="field-msg field-msg--error" id="opencode-path-error" role="alert">
+                          <AlertIcon />
+                          <span>{errors.opencodePath}</span>
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  <p
+                    className={`runtime-status runtime-status--${runtimeView.tone}`}
+                    id="opencode-status"
+                    role="status"
+                  >
+                    <span className="runtime-dot" aria-hidden="true" />
+                    <span>{runtimeView.label}</span>
+                    {runtimeView.version ? <span className="runtime-version">{runtimeView.version}</span> : null}
+                  </p>
+
+                  {settings.opencode.enabled ? (
+                    <div className="runtime-actions">
+                      {settings.opencode.status === 'detected' ? (
+                        <>
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={opencodeUpgrade?.pending}
+                            onClick={onUpgradeOpencode}
+                          >
+                            {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
+                          </button>
+                          {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
+                            <CliResult ok={opencodeUpgrade.ok} message={opencodeUpgrade.message} />
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn btn--secondary"
+                            type="button"
+                            disabled={opencodeInstall?.pending}
+                            onClick={onInstallOpencode}
+                          >
+                            {opencodeInstall?.pending ? 'Installing...' : 'Install opencode'}
+                          </button>
+                          {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
+                            <CliResult ok={opencodeInstall.ok} message={opencodeInstall.message} />
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              {settings.opencode.enabled ? (
+                <section className="settings-sub" aria-labelledby="semantic-search-title">
+                  <h3 className="settings-sub__title" id="semantic-search-title">
+                    OpenCode Semantic Search
+                  </h3>
+                  <p className="field-help">
+                    Indexes this workspace locally so OpenCode can search by meaning instead of reading files into the prompt. That reduces token usage on each turn.
+                  </p>
+                  <div className="runtime">
                     <label className="check" htmlFor="zvec-grep-enabled">
                       <input
                         className="check-input"
@@ -591,9 +635,9 @@ export function SettingsScreen({
                         <CheckIcon />
                       </span>
                       <span className="check-body">
-                        <span className="check-label">Use zvec-grep</span>
+                        <span className="check-label">Use semantic search</span>
                         <span className="check-text">
-                          Local workspace search for OpenCode. This updates your user OpenCode config. A new session picks it up.
+                          Updates your user OpenCode config. A new session picks it up.
                         </span>
                       </span>
                     </label>
@@ -603,40 +647,9 @@ export function SettingsScreen({
                     {zvecGrep && !zvecGrep.pending && zvecGrep.message ? (
                       <CliResult ok={zvecGrep.ok} message={zvecGrep.message} />
                     ) : null}
-                  <div className="runtime-actions">
-                    {settings.opencode.status === 'detected' ? (
-                      <>
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          disabled={opencodeUpgrade?.pending}
-                          onClick={onUpgradeOpencode}
-                        >
-                          {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
-                        </button>
-                        {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
-                          <CliResult ok={opencodeUpgrade.ok} message={opencodeUpgrade.message} />
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          className="btn btn--secondary"
-                          type="button"
-                          disabled={opencodeInstall?.pending}
-                          onClick={onInstallOpencode}
-                        >
-                          {opencodeInstall?.pending ? 'Installing...' : 'Install opencode'}
-                        </button>
-                        {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
-                          <CliResult ok={opencodeInstall.ok} message={opencodeInstall.message} />
-                        ) : null}
-                      </>
-                    )}
                   </div>
-                  </>
-                ) : null}
-              </div>
+                </section>
+              ) : null}
             </div>
           </TabPanel>
 

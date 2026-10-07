@@ -100,8 +100,9 @@ Ollama region carries a **Use opencode as the agentic runtime** switch (off by
 default) and, while it is on, an **opencode CLI path** field. The status line
 shows one of three distinct states — detected (with the CLI version), missing or
 not runnable, and off — and an invalid path is refused inline without
-overwriting a previously stored valid one. While the runtime is on, **Use
-zvec-grep** applies or removes zvec-grep's OpenCode integration immediately.
+overwriting a previously stored valid one. While the runtime is on, the
+**OpenCode Semantic Search** subsection's **Use semantic search** switch applies
+or removes zvec-grep's OpenCode integration immediately.
 The click installs `@zvec/zvec-grep` when `zg` is missing, then runs
 `zg install --target opencode` or `zg uninstall --target opencode`. It does
 not index the workspace and does not uninstall the npm package.
