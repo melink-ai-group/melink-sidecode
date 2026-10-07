@@ -38,7 +38,13 @@ import {
 import { overridesFromResolved } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import { compactedSummary, compactedTranscript, compactionSource } from './backends/compaction';
-import { isMissingThreadError, threadRecoveredNotice } from './backends/threadRecovery';
+import {
+  continueAfterStopInstruction,
+  isMissingThreadError,
+  shouldAutoContinue,
+  stopContinueNotice,
+  threadRecoveredNotice
+} from './backends/threadRecovery';
 import {
   initialHistoryHidden,
   prependOlderHistory,
@@ -126,6 +132,8 @@ interface ChatSession {
   planRunSignature?: string;
   /** A refused approval this turn must not be retried automatically. */
   planHold: boolean;
+  /** Continuations already used since the provider last stopped. A user send resets this. */
+  stopContinueAttempts: number;
   pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
   /** No conversation has been bound to this tab yet. */
   blank: boolean;
@@ -196,6 +204,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private readonly planAutopilotQueue = new Map<string, { session: ChatSession; text: string }>();
   /** The next sendTurn is an automatic plan continuation, not a user message. */
   private autopilotSend = false;
+  /** The next sendTurn continues a stopped provider turn and does not reset the attempt count. */
+  private crashContinue = false;
+  /** One queued continuation per tab, started once the failed turn releases the lock. */
+  private readonly crashContinueQueue = new Map<string, { session: ChatSession; text: string }>();
   /**
    * The per-turn change journal: the host-owned record of what each turn
    * changed. Owned here so it shares the turn lifecycle the view already drives
@@ -455,8 +467,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           }
         }
       }
-      if (event.type === 'turn/completed' && this.mode === 'agent' && event.threadId) {
-        void this.considerPlanAutopilot(event.backendId, event.threadId);
+      if (event.type === 'turn/completed') {
+        if (this.session) {
+          this.session.stopContinueAttempts = 0;
+        }
+        if (this.mode === 'agent' && event.threadId) {
+          void this.considerPlanAutopilot(event.backendId, event.threadId);
+        }
       }
       });
     });
@@ -1265,6 +1282,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       planEpoch: 0,
       planRunAutomatic: false,
       planHold: false,
+      stopContinueAttempts: 0,
       blank: init.blank,
       composerText: init.draftText?.slice(0, COMPOSER_DRAFT_LIMIT) ?? '',
       composerAttachments: (init.draftAttachments ?? []).map((attachment) => ({ ...attachment })),
@@ -2477,6 +2495,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   ): Promise<void> {
     if (this.turnInProgress) {
       this.autopilotSend = false;
+      this.crashContinue = false;
       this.post({ type: 'notice', level: 'info', message: 'A request is already in progress. Wait for it to finish before sending another.' });
       return;
     }
@@ -2485,7 +2504,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       await this.sendTurnCore(text, model, permissionLevel, requestedSettings, attachments, backendId, updatePlan);
     } finally {
       this.turnInProgress = false;
-      this.flushPlanAutopilot();
+      if (!this.flushStopContinue()) {
+        this.flushPlanAutopilot();
+      }
     }
   }
 
@@ -2660,13 +2681,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     updatePlan?: boolean
   ): Promise<void> {
     const automatic = this.autopilotSend;
+    const continuing = this.crashContinue;
     this.autopilotSend = false;
+    this.crashContinue = false;
     if (this.session) {
       this.session.planRunAutomatic = automatic;
-      if (!automatic) {
+      if (!automatic && !continuing) {
         this.planAutopilotQueue.delete(this.session.id);
+        this.crashContinueQueue.delete(this.session.id);
         this.session.planEpoch += 1;
         this.session.planRunSignature = undefined;
+        this.session.stopContinueAttempts = 0;
       }
     }
     this.revisePlanThisTurn = updatePlan === true || userAsksToRevisePlan(text);
@@ -2814,7 +2839,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       if (this.session) {
         this.session.turnOpen = false;
       }
-      if (error instanceof BackendError && error.code === 'unauthenticated') {
+      if (this.session && shouldAutoContinue(error, this.session.stopContinueAttempts)) {
+        this.session.stopContinueAttempts += 1;
+        this.crashContinueQueue.set(this.session.id, {
+          session: this.session,
+          text: continueAfterStopInstruction()
+        });
+        this.post({
+          type: 'notice',
+          level: 'info',
+          message: stopContinueNotice(this.session.stopContinueAttempts)
+        });
+      } else if (error instanceof BackendError && error.code === 'unauthenticated') {
         this.post({ type: 'notice', level: 'warning', message: error.message, action: 'setToken' });
       } else if (!isCancellation(error)) {
         this.post({ type: 'notice', level: 'error', message: error instanceof Error ? error.message : String(error) });
@@ -3514,6 +3550,27 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       text: continuePlanInstruction(existing.steps)
     });
     this.flushPlanAutopilot();
+  }
+
+  /**
+   * Start one queued continuation of a stopped provider turn.
+   * Returns true when a continuation was started, so a plan follow-up waits.
+   */
+  private flushStopContinue(): boolean {
+    if (this.turnInProgress || this.crashContinueQueue.size === 0) {
+      return false;
+    }
+    const next = this.crashContinueQueue.values().next().value;
+    if (!next || next.session.disposed) {
+      if (next) {
+        this.crashContinueQueue.delete(next.session.id);
+      }
+      return false;
+    }
+    this.crashContinueQueue.delete(next.session.id);
+    this.crashContinue = true;
+    void this.sessionStore.run(next.session, () => this.sendTurn(next.text));
+    return true;
   }
 
   /** Start one queued plan continuation once no turn is holding the lock. */

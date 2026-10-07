@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JsonRpcError } from './appserver/jsonrpc.ts';
-import { isMissingThreadError, recoveryHandover, recoveryInstructions, threadRecoveredNotice } from './threadRecovery.ts';
+import {
+  STOP_CONTINUE_ATTEMPTS,
+  continueAfterStopInstruction,
+  isMissingThreadError,
+  recoveryHandover,
+  recoveryInstructions,
+  shouldAutoContinue,
+  stopContinueNotice,
+  threadRecoveredNotice
+} from './threadRecovery.ts';
 
 test('a missing provider thread is recognized, and a missing CLI is not', () => {
   assert.equal(isMissingThreadError(new Error('thread not found: thr_123')), true);
@@ -57,4 +66,15 @@ test('the replacement instructions keep the record ahead of the project snapshot
 
 test('an empty record does not invent a handover', () => {
   assert.equal(recoveryHandover({ provider: 'OpenCode', transcript: [] }), undefined);
+});
+
+test('a stopped provider continues a few times before the error is shown', () => {
+  const stopped = new Error('The Codex app-server stopped unexpectedly.');
+  assert.equal(shouldAutoContinue(stopped, 0), true);
+  assert.equal(shouldAutoContinue(stopped, STOP_CONTINUE_ATTEMPTS - 1), true);
+  assert.equal(shouldAutoContinue(stopped, STOP_CONTINUE_ATTEMPTS), false);
+  assert.equal(shouldAutoContinue(new Error('Turn canceled.'), 0), false);
+  assert.equal(shouldAutoContinue(new Error('The opencode CLI was not found.'), 0), false);
+  assert.match(stopContinueNotice(1), /1 of 3/);
+  assert.match(continueAfterStopInstruction(), /latest changes/);
 });

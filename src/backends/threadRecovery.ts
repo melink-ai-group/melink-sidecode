@@ -18,6 +18,45 @@ const STATUS_LABEL: Record<string, string> = {
 /** Conversation tail kept in the replacement thread. Changes and the plan sit outside this budget. */
 const RECOVERY_CONVERSATION_TOKENS = 6_000;
 
+/**
+ * How many times a stopped turn is continued on its own before the error is shown.
+ * A user send starts the count over.
+ */
+export const STOP_CONTINUE_ATTEMPTS = 3;
+
+/** The automatic turn sent after the provider stops, before any error is shown. */
+export function continueAfterStopInstruction(): string {
+  return 'The previous turn stopped before it finished. Continue the remaining work from the conversation and the latest changes. Do not repeat work that is already done, and do not ask whether to continue.';
+}
+
+/** Status line while an automatic continuation is still available. */
+export function stopContinueNotice(attempt: number, max = STOP_CONTINUE_ATTEMPTS): string {
+  return `The provider stopped. Continuing automatically (${attempt} of ${max}).`;
+}
+
+/**
+ * True when this failure should start another turn instead of showing an error.
+ * A cancel, a missing CLI, and an auth failure are shown immediately.
+ */
+export function shouldAutoContinue(error: unknown, attempts: number, max = STOP_CONTINUE_ATTEMPTS): boolean {
+  if (attempts >= max || attempts < 0) {
+    return false;
+  }
+  const message = errorText(error);
+  if (/cancel/i.test(message)) {
+    return false;
+  }
+  if (/unauthor|unauthenticated|api key|not found at /i.test(message) && !isMissingThreadError(error)) {
+    return false;
+  }
+  if (isMissingThreadError(error)) {
+    return true;
+  }
+  return /stopped unexpectedly|exited unexpectedly|connection closed|not accepting requests|session could not be started or resumed|stream ended before the turn completed|reached the output limit/i.test(
+    message
+  );
+}
+
 export function threadRecoveredNotice(provider: 'Codex' | 'OpenCode'): string {
   const subject = provider === 'Codex' ? 'Codex thread' : 'opencode session';
   return `The ${subject} was not found, so this conversation continued on a new one with the earlier chat, the latest file changes, and the remaining work.`;
