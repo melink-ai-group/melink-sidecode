@@ -146,6 +146,7 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 | `melink.ollama.defaultModel` | *(empty)* | Default model; empty uses the first one the backend reports. |
 | `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the **opencode** agentic runtime. Turn it off to use the direct adapter. |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI used when the runtime is enabled. |
+| `melink.ollama.opencode.zvecGrep` | `false` | Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. On installs `zg` when it is missing and applies the OpenCode integration. Off removes that integration and leaves `zg` installed. |
 
 `Ollama Cloud` lists exactly the models the live server returns from
 `GET /api/tags` — there is no hardcoded fallback list.
@@ -161,6 +162,15 @@ streams chat and does not spawn opencode.
 
 - **Path.** `melink.ollama.opencode.path` defaults to `opencode`, resolved from
   `PATH` when it is a bare name, exactly like `melink.codex.path`.
+- **zvec-grep.** With the runtime on, **Use zvec-grep** connects
+  [zvec-grep](https://github.com/zvec-ai/zvec-grep) through its official
+  OpenCode installer (`zg --install --target opencode`). If `zg` is not on
+  `PATH`, the sidebar installs `@zvec/zvec-grep` (Node.js 22 or newer) first.
+  Turning it off runs `zg --uninstall --target opencode` and does not remove
+  the package or any workspace index. The choice is stored in user settings
+  (`melink.ollama.opencode.zvecGrep`) because the installer edits the user
+  OpenCode config. A new session picks up the change. The generated per-turn
+  config does not carry the MCP entry, so uninstall can turn it off.
 - **Config is generated per turn, never committed.** The generated config is
   handed to the child through the documented inline override
   `OPENCODE_CONFIG_CONTENT`; nothing is written into the workspace and no

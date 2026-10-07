@@ -1746,6 +1746,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         });
         break;
       }
+      case 'setZvecGrep': {
+        this.post({ type: 'zvecGrep', pending: true, requested: message.enabled });
+        const applied = await this.settings.setZvecGrep(message.enabled);
+        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        this.post({
+          type: 'zvecGrep',
+          pending: false,
+          ok: applied.ok,
+          message: applied.message
+        });
+        break;
+      }
       case 'getModelCapability':
         await this.postModelCapability(message.providerId, message.modelId);
         break;

@@ -54,6 +54,8 @@ export interface SettingsScreenProps {
   onUpgradeOpencode: () => void;
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   onInstallOpencode: () => void;
+  zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
+  onSetZvecGrep: (enabled: boolean) => void;
 }
 
 /** Local draft state; the host snapshot is the source of truth on save. */
@@ -112,7 +114,9 @@ export function SettingsScreen({
   opencodeUpgrade,
   onUpgradeOpencode,
   opencodeInstall,
-  onInstallOpencode
+  onInstallOpencode,
+  zvecGrep,
+  onSetZvecGrep
 }: SettingsScreenProps): JSX.Element {
   const [draft, setDraft] = useState<Draft | undefined>(undefined);
   const [errors, setErrors] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
@@ -318,6 +322,18 @@ export function SettingsScreen({
   const codexStatus = connectionTest?.backendId === 'codex' ? connectionTest : undefined;
   const modelOptions = flattenModels(settings.models);
   const runtimeView = opencodeRuntimeView(settings.opencode);
+  const zvecChecked = zvecGrep?.pending
+    ? zvecGrep.requested === true
+    : settings.opencode.zvecGrep.enabled;
+  const zvecStatus = zvecGrep?.pending
+    ? zvecGrep.requested
+      ? 'Installing zvec-grep and connecting it to OpenCode.'
+      : 'Disconnecting zvec-grep from OpenCode.'
+    : settings.opencode.zvecGrep.enabled
+      ? 'Connected. A new OpenCode session uses it.'
+      : settings.opencode.zvecGrep.cli === 'installed'
+        ? 'Installed. Turning this on connects it to OpenCode.'
+        : 'Not installed. Turning this on installs it and connects it to OpenCode.';
   const tabs: readonly TabItem[] = [
     { id: 'providers', label: 'Providers' },
     { id: 'defaults', label: 'Defaults' },
@@ -560,6 +576,33 @@ export function SettingsScreen({
                 </p>
 
                 {settings.opencode.enabled ? (
+                  <>
+                    <label className="check" htmlFor="zvec-grep-enabled">
+                      <input
+                        className="check-input"
+                        id="zvec-grep-enabled"
+                        type="checkbox"
+                        checked={zvecChecked}
+                        disabled={zvecGrep?.pending}
+                        aria-describedby="zvec-grep-status"
+                        onChange={(event) => onSetZvecGrep(event.target.checked)}
+                      />
+                      <span className="check-box" aria-hidden="true">
+                        <CheckIcon />
+                      </span>
+                      <span className="check-body">
+                        <span className="check-label">Use zvec-grep</span>
+                        <span className="check-text">
+                          Local workspace search for OpenCode. This updates your user OpenCode config. A new session picks it up.
+                        </span>
+                      </span>
+                    </label>
+                    <p className="field-help" id="zvec-grep-status">
+                      {zvecStatus}
+                    </p>
+                    {zvecGrep && !zvecGrep.pending && zvecGrep.message ? (
+                      <CliResult ok={zvecGrep.ok} message={zvecGrep.message} />
+                    ) : null}
                   <div className="runtime-actions">
                     {settings.opencode.status === 'detected' ? (
                       <>
@@ -591,6 +634,7 @@ export function SettingsScreen({
                       </>
                     )}
                   </div>
+                  </>
                 ) : null}
               </div>
             </div>

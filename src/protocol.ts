@@ -110,6 +110,15 @@ export interface SettingsSnapshot {
     status: 'detected' | 'missing' | 'not-runnable';
     /** Present only when `status` is `detected`. */
     version?: string;
+    /**
+     * zvec-grep's OpenCode integration. `enabled` is true only when `zg` runs
+     * and the user OpenCode config has a `zvec_grep` server. The checkbox is
+     * hidden while the opencode runtime itself is off.
+     */
+    zvecGrep: {
+      enabled: boolean;
+      cli: 'missing' | 'installed';
+    };
   };
   defaults: {
     permissionLevel: PermissionLevel;
@@ -329,6 +338,11 @@ export type HostToWebviewMessage =
    * the install succeeded, so the settings field can adopt it.
    */
   | { type: 'opencodeInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
+  /**
+   * Result of turning zvec-grep on or off. `requested` is the choice still in
+   * flight while `pending` is true, so the checkbox can follow the click.
+   */
+  | { type: 'zvecGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
   /** The capability descriptor + effective settings for one provider+model. */
   | { type: 'modelCapability'; capability: ModelCapabilitySnapshot }
   /**
@@ -548,6 +562,8 @@ export type WebviewToHostMessage =
   | { type: 'upgradeOpencode' }
   /** Download and install the opencode CLI when it was not detected. */
   | { type: 'installOpencode' }
+  /** Install or remove zvec-grep's OpenCode integration. Applies immediately. */
+  | { type: 'setZvecGrep'; enabled: boolean }
   /** A decision on a pending approval. Never sent by a timer or a retry. */
   | { type: 'decideApproval'; backendId: string; threadId: string; requestId: string; decision: ApprovalDecision }
   /**

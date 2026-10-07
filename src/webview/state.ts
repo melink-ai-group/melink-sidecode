@@ -181,6 +181,8 @@ export interface AppState {
   opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
   /** Result of the last opencode install, or a pending marker while it downloads. */
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
+  /** Result of the last zvec-grep toggle, or a pending marker while it runs. */
+  zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
   /**
    * The project-context read model the composer renders. Built and pushed by the
    * host; the webview never recomputes it. `undefined` until the first push, so
@@ -332,6 +334,7 @@ export type Action =
   | { type: 'connectionTest'; result: ConnectionTestResult }
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   | { type: 'opencodeInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
+  | { type: 'zvecGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
   /** The host's project-context read model, pushed on every relevant change. */
   | {
       type: 'context';
@@ -753,7 +756,8 @@ export function reduce(state: AppState, action: Action): AppState {
         settingsOpen: false,
         connectionTest: undefined,
         opencodeUpgrade: undefined,
-        opencodeInstall: undefined
+        opencodeInstall: undefined,
+        zvecGrep: undefined
       };
     case 'settings':
       return { ...state, settings: action.settings };
@@ -824,6 +828,16 @@ export function reduce(state: AppState, action: Action): AppState {
       return {
         ...state,
         opencodeInstall: { pending: action.pending, ok: action.ok, message: action.message, path: action.path }
+      };
+    case 'zvecGrep':
+      return {
+        ...state,
+        zvecGrep: {
+          pending: action.pending,
+          requested: action.requested,
+          ok: action.ok,
+          message: action.message
+        }
       };
     case 'context':
       // The host is the single source of truth for both the view and the
