@@ -2,13 +2,13 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 
 /**
  * Turn zvec-grep's official OpenCode integration on or off.
  *
  * Enable installs `@zvec/zvec-grep` when `zg` is missing, then runs
- * `zg --install --target opencode --yes`. Disable runs the matching uninstall
+ * `zg install --target opencode --yes`. Disable runs the matching uninstall
  * and leaves the npm package in place. This module never writes the OpenCode
  * config itself and never passes `--force`.
  */
@@ -66,13 +66,43 @@ export function nodeMajor(output: string): number | undefined {
   return Number.isInteger(major) ? major : undefined;
 }
 
-/** Official installer flags. The old `zg install` form is a search, not a command. */
-export function zgIntegrationArgs(action: 'install' | 'uninstall'): readonly string[] {
-  return [action === 'install' ? '--install' : '--uninstall', '--target', 'opencode', '--yes'];
+/**
+ * Installer arguments.
+ *
+ * npm's published CLI (0.2.x) uses subcommands: `zg install`. A later CLI that
+ * rejects that verb with `Unknown command` is retried as `zg --install`.
+ */
+export function zgIntegrationArgs(
+  action: 'install' | 'uninstall',
+  style: 'subcommand' | 'flag' = 'subcommand'
+): readonly string[] {
+  const verb = style === 'flag' ? `--${action}` : action;
+  return [verb, '--target', 'opencode', '--yes'];
+}
+
+/** True when this CLI does not recognize the verb we just sent. */
+export function rejectsIntegrationVerb(result: SpawnOutcome, action: 'install' | 'uninstall'): boolean {
+  const text = `${result.stdout}\n${result.stderr}`;
+  return new RegExp(`unknown command:\\s*-*${action}\\b`, 'i').test(text);
 }
 
 export function npmGlobalInstallArgs(): readonly string[] {
   return ['install', '-g', ZVEC_GREP_PACKAGE];
+}
+
+/**
+ * The `zg` shim npm writes for a global prefix.
+ *
+ * On Windows the prefix directory itself holds `zg.cmd`. Elsewhere the shim is
+ * `prefix/bin/zg`. This is used when the extension host's PATH does not include
+ * that directory, which a new terminal would not fix inside this process.
+ */
+export function zgGlobalBin(prefix: string, platform: string): string {
+  const root = prefix.trim().replace(/[\\/]+$/, '');
+  if (platform === 'win32') {
+    return win32.join(root, 'zg.cmd');
+  }
+  return posix.join(root, 'bin', 'zg');
 }
 
 /**
@@ -166,12 +196,60 @@ export function stripJsonComments(text: string): string {
   return out;
 }
 
-/** Spawn one command. No shell. Output is capped so a long install log stays bounded. */
+/**
+ * How to start a command without `shell: true`.
+ *
+ * Node on Windows rejects a direct spawn of `.cmd` / `.bat` (`EINVAL`, no
+ * output). Those files are started through `cmd.exe /d /s /c` with a quoted
+ * command built only from our own arguments.
+ */
+export function commandLaunch(
+  platform: string,
+  command: string,
+  args: readonly string[],
+  comSpec = 'cmd.exe'
+): { command: string; args: string[]; verbatim: boolean } {
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(command)) {
+    return {
+      command: comSpec,
+      args: ['/d', '/s', '/c', `"${windowsCommandLine(command, args)}"`],
+      verbatim: true
+    };
+  }
+  return { command, args: [...args], verbatim: false };
+}
+
+/** One Windows command line. Arguments that need quoting are quoted; nothing is passed to a shell string from settings. */
+export function windowsCommandLine(command: string, args: readonly string[]): string {
+  return [command, ...args].map(quoteCmdArg).join(' ');
+}
+
+function quoteCmdArg(arg: string): string {
+  if (arg.length === 0) {
+    return '""';
+  }
+  if (/[\s"&|<>^]/.test(arg)) {
+    return `"${arg.replace(/"/g, '""')}"`;
+  }
+  return arg;
+}
+
+/** True when the command is absent, including cmd.exe's "not recognized" text. */
+export function commandNotFound(result: SpawnOutcome): boolean {
+  if (result.error === 'missing') {
+    return true;
+  }
+  const text = `${result.stdout}\n${result.stderr}`;
+  return /not recognized as an internal or external command/i.test(text) || /\bcommand not found\b/i.test(text);
+}
+
+/** Spawn one command. Output is capped so a long install log stays bounded. */
 export function runCommand(
   command: string,
   args: readonly string[],
   timeoutMs: number
 ): Promise<SpawnOutcome> {
+  const launched = commandLaunch(process.platform, command, args, process.env.ComSpec || 'cmd.exe');
   return new Promise((resolve) => {
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
@@ -196,10 +274,11 @@ export function runCommand(
     };
 
     try {
-      child = spawn(command, [...args], {
+      child = spawn(launched.command, launched.args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
-        shell: false
+        shell: false,
+        ...(launched.verbatim ? { windowsVerbatimArguments: true } : {})
       });
     } catch {
       resolve({ code: null, stdout: '', stderr: '', error: 'failed' });
@@ -253,24 +332,24 @@ export async function applyZvecGrep(
 }
 
 async function enableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
-  let cli = await probeZg(io);
-  if (cli === 'missing') {
+  let command = await locateZg(io);
+  if (!command) {
     const ready = await ensureZgInstalled(io);
     if (!ready.ok) {
       return { ok: false, enabled: false, cli: 'missing', message: ready.message };
     }
-    cli = await probeZg(io);
-    if (cli === 'missing') {
+    command = await locateZg(io);
+    if (!command) {
       return {
         ok: false,
         enabled: false,
         cli: 'missing',
-        message: 'zvec-grep was installed, but the zg command was not found. Open a new terminal, then try again.'
+        message: await missingZgMessage(io)
       };
     }
   }
 
-  const installed = await runZg(io, zgIntegrationArgs('install'), INSTALL_TIMEOUT_MS);
+  const installed = await runIntegration(io, command, 'install');
   const status = await detectZvecGrep(io);
   if (installed.error || installed.code !== 0) {
     return {
@@ -298,11 +377,12 @@ async function enableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
 
 async function disableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
   const configured = await configHasZvecGrep(io);
-  const cli = await probeZg(io);
+  const command = await locateZg(io);
+  const cli: ZvecGrepCli = command ? 'installed' : 'missing';
   if (!configured) {
     return { ok: true, enabled: false, cli, message: 'zvec-grep is off.' };
   }
-  if (cli === 'missing') {
+  if (!command) {
     return {
       ok: false,
       enabled: false,
@@ -311,7 +391,7 @@ async function disableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
     };
   }
 
-  const removed = await runZg(io, zgIntegrationArgs('uninstall'), INSTALL_TIMEOUT_MS);
+  const removed = await runIntegration(io, command, 'uninstall');
   const stillConfigured = await configHasZvecGrep(io);
   if (removed.error || removed.code !== 0 || stillConfigured) {
     return {
@@ -329,6 +409,19 @@ async function disableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
     cli: 'installed',
     message: 'zvec-grep is off. A new OpenCode session no longer uses it.'
   };
+}
+
+/** Run the OpenCode installer. Retry the other verb shape when this CLI rejects the first. */
+async function runIntegration(
+  io: ZvecGrepIO,
+  command: string,
+  action: 'install' | 'uninstall'
+): Promise<SpawnOutcome> {
+  const first = await io.run(command, zgIntegrationArgs(action, 'subcommand'), INSTALL_TIMEOUT_MS);
+  if (!rejectsIntegrationVerb(first, action)) {
+    return first;
+  }
+  return io.run(command, zgIntegrationArgs(action, 'flag'), INSTALL_TIMEOUT_MS);
 }
 
 async function ensureZgInstalled(io: ZvecGrepIO): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -349,8 +442,12 @@ async function ensureZgInstalled(io: ZvecGrepIO): Promise<{ ok: true } | { ok: f
 
   const npm = io.platform === 'win32' ? 'npm.cmd' : 'npm';
   const installed = await io.run(npm, npmGlobalInstallArgs(), NPM_TIMEOUT_MS);
-  if (installed.error === 'missing') {
-    return { ok: false, message: 'npm was not found, so zvec-grep was not installed.' };
+  if (installed.error === 'missing' || commandNotFound(installed)) {
+    return {
+      ok: false,
+      message:
+        'npm was not found, so zvec-grep was not installed. Install Node.js 22 or newer, then run npm install -g @zvec/zvec-grep.'
+    };
   }
   if (installed.error || installed.code !== 0) {
     return { ok: false, message: failureMessage(installed, 'zvec-grep could not be installed') };
@@ -359,25 +456,58 @@ async function ensureZgInstalled(io: ZvecGrepIO): Promise<{ ok: true } | { ok: f
 }
 
 async function probeZg(io: ZvecGrepIO): Promise<ZvecGrepCli> {
-  const result = await runZg(io, ['--version'], PROBE_TIMEOUT_MS);
-  return result.error === 'missing' ? 'missing' : 'installed';
+  return (await locateZg(io)) ? 'installed' : 'missing';
+}
+
+/**
+ * Find `zg` on PATH, then in npm's global prefix.
+ *
+ * A global install writes the shim even when that directory is absent from the
+ * extension host's PATH. Opening a new terminal does not change this process.
+ */
+async function locateZg(io: ZvecGrepIO): Promise<string | undefined> {
+  const names = io.platform === 'win32' ? ['zg.cmd', 'zg'] : ['zg'];
+  for (const name of names) {
+    if (await zgRuns(io, name)) {
+      return name;
+    }
+  }
+  const prefix = await npmPrefix(io);
+  if (!prefix) {
+    return undefined;
+  }
+  const bin = zgGlobalBin(prefix, io.platform);
+  return (await zgRuns(io, bin)) ? bin : undefined;
+}
+
+async function zgRuns(io: ZvecGrepIO, command: string): Promise<boolean> {
+  const result = await io.run(command, ['--version'], PROBE_TIMEOUT_MS);
+  return result.error === undefined && result.code === 0;
+}
+
+async function npmPrefix(io: ZvecGrepIO): Promise<string | undefined> {
+  const npm = io.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const result = await io.run(npm, ['prefix', '-g'], PROBE_TIMEOUT_MS);
+  if (result.error || result.code !== 0) {
+    return undefined;
+  }
+  const line = result.stdout
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .pop();
+  return line;
+}
+
+async function missingZgMessage(io: ZvecGrepIO): Promise<string> {
+  const prefix = await npmPrefix(io);
+  const where = prefix ? ` It was installed under ${prefix}.` : '';
+  return `zvec-grep was installed, but zg could not be started.${where} From a terminal, run: zg install --target opencode --yes.`;
 }
 
 async function configHasZvecGrep(io: ZvecGrepIO): Promise<boolean> {
   const text = await io.readConfig();
   return text !== undefined && opencodeConfigHasZvecGrep(text);
-}
-
-/** On Windows, npm's shim is `zg.cmd`. A native `zg` is tried when that shim is absent. */
-async function runZg(io: ZvecGrepIO, args: readonly string[], timeoutMs: number): Promise<SpawnOutcome> {
-  if (io.platform !== 'win32') {
-    return io.run('zg', args, timeoutMs);
-  }
-  const shim = await io.run('zg.cmd', args, timeoutMs);
-  if (shim.error === 'missing') {
-    return io.run('zg', args, timeoutMs);
-  }
-  return shim;
 }
 
 async function readOpencodeConfig(): Promise<string | undefined> {
@@ -407,17 +537,19 @@ function appendOutput(current: string, chunk: string): string {
 
 function failureMessage(result: SpawnOutcome, fallback: string): string {
   if (result.error === 'timeout') {
-    return `${fallback}. It took too long and was stopped.`;
+    return `${fallback}. It took too long and was stopped. ${MANUAL_OPENCODE}`;
   }
   const line = lastUsefulLine(result.stderr) || lastUsefulLine(result.stdout);
   if (line) {
     return line.length > 240 ? `${line.slice(0, 237)}...` : line;
   }
   if (result.code !== null && result.code !== 0) {
-    return `${fallback} (exit ${result.code}).`;
+    return `${fallback} (exit ${result.code}). ${MANUAL_OPENCODE}`;
   }
-  return `${fallback}.`;
+  return `${fallback}. ${MANUAL_OPENCODE}`;
 }
+
+const MANUAL_OPENCODE = 'From a terminal, run: zg install --target opencode --yes.';
 
 function lastUsefulLine(value: string): string {
   const lines = value
