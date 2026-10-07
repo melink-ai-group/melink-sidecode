@@ -18,6 +18,8 @@ import {
   type Attachment,
   type AttachmentKind,
   type DefaultMode,
+  type ModelSettingField,
+  type ModelSettingOverrides,
   type PermissionLevel,
   type PlanArtifact,
   type ThreadHandle,
@@ -35,7 +37,7 @@ import {
   type QuestionAnswer,
   type QuestionRequest
 } from './questions';
-import { overridesFromResolved } from './backends/capabilities';
+import { overridesFromResolved, resolveModelSettings, sanitizeOverrides } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import { compactedSummary, compactedTranscript, compactionSource } from './backends/compaction';
 import {
@@ -107,6 +109,14 @@ import {
   type OpenChatTab,
   reorderById
 } from './chatTabs';
+import {
+  clearPinnedModelSettingField,
+  clearPinnedModelSettings,
+  copyModelSettings,
+  pinModelSettings,
+  pinnedModelSettings,
+  withPinnedDefaults
+} from './composerControls';
 
 /**
  * One sidebar chat tab. Fields that used to live once on the provider move here
@@ -118,6 +128,15 @@ interface ChatSession {
   restored: boolean;
   activeThread?: ThreadHandle;
   mode: DefaultMode;
+  /** True once this tab's mode was chosen or restored, so a later show does not replace it. */
+  modeChosen: boolean;
+  /** Permission this chat runs at. Absent until the tab is shown, then kept on the tab. */
+  tabPermission?: PermissionLevel;
+  /** Model the user picked for this chat. Absent until they pick one or the tab is first shown. */
+  composerBackendId?: string;
+  composerModelId?: string;
+  /** Per-model setting overrides pinned to this chat. */
+  modelSettings: Record<string, ModelSettingOverrides>;
   pendingApproval?: ApprovalRequest;
   pendingQuestion?: { source: 'fence' | 'native'; request: QuestionRequest };
   nativePlanThisTurn: boolean;
@@ -167,9 +186,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'melinkAgent.chat';
 
   /**
-   * The permission level the next turn and the next chat run at. Seeded from
-   * the last picker choice, then from the settings default. A new conversation
-   * keeps it. `unrestricted` arrives only after the webview's confirmation.
+   * The permission level a new chat starts at. Seeded from the last picker
+   * choice, then from the settings default. Each open chat keeps its own level
+   * after that. `unrestricted` arrives only after the webview's confirmation.
    */
   private permissionLevel: PermissionLevel = readDefaultPermissionLevel();
   /** Bumped whenever the selection is stored, so a late snapshot cannot revert it. */
@@ -1275,7 +1294,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       id: `tab_${this.tabSeq}`,
       title: init.title ?? DEFAULT_TAB_TITLE,
       restored: false,
-      mode: readDefaultMode(),
+      mode: init.mode ?? readDefaultMode(),
+      modeChosen: init.mode !== undefined,
+      ...(init.permissionLevel ? { tabPermission: init.permissionLevel } : {}),
+      ...(init.composerBackendId ? { composerBackendId: init.composerBackendId } : {}),
+      ...(init.composerModelId ? { composerModelId: init.composerModelId } : {}),
+      modelSettings: copyModelSettings(init.modelSettings),
       nativePlanThisTurn: false,
       revisePlanThisTurn: false,
       planDecisions: [],
@@ -1315,7 +1339,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         await this.postActiveCheckpoints();
         return;
       }
-      this.postFreshConversation();
+      await this.postFreshConversation();
       this.post({ type: 'restoring', value: false });
     });
     await this.postComposerDraft(session);
@@ -1325,20 +1349,26 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async repaintSession(): Promise<void> {
     const thread = this.activeThread;
     if (!thread) {
-      this.postFreshConversation();
+      await this.postFreshConversation();
       this.post({ type: 'restoring', value: false });
       return;
     }
     const { backendId, threadId, model } = thread;
-    const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
-    this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+    if (this.session && !this.session.modeChosen) {
+      const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
+      this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+      this.session.modeChosen = true;
+    }
+    const choice = this.composerSelection(backendId, model);
+    this.mode = this.resolveMode(choice.backendId, this.mode);
+    const permission = this.sessionPermission(choice.backendId);
     const history = this.currentHistory();
     this.post({
       type: 'conversation',
-      backendId,
+      backendId: choice.backendId,
       threadId,
-      model,
-      permissionLevel: this.permissionLevel,
+      model: choice.model,
+      permissionLevel: permission,
       mode: this.mode,
       replay: await this.previewReplay(history.replay),
       hasOlderHistory: history.hasOlderHistory,
@@ -1347,6 +1377,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
     });
     this.post({ type: 'restoring', value: false });
+    await this.finishComposerPaint(choice.backendId, choice.model);
   }
 
   private loadSavedSessions(): void {
@@ -1405,7 +1436,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         title: session.title,
         ...(session === this.visible ? { active: true } : {}),
         ...(draftText ? { draftText } : {}),
-        ...(draftAttachments.length > 0 ? { draftAttachments } : {})
+        ...(draftAttachments.length > 0 ? { draftAttachments } : {}),
+        ...(session.modeChosen ? { mode: session.mode } : {}),
+        ...(session.tabPermission ? { permissionLevel: session.tabPermission } : {}),
+        ...(session.composerBackendId ? { composerBackendId: session.composerBackendId } : {}),
+        ...(session.composerModelId ? { composerModelId: session.composerModelId } : {}),
+        ...(Object.keys(session.modelSettings).length > 0 ? { modelSettings: session.modelSettings } : {})
       };
     });
     void this.context.workspaceState.update(OPEN_CHAT_TABS_KEY, tabs);
@@ -1681,6 +1717,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'selectMode':
         await this.selectMode(message.mode, false, message.backendId);
         break;
+      case 'selectModel':
+        await this.rememberComposerModel(message.backendId, message.modelId);
+        break;
       case 'buildPlan':
         await this.buildPlan();
         break;
@@ -1809,13 +1848,35 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * sees an Ollama or Codex field name.
    */
   private async postModelCapability(providerId: string, modelId: string): Promise<void> {
+    const session = this.session;
+    if (session && pinnedModelSettings(session.modelSettings, providerId, modelId) === undefined) {
+      session.modelSettings = withPinnedDefaults(
+        session.modelSettings,
+        providerId,
+        modelId,
+        this.registry.modelSettingOverrides(providerId, modelId)
+      );
+    }
     try {
-      const [capabilities, settings] = await Promise.all([
-        this.registry.modelCapabilities(providerId, modelId),
-        this.registry.resolveModelSettings(providerId, modelId, this.appDefaults())
-      ]);
+      const capabilities = await this.registry.modelCapabilities(providerId, modelId);
+      if (session && this.visible !== session) {
+        return;
+      }
+      const overrides =
+        (session ? pinnedModelSettings(session.modelSettings, providerId, modelId) : undefined) ??
+        this.registry.modelSettingOverrides(providerId, modelId);
+      const settings = resolveModelSettings({
+        providerId,
+        modelId,
+        capabilities,
+        overrides: sanitizeOverrides(overrides, capabilities),
+        appDefaults: this.appDefaults()
+      });
       this.post({ type: 'modelCapability', capability: { providerId, modelId, capabilities, settings } });
     } catch (error) {
+      if (session && this.visible !== session) {
+        return;
+      }
       // A read that fails outright is reported as data, so the panel shows an
       // explanation and a retry rather than spinning forever.
       this.post({
@@ -1836,26 +1897,53 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async setModelSettings(
     providerId: string,
     modelId: string,
-    settings: import('./backends/types').ModelSettingOverrides
+    settings: ModelSettingOverrides
   ): Promise<void> {
+    const session = this.session;
+    if (session) {
+      session.modelSettings = pinModelSettings(
+        session.modelSettings,
+        providerId,
+        modelId,
+        settings,
+        this.registry.modelSettingOverrides(providerId, modelId)
+      );
+    }
     await this.registry.setModelSettings(providerId, modelId, settings);
     await this.postModelCapability(providerId, modelId);
+    this.persistOpenTabs();
   }
 
-  /** Drop every override for one model and echo the re-resolved settings. */
+  /** Drop every override for this chat's model and echo the re-resolved settings. */
   private async resetModelSettings(providerId: string, modelId: string): Promise<void> {
+    const session = this.session;
+    if (session) {
+      session.modelSettings = clearPinnedModelSettings(session.modelSettings, providerId, modelId);
+    }
     await this.registry.resetModelSettings(providerId, modelId);
     await this.postModelCapability(providerId, modelId);
+    this.persistOpenTabs();
   }
 
   /** Drop one field's override only and echo the re-resolved settings. */
   private async resetModelSettingField(
     providerId: string,
     modelId: string,
-    field: import('./backends/types').ModelSettingField
+    field: ModelSettingField
   ): Promise<void> {
+    const session = this.session;
+    if (session) {
+      session.modelSettings = clearPinnedModelSettingField(
+        session.modelSettings,
+        providerId,
+        modelId,
+        field,
+        this.registry.modelSettingOverrides(providerId, modelId)
+      );
+    }
     await this.registry.resetModelSettingField(providerId, modelId, field);
     await this.postModelCapability(providerId, modelId);
+    this.persistOpenTabs();
   }
 
   /** The app-level defaults a per-model setting falls back to. */
@@ -1888,7 +1976,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           requiresConfirmation: descriptor.requiresConfirmation
         };
       }),
-      selected: this.permissionLevel,
+      selected: this.sessionPermission(backendId),
       epoch: this.permissionEpoch,
       rules: backend ? await this.registry.listApprovalRules(backendId) : []
     };
@@ -1939,6 +2027,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const target = backendId ?? this.activeThread?.backendId ?? this.defaultBackendId();
     const mode = this.resolveMode(target, requested);
     this.mode = mode;
+    if (this.session) {
+      this.session.modeChosen = true;
+    }
     const thread = this.activeThread;
     if (thread && thread.backendId === target) {
       await this.store.setActiveThread({
@@ -1951,6 +2042,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       });
     }
     this.post({ type: 'modes', modes: this.modeSnapshot(target) });
+    this.persistOpenTabs();
   }
 
   /** The settings read model plus the live model lists, so the default-model
@@ -2012,10 +2104,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Opens an empty conversation, re-applying the last-used model so reopening a
-   * window still lands on the model the user last chose.
-   */
-  /**
    * Re-read and push the context view. Called when the active editor or the
    * selection changes, so the strip follows the user between files and
    * selections without a reload and without touching the transcript.
@@ -2034,20 +2122,92 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }, 120);
   }
 
-  private postFreshConversation(): void {
+  /**
+   * Paint a blank chat. The first visit seeds the last-used model and the
+   * current permission. A later visit keeps the model, mode, permission, and
+   * thinking level the user set on this tab.
+   */
+  private async postFreshConversation(): Promise<void> {
     this.clearHistory(this.session);
     const last = this.store.getLastUsedModel();
-    const backendId = last && this.registry.get(last.backendId) ? last.backendId : this.defaultBackendId();
-    this.permissionLevel = this.resolvePermission(backendId, this.permissionLevel);
-    this.mode = this.resolveMode(backendId, readDefaultMode());
+    const fallbackBackend = last && this.registry.get(last.backendId) ? last.backendId : this.defaultBackendId();
+    const fallbackModel = last?.backendId === fallbackBackend && last.modelId ? last.modelId : undefined;
+    const choice = this.composerSelection(fallbackBackend, fallbackModel);
+    this.mode = this.resolveMode(choice.backendId, this.mode);
+    const permission = this.sessionPermission(choice.backendId);
     this.post({
       type: 'conversation',
-      backendId,
-      model: last?.modelId || undefined,
-      permissionLevel: this.permissionLevel,
+      backendId: choice.backendId,
+      model: choice.model,
+      permissionLevel: permission,
       mode: this.mode,
       hasOlderHistory: false
     });
+    await this.finishComposerPaint(choice.backendId, choice.model);
+  }
+
+  /**
+   * The model this chat should show. A choice already stored on the tab wins.
+   * The first visit records the fallback so a later chat cannot replace it.
+   */
+  private composerSelection(fallbackBackendId: string, fallbackModel?: string): { backendId: string; model?: string } {
+    const session = this.session;
+    const remembered =
+      session?.composerBackendId && this.registry.get(session.composerBackendId) ? session.composerBackendId : undefined;
+    if (remembered) {
+      return { backendId: remembered, ...(session?.composerModelId ? { model: session.composerModelId } : {}) };
+    }
+    if (session) {
+      session.composerBackendId = fallbackBackendId;
+      if (fallbackModel) {
+        session.composerModelId = fallbackModel;
+      }
+    }
+    return { backendId: fallbackBackendId, ...(fallbackModel ? { model: fallbackModel } : {}) };
+  }
+
+  /** Permission for the chat on screen. The first visit copies the shared choice, then the tab keeps it. */
+  private sessionPermission(backendId: string): PermissionLevel {
+    const session = this.session;
+    const level = this.resolvePermission(backendId, session?.tabPermission ?? this.permissionLevel);
+    if (session) {
+      session.tabPermission = level;
+    }
+    return level;
+  }
+
+  /** Push the open chat's mode, permission, and model settings, then save them with the tab. */
+  private async finishComposerPaint(backendId: string, model?: string): Promise<void> {
+    this.post({ type: 'modes', modes: this.modeSnapshot(backendId) });
+    await this.postPermissions(backendId);
+    if (model) {
+      await this.postModelCapability(backendId, model);
+    }
+    this.persistOpenTabs();
+  }
+
+  /** Remember a model pick on the open chat, and as the seed for the next new chat. */
+  private async rememberComposerModel(backendId: string, modelId: string): Promise<void> {
+    const session = this.session;
+    if (session) {
+      session.composerBackendId = backendId;
+      session.composerModelId = modelId;
+      const thread = session.activeThread;
+      if (thread && thread.backendId === backendId) {
+        thread.model = modelId;
+        const stored = this.store.listThreads(backendId).find((entry) => entry.threadId === thread.threadId);
+        await this.store.setActiveThread({
+          backendId,
+          threadId: thread.threadId,
+          modelId,
+          mode: session.mode,
+          title: stored?.title,
+          updatedAt: Date.now()
+        });
+      }
+    }
+    await this.store.setLastUsedModel({ backendId, modelId });
+    this.persistOpenTabs();
   }
 
   private defaultBackendId(): string {
@@ -2110,11 +2270,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: 'notice', level: 'error', message: `Backend ${backendId} is not registered.` });
       return;
     }
-    // An explicit level wins. Otherwise keep the last picker choice, which is
-    // seeded from the settings default until the user picks one. A new chat
-    // does not drop that choice. The mode still falls back to its stored default.
-    const level = this.resolvePermission(backendId, permissionLevel ?? this.permissionLevel);
-    const mode = this.resolveMode(backendId, requestedMode ?? readDefaultMode());
+    // An explicit level wins. Otherwise keep this chat's level, which was seeded
+    // from the last picker choice. The mode is the one this chat is already using.
+    const level = this.resolvePermission(backendId, permissionLevel ?? this.sessionPermission(backendId));
+    const mode = this.resolveMode(backendId, requestedMode ?? this.mode);
     // The effective per-model settings are resolved and clamped here, in the
     // host, against the provider's own descriptor. The webview never computes a
     // value, so a stale value can never reach the provider.
@@ -2148,6 +2307,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.contextDelivery.begin(ContextDelivery.key(backendId, handle.threadId), prime, Boolean(handle.contextPrimed));
       await this.rememberPermission(level);
       this.mode = mode;
+      if (this.session) {
+        this.session.modeChosen = true;
+        this.session.tabPermission = level;
+        this.session.composerBackendId = backendId;
+        const chosenModel = model ?? handle.model;
+        if (chosenModel) {
+          this.session.composerModelId = chosenModel;
+        }
+      }
       const seeded = handover?.trim() ? compactedTranscript(handover) : undefined;
       if (seeded) {
         this.store.setTranscript(backendId, handle.threadId, seeded);
@@ -2202,14 +2370,39 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async resolveTurnSettings(
     backendId: string,
     model: string | undefined,
-    requested?: import('./backends/types').ModelSettingOverrides
-  ): Promise<import('./backends/types').ModelSettingOverrides> {
+    requested?: ModelSettingOverrides
+  ): Promise<ModelSettingOverrides> {
     if (!model) {
       return {};
     }
-    const resolved = requested
-      ? await this.registry.setModelSettings(backendId, model, requested)
-      : await this.registry.resolveModelSettings(backendId, model, this.appDefaults());
+    const session = this.session;
+    if (requested) {
+      if (session) {
+        session.modelSettings = pinModelSettings(
+          session.modelSettings,
+          backendId,
+          model,
+          requested,
+          pinnedModelSettings(session.modelSettings, backendId, model) ?? this.registry.modelSettingOverrides(backendId, model)
+        );
+      }
+      const resolved = await this.registry.setModelSettings(backendId, model, requested);
+      return overridesFromResolved(resolved);
+    }
+    const pinned = session ? pinnedModelSettings(session.modelSettings, backendId, model) : undefined;
+    if (pinned) {
+      const capabilities = await this.registry.modelCapabilities(backendId, model);
+      return overridesFromResolved(
+        resolveModelSettings({
+          providerId: backendId,
+          modelId: model,
+          capabilities,
+          overrides: sanitizeOverrides(pinned, capabilities),
+          appDefaults: this.appDefaults()
+        })
+      );
+    }
+    const resolved = await this.registry.resolveModelSettings(backendId, model, this.appDefaults());
     return overridesFromResolved(resolved);
   }
 
@@ -2232,9 +2425,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   /** Apply a picker choice and echo it so the panel matches what the next chat will use. */
   private async selectPermissionLevel(requested: PermissionLevel): Promise<void> {
-    const backendId = this.activeThread?.backendId ?? this.defaultBackendId();
-    await this.rememberPermission(this.resolvePermission(backendId, requested));
+    const backendId = this.activeThread?.backendId ?? this.session?.composerBackendId ?? this.defaultBackendId();
+    const level = this.resolvePermission(backendId, requested);
+    if (this.session) {
+      this.session.tabPermission = level;
+    }
+    await this.rememberPermission(level);
     await this.postPermissions(backendId);
+    this.persistOpenTabs();
   }
 
   private resolvePermission(backendId: string, requested?: PermissionLevel): PermissionLevel {
@@ -2393,16 +2591,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         prime,
         Boolean(result.handle.contextPrimed)
       );
-      // The thread index carries the mode, so a resumed thread keeps its mode;
-      // a mode the backend cannot serve degrades to `agent`.
+      // The thread index carries the mode, so a resumed thread keeps its mode
+      // until this tab has its own choice. A mode the backend cannot serve
+      // degrades to `agent`.
       const ref = stored ?? this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
-      this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+      if (!this.session?.modeChosen) {
+        this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+        if (this.session) {
+          this.session.modeChosen = true;
+        }
+      } else {
+        this.mode = this.resolveMode(backendId, this.mode);
+      }
       const titled =
         ref?.title ?? result.items.find((item) => item.role === 'user' && item.text?.trim())?.text;
+      const choice = this.composerSelection(backendId, result.model);
       await this.store.setActiveThread({
         backendId,
         threadId,
-        modelId: result.model,
+        modelId: choice.backendId === backendId ? choice.model ?? result.model : result.model,
         mode: this.mode,
         title: titled ? ThreadStore.titleFromText(titled) ?? titled : undefined,
         updatedAt: Date.now()
@@ -2426,12 +2633,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.store.mergeApprovalMarkers(backendId, threadId, source),
         Boolean(result.hasOlderHistory)
       );
+      const permission = this.sessionPermission(choice.backendId);
       this.post({
         type: 'conversation',
-        backendId,
+        backendId: choice.backendId,
         threadId,
-        model: result.model,
-        permissionLevel: this.permissionLevel,
+        model: choice.model,
+        permissionLevel: permission,
         mode: this.mode,
         replay: await this.previewReplay(history.replay),
         hasOlderHistory: history.hasOlderHistory,
@@ -2441,6 +2649,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           ? this.planArtifact(backendId, threadId)
           : undefined
       });
+      await this.finishComposerPaint(choice.backendId, choice.model);
       if (result.recovered) {
         const provider = backendId === 'codex' ? 'Codex' : 'OpenCode';
         this.post({ type: 'notice', level: 'info', message: threadRecoveredNotice(provider) });
@@ -2459,7 +2668,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
         this.activeThread = { backendId, threadId, model: ref?.modelId };
         this.syncPlanPreviewThread(threadId);
-        this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+        if (!this.session?.modeChosen) {
+          this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+          if (this.session) {
+            this.session.modeChosen = true;
+          }
+        } else {
+          this.mode = this.resolveMode(backendId, this.mode);
+        }
         const titled =
           ref?.title ?? storedItems.find((item) => item.role === 'user' && item.text?.trim())?.text;
         if (this.session) {
@@ -2468,18 +2684,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           this.publishTabs();
         }
         const history = this.openHistory(this.store.mergeApprovalMarkers(backendId, threadId, storedItems));
+        const choice = this.composerSelection(backendId, ref?.modelId);
+        const permission = this.sessionPermission(choice.backendId);
         this.post({
           type: 'conversation',
-          backendId,
+          backendId: choice.backendId,
           threadId,
-          model: ref?.modelId,
-          permissionLevel: this.permissionLevel,
+          model: choice.model,
+          permissionLevel: permission,
           mode: this.mode,
           replay: await this.previewReplay(history.replay),
           hasOlderHistory: history.hasOlderHistory,
           pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
           plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
         });
+        await this.finishComposerPaint(choice.backendId, choice.model);
         await this.postLatestChanges();
         await this.postActiveCheckpoints();
         this.post({
@@ -2614,7 +2833,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           backendId: active.backendId,
           threadId: active.threadId,
           model,
-          permissionLevel: this.permissionLevel,
+          permissionLevel: this.sessionPermission(active.backendId),
           mode: this.mode,
           replay: await this.previewReplay(history.replay),
           hasOlderHistory: history.hasOlderHistory,
@@ -2822,6 +3041,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       this.session.blank = false;
       this.publishTabs();
+    }
+    if (this.session) {
+      this.session.composerBackendId = activeBackendId;
+      if (resolvedModel) {
+        this.session.composerModelId = resolvedModel;
+      }
+      this.persistOpenTabs();
     }
     await this.store.setLastUsedModel({ backendId: activeBackendId, modelId: resolvedModel ?? '' });
     this.post({ type: 'busy', value: true, backendId: activeBackendId, threadId });

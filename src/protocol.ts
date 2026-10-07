@@ -586,6 +586,12 @@ export type WebviewToHostMessage =
    */
   | { type: 'selectMode'; mode: DefaultMode; backendId?: string }
   /**
+   * Remember the model the user picked for the open chat. The choice stays on
+   * that chat when they switch tabs, and a new chat still starts from the
+   * last model they picked.
+   */
+  | { type: 'selectModel'; backendId: string; modelId: string }
+  /**
    * Select the permission level for the next turn and for later conversations.
    * The host stores it, so a new chat keeps the choice. `unrestricted` is only
    * posted after the labelled confirmation.

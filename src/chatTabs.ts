@@ -2,6 +2,7 @@
  * Sidebar chat-tab titles and which open tab a new chat or history pick should use.
  * Pure data so the host can share the rule with tests; no VS Code types.
  */
+import { parseStoredComposer, type StoredComposer } from './composerControls.ts';
 
 export const DEFAULT_TAB_TITLE = 'SideCode';
 
@@ -28,7 +29,7 @@ export interface DraftAttachment {
   kind: 'image' | 'audio' | 'text' | 'file';
 }
 
-export interface ChatTabState {
+export interface ChatTabState extends StoredComposer {
   backendId?: string;
   threadId?: string;
   blank: boolean;
@@ -110,6 +111,7 @@ export function parseChatTabState(state: unknown): ChatTabState {
   const title = typeof record.title === 'string' && record.title.trim() ? record.title : undefined;
   const draftText = parseDraftText(record.draftText);
   const draftAttachments = parseDraftAttachments(record.draftAttachments);
+  const composer = parseStoredComposer(record);
   return {
     blank: !(threadId && backendId),
     ...(backendId ? { backendId } : {}),
@@ -117,7 +119,8 @@ export function parseChatTabState(state: unknown): ChatTabState {
     ...(title ? { title } : {}),
     ...(record.active === true ? { active: true } : {}),
     ...(draftText ? { draftText } : {}),
-    ...(draftAttachments.length > 0 ? { draftAttachments } : {})
+    ...(draftAttachments.length > 0 ? { draftAttachments } : {}),
+    ...composer
   };
 }
 

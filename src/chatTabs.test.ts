@@ -50,6 +50,27 @@ test('restored tab state resumes a thread and treats anything else as blank', ()
   });
 });
 
+test('restored tab state keeps the composer choices for that chat', () => {
+  assert.deepEqual(
+    parseChatTabState({
+      blank: true,
+      mode: 'plan',
+      permissionLevel: 'read-only',
+      composerBackendId: 'codex',
+      composerModelId: 'gpt-6',
+      modelSettings: { 'codex:gpt-6': { thinking: 'high' } }
+    }),
+    {
+      blank: true,
+      mode: 'plan',
+      permissionLevel: 'read-only',
+      composerBackendId: 'codex',
+      composerModelId: 'gpt-6',
+      modelSettings: { 'codex:gpt-6': { thinking: 'high' } }
+    }
+  );
+});
+
 test('restored tab state keeps the unsent composer and drops file bytes', () => {
   assert.deepEqual(
     parseChatTabState({

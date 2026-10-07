@@ -504,6 +504,9 @@ export function App(): JSX.Element {
   // selected model. The host owns resolution and clamping, so the webview never
   // guesses a valid value; it marks the read loading until the answer arrives,
   // and the floating panel renders whatever the host resolved.
+  const activeChatTabId = state.chatTabs.find((tab) => tab.active)?.id;
+  activeChatTabIdRef.current = activeChatTabId;
+
   useEffect(() => {
     if (state.selectedBackendId && state.selectedModel) {
       dispatch({ type: 'modelCapabilityLoading' });
@@ -513,7 +516,7 @@ export function App(): JSX.Element {
         modelId: state.selectedModel
       });
     }
-  }, [state.selectedBackendId, state.selectedModel]);
+  }, [state.selectedBackendId, state.selectedModel, activeChatTabId]);
 
   const requestOlder = (fromReader = false): void => {
     if (fromReader) {
@@ -1640,8 +1643,6 @@ export function App(): JSX.Element {
   };
 
 
-  const activeChatTabId = state.chatTabs.find((tab) => tab.active)?.id;
-  activeChatTabIdRef.current = activeChatTabId;
   const previousChatTabRef = useRef(activeChatTabId);
   onComposerDraftRef.current = (message) => {
     if (
@@ -2479,6 +2480,7 @@ function ModelPanel({
   const select = (backendId: string, model: string): void => {
     dispatch({ type: 'selectBackend', backendId });
     dispatch({ type: 'selectModel', model });
+    bridge.post({ type: 'selectModel', backendId, modelId: model });
     onClose();
   };
 
