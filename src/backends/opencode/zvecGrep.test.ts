@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import {
   applyZvecGrep,
+  commandLaunch,
+  commandNotFound,
   detectZvecGrep,
   firstExisting,
   nodeMajor,
   npmGlobalInstallArgs,
+  zgGlobalBin,
   opencodeConfigCandidates,
   opencodeConfigHasZvecGrep,
+  rejectsIntegrationVerb,
   zgIntegrationArgs,
   type CommandRunner,
   type SpawnOutcome,
@@ -30,10 +34,15 @@ test('node major is read from a version line', () => {
 });
 
 test('integration args use the current installer form and never force', () => {
-  assert.deepEqual(zgIntegrationArgs('install'), ['--install', '--target', 'opencode', '--yes']);
-  assert.deepEqual(zgIntegrationArgs('uninstall'), ['--uninstall', '--target', 'opencode', '--yes']);
+  assert.deepEqual(zgIntegrationArgs('install'), ['install', '--target', 'opencode', '--yes']);
+  assert.deepEqual(zgIntegrationArgs('uninstall'), ['uninstall', '--target', 'opencode', '--yes']);
+  assert.deepEqual(zgIntegrationArgs('install', 'flag'), ['--install', '--target', 'opencode', '--yes']);
   assert.deepEqual(npmGlobalInstallArgs(), ['install', '-g', '@zvec/zvec-grep']);
   assert.equal(zgIntegrationArgs('install').includes('--force'), false);
+  assert.equal(
+    rejectsIntegrationVerb({ code: 1, stdout: '', stderr: 'Error: Unknown command: --install.' }, 'install'),
+    true
+  );
 });
 
 test('config candidates follow zg path rules', () => {
@@ -95,11 +104,17 @@ test('enable installs zg when it is missing, then connects OpenCode', async () =
     if (command === 'node') {
       return ok('v22.14.0');
     }
+    if (command === 'npm' && args[0] === 'prefix') {
+      return ok('/usr/local');
+    }
     if (command === 'npm') {
       packageInstalled = true;
       return ok('added 1 package');
     }
-    if (args[0] === '--install') {
+    if (command === zgGlobalBin('/usr/local', 'linux')) {
+      return missing();
+    }
+    if (args[0] === 'install') {
       configured = true;
       return ok('installed opencode');
     }
@@ -111,10 +126,12 @@ test('enable installs zg when it is missing, then connects OpenCode', async () =
   assert.equal(result.cli, 'installed');
   assert.deepEqual(calls, [
     'zg --version',
+    'npm prefix -g',
+    `${zgGlobalBin('/usr/local', 'linux')} --version`,
     'node --version',
     'npm install -g @zvec/zvec-grep',
     'zg --version',
-    'zg --install --target opencode --yes',
+    'zg install --target opencode --yes',
     'zg --version'
   ]);
 });
@@ -137,16 +154,37 @@ test('enable refuses Node older than 22 and does not install', async () => {
   const calls: string[] = [];
   const result = await applyZvecGrep(true, io('linux', async (command, args) => {
     calls.push([command, ...args].join(' '));
-    if (command === 'zg') {
-      return missing();
+    if (command === 'node') {
+      return ok('v21.7.0');
     }
-    return ok('v21.7.0');
+    return missing();
   }, async () => undefined));
 
   assert.equal(result.ok, false);
   assert.match(result.message, /Node\.js 22/);
-  assert.equal(calls.some((call) => call.startsWith('npm')), false);
+  assert.equal(calls.some((call) => call.startsWith('npm install')), false);
   assert.equal(calls.some((call) => call.includes('--install')), false);
+});
+
+test('an unknown subcommand is retried as a flag', async () => {
+  const calls: string[] = [];
+  const result = await applyZvecGrep(true, io('linux', async (command, args) => {
+    calls.push([command, ...args].join(' '));
+    if (args[0] === '--version') {
+      return ok('1.0.0');
+    }
+    if (args[0] === 'install') {
+      return { code: 1, stdout: '', stderr: 'Error: Unknown command: install.' };
+    }
+    if (args[0] === '--install') {
+      return ok('installed');
+    }
+    return fail(command);
+  }, async () => CONFIGURED));
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.includes('zg install --target opencode --yes'), true);
+  assert.equal(calls.includes('zg --install --target opencode --yes'), true);
 });
 
 test('an unmanaged entry is reported and not forced', async () => {
@@ -169,7 +207,7 @@ test('disable uninstalls the integration and leaves the package installed', asyn
   const calls: string[] = [];
   const result = await applyZvecGrep(false, io('linux', async (command, args) => {
     calls.push([command, ...args].join(' '));
-    if (args[0] === '--uninstall') {
+    if (args[0] === 'uninstall') {
       configured = false;
       return ok('removed');
     }
@@ -180,7 +218,7 @@ test('disable uninstalls the integration and leaves the package installed', asyn
   assert.equal(result.enabled, false);
   assert.equal(result.cli, 'installed');
   assert.equal(calls.some((call) => call.startsWith('npm')), false);
-  assert.equal(calls.includes('zg --uninstall --target opencode --yes'), true);
+  assert.equal(calls.includes('zg uninstall --target opencode --yes'), true);
 });
 
 test('disable is a no-op when OpenCode is not configured', async () => {
@@ -203,6 +241,86 @@ test('detection requires both the CLI and the server entry', async () => {
   assert.deepEqual(noCli, { enabled: false, cli: 'missing' });
 });
 
+test('Windows starts cmd shims through cmd.exe', () => {
+  assert.deepEqual(commandLaunch('win32', 'npm.cmd', ['install', '-g', '@zvec/zvec-grep']), {
+    command: 'cmd.exe',
+    args: ['/d', '/s', '/c', '"npm.cmd install -g @zvec/zvec-grep"'],
+    verbatim: true
+  });
+  assert.equal(commandLaunch('linux', 'npm', ['--version']).verbatim, false);
+  assert.equal(
+    commandNotFound({
+      code: 1,
+      stdout: '',
+      stderr: "'zg' is not recognized as an internal or external command"
+    }),
+    true
+  );
+});
+
+test('a global zg outside PATH is used after install', async () => {
+  const prefix = 'C:\\home\\me\\.npm-global';
+  const bin = zgGlobalBin(prefix, 'win32');
+  let packageInstalled = false;
+  const result = await applyZvecGrep(true, io('win32', async (command, args) => {
+    if (command === 'zg.cmd' || command === 'zg') {
+      return missing();
+    }
+    if (command === 'node') {
+      return ok('v22.14.0');
+    }
+    if (command === 'npm.cmd' && args[0] === 'prefix') {
+      return ok(prefix);
+    }
+    if (command === 'npm.cmd' && args[0] === 'install') {
+      packageInstalled = true;
+      return ok('added');
+    }
+    if (command === bin && args[0] === '--version') {
+      return packageInstalled ? ok('1.0.0') : missing();
+    }
+    if (command === bin && args[0] === 'install') {
+      return ok('installed');
+    }
+    return fail(`${command} ${args.join(' ')}`);
+  }, async () => (packageInstalled ? CONFIGURED : '{ "mcp": {} }')));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.enabled, true);
+  assert.match(result.message, /connected to OpenCode/);
+});
+
+test('Windows EINVAL on the cmd shim still installs zg', async () => {
+  let packageInstalled = false;
+  const calls: string[] = [];
+  const result = await applyZvecGrep(true, io('win32', async (command, args) => {
+    calls.push([command, ...args].join(' '));
+    if (command === 'zg.cmd') {
+      return { code: null, stdout: '', stderr: '', error: 'failed' };
+    }
+    if (command === 'zg' && args[0] === '--version') {
+      return packageInstalled ? ok('1.0.0') : missing();
+    }
+    if (command === 'node') {
+      return ok('v22.1.0');
+    }
+    if (command === 'npm.cmd' && args[0] === 'prefix') {
+      return missing();
+    }
+    if (command === 'npm.cmd') {
+      packageInstalled = true;
+      return ok('added');
+    }
+    if (command === 'zg' && args[0] === 'install') {
+      return ok('installed');
+    }
+    return fail(command);
+  }, async () => CONFIGURED));
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.includes('npm.cmd install -g @zvec/zvec-grep'), true);
+});
+
 test('Windows uses the npm shims', async () => {
   let packageInstalled = false;
   const calls: string[] = [];
@@ -217,11 +335,14 @@ test('Windows uses the npm shims', async () => {
     if (command === 'node') {
       return ok('v22.0.0');
     }
+    if (command === 'npm.cmd' && args[0] === 'prefix') {
+      return missing();
+    }
     if (command === 'npm.cmd') {
       packageInstalled = true;
       return ok('added');
     }
-    if (command === 'zg' && args[0] === '--install') {
+    if (command === 'zg' && args[0] === 'install') {
       return ok('installed');
     }
     return fail(command);
@@ -230,7 +351,7 @@ test('Windows uses the npm shims', async () => {
 
   assert.equal(calls.includes('npm.cmd install -g @zvec/zvec-grep'), true);
   assert.equal(calls.includes('zg.cmd --version'), true);
-  assert.equal(calls.includes('zg --install --target opencode --yes'), true);
+  assert.equal(calls.includes('zg install --target opencode --yes'), true);
 });
 
 function io(

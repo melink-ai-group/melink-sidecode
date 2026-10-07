@@ -180,7 +180,7 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       Reload the window and open the sidebar.
 - [ ] 14a1. **zvec-grep.** Open settings with opencode on and turn **Use zvec-grep**
       on. If `zg` is missing and Node.js is 22 or newer, the sidebar installs
-      `@zvec/zvec-grep`, then runs `zg --install --target opencode --yes`.
+      `@zvec/zvec-grep`, then runs `zg install --target opencode --yes`.
       Confirm the checkbox stays on and the user OpenCode config
       (`opencode.jsonc` or `opencode.json`) contains a `zvec_grep` server.
       Turn it off and confirm that server is removed, `zg` is still on `PATH`,

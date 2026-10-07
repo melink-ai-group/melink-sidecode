@@ -164,9 +164,9 @@ streams chat and does not spawn opencode.
   `PATH` when it is a bare name, exactly like `melink.codex.path`.
 - **zvec-grep.** With the runtime on, **Use zvec-grep** connects
   [zvec-grep](https://github.com/zvec-ai/zvec-grep) through its official
-  OpenCode installer (`zg --install --target opencode`). If `zg` is not on
+  OpenCode installer (`zg install --target opencode`). If `zg` is not on
   `PATH`, the sidebar installs `@zvec/zvec-grep` (Node.js 22 or newer) first.
-  Turning it off runs `zg --uninstall --target opencode` and does not remove
+  Turning it off runs `zg uninstall --target opencode` and does not remove
   the package or any workspace index. The choice is stored in user settings
   (`melink.ollama.opencode.zvecGrep`) because the installer edits the user
   OpenCode config. A new session picks up the change. The generated per-turn
