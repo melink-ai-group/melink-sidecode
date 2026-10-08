@@ -59,9 +59,24 @@ export function switchComposerDraft(
 export function acceptComposerRestore(
   remembered: Readonly<Record<string, ComposerDraft>>,
   tabId: string,
-  dirty: boolean
+  dirty: boolean,
+  incoming?: ComposerDraft
 ): boolean {
-  return !dirty && remembered[tabId] === undefined;
+  if (dirty) {
+    return false;
+  }
+  const stored = remembered[tabId];
+  if (stored === undefined) {
+    return true;
+  }
+  // Send clears the composer before the host can refuse. The refusal puts the
+  // text back, and that empty local draft must not block it.
+  return (
+    incoming !== undefined &&
+    stored.text.trim() === '' &&
+    stored.attachments.length === 0 &&
+    (incoming.text.trim() !== '' || incoming.attachments.length > 0)
+  );
 }
 
 /**

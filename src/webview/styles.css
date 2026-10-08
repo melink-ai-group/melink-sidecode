@@ -816,6 +816,7 @@ html body {
   content: "";
   flex: 0 0 25vh;
   height: 25vh;
+  max-height: 300px;
   margin-top: -16px;
 }
 

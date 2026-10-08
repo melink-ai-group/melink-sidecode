@@ -427,6 +427,9 @@ export function App(): JSX.Element {
             messageId: message.messageId
           });
           break;
+        case 'revertLocalSend':
+          dispatch({ type: 'revertLocalSend', text: message.text });
+          break;
         case 'changes/restorePreview':
           dispatch({ type: 'restorePreview', preview: message.preview });
           break;
@@ -1653,7 +1656,9 @@ export function App(): JSX.Element {
       composerCarryRef.current = undefined;
       composerCarryFromRef.current = undefined;
     }
-    if (!acceptComposerRestore(composerMemoryRef.current, message.tabId, composerDirtyRef.current)) {
+    const incoming = { text: message.text, attachments: message.attachments };
+    const editingThisTab = message.tabId === activeChatTabIdRef.current && composerDirtyRef.current;
+    if (!acceptComposerRestore(composerMemoryRef.current, message.tabId, editingThisTab, incoming)) {
       return;
     }
     const restored: ComposerDraft = {

@@ -716,6 +716,14 @@ test('a later message hides a finished plan row, and new work brings it back', (
   assert.equal(resumed.plan?.completedDismissed, undefined);
 });
 
+test('a refused send drops the optimistic bubble and leaves the rest of the chat', () => {
+  const sent = reduce(initialState, { type: 'localUserMessage', text: 'hello there' });
+  const kept = reduce(sent, { type: 'revertLocalSend', text: 'other' });
+  assert.equal(kept.transcript.length, 1);
+  const reverted = reduce(sent, { type: 'revertLocalSend', text: 'hello there' });
+  assert.equal(reverted.transcript.length, 0);
+});
+
 test('a live user bubble takes the host message id so its restore control can match', () => {
   const sent = reduce(initialState, { type: 'localUserMessage', text: 'fix the header' });
   assert.equal(sent.transcript[0]?.id.startsWith('local_'), true);

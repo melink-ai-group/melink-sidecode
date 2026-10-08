@@ -165,6 +165,15 @@ interface ChatSession {
   disposed: boolean;
   /** True while this tab's turn is still running, including after the tab is closed. */
   turnOpen: boolean;
+  /** True from the moment this tab's send is accepted until that send's promise settles. */
+  turnBusy: boolean;
+  /** Notice that belongs to this tab and is shown again when the tab is reopened. */
+  heldNotice?: { level: 'info' | 'warning' | 'error'; message: string };
+  /**
+   * The webview clears the composer as soon as Send is clicked. When that send
+   * is refused, ignore the empty draft that is still in flight.
+   */
+  ignoreNextEmptyDraft: boolean;
   /** History captured for this tab, oldest first. Absent until a chat is painted. */
   loadedTranscript?: TranscriptItem[];
   /** Index of the first painted row. Rows before it load when the reader scrolls up. */
@@ -221,11 +230,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private showingPlanPreview = false;
   /** Built-plan turns waiting to start once the current turn has released the lock. */
   private readonly planAutopilotQueue = new Map<string, { session: ChatSession; text: string }>();
-  /** The next sendTurn is an automatic plan continuation, not a user message. */
-  private autopilotSend = false;
-  /** The next sendTurn continues a stopped provider turn and does not reset the attempt count. */
-  private crashContinue = false;
-  /** One queued continuation per tab, started once the failed turn releases the lock. */
+  /** One queued continuation per tab, started once that tab's turn releases the lock. */
   private readonly crashContinueQueue = new Map<string, { session: ChatSession; text: string }>();
   /**
    * The per-turn change journal: the host-owned record of what each turn
@@ -259,8 +264,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * journal's recorded pre-turn bytes.
    */
   private readonly nativeDiff: NativeDiffService;
-  /** Prevents overlapping sends and mode changes while one request is running. */
-  private turnInProgress = false;
   /**
    * The fallback watcher for shell-driven edits that emit no structured event.
    * Started per turn and stopped when the turn ends, so no watcher outlives it.
@@ -276,10 +279,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private contextViewTimer?: ReturnType<typeof setTimeout>;
   /** Serializes plan-file writes so a live status update cannot clobber another. */
   private planStepChain: Promise<void> = Promise.resolve();
-  /** Latest thread whose running turn should refresh todo status. */
-  private todoProgressTarget?: { backendId: string; threadId: string };
+  /** Threads whose running turns should refresh todo status. One chat does not replace another. */
+  private readonly todoProgressTargets = new Map<string, { backendId: string; threadId: string }>();
   private todoProgressQueued = false;
-  private todoProgressAgain = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -481,6 +483,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
             continue;
           }
           session.turnOpen = false;
+          session.heldNotice = undefined;
           if (session.disposed) {
             this.removeSession(session);
           }
@@ -661,14 +664,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * step, and the surface has to keep every step's files.
    */
   private async finishChangeTurn(turnId: string): Promise<void> {
-    // A terminus for a turn that is not the active one (a late event after a new
-    // turn already started) must not stop the newer turn's watcher or end its
-    // boundary.
-    if (this.changeTracker.currentTurnId !== turnId) {
+    // A terminus for a turn that already ended (a late event after this chat
+    // started another turn) must not stop a chat that is still running.
+    if (!this.changeTracker.isOpen(turnId)) {
       return;
     }
-    this.changeWatcher.stop();
     const set = await this.changeTracker.endTurn(turnId);
+    if (!this.changeTracker.isTracking) {
+      this.changeWatcher.stop();
+    }
     if (!set) {
       return;
     }
@@ -1312,7 +1316,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       composerAttachments: (init.draftAttachments ?? []).map((attachment) => ({ ...attachment })),
       ...(init.backendId && init.threadId ? { resume: { backendId: init.backendId, threadId: init.threadId } } : {}),
       disposed: false,
-      turnOpen: false
+      turnOpen: false,
+      turnBusy: false,
+      ignoreNextEmptyDraft: false
     };
     this.sessions.push(session);
     return session;
@@ -1331,16 +1337,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         session.resume = undefined;
         session.blank = false;
         await this.resumeThread(pending.backendId, pending.threadId);
-        return;
-      }
-      if (session.activeThread) {
+      } else if (session.activeThread) {
         await this.repaintSession();
         await this.postLatestChanges();
         await this.postActiveCheckpoints();
-        return;
+      } else {
+        await this.postFreshConversation();
+        this.post({ type: 'restoring', value: false });
       }
-      await this.postFreshConversation();
-      this.post({ type: 'restoring', value: false });
+      if (session.heldNotice && this.visible === session) {
+        this.post({ type: 'notice', level: session.heldNotice.level, message: session.heldNotice.message });
+      }
     });
     await this.postComposerDraft(session);
   }
@@ -1587,6 +1594,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         const session =
           (message.tabId ? this.liveSessions().find((entry) => entry.id === message.tabId) : undefined) ?? this.visible;
         if (session) {
+          const empty = message.text.trim().length === 0 && message.attachments.length === 0;
+          if (session.ignoreNextEmptyDraft && empty) {
+            session.ignoreNextEmptyDraft = false;
+            break;
+          }
+          if (!empty) {
+            session.ignoreNextEmptyDraft = false;
+          }
           this.rememberComposer(session, message.text, message.attachments);
         }
         break;
@@ -2020,7 +2035,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * index so a resumed thread keeps it.
    */
   private async selectMode(requested: DefaultMode, fromInitialRequest = false, backendId?: string): Promise<void> {
-    if (this.turnInProgress && !fromInitialRequest) {
+    if ((this.session?.turnBusy || this.session?.turnOpen) && !fromInitialRequest) {
       this.post({ type: 'notice', level: 'info', message: 'Mode changes apply after the current request finishes.' });
       return;
     }
@@ -2722,23 +2737,68 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     requestedSettings?: import('./backends/types').ModelSettingOverrides,
     attachments?: Attachment[],
     backendId?: string,
-    updatePlan?: boolean
+    updatePlan?: boolean,
+    origin: 'user' | 'autopilot' | 'continue' = 'user'
   ): Promise<void> {
-    if (this.turnInProgress) {
-      this.autopilotSend = false;
-      this.crashContinue = false;
-      this.post({ type: 'notice', level: 'info', message: 'A request is already in progress. Wait for it to finish before sending another.' });
+    const session = this.session;
+    if (origin === 'user' && session?.turnBusy) {
+      this.holdUnsent(
+        text,
+        attachments,
+        'A request is already in progress on this chat. Wait for it to finish before sending another.'
+      );
       return;
     }
-    this.turnInProgress = true;
+    if (session) {
+      session.turnBusy = true;
+      session.heldNotice = undefined;
+    }
+    let sent = false;
     try {
-      await this.sendTurnCore(text, model, permissionLevel, requestedSettings, attachments, backendId, updatePlan);
+      sent = await this.sendTurnCore(
+        text,
+        model,
+        permissionLevel,
+        requestedSettings,
+        attachments,
+        backendId,
+        updatePlan,
+        origin
+      );
     } finally {
-      this.turnInProgress = false;
-      if (!this.flushStopContinue()) {
-        this.flushPlanAutopilot();
+      if (session) {
+        session.turnBusy = false;
       }
     }
+    if (!sent && origin === 'user') {
+      this.holdUnsent(text, attachments);
+    }
+    this.flushQueuedTurns();
+  }
+
+  /**
+   * The send was not stored. Put the text back on this tab and, when `notice`
+   * is set, keep that warning with the tab across switches.
+   */
+  private holdUnsent(text: string, attachments: Attachment[] | undefined, notice?: string): void {
+    const session = this.session;
+    if (!session) {
+      if (notice) {
+        this.post({ type: 'notice', level: 'info', message: notice });
+      }
+      return;
+    }
+    const cleared = session.composerText.trim().length === 0 && session.composerAttachments.length === 0;
+    this.rememberComposer(session, text, attachments ?? []);
+    if (!cleared) {
+      session.ignoreNextEmptyDraft = true;
+    }
+    if (notice) {
+      session.heldNotice = { level: 'info', message: notice };
+      this.post({ type: 'notice', level: 'info', message: notice });
+    }
+    this.post({ type: 'revertLocalSend', text });
+    void this.postComposerDraft(session);
   }
 
   /**
@@ -2798,7 +2858,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * a replacement transcript, which is what the next turn is built from.
    */
   private async compactContext(usedTokens: number, maxTokens: number): Promise<void> {
-    if (this.turnInProgress || !canCompactContext(contextUsagePercent(usedTokens, maxTokens), false)) {
+    if (this.session?.turnBusy || this.session?.turnOpen || !canCompactContext(contextUsagePercent(usedTokens, maxTokens), false)) {
       return;
     }
     const active = this.activeThread;
@@ -2810,7 +2870,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!backend) {
       return;
     }
-    this.turnInProgress = true;
+    if (this.session) {
+      this.session.turnBusy = true;
+    }
     this.post({ type: 'busy', value: true, backendId: active.backendId, threadId: active.threadId });
     try {
       const model = active.model;
@@ -2852,8 +2914,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         message
       });
     } finally {
-      this.turnInProgress = false;
+      if (this.session) {
+        this.session.turnBusy = false;
+      }
       this.post({ type: 'busy', value: false, backendId: active.backendId, threadId: active.threadId });
+      this.flushQueuedTurns();
     }
   }
 
@@ -2885,7 +2950,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async steerTurn(text: string): Promise<void> {
     const value = text.trim();
     const active = this.activeThread;
-    if (!value || !this.turnInProgress || !active) return;
+    if (!value || !active || !(this.session?.turnBusy || this.session?.turnOpen)) return;
     const backend = this.registry.get(active.backendId);
     if (!backend?.steerTurn) {
       this.post({ type: 'notice', level: 'info', message: 'This provider cannot accept steer messages while busy.' });
@@ -2909,12 +2974,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     requestedSettings?: import('./backends/types').ModelSettingOverrides,
     attachments?: Attachment[],
     backendId?: string,
-    updatePlan?: boolean
-  ): Promise<void> {
-    const automatic = this.autopilotSend;
-    const continuing = this.crashContinue;
-    this.autopilotSend = false;
-    this.crashContinue = false;
+    updatePlan?: boolean,
+    origin: 'user' | 'autopilot' | 'continue' = 'user'
+  ): Promise<boolean> {
+    const automatic = origin === 'autopilot';
+    const continuing = origin === 'continue';
     if (this.session) {
       this.session.planRunAutomatic = automatic;
       if (!automatic && !continuing) {
@@ -2959,7 +3023,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     if (!candidateBackend) {
       this.post({ type: 'notice', level: 'warning', message: 'No available backend to send the turn.' });
-      return;
+      return false;
     }
     // A model pick only updates the webview. A different provider continues
     // this chat: the current transcript is compacted, and that summary is the
@@ -2968,7 +3032,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (this.activeThread && this.activeThread.backendId !== candidateBackend) {
       const summary = await this.compactHandover(this.activeThread);
       if (summary === 'failed') {
-        return;
+        return false;
       }
       handover = summary;
     }
@@ -2986,12 +3050,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     if (!this.activeThread || this.activeThread.backendId !== candidateBackend) {
       this.post({ type: 'busy', value: false });
-      return;
+      return false;
     }
     const { backendId: activeBackendId, threadId } = this.activeThread;
     const backend = this.registry.get(activeBackendId);
     if (!backend) {
-      return;
+      return false;
     }
     // Clipboard images have no path. Copy them into workspace storage first so
     // a reload can show the same thumbnail. The transcript then keeps the path,
@@ -3097,6 +3161,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       await this.store.flush();
       this.post({ type: 'busy', value: false, backendId: activeBackendId, threadId });
     }
+    return true;
   }
 
   /**
@@ -3259,7 +3324,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.pendingQuestion = undefined;
       this.post({ type: 'question/cleared' });
     }
-    this.registry.cancel(this.activeThread.backendId);
+    this.registry.cancel(this.activeThread.backendId, this.activeThread.threadId);
   }
 
   /**
@@ -3787,45 +3852,34 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       session,
       text: continuePlanInstruction(existing.steps)
     });
-    this.flushPlanAutopilot();
+    this.flushQueuedTurns();
   }
 
   /**
-   * Start one queued continuation of a stopped provider turn.
-   * Returns true when a continuation was started, so a plan follow-up waits.
+   * Start queued continuations for every chat that is not already in a turn.
+   * One chat's request does not hold the others.
    */
-  private flushStopContinue(): boolean {
-    if (this.turnInProgress || this.crashContinueQueue.size === 0) {
-      return false;
-    }
-    const next = this.crashContinueQueue.values().next().value;
-    if (!next || next.session.disposed) {
-      if (next) {
-        this.crashContinueQueue.delete(next.session.id);
+  private flushQueuedTurns(): void {
+    const queues: Array<['continue' | 'autopilot', Map<string, { session: ChatSession; text: string }>]> = [
+      ['continue', this.crashContinueQueue],
+      ['autopilot', this.planAutopilotQueue]
+    ];
+    for (const [origin, queue] of queues) {
+      for (const [id, next] of [...queue.entries()]) {
+        if (next.session.disposed) {
+          queue.delete(id);
+          continue;
+        }
+        if (next.session.turnBusy) {
+          continue;
+        }
+        queue.delete(id);
+        next.session.turnBusy = true;
+        void this.sessionStore.run(next.session, () =>
+          this.sendTurn(next.text, undefined, undefined, undefined, undefined, undefined, undefined, origin)
+        );
       }
-      return false;
     }
-    this.crashContinueQueue.delete(next.session.id);
-    this.crashContinue = true;
-    void this.sessionStore.run(next.session, () => this.sendTurn(next.text));
-    return true;
-  }
-
-  /** Start one queued plan continuation once no turn is holding the lock. */
-  private flushPlanAutopilot(): void {
-    if (this.turnInProgress || this.planAutopilotQueue.size === 0) {
-      return;
-    }
-    const next = this.planAutopilotQueue.values().next().value;
-    if (!next || next.session.disposed) {
-      if (next) {
-        this.planAutopilotQueue.delete(next.session.id);
-      }
-      return;
-    }
-    this.planAutopilotQueue.delete(next.session.id);
-    this.autopilotSend = true;
-    void this.sessionStore.run(next.session, () => this.sendTurn(next.text));
   }
 
   /**
@@ -3857,26 +3911,26 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!existing?.built || existing.steps.length === 0) {
       return;
     }
-    this.todoProgressTarget = { backendId, threadId };
-    this.todoProgressAgain = true;
+    this.todoProgressTargets.set(`${backendId}:${threadId}`, { backendId, threadId });
     if (this.todoProgressQueued) {
       return;
     }
     this.todoProgressQueued = true;
     void this.enqueuePlanSteps(async () => {
       try {
-        while (this.todoProgressAgain) {
-          this.todoProgressAgain = false;
-          const target = this.todoProgressTarget;
-          if (!target) {
-            return;
+        while (this.todoProgressTargets.size > 0) {
+          const batch = [...this.todoProgressTargets.values()];
+          this.todoProgressTargets.clear();
+          for (const target of batch) {
+            const owner = this.sessionForThread(target.backendId, target.threadId);
+            await this.sessionStore.run(owner, () => this.mergeTodoProgressFromReply(target.backendId, target.threadId));
           }
-          await this.mergeTodoProgressFromReply(target.backendId, target.threadId);
         }
       } finally {
         this.todoProgressQueued = false;
-        if (this.todoProgressAgain && this.todoProgressTarget) {
-          this.noteTodoProgress(this.todoProgressTarget.backendId, this.todoProgressTarget.threadId);
+        const next = this.todoProgressTargets.values().next().value;
+        if (next) {
+          this.noteTodoProgress(next.backendId, next.threadId);
         }
       }
     });

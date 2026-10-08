@@ -290,11 +290,12 @@ export class OllamaBackend implements AgentBackend {
       settle: (answers: string[][] | 'reject') => void;
     }
   >();
-  private inFlight?: AbortController;
-  /** User texts waiting to be folded into the active turn. Stop clears this. */
-  private steerTexts: string[] = [];
-  /** Thread whose turn is running. Compact sets `inFlight` without this. */
-  private activeTurnThreadId?: string;
+  /** One abort handle per chat, so two tabs can generate at once. */
+  private readonly flights = new Map<string, AbortController>();
+  /** User texts waiting to be folded into one chat's turn. Stop clears that chat. */
+  private readonly steerQueues = new Map<string, string[]>();
+  /** Compaction and other work that is not a chat turn. */
+  private sideFlight?: AbortController;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -560,9 +561,18 @@ export class OllamaBackend implements AgentBackend {
     return [...summaries.values()].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   }
 
-  cancel(): void {
-    this.steerTexts = [];
-    this.inFlight?.abort();
+  cancel(threadId?: string): void {
+    if (threadId) {
+      this.steerQueues.delete(threadId);
+      this.flights.get(threadId)?.abort();
+      return;
+    }
+    this.sideFlight?.abort();
+    this.sideFlight = undefined;
+    for (const [id, controller] of this.flights) {
+      this.steerQueues.delete(id);
+      controller.abort();
+    }
   }
 
   /**
@@ -576,33 +586,35 @@ export class OllamaBackend implements AgentBackend {
     if (!value) {
       return;
     }
-    if (!this.inFlight || this.activeTurnThreadId !== handle.threadId) {
+    if (!this.flights.has(handle.threadId)) {
       throw new BackendError('provider', 'There is no active turn to steer.');
     }
-    this.steerTexts.push(value);
-    this.inFlight.abort();
+    const queued = this.steerQueues.get(handle.threadId) ?? [];
+    queued.push(value);
+    this.steerQueues.set(handle.threadId, queued);
+    this.flights.get(handle.threadId)?.abort();
   }
 
-  private beginFlight(): AbortController {
+  private beginFlight(threadId: string): AbortController {
     const controller = new AbortController();
-    this.inFlight = controller;
+    this.flights.set(threadId, controller);
     return controller;
   }
 
-  private endFlight(controller: AbortController): void {
-    if (this.inFlight === controller) {
-      this.inFlight = undefined;
+  private endFlight(threadId: string, controller: AbortController): void {
+    if (this.flights.get(threadId) === controller) {
+      this.flights.delete(threadId);
     }
   }
 
-  /** Join every queued steer, or `undefined` when Stop won or nothing is queued. */
-  private drainSteers(): string | undefined {
-    if (this.steerTexts.length === 0) {
+  /** Join this chat's queued steers, or `undefined` when Stop won or nothing is queued. */
+  private drainSteers(threadId: string): string | undefined {
+    const queued = this.steerQueues.get(threadId);
+    if (!queued || queued.length === 0) {
       return undefined;
     }
-    const text = this.steerTexts.join('\n\n');
-    this.steerTexts = [];
-    return text;
+    this.steerQueues.delete(threadId);
+    return queued.join('\n\n');
   }
 
   /**
@@ -645,7 +657,7 @@ export class OllamaBackend implements AgentBackend {
     }
 
     const controller = new AbortController();
-    this.inFlight = controller;
+    this.sideFlight = controller;
     let summary = '';
     try {
       const settings =
@@ -673,8 +685,8 @@ export class OllamaBackend implements AgentBackend {
       }
       summary = body.message?.content?.trim() ?? '';
     } catch (error) {
-      if (this.inFlight === controller) {
-        this.inFlight = undefined;
+      if (this.sideFlight === controller) {
+        this.sideFlight = undefined;
       }
       const failure = this.categorize(error);
       throw new BackendError(
@@ -682,8 +694,8 @@ export class OllamaBackend implements AgentBackend {
         failure.code === 'canceled' ? 'Compaction canceled.' : failure.message
       );
     }
-    if (this.inFlight === controller) {
-      this.inFlight = undefined;
+    if (this.sideFlight === controller) {
+      this.sideFlight = undefined;
     }
     if (!summary) {
       throw new BackendError('provider', 'Compaction did not return a summary.');
@@ -746,15 +758,13 @@ export class OllamaBackend implements AgentBackend {
 
     const turnId = createId('ollama_turn');
     let itemId = createId('ollama_item');
-    let controller = this.beginFlight();
-    this.activeTurnThreadId = handle.threadId;
+    let controller = this.beginFlight(handle.threadId);
 
     this.events.fire({ type: 'turn/started', backendId: this.id, threadId: handle.threadId, turnId });
 
     const model = request.model ?? this.defaultModel;
     if (!model) {
-      this.endFlight(controller);
-      this.activeTurnThreadId = undefined;
+      this.endFlight(handle.threadId, controller);
       const failure = new BackendError('provider', 'No Ollama Cloud model selected.');
       this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId: handle.threadId, turnId, reason: failure.message });
       throw failure;
@@ -777,7 +787,7 @@ export class OllamaBackend implements AgentBackend {
       text = next;
       steered = true;
       itemId = createId('ollama_item');
-      controller = this.beginFlight();
+      controller = this.beginFlight(handle.threadId);
       startItem();
     };
 
@@ -804,7 +814,7 @@ export class OllamaBackend implements AgentBackend {
             })
           });
         } catch (error) {
-          const next = this.categorize(error).code === 'canceled' ? this.drainSteers() : undefined;
+          const next = this.categorize(error).code === 'canceled' ? this.drainSteers(handle.threadId) : undefined;
           if (!next) {
             this.failTurn(handle, itemId, turnId, this.categorize(error));
             throw error;
@@ -819,7 +829,7 @@ export class OllamaBackend implements AgentBackend {
             throw new StreamError('canceled', 'Turn canceled.');
           }
         } catch (error) {
-          const next = this.categorize(error).code === 'canceled' ? this.drainSteers() : undefined;
+          const next = this.categorize(error).code === 'canceled' ? this.drainSteers(handle.threadId) : undefined;
           if (!next) {
             this.failTurn(handle, itemId, turnId, this.categorize(error));
             throw error;
@@ -829,12 +839,12 @@ export class OllamaBackend implements AgentBackend {
         }
 
         this.events.fire({ type: 'item/completed', backendId: this.id, threadId: handle.threadId, itemId, status: 'completed' });
-        const next = this.drainSteers();
+        const next = this.drainSteers(handle.threadId);
         if (next) {
           text = next;
           steered = true;
           itemId = createId('ollama_item');
-          controller = this.beginFlight();
+          controller = this.beginFlight(handle.threadId);
           startItem();
           continue;
         }
@@ -842,11 +852,8 @@ export class OllamaBackend implements AgentBackend {
         return;
       }
     } finally {
-      this.endFlight(controller);
-      if (this.activeTurnThreadId === handle.threadId) {
-        this.activeTurnThreadId = undefined;
-      }
-      this.steerTexts = [];
+      this.endFlight(handle.threadId, controller);
+      this.steerQueues.delete(handle.threadId);
     }
   }
 
@@ -919,8 +926,7 @@ export class OllamaBackend implements AgentBackend {
       });
     }
 
-    let controller = this.beginFlight();
-    this.activeTurnThreadId = handle.threadId;
+    let controller = this.beginFlight(handle.threadId);
     // The session id is read before the turn so a later turn in the same thread
     // resumes the same opencode session; absent means a fresh session.
     //
@@ -1024,7 +1030,7 @@ export class OllamaBackend implements AgentBackend {
         }
 
         const next =
-          result.outcome === 'canceled' || result.outcome === 'completed' ? this.drainSteers() : undefined;
+          result.outcome === 'canceled' || result.outcome === 'completed' ? this.drainSteers(handle.threadId) : undefined;
         if (next) {
           // Keep this turn open. A live session already has the original prompt,
           // so the continuation is the steer text alone. Without a session id
@@ -1036,7 +1042,7 @@ export class OllamaBackend implements AgentBackend {
             visibleText = `${visibleText}\n\n${next}`;
             barePrompt = false;
           }
-          controller = this.beginFlight();
+          controller = this.beginFlight(handle.threadId);
           continue;
         }
 
@@ -1082,11 +1088,8 @@ export class OllamaBackend implements AgentBackend {
         return;
       }
     } finally {
-      this.endFlight(controller);
-      if (this.activeTurnThreadId === handle.threadId) {
-        this.activeTurnThreadId = undefined;
-      }
-      this.steerTexts = [];
+      this.endFlight(handle.threadId, controller);
+      this.steerQueues.delete(handle.threadId);
     }
   }
 

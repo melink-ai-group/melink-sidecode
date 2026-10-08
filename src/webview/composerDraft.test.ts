@@ -53,6 +53,24 @@ test('a host restore fills only a tab that has not been edited', () => {
   assert.equal(acceptComposerRestore({}, 'tab_a', false), true);
   assert.equal(acceptComposerRestore({}, 'tab_a', true), false);
   assert.equal(acceptComposerRestore({ tab_a: { text: 'typed', attachments: [] } }, 'tab_a', false), false);
+  assert.equal(
+    acceptComposerRestore(
+      { tab_a: { text: '', attachments: [] } },
+      'tab_a',
+      false,
+      { text: 'put me back', attachments: [] }
+    ),
+    true
+  );
+  assert.equal(
+    acceptComposerRestore(
+      { tab_a: { text: 'typed', attachments: [] } },
+      'tab_a',
+      false,
+      { text: 'put me back', attachments: [] }
+    ),
+    false
+  );
 });
 
 test('inline image bytes are posted once', () => {
