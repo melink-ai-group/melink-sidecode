@@ -375,11 +375,14 @@ test('switching conversation clears a failure banner from the previous chat', ()
       code: 'provider'
     }
   });
-  assert.equal(failed.notice?.message, 'The opencode session could not be started.');
+  assert.equal(failed.notice, undefined);
+  assert.equal(failed.transcript.at(-1)?.text, 'The opencode session could not be started.');
+  assert.equal(failed.transcript.at(-1)?.noticeLevel, 'error');
   const same = reduce(failed, { type: 'conversation', backendId: 'ollama', threadId: 't1' });
-  assert.equal(same.notice?.message, 'The opencode session could not be started.');
+  assert.equal(same.notice, undefined);
   const switched = reduce(failed, { type: 'conversation', backendId: 'ollama', threadId: 't2' });
   assert.equal(switched.notice, undefined);
+  assert.equal(switched.transcript.some((item) => item.detail === 'status'), false);
   const late = reduce(switched, {
     type: 'agentEvent',
     event: {
@@ -640,8 +643,10 @@ test('an API-key-vs-ChatGPT mismatch on the selected provider is surfaced distin
       code: 'auth-mismatch'
     }
   });
-  assert.equal(afterError.notice?.level, 'warning');
-  assert.match(afterError.notice?.message ?? '', /API key/);
+  assert.equal(afterError.notice, undefined);
+  assert.equal(afterError.transcript.at(-1)?.noticeLevel, 'warning');
+  assert.equal(afterError.transcript.at(-1)?.noticeAction, 'refresh');
+  assert.match(afterError.transcript.at(-1)?.text ?? '', /API key/);
 });
 
 test('reject confirmation opens, cancels, and closes when a plan is written', () => {
@@ -897,7 +902,7 @@ test('a decision answer settles the in-flight lock and closes the confirmation',
   assert.equal(answered.changeDecision?.results[0].ok, true);
 });
 
-test('a failure banner leaves once the user or the next turn continues', () => {
+test('a failure line stays where it happened once the user or the next turn continues', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 'thread_1' });
   const failed = reduce(active, {
     type: 'agentEvent',
@@ -910,14 +915,18 @@ test('a failure banner leaves once the user or the next turn continues', () => {
       code: 'stream'
     }
   });
-  assert.equal(failed.notice?.message, 'The opencode stream ended before the turn completed.');
+  assert.equal(failed.notice, undefined);
+  assert.equal(failed.transcript.at(-1)?.text, 'The opencode stream ended before the turn completed.');
   const continued = reduce(failed, { type: 'localUserMessage', text: 'Continue the remaining steps.' });
   assert.equal(continued.notice, undefined);
+  assert.equal(continued.transcript[0]?.text, 'The opencode stream ended before the turn completed.');
+  assert.equal(continued.transcript.at(-1)?.text, 'Continue the remaining steps.');
   const again = reduce(failed, {
     type: 'agentEvent',
     event: { type: 'turn/started', backendId: 'ollama', threadId: 'thread_1', turnId: 'turn_2' }
   });
   assert.equal(again.notice, undefined);
+  assert.equal(again.transcript.at(-1)?.text, 'The opencode stream ended before the turn completed.');
 });
 
 test('a new turn keeps the review but stops claiming a decision is in flight', () => {
@@ -1056,4 +1065,43 @@ test('a question request replaces the fenced assistant text and stays pending', 
   assert.equal(asked.transcript[0]?.text, 'Hello');
   const cleared = reduce(asked, { type: 'questionCleared' });
   assert.equal(cleared.pendingQuestion, undefined);
+});
+
+test('an info notice stays in the transcript where it happened', () => {
+  const open = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 'thread_1' });
+  const sent = reduce(open, { type: 'localUserMessage', text: 'build the plan' });
+  const switched = reduce(sent, {
+    type: 'notice',
+    level: 'info',
+    message: 'Switched to Agent mode for this request.'
+  });
+  assert.equal(switched.notice, undefined);
+  assert.equal(switched.transcript[1]?.detail, 'status');
+  assert.equal(switched.transcript[1]?.text, 'Switched to Agent mode for this request.');
+  const continued = reduce(switched, {
+    type: 'agentEvent',
+    event: {
+      type: 'item/started',
+      backendId: 'ollama',
+      threadId: 'thread_1',
+      item: { id: 'a1', kind: 'message', role: 'assistant', text: '' }
+    }
+  });
+  assert.equal(continued.transcript[1]?.text, 'Switched to Agent mode for this request.');
+  assert.equal(continued.transcript[2]?.id, 'a1');
+  assert.equal(continued.notice, undefined);
+});
+
+test('a warning with a recovery action is a transcript line, not a pinned banner', () => {
+  const open = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 'thread_1' });
+  const warned = reduce(open, {
+    type: 'notice',
+    level: 'warning',
+    message: 'Ollama needs a token before you can chat.',
+    action: 'setToken'
+  });
+  assert.equal(warned.notice, undefined);
+  assert.equal(warned.transcript.at(-1)?.noticeLevel, 'warning');
+  assert.equal(warned.transcript.at(-1)?.noticeAction, 'setToken');
+  assert.equal(warned.transcript.at(-1)?.text, 'Ollama needs a token before you can chat.');
 });
