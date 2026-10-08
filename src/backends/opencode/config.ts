@@ -7,6 +7,8 @@ import type {
 } from '../types.ts';
 import { isKnown } from '../capabilities.ts';
 import { isDefaultMode, modeForcesReadOnly } from '../modes.ts';
+import type { BrowserCommand } from '../../browser/config.ts';
+import { browserPermissionKeys, mergeOpencodeMcp } from '../../browser/config.ts';
 
 /**
  * The one pure home for the generated opencode config.
@@ -91,6 +93,12 @@ export interface OpencodeConfigInput {
   capabilities?: ModelCapabilities;
   mode: DefaultMode;
   permissionLevel: PermissionLevel;
+  /**
+   * Present when browser control is on. The command is added as one MCP server
+   * and does not replace servers the user's own config already has: OpenCode
+   * merges this object over that config.
+   */
+  browser?: BrowserCommand;
 }
 
 /**
@@ -201,14 +209,14 @@ export function opencodeRequiresApproval(level: PermissionLevel, mode: DefaultMo
   return Object.values(opencodePermission(level, mode)).includes('ask');
 }
 
-/** The custom Ask agent: it may read and answer, and cannot act at all. */
-function askAgent(): Record<string, unknown> {
+/** The custom Ask agent: it may read and answer, and cannot change the workspace. */
+function askAgent(permission: Record<string, 'allow' | 'ask' | 'deny'>): Record<string, unknown> {
   return {
     [OPENCODE_ASK_AGENT]: {
       description: 'Answers questions without changing the workspace.',
       mode: 'primary',
       tools: { write: false, edit: false, patch: false, bash: false },
-      permission: { edit: 'deny', write: 'deny', patch: 'deny', bash: 'deny' }
+      permission
     }
   };
 }
@@ -219,7 +227,7 @@ function askAgent(): Record<string, unknown> {
  * descriptor, so no other model's limit or reasoning is fabricated.
  */
 export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigResult {
-  const { baseUrl, modelIds, modelId, settings, capabilities, mode, permissionLevel } = input;
+  const { baseUrl, modelIds, modelId, settings, capabilities, mode, permissionLevel, browser } = input;
   const resolvedMode: DefaultMode = isDefaultMode(mode) ? mode : 'agent';
 
   const models: Record<string, unknown> = {};
@@ -282,10 +290,17 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
     autoupdate: false,
     // The config is merged over the user's global/project config. Permissions
     // are set explicitly so the turn's level is honoured here too.
-    permission: opencodePermission(permissionLevel, resolvedMode)
+    permission: {
+      ...opencodePermission(permissionLevel, resolvedMode),
+      ...(browser ? browserPermissionKeys() : {})
+    }
   };
+  const mcp = mergeOpencodeMcp(undefined, browser);
+  if (mcp) {
+    config.mcp = mcp;
+  }
   if (resolvedMode === 'ask') {
-    config.agent = askAgent();
+    config.agent = askAgent(config.permission as Record<string, 'allow' | 'ask' | 'deny'>);
   }
 
   return {

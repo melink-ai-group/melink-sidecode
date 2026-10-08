@@ -210,6 +210,11 @@
           },
           "default": [],
           "markdownDescription": "Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. An excluded path is never read, and a selection inside one is reported as excluded rather than quoted."
+        },
+        "melink.skills.browser": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let Codex and OpenCode open a browser tab in the editor to check layout. On by default. Turn it off and browser control stays unavailable: no browser tab is opened and no browser process is started."
         }
       }
     }
@@ -227,6 +232,7 @@
   "dependencies": {
     "@xenova/transformers": "^2.17.2",
     "ffmpeg-static": "^5.3.0",
+    "playwright-core": "^1.56.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

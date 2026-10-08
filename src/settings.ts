@@ -17,6 +17,8 @@ import {
   type OpencodeUpgradeResult
 } from './backends/opencode/status';
 import { applyZvecGrep, detectZvecGrep, type ZvecGrepApplyResult, type ZvecGrepStatus } from './backends/opencode/zvecGrep';
+import { browserLaunchError } from './browser/skill.ts';
+import { browserSkillEnabled } from './browser/policy.ts';
 import {
   CONTEXT_SECTION,
   DEFAULT_CONTEXT_SETTINGS,
@@ -39,6 +41,7 @@ const OLLAMA_SECTION = 'melink.ollama';
 const OLLAMA_OPENCODE_SECTION = 'melink.ollama.opencode';
 const CODEX_SECTION = 'melink.codex';
 const DEFAULTS_SECTION = 'melink.defaults';
+const SKILLS_SECTION = 'melink.skills';
 
 export { PERMISSION_LEVELS } from './backends/types';
 export { DEFAULT_MODES };
@@ -105,6 +108,10 @@ export class SettingsService {
         dictationModel: config.get<string>(`${DEFAULTS_SECTION}.dictationModel`, '')
       },
       context: this.contextSnapshot(config),
+      skills: {
+        browser: browserSkillEnabled(config.get<unknown>(`${SKILLS_SECTION}.browser`, true)),
+        browserError: browserLaunchError()
+      },
       models: {}
     };
   }
@@ -234,6 +241,10 @@ export class SettingsService {
         const cleaned = patch.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0);
         await config.update(`${CONTEXT_SECTION}.exclude`, cleaned, this.target);
       }
+    }
+
+    if (patch.browser !== undefined) {
+      await config.update(`${SKILLS_SECTION}.browser`, patch.browser === true, this.target);
     }
 
     return { ok: Object.keys(errors).length === 0, errors };

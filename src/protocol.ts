@@ -132,6 +132,14 @@ export interface SettingsSnapshot {
    * the snapshot and injection paths read, so a control is never inert.
    */
   context: ContextSettingsSnapshot;
+  /**
+   * Optional agent skills. `browser` is on unless the user turned it off.
+   * `browserError` is set only after a launch was attempted and failed.
+   */
+  skills: {
+    browser: boolean;
+    browserError?: string;
+  };
   /** Live model lists for the default-model picker, per backend id. */
   models: Record<string, BackendModel[]>;
   /**
@@ -182,6 +190,8 @@ export interface SettingsPatch {
   contextIncludeChangedFiles?: boolean;
   contextMaxBytes?: number;
   contextExclude?: string[];
+  /** Browser control skill. On lets Codex and OpenCode drive the editor browser tab. */
+  browser?: boolean;
 }
 
 /**

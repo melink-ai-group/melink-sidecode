@@ -906,6 +906,8 @@ export class OllamaBackend implements AgentBackend {
     // the path and no child process is ever spawned.
     const { buildOpencodeConfig, opencodeRequiresApproval } = await import('./opencode/config.ts');
     const { runOpencodeTurn } = await import('./opencode/runtime.ts');
+    const { browserCommand } = await import('../browser/skill.ts');
+    const browser = await browserCommand();
 
     const built = buildOpencodeConfig({
       baseUrl: this.baseUrl,
@@ -914,7 +916,8 @@ export class OllamaBackend implements AgentBackend {
       settings: request.modelSettings,
       capabilities,
       mode: request.mode ?? 'agent',
-      permissionLevel
+      permissionLevel,
+      ...(browser ? { browser } : {})
     });
     if (built.reasoningUnsupported) {
       this.events.fire({
