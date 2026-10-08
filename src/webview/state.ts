@@ -262,6 +262,8 @@ export type Action =
   | { type: 'localUserMessage'; text: string; attachments?: Attachment[] }
   /** Replace the optimistic user bubble id with the host message id. */
   | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string }
+  /** Remove the optimistic user bubble when the host did not accept the send. */
+  | { type: 'revertLocalSend'; text: string }
   | {
       type: 'conversation';
       backendId: string;
@@ -564,6 +566,22 @@ export function reduce(state: AppState, action: Action): AppState {
       }
       transcript[index] = { ...item, id: action.messageId };
       return { ...state, transcript };
+    }
+    case 'revertLocalSend': {
+      let index = -1;
+      for (let cursor = state.transcript.length - 1; cursor >= 0; cursor -= 1) {
+        const item = state.transcript[cursor];
+        if (item?.kind === 'message' && item.role === 'user' && item.id.startsWith('local_') && item.text === action.text) {
+          index = cursor;
+          break;
+        }
+      }
+      if (index === -1) {
+        return state;
+      }
+      const transcript = state.transcript.slice();
+      transcript.splice(index, 1);
+      return { ...state, transcript, contextUsedTokens: estimateConversationTokens(transcript) };
     }
     case 'localUserMessage':
       return {

@@ -327,9 +327,9 @@ export class BackendRegistry implements Disposable {
     this.get(id)?.answerQuestion(threadId, requestId, answers);
   }
 
-  /** Aborts the in-flight turn on the given backend, if any. */
-  cancel(id: string): void {
-    this.get(id)?.cancel();
+  /** Aborts one chat's turn, or every turn on the backend when `threadId` is omitted. */
+  cancel(id: string, threadId?: string): void {
+    this.get(id)?.cancel(threadId);
   }
 
   dispose(): Promise<void> {

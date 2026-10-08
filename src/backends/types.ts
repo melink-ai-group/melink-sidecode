@@ -1161,10 +1161,11 @@ export interface AgentBackend {
   steerTurn?(handle: ThreadHandle, text: string, clientUserMessageId?: string): Promise<void>;
 
   /**
-   * Aborts any in-flight turn for this backend. Safe to call when idle.
+   * Aborts one in-flight turn. `threadId` stops that chat and leaves the others
+   * running. With no id, every turn on this backend stops. Safe to call when idle.
    * The adapter must leave the transcript coherent and emit an interruption.
    */
-  cancel(): void;
+  cancel(threadId?: string): void;
 
   /** Subscribes to the normalized event stream. */
   onEvent(listener: (event: AgentEvent) => void): Disposable;

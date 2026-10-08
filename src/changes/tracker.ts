@@ -55,6 +55,9 @@ export interface BeginTurnOptions {
 }
 
 export class ChangeTracker {
+  /** Every turn that is still open. One chat tab does not replace another's. */
+  private readonly openTurns = new Map<string, { turnId: string; threadId: string; backendId: string }>();
+  /** The turn most recently started. `endTurn()` with no id closes this one. */
   private active?: { turnId: string; threadId: string; backendId: string };
   private readonly listeners = new Set<(set: TurnChangeSet) => void>();
   private readonly journal: ChangeJournal;
@@ -71,18 +74,30 @@ export class ChangeTracker {
     return { dispose: () => this.listeners.delete(listener) };
   }
 
-  /** The turn currently being tracked, or `undefined` when idle. */
+  /** The turn most recently started, or `undefined` when idle. */
   get currentTurnId(): string | undefined {
-    return this.active?.turnId;
+    return this.active && this.openTurns.has(this.active.turnId) ? this.active.turnId : undefined;
+  }
+
+  /** True when this turn is still open. A later turn on another chat does not close it. */
+  isOpen(turnId: string): boolean {
+    return this.openTurns.has(turnId);
   }
 
   /**
-   * Open a turn boundary. A second `beginTurn` before the first ends replaces
-   * the active turn, so a missed lifecycle notification cannot strand the
-   * tracker on a stale turn id.
+   * Open a turn boundary. A second `beginTurn` for the same thread replaces
+   * that thread's open turn, so a missed lifecycle notification cannot strand
+   * the tracker. A different thread stays open beside it.
    */
   async beginTurn(options: BeginTurnOptions): Promise<void> {
-    this.active = { turnId: options.turnId, threadId: options.threadId, backendId: options.backendId };
+    for (const open of this.openTurns.values()) {
+      if (open.threadId === options.threadId && open.turnId !== options.turnId) {
+        this.openTurns.delete(open.turnId);
+      }
+    }
+    const entry = { turnId: options.turnId, threadId: options.threadId, backendId: options.backendId };
+    this.openTurns.set(options.turnId, entry);
+    this.active = entry;
     await this.journal.beginTurn({
       turnId: options.turnId,
       threadId: options.threadId,
@@ -99,8 +114,13 @@ export class ChangeTracker {
    * late or background report cannot attach to an unrelated turn.
    */
   reportChanges(changes: readonly ReportedChange[], threadId?: string): void {
-    const active = this.active;
-    if (!active || (threadId !== undefined && threadId !== active.threadId)) {
+    const active =
+      threadId !== undefined
+        ? [...this.openTurns.values()].find((turn) => turn.threadId === threadId)
+        : this.openTurns.size === 1
+          ? [...this.openTurns.values()][0]
+          : undefined;
+    if (!active) {
       return;
     }
     for (const change of changes) {
@@ -118,16 +138,14 @@ export class ChangeTracker {
    * late snapshot cannot prove the kind on its own.
    */
   watch(absPath: string, status?: ChangeStatus): void {
-    const active = this.active;
-    if (!active) {
-      return;
+    for (const active of this.openTurns.values()) {
+      void this.journal.observe(active.turnId, absPath, 'watched', status);
     }
-    void this.journal.observe(active.turnId, absPath, 'watched', status);
   }
 
   /** True when a turn is open, so the host can decide whether to keep watching. */
   get isTracking(): boolean {
-    return this.active !== undefined;
+    return this.openTurns.size > 0;
   }
 
   /**
@@ -173,6 +191,7 @@ export class ChangeTracker {
 
   /** Drop any in-flight turn state. Used when the view is torn down. */
   dispose(): void {
+    this.openTurns.clear();
     this.active = undefined;
     this.listeners.clear();
   }
@@ -183,11 +202,14 @@ export class ChangeTracker {
    * not a claim that the agent changed nothing.
    */
   async endTurn(turnId?: string, afterPaths: readonly string[] = []): Promise<TurnChangeSet | undefined> {
-    const active = this.active;
-    if (!active || (turnId !== undefined && turnId !== active.turnId)) {
+    const active = turnId !== undefined ? this.openTurns.get(turnId) : this.active;
+    if (!active || !this.openTurns.has(active.turnId)) {
       return undefined;
     }
-    this.active = undefined;
+    this.openTurns.delete(active.turnId);
+    if (this.active?.turnId === active.turnId) {
+      this.active = [...this.openTurns.values()].at(-1);
+    }
     await this.journal.endTurn(active.turnId, afterPaths);
     const turn = this.journal.getTurn(active.turnId);
     if (!turn || !turn.observed) {

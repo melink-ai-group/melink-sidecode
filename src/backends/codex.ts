@@ -193,13 +193,19 @@ export class CodexBackend implements AgentBackend {
   private readonly hostThreads = new Map<string, string>();
   /** Snapshot last written into `developerInstructions`, so a refresh can replace it. */
   private readonly bakedSnapshot = new Map<string, string>();
-  /** True while a resume is rewriting instructions, so its history is not replayed. */
-  private suppressHistory = false;
+  /**
+   * Replacement thread starts in flight. Their `thread/started` is hidden so the
+   * open chat is not given a second conversation. Other chats keep their events.
+   */
+  private replacementStarts = 0;
+  /** Codex thread ids whose lifecycle is hidden until they are mapped onto a chat. */
+  private readonly hiddenThreadIds = new Set<string>();
   /** Backwards cursors for a resumed thread, so older turns can load on scroll. */
   private readonly historyCursors = new Map<string, HistoryCursors>();
   private connection?: AppServerConnection;
   private connecting?: Promise<AppServerConnection>;
-  private pendingTurn?: PendingTurn;
+  /** One waiter per chat. A second tab does not replace the first chat's turn. */
+  private readonly pendingTurns = new Map<string, PendingTurn>();
   private disposing?: Promise<void>;
   /** Threads used only to clean a transcript. Their events never reach the chat. */
   private readonly quietThreads = new Set<string>();
@@ -461,6 +467,7 @@ export class CodexBackend implements AgentBackend {
       })
       .catch((error: unknown) => this.fail(error));
     const threadId = response.thread.id;
+    this.hiddenThreadIds.delete(threadId);
     this.threads.add(threadId);
     this.threadPermissions.set(threadId, requestedLevel);
     this.threadModes.set(threadId, mode);
@@ -602,20 +609,25 @@ export class CodexBackend implements AgentBackend {
     }));
   }
 
-  cancel(): void {
-    this.refuseOpenQuestions('The turn was stopped.');
-    const pending = this.pendingTurn;
-    if (pending) {
-      this.refuseOpenApprovals(pending.threadId, 'The turn was stopped.');
+  cancel(threadId?: string): void {
+    const pending = threadId ? [this.pendingTurns.get(threadId)].filter((turn) => turn !== undefined) : [...this.pendingTurns.values()];
+    this.refuseOpenQuestions('The turn was stopped.', threadId);
+    for (const turn of pending) {
+      this.refuseOpenApprovals(turn.threadId, 'The turn was stopped.');
     }
     const connection = this.connection;
-    if (!pending || !connection || !pending.turnId) {
+    if (!connection) {
       return;
     }
     // Fire the interrupt; the server answers with a `turn/completed` whose status
     // is `interrupted`, which resolves the turn as canceled. The result is not
     // awaited so `cancel()` stays synchronous, as the interface requires.
-    void connection.interruptTurn({ threadId: this.liveThreadId(pending.threadId), turnId: pending.turnId });
+    for (const turn of pending) {
+      if (!turn.turnId) {
+        continue;
+      }
+      void connection.interruptTurn({ threadId: this.liveThreadId(turn.threadId), turnId: turn.turnId });
+    }
   }
 
   /**
@@ -695,7 +707,8 @@ export class CodexBackend implements AgentBackend {
     timeoutMessage: string;
     busyMessage: string;
   }): Promise<string> {
-    if (this.pendingTurn) {
+    const quietBusy = this.quietCapture;
+    if (quietBusy) {
       throw new BackendError('provider', options.busyMessage);
     }
     const connection = await this.connect();
@@ -795,7 +808,6 @@ export class CodexBackend implements AgentBackend {
     let revokePlan = false;
     if (mode === 'agent' && this.needsPlanEscape.has(handle.threadId)) {
       revokePlan = true;
-      this.suppressHistory = true;
       try {
         await this.escapePlanInstruction(
           connection,
@@ -808,8 +820,6 @@ export class CodexBackend implements AgentBackend {
         this.needsPlanEscape.delete(handle.threadId);
       } catch {
         logDiagnostic('Codex could not leave the Plan-mode instruction.');
-      } finally {
-        this.suppressHistory = false;
       }
     }
     this.bakedMode.set(handle.threadId, mode);
@@ -824,8 +834,13 @@ export class CodexBackend implements AgentBackend {
       includeSnapshot: Boolean(request.context?.priming && nextSnapshot)
     });
 
+    if (this.pendingTurns.has(handle.threadId)) {
+      throw new BackendError('provider', 'This chat already has a request in progress.');
+    }
+    let pending: PendingTurn | undefined;
     const turnDone = new Promise<void>((resolve, reject) => {
-      this.pendingTurn = { threadId: handle.threadId, resolve, reject };
+      pending = { threadId: handle.threadId, resolve, reject };
+      this.pendingTurns.set(handle.threadId, pending);
     });
 
     const start = () =>
@@ -849,7 +864,7 @@ export class CodexBackend implements AgentBackend {
       response = await start();
     } catch (error) {
       if (!isMissingThreadError(error)) {
-        this.pendingTurn = undefined;
+        this.dropPending(handle.threadId, pending);
         throw error;
       }
       const recovered = await this.rebindMissingThread(connection, handle.threadId, {
@@ -861,7 +876,7 @@ export class CodexBackend implements AgentBackend {
         omitTrailingUserText: request.text
       });
       if (!recovered) {
-        this.pendingTurn = undefined;
+        this.dropPending(handle.threadId, pending);
         throw error;
       }
       this.events.fire({
@@ -874,14 +889,15 @@ export class CodexBackend implements AgentBackend {
       try {
         response = await start();
       } catch (retryError) {
-        this.pendingTurn = undefined;
+        this.dropPending(handle.threadId, pending);
         throw retryError;
       }
     }
     // Record the turn id so a fast `cancel()` can interrupt before `turn/started`
     // arrives; `turn/started` overwrites it with the same value.
-    if (this.pendingTurn) {
-      this.pendingTurn.turnId = response.turn.id;
+    const waiting = this.pendingTurns.get(handle.threadId);
+    if (waiting && waiting === pending) {
+      waiting.turnId = response.turn.id;
     }
     return turnDone;
   }
@@ -894,12 +910,12 @@ export class CodexBackend implements AgentBackend {
   async compact(handle: ThreadHandle, _request: CompactRequest): Promise<CompactResult> {
     const connection = await this.connect();
     const turnDone = new Promise<void>((resolve, reject) => {
-      this.pendingTurn = { threadId: handle.threadId, resolve, reject, compact: true };
+      this.pendingTurns.set(handle.threadId, { threadId: handle.threadId, resolve, reject, compact: true });
     });
     const timer = setTimeout(() => {
-      if (this.pendingTurn?.compact && this.pendingTurn.threadId === handle.threadId) {
-        const pending = this.pendingTurn;
-        this.pendingTurn = undefined;
+      const pending = this.pendingTurns.get(handle.threadId);
+      if (pending?.compact) {
+        this.pendingTurns.delete(handle.threadId);
         pending.reject(new BackendError('provider', 'Compaction did not finish.'));
       }
     }, 120_000);
@@ -907,8 +923,9 @@ export class CodexBackend implements AgentBackend {
       await connection.compactThread({ threadId: this.liveThreadId(handle.threadId) }).catch((error: unknown) => this.fail(error));
       await turnDone;
     } catch (error) {
-      if (this.pendingTurn?.threadId === handle.threadId && this.pendingTurn.compact) {
-        this.pendingTurn = undefined;
+      const pending = this.pendingTurns.get(handle.threadId);
+      if (pending?.compact) {
+        this.pendingTurns.delete(handle.threadId);
       }
       throw error;
     } finally {
@@ -918,8 +935,8 @@ export class CodexBackend implements AgentBackend {
   }
 
   async steerTurn(handle: ThreadHandle, text: string, clientUserMessageId?: string): Promise<void> {
-    const pending = this.pendingTurn;
-    if (!pending || pending.threadId !== handle.threadId || !pending.turnId) {
+    const pending = this.pendingTurns.get(handle.threadId);
+    if (!pending?.turnId) {
       throw new BackendError('provider', 'There is no active Codex turn to steer.');
     }
     const connection = await this.connect();
@@ -948,9 +965,10 @@ export class CodexBackend implements AgentBackend {
     const connection = this.connection;
     const connecting = this.connecting;
     this.connection = undefined;
-    const pending = this.pendingTurn;
-    this.pendingTurn = undefined;
-    pending?.resolve();
+    for (const pending of this.pendingTurns.values()) {
+      pending.resolve();
+    }
+    this.pendingTurns.clear();
     this.threads.clear();
     this.announcedThreads.clear();
     this.openedItems.clear();
@@ -1056,9 +1074,18 @@ export class CodexBackend implements AgentBackend {
     // A crash after startup ends any turn and marks the backend unusable so the
     // next probe re-spawns rather than talking to a dead pipe.
     this.connection = undefined;
-    const pending = this.pendingTurn;
-    this.pendingTurn = undefined;
-    pending?.reject(new BackendError('provider', 'The Codex app-server stopped unexpectedly.'));
+    const failure = new BackendError('provider', 'The Codex app-server stopped unexpectedly.');
+    for (const pending of this.pendingTurns.values()) {
+      pending.reject(failure);
+    }
+    this.pendingTurns.clear();
+  }
+
+  /** Drop a waiter only when it is still the one this send registered. */
+  private dropPending(threadId: string, pending: PendingTurn | undefined): void {
+    if (pending && this.pendingTurns.get(threadId) === pending) {
+      this.pendingTurns.delete(threadId);
+    }
   }
 
   /** Emit `thread/started` at most once per thread id for this backend. */
@@ -1115,21 +1142,24 @@ export class CodexBackend implements AgentBackend {
   }
 
   private handleNotification(notification: { method: string; params?: unknown }): void {
-    const params = this.retargetParams(notification.params ?? {});
-    if (this.swallowQuiet(notification.method, params)) {
+    const rawThreadId = this.rawThreadId(notification.method, notification.params);
+    // A replacement thread's own startup must not open a second conversation.
+    // Events for every other chat still pass through.
+    if (
+      notification.method === 'thread/started' &&
+      this.replacementStarts > 0 &&
+      rawThreadId &&
+      !this.hostThreads.has(rawThreadId) &&
+      !this.threads.has(rawThreadId)
+    ) {
+      this.hiddenThreadIds.add(rawThreadId);
       return;
     }
-    // Starting the replacement thread emits its own lifecycle events. Drop them
-    // so the open chat is not given a second conversation.
-    if (
-      this.suppressHistory &&
-      (notification.method.startsWith('item/') ||
-        notification.method.startsWith('turn/') ||
-        notification.method === 'thread/started' ||
-        notification.method === 'thread/status/changed' ||
-        notification.method === 'thread/closed' ||
-        notification.method === 'thread/deleted')
-    ) {
+    if (rawThreadId && this.hiddenThreadIds.has(rawThreadId)) {
+      return;
+    }
+    const params = this.retargetParams(notification.params ?? {});
+    if (this.swallowQuiet(notification.method, params)) {
       return;
     }
     switch (notification.method) {
@@ -1151,8 +1181,9 @@ export class CodexBackend implements AgentBackend {
       }
       case 'turn/started': {
         const { threadId, turn } = params as TurnStartedNotification;
-        if (this.pendingTurn && this.pendingTurn.threadId === threadId) {
-          this.pendingTurn.turnId = turn.id;
+        const pending = this.pendingTurns.get(threadId);
+        if (pending) {
+          pending.turnId = turn.id;
         }
         this.events.fire({ type: 'turn/started', backendId: this.id, threadId, turnId: turn.id });
         break;
@@ -1272,9 +1303,9 @@ export class CodexBackend implements AgentBackend {
         // A compact turn ends on this notification when the server does not
         // also emit `turn/completed`. Either signal releases the waiter.
         const notification = params as ContextCompactedNotification;
-        const pending = this.pendingTurn;
-        if (pending?.compact && pending.threadId === notification.threadId) {
-          this.pendingTurn = undefined;
+        const pending = this.pendingTurns.get(notification.threadId);
+        if (pending?.compact) {
+          this.pendingTurns.delete(notification.threadId);
           pending.resolve();
         }
         break;
@@ -1379,9 +1410,9 @@ export class CodexBackend implements AgentBackend {
         return;
     }
     // A user cancel arrives as a normal completion for the pending turn.
-    const pending = this.pendingTurn;
-    if (pending && pending.threadId === threadId) {
-      this.pendingTurn = undefined;
+    const pending = this.pendingTurns.get(threadId);
+    if (pending) {
+      this.pendingTurns.delete(threadId);
       pending.resolve();
     }
   }
@@ -1497,6 +1528,15 @@ export class CodexBackend implements AgentBackend {
     this.events.fire({ type: 'approval/requested', backendId: this.id, threadId, approval });
   }
 
+  /** Codex thread id on a notification, before it is rewritten onto the host chat. */
+  private rawThreadId(method: string, params: unknown): string | undefined {
+    if (!params || typeof params !== 'object') {
+      return undefined;
+    }
+    const record = params as { threadId?: string; thread?: { id?: string } };
+    return method === 'thread/started' ? record.thread?.id : record.threadId;
+  }
+
   /** The Codex thread that receives turns for a sidebar conversation. */
   private liveThreadId(hostThreadId: string): string {
     return this.liveThreads.get(hostThreadId) ?? hostThreadId;
@@ -1563,7 +1603,7 @@ export class CodexBackend implements AgentBackend {
     const level = effectivePermissionLevel(mode, requestedLevel);
     const mapping = codexPermissionMapping(level);
     const model = options.model || ref?.modelId || this.defaultModel || '';
-    this.suppressHistory = true;
+    this.replacementStarts += 1;
     try {
       const response = await connection.startThread({
         model: model || null,
@@ -1574,6 +1614,7 @@ export class CodexBackend implements AgentBackend {
         developerInstructions: recoveryInstructions(handover, options.snapshot)
       });
       const startedId = response.thread.id;
+      this.hiddenThreadIds.delete(startedId);
       this.liveThreads.set(hostThreadId, startedId);
       this.hostThreads.set(startedId, hostThreadId);
       this.threads.add(startedId);
@@ -1603,7 +1644,7 @@ export class CodexBackend implements AgentBackend {
       logDiagnostic(error instanceof Error ? error.message : String(error));
       return undefined;
     } finally {
-      this.suppressHistory = false;
+      this.replacementStarts -= 1;
     }
   }
 
@@ -1631,18 +1672,24 @@ export class CodexBackend implements AgentBackend {
     ]
       .filter((part): part is string => Boolean(part && part.trim().length > 0))
       .join('\n\n');
-    const response = await connection.startThread({
-      model: model || null,
-      cwd: cwd ?? this.cwd,
-      approvalPolicy: mapping.approvalPolicy,
-      approvalsReviewer: 'user',
-      sandbox: mapping.sandbox,
-      developerInstructions: instructions
-    });
-    const startedId = response.thread.id;
-    this.liveThreads.set(hostThreadId, startedId);
-    this.hostThreads.set(startedId, hostThreadId);
-    this.threads.add(startedId);
+    this.replacementStarts += 1;
+    try {
+      const response = await connection.startThread({
+        model: model || null,
+        cwd: cwd ?? this.cwd,
+        approvalPolicy: mapping.approvalPolicy,
+        approvalsReviewer: 'user',
+        sandbox: mapping.sandbox,
+        developerInstructions: instructions
+      });
+      const startedId = response.thread.id;
+      this.hiddenThreadIds.delete(startedId);
+      this.liveThreads.set(hostThreadId, startedId);
+      this.hostThreads.set(startedId, hostThreadId);
+      this.threads.add(startedId);
+    } finally {
+      this.replacementStarts -= 1;
+    }
   }
 
   /**
@@ -1681,10 +1728,10 @@ export class CodexBackend implements AgentBackend {
     this.events.fire({ type: 'question/requested', backendId: this.id, threadId: request.threadId, request });
   }
 
-  /** Unblock every open user-input request so a stopped turn cannot stay hung. */
-  private refuseOpenQuestions(reason: string): void {
+  /** Unblock open user-input requests so a stopped turn cannot stay hung. */
+  private refuseOpenQuestions(reason: string, threadId?: string): void {
     for (const [requestId, pending] of [...this.pendingQuestions.entries()]) {
-      if (pending.settled) {
+      if (pending.settled || (threadId !== undefined && pending.threadId !== threadId)) {
         continue;
       }
       pending.settled = true;

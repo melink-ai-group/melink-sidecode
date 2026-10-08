@@ -393,6 +393,47 @@ test('a watcher path outside the workspace is never recorded', async () => {
   assert.equal(await change.endTurn(), undefined);
 });
 
+test('two chats can track turns at the same time', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/a.ts', text('a'));
+  fs.files.set('/ws/b.ts', text('b'));
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'one', turnId: 't1', candidates: ['/ws/a.ts', '/ws/b.ts'] });
+  await change.beginTurn({ backendId: 'codex', threadId: 'two', turnId: 't2', candidates: ['/ws/b.ts'] });
+  assert.equal(change.isOpen('t1'), true);
+  assert.equal(change.isOpen('t2'), true);
+
+  fs.files.set('/ws/b.ts', text('changed'));
+  change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }], 'one');
+  change.watch('/ws/b.ts', 'modified');
+
+  const first = await change.endTurn('t1');
+  assert.equal(change.isTracking, true, 'the other chat stays open');
+  assert.equal(change.isOpen('t2'), true);
+  assert.ok(first);
+  assert.deepEqual(first.entries.map((entry) => entry.path), ['b.ts']);
+
+  const second = await change.endTurn('t2');
+  assert.equal(change.isTracking, false);
+  assert.ok(second);
+  assert.deepEqual(second.entries.map((entry) => entry.path), ['b.ts']);
+});
+
+test('a new turn on the same chat replaces only that chat', async () => {
+  const fs = new FakeFs();
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'one', turnId: 't1' });
+  await change.beginTurn({ backendId: 'ollama', threadId: 'two', turnId: 't2' });
+  await change.beginTurn({ backendId: 'codex', threadId: 'one', turnId: 't3' });
+
+  assert.equal(change.isOpen('t1'), false);
+  assert.equal(change.isOpen('t2'), true);
+  assert.equal(change.isOpen('t3'), true);
+  assert.equal(await change.endTurn('t1'), undefined);
+});
+
 test('a closed turn id cannot be re-ended and a mismatched id is a no-op', async () => {
   const fs = new FakeFs();
   const change = tracker(fs);

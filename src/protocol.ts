@@ -437,6 +437,11 @@ export type HostToWebviewMessage =
    */
   | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string }
   /**
+   * The send was not accepted. Drop the optimistic user bubble so the composer
+   * can show the text again.
+   */
+  | { type: 'revertLocalSend'; text: string }
+  /**
    * What a restore would rewind, computed when the user asks. Shown in the
    * confirmation before anything is written.
    */
