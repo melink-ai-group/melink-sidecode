@@ -39,6 +39,12 @@ test('every mode carries the shared plan-document contract', () => {
     assert.match(text, /last thing the user reads/);
     assert.match(text, /Want me to/);
   }
+  for (const text of [agent, plan]) {
+    assert.match(text, /\.melink\/plans\//);
+    assert.match(text, /\.melink\/reports\//);
+    assert.match(text, /Do not create or write those files in `docs\/` or `reports\/`/);
+  }
+  assert.equal(ask.includes('.melink/plans/'), false);
 });
 
 test('an unknown mode degrades to the agent default', () => {
