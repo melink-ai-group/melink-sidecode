@@ -989,7 +989,7 @@ export function App(): JSX.Element {
       const limit = Number.parseFloat(getComputedStyle(composer).maxHeight);
       if (Number.isFinite(limit)) {
         const chrome = composer.scrollHeight - element.offsetHeight;
-        room = Math.max(44, limit - chrome);
+        room = Math.max(72, limit - chrome);
       }
     }
     element.style.height = 'auto';
