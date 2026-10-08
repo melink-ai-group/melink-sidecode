@@ -62,6 +62,15 @@ const REPLY_CLOSE =
 const QUESTION_BLOCK =
   'When you need a decision from the user, write that closing sentence first, then stop and end your reply with one fenced sidecode-question block and do not continue until the answers arrive. The block is JSON of the form {"questions":[{"prompt":"...","options":["preferred answer","next-best answer"]}]}. The prompt is one clear sentence. Put the preferred answer first. The host adds a custom-message choice, so do not add one yourself.';
 
+/**
+ * Where generated documents go. Codex and OpenCode both receive the mode text,
+ * so this is the one rule for both. The host already stores the tracked plan at
+ * `.melink/plans/<thread-id>.md`; this stops the model from also dropping plans,
+ * reports, and similar notes in workspace-root `docs/` or `reports/`.
+ */
+const ARTIFACT_HOME =
+  'When you write a plan, report, investigation, design note, or other generated document to disk, save it under `.melink/` and nowhere else: plans in `.melink/plans/`, reports and similar notes in `.melink/reports/`. Do not create or write those files in `docs/` or `reports/`. A documentation file the project already keeps stays where it is when the user asks you to edit that file.';
+
 export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
   {
     mode: 'agent',
@@ -69,7 +78,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent acts on the workspace.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
+      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
   },
   {
     mode: 'plan',
@@ -77,7 +86,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent writes a plan document that ends in a todo list, and waits for approval before changing anything.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Investigate what the task requires, then answer with one markdown plan: a title, the plan body (approach, files, and risks), and a final "## Steps" section whose items are a checkbox list, one step per line ("- [ ] ..."). Do not implement the plan. If a plan already exists, leave that document unchanged unless the user asked you to update or revise it. When the user answers your questions, rewrite that same document so the body, a "## Decisions" section, and the steps reflect those answers. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps. If you need a decision before the plan can be written, do not write the plan yet. ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK}`
+      `Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Investigate what the task requires, then answer with one markdown plan: a title, the plan body (approach, files, and risks), and a final "## Steps" section whose items are a checkbox list, one step per line ("- [ ] ..."). Do not implement the plan. If a plan already exists, leave that document unchanged unless the user asked you to update or revise it. When the user answers your questions, rewrite that same document so the body, a "## Decisions" section, and the steps reflect those answers. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps. If you need a decision before the plan can be written, do not write the plan yet. ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK}`
   },
   {
     mode: 'ask',
