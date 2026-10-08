@@ -1774,6 +1774,25 @@ html body {
   background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 8%, var(--vscode-sideBar-background));
 }
 
+.banner--status {
+  align-items: center;
+}
+
+.banner--status .banner-icon {
+  margin-top: 0;
+}
+
+.banner--status .banner-text {
+  margin-top: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.banner--status .banner-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
 .banner--error {
   border-left: 3px solid var(--vscode-errorForeground);
   background: color-mix(in srgb, var(--vscode-errorForeground) 8%, var(--vscode-sideBar-background));

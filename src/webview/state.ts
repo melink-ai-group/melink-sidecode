@@ -43,6 +43,8 @@ import type {
 /** Lifecycle of one transcript item, driving its status affordance. */
 export type ItemStatus = 'streaming' | 'completed' | 'failed' | 'warning' | 'canceled' | 'pending';
 
+export type NoticeAction = 'setToken' | 'clearToken' | 'refresh';
+
 export interface TranscriptItemView {
   id: string;
   kind: TranscriptItemKind;
@@ -67,9 +69,11 @@ export interface TranscriptItemView {
   attachments?: Attachment[];
   text: string;
   status: ItemStatus;
+  /** Status-line notices: severity. Errors stay red; the line has no title. */
+  noticeLevel?: 'info' | 'warning' | 'error';
+  /** Status-line notices: recovery control, when the line offers one. */
+  noticeAction?: NoticeAction;
 }
-
-export type NoticeAction = 'setToken' | 'clearToken' | 'refresh';
 
 export interface AppState {
   availability: BackendAvailability[];
@@ -732,13 +736,11 @@ export function reduce(state: AppState, action: Action): AppState {
       }
       return { ...state, busy: action.value, startingTurn: action.value ? state.startingTurn : false };
     case 'notice':
-      return {
-        ...state,
-        notice:
-          action.action !== undefined
-            ? { level: action.level, message: action.message, action: action.action }
-            : { level: action.level, message: action.message }
-      };
+      return placeNotice(state, {
+        level: action.level,
+        message: action.message,
+        action: action.action
+      });
     case 'dismissNotice':
       return { ...state, notice: undefined };
     case 'addAttachments': {
@@ -1259,13 +1261,10 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
     }
     case 'approval/denied':
       // The agent was told explicitly, so the turn does not stall silently.
-      return {
-        ...state,
-        notice: {
-          level: 'info',
-          message: `${event.subject ? `${event.subject}: ` : ''}the request was denied and the agent was told.`
-        }
-      };
+      return placeNotice(state, {
+        level: 'info',
+        message: `${event.subject ? `${event.subject}: ` : ''}the request was denied and the agent was told.`
+      });
     case 'error':
       // A backend the user is not currently driving must never surface a status
       // or error: a failed Codex auth attempt stays invisible while Ollama is
@@ -1274,31 +1273,33 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
       if (!eventForActiveChat(state, event.backendId, event.threadId)) {
         return state;
       }
-      return { ...state, planRevising: false, notice: noticeForError(event) };
+      return placeNotice({ ...state, planRevising: false }, noticeForError(event));
     case 'turn/interrupted':
       if (!eventForActiveChat(state, event.backendId, event.threadId)) {
         return state;
       }
       if (event.canceled) {
-        return {
+        const stopped = {
           ...state,
           busy: false,
           startingTurn: false,
           pendingApproval: undefined,
           planRevising: false,
           transcript: markStreamingItems(state.transcript, 'canceled'),
-          notice: { level: 'info', message: event.reason ?? 'Response stopped.' }
+          notice: undefined
         };
+        return event.reason ? appendStatusNotice(stopped, event.reason, 'info') : stopped;
       }
-      return {
+      const interrupted = {
         ...state,
         busy: false,
         startingTurn: false,
         pendingApproval: undefined,
         planRevising: false,
         transcript: markStreamingItems(state.transcript, 'warning'),
-        notice: event.reason ? { level: 'warning', message: event.reason } : state.notice
+        notice: undefined
       };
+      return event.reason ? appendStatusNotice(interrupted, event.reason, 'warning') : interrupted;
     case 'turn/completed':
       // A finished turn cannot still be blocking on an approval; a card that
       // somehow survived is stale, so it is dropped rather than left pending. A
@@ -1322,13 +1323,12 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         }
       };
     case 'notice':
-      // A provider-neutral informational line from a backend (e.g. a degraded
-      // session resume), rendered with the existing notice path. A line from
-      // another chat does not replace the banner on this one.
+      // A provider-neutral line from a backend (e.g. a degraded session resume).
+      // A line from another chat does not replace what is on screen.
       if (!eventForActiveChat(state, event.backendId, event.threadId)) {
         return state;
       }
-      return { ...state, notice: { level: event.level, message: event.message } };
+      return placeNotice(state, { level: event.level, message: event.message });
     default:
       return state;
   }
@@ -1433,6 +1433,43 @@ function markStreamingItems(
  * Provider wording is not trusted verbatim for the generic cases: the code
  * decides the sentence, so a raw protocol failure never reaches the transcript.
  */
+/**
+ * Every notice is a transcript line at the moment it happens. A later reply
+ * follows it. Nothing stays pinned under the thread.
+ */
+function placeNotice(state: AppState, notice: NonNullable<AppState['notice']>): AppState {
+  return appendStatusNotice(state, notice.message, notice.level, notice.action);
+}
+
+/** Insert one status sentence where the conversation is right now. */
+function appendStatusNotice(
+  state: AppState,
+  message: string,
+  level: 'info' | 'warning' | 'error' = 'info',
+  action?: NoticeAction
+): AppState {
+  const text = message.trim();
+  if (!text) {
+    return { ...state, notice: undefined };
+  }
+  return {
+    ...state,
+    notice: undefined,
+    transcript: [
+      ...state.transcript,
+      {
+        id: `status_${state.transcript.length}_${text.length}`,
+        kind: 'notice',
+        detail: 'status',
+        text,
+        status: 'completed',
+        noticeLevel: level,
+        noticeAction: action
+      }
+    ]
+  };
+}
+
 /** Drop an error banner once the user or the agent continues. Info notices stay. */
 function withoutFailureNotice(notice: AppState['notice']): AppState['notice'] {
   if (notice?.level === 'error' || notice?.level === 'warning') {

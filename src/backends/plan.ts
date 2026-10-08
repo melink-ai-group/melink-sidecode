@@ -362,6 +362,69 @@ function proseBeforeList(reply: string): string | undefined {
 }
 
 /**
+ * A plan file under `.melink/plans/` that is not already a chat's own plan file.
+ * Thread-id files stay with the chat that owns them. A file moved in by hand
+ * (any other name) can be recovered.
+ */
+export function isLoosePlanFile(relativePath: string, ownedPaths: ReadonlySet<string>): boolean {
+  const normalized = relativePath.replace(/\\/g, '/');
+  if (!normalized.startsWith(`${PLAN_DIRECTORY}/`) || !normalized.toLowerCase().endsWith('.md')) {
+    return false;
+  }
+  return !ownedPaths.has(normalized);
+}
+
+/** A readable title from a plan file name, used when the document has no `#` heading. */
+export function planTitleFromFileName(name: string): string {
+  const stem = name.replace(/^.*[\\/]/, '').replace(/\.md$/i, '');
+  const words = stem.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return words.length > 0 ? words : 'Plan';
+}
+
+/**
+ * Read a plan that was saved outside the host's thread file and then moved
+ * into `.melink/plans/`. A `## Steps` list or the first bullet list is used.
+ * A numbered list is used when the document has no bullets. No steps means
+ * the file is not a plan the host can build.
+ */
+export function recoverPlanDraft(markdown: string, fallbackTitle: string): PlanDocumentDraft | undefined {
+  const draft = planDocumentFromReply(markdown);
+  const steps = draft.steps.length > 0 ? draft.steps : numberedPlanSteps(markdown);
+  if (steps.length === 0) {
+    return undefined;
+  }
+  const title = draft.title?.trim() || fallbackTitle.trim() || 'Plan';
+  return {
+    title,
+    body: draft.body,
+    summary: draft.summary,
+    steps
+  };
+}
+
+/** The first contiguous numbered list, as pending steps. */
+function numberedPlanSteps(markdown: string): TodoStep[] {
+  const steps: TodoStep[] = [];
+  let started = false;
+  for (const line of markdown.split(/\r?\n/)) {
+    const match = /^\s*\d+[.)]\s+(?:\[([^\]])\]\s*)?(.*\S)\s*$/.exec(line);
+    if (!match) {
+      if (started && line.trim().length > 0) {
+        break;
+      }
+      continue;
+    }
+    const text = match[2].trim();
+    if (text.length === 0) {
+      continue;
+    }
+    started = true;
+    steps.push({ text, status: match[1] ? statusForMarker(match[1]) : 'pending' });
+  }
+  return steps;
+}
+
+/**
  * Derive a plan document from an assistant reply. A `## Steps` section is the
  * todo list and everything above it is the body. Without that heading, the
  * first contiguous bullet list is the todo list and the prose before it is

@@ -64,11 +64,14 @@ import {
   continuePlanInstruction,
   decidePlanAutopilot,
   hasPlanStepsHeading,
+  isLoosePlanFile,
   mergeCheckboxStatuses,
   mergeReportedStepStatuses,
   planDocumentFromReply,
   planRelativePath,
+  planTitleFromFileName,
   planTurnWork,
+  recoverPlanDraft,
   shouldAutoOpenPlanDocument,
   shouldDismissCompletedPlan,
   updateStepStatus,
@@ -228,6 +231,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private readonly shownPlanPreviews = new Set<string>();
   /** True while Preview is being opened, so that open does not trigger another one. */
   private showingPlanPreview = false;
+  /** True while a moved plan is being copied onto the open chat, so the write is not recovered again. */
+  private recoveringPlan = false;
+  /** True after the first chat with no plan has been checked for a moved plan file. */
+  private loosePlanScanDone = false;
   /** Built-plan turns waiting to start once the current turn has released the lock. */
   private readonly planAutopilotQueue = new Map<string, { session: ChatSession; text: string }>();
   /** One queued continuation per tab, started once that tab's turn releases the lock. */
@@ -341,7 +348,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         if (!shouldAutoShowPlanPreview(uri.fsPath, this.shownPlanPreviews.has(uri.toString()))) {
           return;
         }
-        void this.showPlanMarkdownPreview(uri);
+        void this.recoverOrPreviewPlan(uri);
       }),
       vscode.workspace.onDidCloseTextDocument((document) => {
         if (!this.showingPlanPreview) {
@@ -356,7 +363,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.adoptExternalPlanFile(uri);
       }),
       planFiles.onDidCreate((uri) => {
-        this.adoptExternalPlanFile(uri);
+        void this.recoverMovedPlan(uri, false).then((recovered) => {
+          if (!recovered) {
+            this.adoptExternalPlanFile(uri);
+          }
+        });
       })
     );
     this.registry.onDidChangeAvailability((availability) => this.post({ type: 'snapshot', availability }));
@@ -1347,6 +1358,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       if (session.heldNotice && this.visible === session) {
         this.post({ type: 'notice', level: session.heldNotice.level, message: session.heldNotice.message });
+      }
+      if (this.visible === session) {
+        await this.offerSingleLoosePlan();
       }
     });
     await this.postComposerDraft(session);
@@ -3952,6 +3966,183 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       await this.mergeTodoProgressFromReply(backendId, threadId);
       await this.settlePlanProgress(backendId, threadId);
     });
+  }
+
+  /**
+   * Open a plan file. A file moved into `.melink/plans/` by hand becomes the
+   * open chat's plan, with the rendered preview and Build. A thread's own
+   * plan file keeps the Markdown preview.
+   */
+  private async recoverOrPreviewPlan(uri: vscode.Uri): Promise<void> {
+    const recovered = await this.recoverMovedPlan(uri, true);
+    if (!recovered) {
+      await this.showPlanMarkdownPreview(uri);
+    }
+  }
+
+  /**
+   * When the open chat has no plan, and `.melink/plans/` holds exactly one
+   * file that is not already a chat's plan, attach that file. Checked once
+   * per window so a later empty chat does not take it.
+   */
+  private async offerSingleLoosePlan(): Promise<void> {
+    if (this.loosePlanScanDone || this.recoveringPlan) {
+      return;
+    }
+    const thread = this.activeThread;
+    if (!thread) {
+      return;
+    }
+    const existing = this.store.getPlanState(thread.backendId, thread.threadId);
+    if (existing && existing.steps.length > 0) {
+      return;
+    }
+    this.loosePlanScanDone = true;
+    const loose = await this.loosePlanFiles();
+    if (loose.length !== 1) {
+      return;
+    }
+    await this.recoverMovedPlan(loose[0], false);
+  }
+
+  /** Plan markdown under `.melink/plans/` that no chat already owns. */
+  private async loosePlanFiles(): Promise<vscode.Uri[]> {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) {
+      return [];
+    }
+    const dir = vscode.Uri.joinPath(folder.uri, '.melink', 'plans');
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(dir);
+    } catch {
+      return [];
+    }
+    const owned = this.ownedPlanPaths();
+    const files: vscode.Uri[] = [];
+    for (const [name, type] of entries) {
+      if (type !== vscode.FileType.File) {
+        continue;
+      }
+      const uri = vscode.Uri.joinPath(dir, name);
+      const relative = this.workspaceRelative(uri);
+      if (isLoosePlanFile(relative, owned)) {
+        files.push(uri);
+      }
+    }
+    return files;
+  }
+
+  /** Paths of plan files the host already tracks for a chat. */
+  private ownedPlanPaths(): Set<string> {
+    const paths = new Set<string>();
+    const ids = this.registry.snapshot().map((entry) => entry.id);
+    const backendIds = ids.length > 0 ? ids : ['ollama', 'codex'];
+    for (const backendId of backendIds) {
+      for (const thread of this.store.listThreads(backendId)) {
+        paths.add(planRelativePath(thread.threadId));
+        const state = this.store.getPlanState(backendId, thread.threadId);
+        if (state?.path) {
+          paths.add(state.path.replace(/\\/g, '/'));
+        }
+      }
+    }
+    for (const session of this.sessions) {
+      const threadId = session.activeThread?.threadId;
+      if (threadId) {
+        paths.add(planRelativePath(threadId));
+      }
+    }
+    return paths;
+  }
+
+  private workspaceRelative(uri: vscode.Uri): string {
+    return vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+  }
+
+  /**
+   * Attach a hand-moved plan to the open chat and open the rendered preview.
+   * Returns true when the file became that chat's plan. A chat that already
+   * has a plan is left as it is.
+   */
+  private async recoverMovedPlan(uri: vscode.Uri, explicit: boolean): Promise<boolean> {
+    if (this.recoveringPlan) {
+      return false;
+    }
+    const relative = this.workspaceRelative(uri);
+    if (!isLoosePlanFile(relative, this.ownedPlanPaths())) {
+      return false;
+    }
+    const session = this.session ?? this.visible;
+    const thread = session?.activeThread;
+    if (!session || !thread) {
+      if (explicit) {
+        this.post({
+          type: 'notice',
+          level: 'info',
+          message: 'Open a chat, then open this plan again, to recover it.'
+        });
+      }
+      return false;
+    }
+    const existing = this.store.getPlanState(thread.backendId, thread.threadId);
+    if (existing && existing.steps.length > 0) {
+      if (explicit) {
+        this.post({
+          type: 'notice',
+          level: 'info',
+          message: 'This chat already has a plan. Reject it, or open another chat, before recovering this file.'
+        });
+      }
+      return false;
+    }
+    let markdown: string;
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      markdown = new TextDecoder('utf8').decode(bytes);
+    } catch {
+      if (explicit) {
+        this.post({ type: 'notice', level: 'warning', message: 'That plan file could not be read.' });
+      }
+      return false;
+    }
+    const name = relative.slice(relative.lastIndexOf('/') + 1);
+    const draft = recoverPlanDraft(markdown, planTitleFromFileName(name));
+    if (!draft || draft.steps.length === 0) {
+      return false;
+    }
+    this.recoveringPlan = true;
+    try {
+      return await this.sessionStore.run(session, async () => {
+        const artifact = await this.plans.write({
+          threadId: thread.threadId,
+          title: draft.title || 'Plan',
+          summary: draft.summary,
+          body: draft.body,
+          steps: draft.steps
+        });
+        const plan = { ...artifact, built: false as const };
+        await this.store.setPlanState(thread.backendId, thread.threadId, {
+          path: plan.path,
+          title: plan.title,
+          summary: plan.summary,
+          body: plan.body,
+          steps: plan.steps,
+          built: false,
+          updatedAt: plan.updatedAt
+        });
+        this.post({ type: 'plan', plan });
+        this.publishPlanDocument(plan, true);
+        this.post({
+          type: 'notice',
+          level: 'info',
+          message: `Recovered "${plan.title}" into this chat. Build runs its steps.`
+        });
+        return true;
+      });
+    } finally {
+      this.recoveringPlan = false;
+    }
   }
 
   /**

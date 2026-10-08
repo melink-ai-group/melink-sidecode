@@ -1942,6 +1942,7 @@ export function App(): JSX.Element {
                 onOpenRules={() => dispatch({ type: 'openRules' })}
                 onRestore={restoreCheckpoint}
                 onViewImage={(images, index) => setImageViewer({ images, index })}
+                onNoticeAction={runNoticeAction}
               />
             )
           )
@@ -1973,10 +1974,6 @@ export function App(): JSX.Element {
               </span>
             </div>
           </div>
-        ) : null}
-
-        {state.notice ? (
-          <NoticeBanner notice={state.notice} onAction={runNoticeAction} />
         ) : null}
 
         {state.restoreResult?.undoPointId && !state.restoreResult.aborted ? (
@@ -3143,43 +3140,6 @@ function runTokenAction(dispatch: Dispatch<Action>, state: AppState): void {
   });
 }
 
-function NoticeBanner({
-  notice,
-  onAction
-}: {
-  notice: NonNullable<AppState['notice']>;
-  onAction: (action: 'setToken' | 'clearToken' | 'refresh') => void;
-}): JSX.Element {
-  const level = notice.level === 'error' ? 'error' : 'interrupted';
-  const title =
-    notice.level === 'error'
-      ? 'Something went wrong'
-      : notice.level === 'warning'
-        ? 'Needs attention'
-        : 'Response stopped';
-  return (
-    <div className={`banner banner--${level}`} role={notice.level === 'error' ? 'alert' : 'status'}>
-      <span className="banner-icon" aria-hidden="true">
-        <AlertIcon />
-      </span>
-      <div>
-        <p className="banner-title">{title}</p>
-        <p className="banner-text">{notice.message}</p>
-        {notice.action ? (
-          <div className="banner-actions">
-            <button className="btn btn--primary" type="button" onClick={() => onAction(notice.action ?? 'refresh')}>
-              {notice.action === 'setToken' ? 'Set token' : notice.action === 'clearToken' ? 'Clear token' : 'Retry'}
-            </button>
-            <button className="btn btn--quiet" type="button" onClick={() => onAction('refresh')}>
-              Refresh backends
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 /**
  * The result strip for a checkpoint restore, so a partial outcome is never
  * hidden and the restore can be undone. It states plainly that only files were
@@ -3235,7 +3195,8 @@ function TranscriptRow({
   onDecide,
   onOpenRules,
   onRestore,
-  onViewImage
+  onViewImage,
+  onNoticeAction
 }: {
   item: TranscriptItemView;
   providerId: string;
@@ -3250,6 +3211,7 @@ function TranscriptRow({
   onOpenRules: () => void;
   onRestore: (messageId: string) => void;
   onViewImage: (images: ViewableImage[], index: number) => void;
+  onNoticeAction: (action: 'setToken' | 'clearToken' | 'refresh') => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
     const text = visibleTranscriptText(item.text);
@@ -3311,6 +3273,28 @@ function TranscriptRow({
 
   if (item.kind === 'approval-denied') {
     return <ApprovalResolvedCard item={item} approved={false} onOpenRules={onOpenRules} />;
+  }
+
+  if (item.kind === 'notice' && item.detail === 'status') {
+    const tone = item.noticeLevel === 'error' ? 'error' : 'interrupted';
+    return (
+      <div className={`banner banner--${tone} banner--status`} role={tone === 'error' ? 'alert' : 'status'}>
+        <span className="banner-icon" aria-hidden="true">
+          <AlertIcon />
+        </span>
+        <p className="banner-text">{item.text}</p>
+        {item.noticeAction ? (
+          <div className="banner-actions">
+            <button className="btn btn--primary" type="button" onClick={() => onNoticeAction(item.noticeAction ?? 'refresh')}>
+              {item.noticeAction === 'setToken' ? 'Set token' : item.noticeAction === 'clearToken' ? 'Clear token' : 'Retry'}
+            </button>
+            <button className="btn btn--quiet" type="button" onClick={() => onNoticeAction('refresh')}>
+              Refresh backends
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   if (item.kind === 'notice') {

@@ -12,9 +12,12 @@ import {
   parsePlanSummary,
   parsePlanTitle,
   planArtifactFromMarkdown,
+  isLoosePlanFile,
   planDocumentFromReply,
   planFileName,
   planRelativePath,
+  planTitleFromFileName,
+  recoverPlanDraft,
   planStepsFromReply,
   planSummaryFromReply,
   renderPlanMarkdown,
@@ -597,6 +600,38 @@ test('a completed plan row hides only after a later user message', () => {
   assert.equal(showBuiltPlanDock({ built: true, steps: open, completedDismissed: true }), true);
   assert.equal(carriedPlanDismissal(open, true), undefined);
   assert.equal(carriedPlanDismissal(done, true), true);
+});
+
+test('a plan moved into .melink/plans is recoverable when it is not a thread file', () => {
+  const owned = new Set(['.melink/plans/thread-abc.md']);
+  assert.equal(isLoosePlanFile('.melink/plans/OPENCODE_KNOWLEDGE_SOURCE_LEADS_PLAN.md', owned), true);
+  assert.equal(isLoosePlanFile('.melink/plans/thread-abc.md', owned), false);
+  assert.equal(isLoosePlanFile('docs/plan.md', owned), false);
+  assert.equal(planTitleFromFileName('OPENCODE_KNOWLEDGE_SOURCE_LEADS_PLAN.md'), 'OPENCODE KNOWLEDGE SOURCE LEADS PLAN');
+
+  const moved = [
+    '# Knowledge source leads',
+    '',
+    'Read the current indexer before changing it.',
+    '',
+    '## Steps',
+    '',
+    '- [ ] Read the indexer',
+    '- [x] Note the gap'
+  ].join('\n');
+  const draft = recoverPlanDraft(moved, 'fallback');
+  assert.equal(draft?.title, 'Knowledge source leads');
+  assert.deepEqual(draft?.steps, [
+    { text: 'Read the indexer', status: 'pending' },
+    { text: 'Note the gap', status: 'completed' }
+  ]);
+
+  const numbered = ['# Later', '', '1. First', '2. Second'].join('\n');
+  assert.deepEqual(recoverPlanDraft(numbered, 'fallback')?.steps, [
+    { text: 'First', status: 'pending' },
+    { text: 'Second', status: 'pending' }
+  ]);
+  assert.equal(recoverPlanDraft('Just a paragraph.', 'fallback'), undefined);
 });
 
 test('plan work is the latest turn’s tools and files, not the prose', () => {
