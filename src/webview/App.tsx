@@ -2104,7 +2104,7 @@ export function App(): JSX.Element {
                 : pending || asking
                   ? 'Waiting for your decision above...'
                   : active?.status === 'available'
-                    ? 'Ask the agent...'
+                    ? 'Build, Plan or Ask SideCode anything...'
                     : 'No backend available'
             }
             disabled={active?.status !== 'available' || state.restoring || Boolean(pending) || asking}
