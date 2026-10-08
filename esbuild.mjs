@@ -42,7 +42,7 @@ const extensionOptions = {
   format: 'cjs',
   platform: 'node',
   target: 'node20',
-  external: ['vscode']
+  external: ['vscode', 'playwright-core']
 };
 
 /** Webview bundle: React + TypeScript, browser IIFE, CSS emitted alongside. */
@@ -73,7 +73,18 @@ const planPreviewOptions = {
   define: { 'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development') }
 };
 
-const targets = [extensionOptions, webviewOptions, planPreviewOptions];
+/** Browser MCP shim: stdio only. It forwards tool calls and does not launch a browser. */
+/** @type {import('esbuild').BuildOptions} */
+const browserMcpOptions = {
+  ...shared,
+  entryPoints: ['src/browser/mcp.ts'],
+  outfile: 'dist/browser-mcp.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node20'
+};
+
+const targets = [extensionOptions, webviewOptions, planPreviewOptions, browserMcpOptions];
 
 if (watch) {
   await stageDictation();
@@ -83,5 +94,5 @@ if (watch) {
 } else {
   await Promise.all(targets.map((options) => build(options)));
   await stageDictation();
-  console.log(`[esbuild] built dist/extension.js, dist/webview.{js,css}, and dist/planPreview.{js,css} (${production ? 'production' : 'development'})`);
+  console.log(`[esbuild] built dist/extension.js, dist/webview.{js,css}, dist/planPreview.{js,css}, and dist/browser-mcp.js (${production ? 'production' : 'development'})`);
 }

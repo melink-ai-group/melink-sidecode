@@ -5,6 +5,7 @@ import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
 import { VscodeProjectContext } from './context/vscodeHost';
 import { planStepMarkdownPlugin } from './planStepMarkdown';
 import { SidebarViewProvider } from './sidebarView';
+import { attachBrowserSkill, stopBrowserSkill, syncBrowserSkill, BrowserSkill } from './browser/skill';
 
 /**
  * The registry is referenced by `deactivate` as well as by the subscriptions, so
@@ -21,6 +22,9 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
   context.subscriptions.push(diagnostics);
   setDiagnosticSink((message) => diagnostics.appendLine(message));
 
+  const skill = new BrowserSkill(context);
+  attachBrowserSkill(skill);
+
   const activeRegistry = new BackendRegistry(context);
   registry = activeRegistry;
   // The project-context service is the single source of project awareness: it
@@ -28,6 +32,9 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
   // view, which delivers them to each backend through the AgentBackend seam.
   const projectContext = new VscodeProjectContext();
   const provider = new SidebarViewProvider(context.extensionUri, context, activeRegistry, projectContext);
+  skill.setLaunchErrorListener(() => {
+    void provider.publishSettings();
+  });
 
   context.subscriptions.push(
     activeRegistry,
@@ -40,6 +47,9 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('melink.context')) {
         provider.invalidateContextDelivery();
+      }
+      if (event.affectsConfiguration('melink.skills.browser')) {
+        void syncBrowserSkill();
       }
     }),
     vscode.window.registerWebviewViewProvider(SidebarViewProvider.viewType, provider, {
@@ -96,9 +106,10 @@ interface MarkdownItLike {
   };
 }
 
-export function deactivate(): Promise<void> {
+export async function deactivate(): Promise<void> {
   // VS Code disposes `context.subscriptions` and then calls this. Awaiting the
   // registry's teardown is what guarantees the Codex child process is gone
-  // before the extension host exits.
-  return registry?.dispose() ?? Promise.resolve();
+  // before the extension host exits. The browser tab and its page go with it.
+  await stopBrowserSkill();
+  await registry?.dispose();
 }

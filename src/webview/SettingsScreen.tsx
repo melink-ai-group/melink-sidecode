@@ -78,6 +78,7 @@ interface Draft {
   /** The overall cap, held as a string so a half-typed value is not coerced. */
   contextMaxKb: string;
   contextExclude: string[];
+  browser: boolean;
 }
 
 /** Seed the draft from a host snapshot; used on load, echo, and reset. */
@@ -99,7 +100,8 @@ function draftFrom(settings: SettingsSnapshot): Draft {
     contextIncludeSelection: settings.context.includeSelection,
     contextIncludeChangedFiles: settings.context.includeChangedFiles,
     contextMaxKb: String(Math.round(settings.context.maxBytes / 1024)),
-    contextExclude: [...settings.context.exclude]
+    contextExclude: [...settings.context.exclude],
+    browser: settings.skills.browser
   };
 }
 
@@ -130,7 +132,7 @@ export function SettingsScreen({
   const [permissionConfirm, setPermissionConfirm] = useState(false);
   // The visible settings section. Switching tabs never touches the draft, so an
   // unsaved edit in another section survives.
-  const [tab, setTab] = useState<'providers' | 'defaults' | 'context'>('providers');
+  const [tab, setTab] = useState<'providers' | 'defaults' | 'context' | 'skills'>('providers');
   // Ollama and Codex are separate pages inside Providers. The choice is view
   // state only; it does not touch the draft.
   const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-codex'>('provider-ollama');
@@ -208,7 +210,8 @@ export function SettingsScreen({
       draft.contextIncludeSelection !== settings.context.includeSelection ||
       draft.contextIncludeChangedFiles !== settings.context.includeChangedFiles ||
       draft.contextMaxKb !== storedKb ||
-      JSON.stringify(draft.contextExclude) !== storedExclude
+      JSON.stringify(draft.contextExclude) !== storedExclude ||
+      draft.browser !== settings.skills.browser
     );
   }, [draft, settings]);
 
@@ -285,7 +288,8 @@ export function SettingsScreen({
       contextIncludeSelection: draft.contextIncludeSelection,
       contextIncludeChangedFiles: draft.contextIncludeChangedFiles,
       contextMaxBytes: maxKb * 1024,
-      contextExclude: draft.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0)
+      contextExclude: draft.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0),
+      browser: draft.browser
     });
   };
 
@@ -337,7 +341,8 @@ export function SettingsScreen({
   const tabs: readonly TabItem[] = [
     { id: 'providers', label: 'Providers' },
     { id: 'defaults', label: 'Defaults' },
-    { id: 'context', label: 'Context' }
+    { id: 'context', label: 'Context' },
+    { id: 'skills', label: 'Skills' }
   ];
 
   return (
@@ -1123,6 +1128,46 @@ export function SettingsScreen({
                   never widens them unless you change a setting here.
                 </span>
               </p>
+            </div>
+          </div>
+          <p className="panel__foot">Unsaved changes apply to the next turn.</p>
+        </section>
+        </TabPanel>
+
+        {/* ---------- Skills ---------- */}
+        <TabPanel id="skills" active={tab}>
+        <section className="panel panel--fill" aria-labelledby="skills-title">
+          <div className="panel__head" id="skills-title">
+            <span>Skills</span>
+            <span className="spacer" />
+            <span className="panel__note">What the agent can do besides edit the workspace</span>
+          </div>
+          <div className="panel__body">
+            <div className="field">
+              <p className="field-help">
+                A skill is available to Codex and OpenCode while it is on. Turning it off leaves that
+                ability out of the next conversation.
+              </p>
+              <ul className="context-list">
+                <ContextCategory
+                  id="skill-browser"
+                  name="Browser control"
+                  description="When this is on, the agent can open the app in an editor tab and check layout. When it is off, it cannot, and no browser is started. Uses the installed Edge or Chrome."
+                  checked={draft.browser}
+                  onChange={(value) => update('browser', value)}
+                />
+              </ul>
+              {settings.skills.browserError ? (
+                <p className="field-msg field-msg--error" role="alert">
+                  <AlertIcon />
+                  <span>{settings.skills.browserError}</span>
+                </p>
+              ) : (
+                <p className="field-help">
+                  Saved to <code className="key">melink.skills.browser</code>. On by default. A new Codex
+                  conversation and the next OpenCode turn pick up the change.
+                </p>
+              )}
             </div>
           </div>
           <p className="panel__foot">Unsaved changes apply to the next turn.</p>

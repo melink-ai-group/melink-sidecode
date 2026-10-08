@@ -2060,7 +2060,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.persistOpenTabs();
   }
 
-  /** The settings read model plus the live model lists, so the default-model
+  /** Push the settings read model, including a browser launch failure. */
+  async publishSettings(): Promise<void> {
+    this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+  }
+
+  /**
+   * The settings read model plus the live model lists, so the default-model
    * picker can offer real choices without a second round trip. A provider whose
    * list fails is simply absent; it is never shown as an empty list.
    */

@@ -69,6 +69,8 @@ import {
 import { buildCodexTurnInput } from './codex/turnInput';
 import { isMissingThreadError, recoveryHandover, recoveryInstructions, threadRecoveredNotice } from './threadRecovery';
 import { refreshStoredChatgptAuth } from './codex/tokenRefresh';
+import { browserCommand } from '../browser/skill.ts';
+import { codexBrowserConfig } from '../browser/config.ts';
 import type { Thread } from '../../schemas/v2/Thread';
 import type { ThreadItem } from '../../schemas/v2/ThreadItem';
 import type { Turn } from '../../schemas/v2/Turn';
@@ -431,6 +433,15 @@ export class CodexBackend implements AgentBackend {
     return models?.find((model) => model.id === modelId)?.capabilities;
   }
 
+  /**
+   * MCP server for the editor browser, when the skill is on.
+   * Quiet turns do not call this, so compaction and dictation stay as they are.
+   */
+  private async browserThreadFields(): Promise<{ config?: { [key: string]: import('../../schemas/serde_json/JsonValue.ts').JsonValue } }> {
+    const config = codexBrowserConfig(await browserCommand());
+    return config ? { config } : {};
+  }
+
   async startThread(options?: StartThreadOptions): Promise<ThreadHandle> {
     const connection = await this.connect();
     const model = options?.model ?? this.defaultModel;
@@ -463,7 +474,10 @@ export class CodexBackend implements AgentBackend {
         // life of the loaded thread and ignores a later replacement, so a Plan
         // instruction written at start would still block Build. The snapshot
         // is the only persisted instruction. The mode is sent on each turn.
-        developerInstructions: instructionsWithHandover(options?.context?.snapshot, options?.handover)
+        developerInstructions: instructionsWithHandover(options?.context?.snapshot, options?.handover),
+        // Browser control is one MCP server on the thread. Quiet turns never
+        // call this, and an off skill omits the field entirely.
+        ...(await this.browserThreadFields())
       })
       .catch((error: unknown) => this.fail(error));
     const threadId = response.thread.id;
@@ -507,7 +521,8 @@ export class CodexBackend implements AgentBackend {
         // Prefer the snapshot service's root as cwd, mirroring `startThread`.
         cwd: options?.context?.workspaceRoot ?? this.cwd,
         developerInstructions: instructionsWithHandover(options?.context?.snapshot, options?.handover),
-        approvalsReviewer: 'user'
+        approvalsReviewer: 'user',
+        ...(await this.browserThreadFields())
       });
     } catch (error) {
       const failure = this.toBackendError(error);
@@ -1611,7 +1626,8 @@ export class CodexBackend implements AgentBackend {
         approvalPolicy: mapping.approvalPolicy,
         approvalsReviewer: 'user',
         sandbox: mapping.sandbox,
-        developerInstructions: recoveryInstructions(handover, options.snapshot)
+        developerInstructions: recoveryInstructions(handover, options.snapshot),
+        ...(await this.browserThreadFields())
       });
       const startedId = response.thread.id;
       this.hiddenThreadIds.delete(startedId);
@@ -1680,7 +1696,8 @@ export class CodexBackend implements AgentBackend {
         approvalPolicy: mapping.approvalPolicy,
         approvalsReviewer: 'user',
         sandbox: mapping.sandbox,
-        developerInstructions: instructions
+        developerInstructions: instructions,
+        ...(await this.browserThreadFields())
       });
       const startedId = response.thread.id;
       this.hiddenThreadIds.delete(startedId);
