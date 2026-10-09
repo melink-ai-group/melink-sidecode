@@ -2909,8 +2909,12 @@ function ChatTabStrip({
                 onClick={() => bridge.post({ type: 'selectChatTab', tabId: tab.id })}
               >
                 <span className="chat-tab__text">{tab.title}</span>
-                {live?.busy ? <span className="chat-tab__mark">Busy</span> : null}
-                {!tab.active && live?.unread ? <span className="chat-tab__unread" aria-label="Unread" /> : null}
+                {live?.busy ? (
+                  <span className="chat-tab__mark" role="status" title="Busy" aria-label="Busy">
+                    <span className="spinner" aria-hidden="true" />
+                  </span>
+                ) : null}
+                {!tab.active && live?.unread ? <span className="chat-tab__unread" title="Unread" aria-label="Unread" /> : null}
               </button>
               <button
                 className="chat-tab__close"
@@ -3021,10 +3025,16 @@ function HistoryPanel({
               >
                 <span className="thread-title">{thread.title ?? 'Untitled conversation'}</span>
                 <span className="history-status-slot">
-                  {activity?.busy ? <span className="history-status" role="status">Busy</span> : null}
+                  {activity?.busy ? (
+                    <span className="history-status history-status--busy" role="status" title="Busy" aria-label="Busy">
+                      <span className="spinner" aria-hidden="true" />
+                    </span>
+                  ) : null}
                 </span>
                 <span className="history-status-slot">
-                  {activity?.unread ? <span className="history-status history-status--unread">Unread</span> : null}
+                  {activity?.unread ? (
+                    <span className="history-status history-status--unread" title="Unread" role="img" aria-label="Unread" />
+                  ) : null}
                 </span>
                 <span className="history-model-slot">{detail}</span>
               </li>
