@@ -203,8 +203,14 @@ html body {
 
 .chat-tab__mark {
   flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--vscode-descriptionForeground);
+  display: inline-flex;
+  align-items: center;
+  color: var(--vscode-foreground);
+}
+
+.chat-tab__mark .spinner {
+  width: 10px;
+  height: 10px;
 }
 
 .chat-tab__unread {
@@ -551,17 +557,21 @@ html body {
 
 .history-status {
   flex: 0 0 auto;
-  padding: 1px 5px;
-  border-radius: 8px;
-  background: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
-  font-size: 10px;
-  line-height: 1.5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-foreground);
+  line-height: 0;
+}
+
+.history-status--busy .spinner {
+  width: 10px;
+  height: 10px;
 }
 
 #history-panel .model-option {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px 48px minmax(0, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) 14px 14px minmax(0, 0.8fr);
   gap: 6px;
   padding-left: 10px;
 }
@@ -586,7 +596,10 @@ html body {
 }
 
 .history-status--unread {
-  background: var(--vscode-testing-iconPassed, var(--vscode-focusBorder));
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--melink-primary);
 }
 
 /* Unauthenticated provider: an actionable disabled entry, never an empty list. */
