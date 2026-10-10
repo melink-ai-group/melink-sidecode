@@ -112,6 +112,7 @@ import {
   type OpenChatTab,
   reorderById
 } from './chatTabs';
+import { historyThreadTitle } from './webview/historyEntries';
 import {
   clearPinnedModelSettingField,
   clearPinnedModelSettings,
@@ -1269,7 +1270,33 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const stored = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId)?.title;
-    void this.showSession(this.createSession({ blank: false, backendId, threadId, title: tabTitle(stored) }));
+    const transcript = this.store
+      .getTranscript(backendId, threadId)
+      .find((item) => item.role === 'user' && item.text?.trim())?.text;
+    void this.showSession(
+      this.createSession({ blank: false, backendId, threadId, title: tabTitle(historyThreadTitle(stored, transcript)) })
+    );
+  }
+
+  /**
+   * History label for one thread. The stored first message wins. The transcript
+   * is next. The provider preview is last, because Codex records our mode
+   * instruction as that preview.
+   */
+  private historyLabel(
+    backendId: string,
+    threadId: string,
+    indexed: string | undefined,
+    providerTitle: string | undefined
+  ): string | undefined {
+    const fromIndex = historyThreadTitle(indexed, undefined);
+    if (fromIndex) {
+      return fromIndex;
+    }
+    const transcript = this.store
+      .getTranscript(backendId, threadId)
+      .find((item) => item.role === 'user' && item.text?.trim())?.text;
+    return historyThreadTitle(transcript, providerTitle);
   }
 
   private reorderSession(tabId: string, toIndex: number): void {
@@ -1673,13 +1700,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         });
         break;
       }
-      case 'listThreads':
+      case 'listThreads': {
+        const backendId = message.backendId;
+        const live = await this.registry.listThreads(backendId);
+        const stored = new Map(this.store.listThreads(backendId).map((entry) => [entry.threadId, entry.title]));
         this.post({
           type: 'threads',
-          backendId: message.backendId,
-          threads: await this.registry.listThreads(message.backendId)
+          backendId,
+          threads: live.map((thread) => ({
+            ...thread,
+            title: this.historyLabel(backendId, thread.threadId, stored.get(thread.threadId), thread.title)
+          }))
         });
         break;
+      }
       case 'resumeThread':
         await this.resumeThread(message.backendId, message.threadId);
         break;
@@ -2638,15 +2672,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       } else {
         this.mode = this.resolveMode(backendId, this.mode);
       }
-      const titled =
-        ref?.title ?? result.items.find((item) => item.role === 'user' && item.text?.trim())?.text;
+      const titled = historyThreadTitle(
+        ref?.title,
+        result.items.find((item) => item.role === 'user' && item.text?.trim())?.text
+      );
       const choice = this.composerSelection(backendId, result.model);
       await this.store.setActiveThread({
         backendId,
         threadId,
         modelId: choice.backendId === backendId ? choice.model ?? result.model : result.model,
         mode: this.mode,
-        title: titled ? ThreadStore.titleFromText(titled) ?? titled : undefined,
+        title: titled,
         updatedAt: Date.now()
       });
       if (this.session) {
@@ -2711,8 +2747,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         } else {
           this.mode = this.resolveMode(backendId, this.mode);
         }
-        const titled =
-          ref?.title ?? storedItems.find((item) => item.role === 'user' && item.text?.trim())?.text;
+        const titled = historyThreadTitle(
+          ref?.title,
+          storedItems.find((item) => item.role === 'user' && item.text?.trim())?.text
+        );
         if (this.session) {
           this.session.blank = false;
           this.session.title = tabTitle(titled);
@@ -3109,7 +3147,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const messageId = await this.store.appendUserMessage(activeBackendId, threadId, text, persisted);
     const indexed = this.store.listThreads(activeBackendId).find((entry) => entry.threadId === threadId);
-    const title = indexed?.title ?? ThreadStore.titleFromText(text);
+    const title = historyThreadTitle(indexed?.title, text);
     await this.store.setActiveThread({
       backendId: activeBackendId,
       threadId,

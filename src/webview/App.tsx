@@ -192,6 +192,13 @@ export function App(): JSX.Element {
   const [pinnedUserId, setPinnedUserId] = useState<string | undefined>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
+  /** Bumped when a thread is created or a turn finishes, so the next open can refresh. */
+  const [historyStale, setHistoryStale] = useState(false);
+  const historyLoadedRef = useRef(new Set<string>());
+  /** True once a provider list has been stored, so a later wipe is a refresh rather than the first load. */
+  const historySeenRef = useRef(false);
+  const markHistoryStaleRef = useRef<() => void>(() => {});
+  markHistoryStaleRef.current = () => setHistoryStale(true);
   const historyRef = useRef<HTMLDivElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -300,6 +307,7 @@ export function App(): JSX.Element {
           dispatch({ type: 'questionCleared' });
           break;
         case 'conversation':
+          markHistoryStaleRef.current();
           olderStallRef.current = false;
           olderAnchorRef.current = null;
           dispatch({
@@ -333,6 +341,9 @@ export function App(): JSX.Element {
           dispatch({ type: 'restoring', value: message.value });
           break;
         case 'busy':
+          if (!message.value) {
+            markHistoryStaleRef.current();
+          }
           dispatch({ type: 'busy', value: message.value, backendId: message.backendId, threadId: message.threadId });
           break;
         case 'notice':
@@ -843,17 +854,45 @@ export function App(): JSX.Element {
   const historyPending = historyLoading(state.availability, state.threadLoading);
 
   const toggleHistory = (): void => {
-    const open = !historyOpen;
-    setHistoryOpen(open);
-    if (!open) {
+    setHistoryOpen((open) => {
+      if (!open) {
+        setHistoryQuery('');
+      }
+      return !open;
+    });
+  };
+
+  // The first open loads every provider. Later opens reuse that list. A new
+  // chat or a finished turn marks the list stale, and the next open (or an
+  // open panel) refreshes without replacing the rows with a spinner.
+  useEffect(() => {
+    const providers = state.availability;
+    const hasLists = providers.some((backend) => state.threads[backend.id] !== undefined);
+    if (hasLists) {
+      historySeenRef.current = true;
+    } else if (historySeenRef.current && providers.length > 0) {
+      historyLoadedRef.current.clear();
+      historySeenRef.current = false;
+    }
+    if (!historyOpen || providers.length === 0) {
       return;
     }
-    setHistoryQuery('');
-    for (const backend of state.availability) {
-      dispatch({ type: 'threadsLoading', backendId: backend.id, value: true });
-      bridge.post({ type: 'listThreads', backendId: backend.id });
+    const refresh = providers.filter((backend) => historyStale || !historyLoadedRef.current.has(backend.id));
+    if (refresh.length === 0) {
+      return;
     }
-  };
+    const showLoading = providers.every((backend) => state.threads[backend.id] === undefined);
+    for (const backend of refresh) {
+      if (showLoading) {
+        dispatch({ type: 'threadsLoading', backendId: backend.id, value: true });
+      }
+      bridge.post({ type: 'listThreads', backendId: backend.id });
+      historyLoadedRef.current.add(backend.id);
+    }
+    if (historyStale) {
+      setHistoryStale(false);
+    }
+  }, [historyOpen, historyStale, state.availability, state.threads]);
 
   const resumeThread = (backendId: string, threadId: string): void => {
     setHistoryOpen(false);
@@ -1042,6 +1081,7 @@ export function App(): JSX.Element {
     followSentMessage();
     dispatch({ type: 'localUserMessage', text, attachments: state.attachments });
     dispatch({ type: 'dismissNotice' });
+    setHistoryStale(true);
     bridge.post({
       type: 'sendTurn',
       text,
@@ -1326,6 +1366,7 @@ export function App(): JSX.Element {
     dispatch({ type: 'localUserMessage', text, attachments: state.attachments });
     dispatch({ type: 'dismissNotice' });
     dispatch({ type: 'dismissAttachmentError' });
+    setHistoryStale(true);
     bridge.post({
       type: 'sendTurn',
       text,
@@ -1518,6 +1559,7 @@ export function App(): JSX.Element {
     dispatch({ type: 'planRevising' });
     followSentMessage();
     dispatch({ type: 'localUserMessage', text });
+    setHistoryStale(true);
     bridge.post({
       type: 'sendTurn',
       text,
@@ -2962,12 +3004,7 @@ function HistoryPanel({
 }): JSX.Element {
   const needle = query.trim().toLowerCase();
   const visible = needle
-    ? threads.filter((thread) => {
-        const title = (thread.title ?? 'Untitled conversation').toLowerCase();
-        const model = (thread.model ?? '').toLowerCase();
-        const provider = thread.backendLabel.toLowerCase();
-        return title.includes(needle) || model.includes(needle) || provider.includes(needle);
-      })
+    ? threads.filter((thread) => (thread.title ?? 'Untitled conversation').toLowerCase().includes(needle))
     : threads;
   return (
     <div className="history-menu" id="history-panel">
@@ -2989,7 +3026,7 @@ function HistoryPanel({
           }}
         />
       </div>
-      {loading ? (
+      {loading && threads.length === 0 ? (
         <div className="history-loading" role="status" aria-live="polite">
           <span className="spinner" aria-hidden="true" />
           Loading conversations...
@@ -3007,7 +3044,7 @@ function HistoryPanel({
           {visible.map((thread) => {
             const selected = thread.backendId === selectedBackendId && thread.threadId === activeThreadId;
             const activity = threadActivity?.[`${thread.backendId}:${thread.threadId}`];
-            const detail = thread.model ? `${thread.backendLabel} · ${thread.model}` : thread.backendLabel;
+            const title = thread.title ?? 'Untitled conversation';
             return (
               <li
                 className="model-option"
@@ -3023,20 +3060,17 @@ function HistoryPanel({
                   }
                 }}
               >
-                <span className="thread-title">{thread.title ?? 'Untitled conversation'}</span>
-                <span className="history-status-slot">
-                  {activity?.busy ? (
-                    <span className="history-status history-status--busy" role="status" title="Busy" aria-label="Busy">
-                      <span className="spinner" aria-hidden="true" />
-                    </span>
-                  ) : null}
+                <span className="thread-title" title={title}>
+                  {title}
                 </span>
-                <span className="history-status-slot">
-                  {activity?.unread ? (
-                    <span className="history-status history-status--unread" title="Unread" role="img" aria-label="Unread" />
-                  ) : null}
-                </span>
-                <span className="history-model-slot">{detail}</span>
+                {activity?.busy ? (
+                  <span className="chat-tab__mark" role="status" title="Busy" aria-label="Busy">
+                    <span className="spinner" aria-hidden="true" />
+                  </span>
+                ) : null}
+                {!selected && activity?.unread ? (
+                  <span className="chat-tab__unread" title="Unread" role="img" aria-label="Unread" />
+                ) : null}
               </li>
             );
           })}
