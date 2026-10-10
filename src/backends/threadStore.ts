@@ -474,15 +474,6 @@ export class ThreadStore implements vscode.Disposable {
     await this.context.workspaceState.update(PLANS_KEY, plans);
   }
 
-  /** First line of a user turn, used as the history list label. */
-  static titleFromText(text: string): string | undefined {
-    const line = text.trim().split(/\r?\n/, 1)[0]?.trim();
-    if (!line) {
-      return undefined;
-    }
-    return line.length > 60 ? `${line.slice(0, 60)}...` : line;
-  }
-
   private loadThreadIndex(): ThreadIndex {
     if (!this.threadIndex) {
       this.threadIndex = this.context.workspaceState.get<ThreadIndex>(THREAD_INDEX_KEY) ?? {};

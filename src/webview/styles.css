@@ -555,51 +555,12 @@ html body {
   text-overflow: ellipsis;
 }
 
-.history-status {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--vscode-foreground);
-  line-height: 0;
-}
-
-.history-status--busy .spinner {
-  width: 10px;
-  height: 10px;
-}
-
 #history-panel .model-option {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 14px 14px minmax(0, 0.8fr);
-  gap: 6px;
   padding-left: 10px;
 }
 
-#history-panel .thread-title,
-#history-panel .history-model-slot {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-#history-panel .history-status-slot {
-  display: flex;
-  min-width: 0;
-  justify-content: center;
-}
-
-#history-panel .history-model-slot {
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-}
-
-.history-status--unread {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--melink-primary);
+#history-panel .thread-title {
+  flex: 1 1 auto;
 }
 
 /* Unauthenticated provider: an actionable disabled entry, never an empty list. */
