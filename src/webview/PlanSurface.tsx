@@ -283,7 +283,7 @@ function TodoList({
   const stopped = !allDone && !busy && madeProgress;
 
   const stateClass = allDone ? ' todo--finished' : stopped ? ' todo--stopped' : '';
-  const title = allDone ? 'Plan complete' : stopped ? 'Build incomplete' : 'Building plan';
+  const title = allDone ? 'Complete' : stopped ? 'Incomplete' : 'Busy';
 
   const progressText = total > 0 ? `${done} of ${total} done` : 'No steps';
 
