@@ -7,6 +7,8 @@ import {
   isMissingThreadError,
   recoveryHandover,
   recoveryInstructions,
+  isQuietTurnError,
+  quietContinueNotice,
   shouldAutoContinue,
   stopContinueNotice,
   threadRecoveredNotice
@@ -77,4 +79,10 @@ test('a stopped provider continues a few times before the error is shown', () =>
   assert.equal(shouldAutoContinue(new Error('The opencode CLI was not found.'), 0), false);
   assert.match(stopContinueNotice(1), /1 of 3/);
   assert.match(continueAfterStopInstruction(), /latest changes/);
+  const quiet = new Error('The turn went quiet before it finished.');
+  assert.equal(isQuietTurnError(quiet), true);
+  assert.equal(shouldAutoContinue(quiet, 0), true);
+  assert.equal(shouldAutoContinue(quiet, STOP_CONTINUE_ATTEMPTS), false);
+  assert.match(quietContinueNotice(1), /Nothing new arrived/);
+  assert.equal(isQuietTurnError(stopped), false);
 });
