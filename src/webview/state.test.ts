@@ -1092,6 +1092,39 @@ test('an info notice stays in the transcript where it happened', () => {
   assert.equal(continued.notice, undefined);
 });
 
+test('the same provider failure is one status line, and Retry can clear it', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
+  const busy = reduce(active, { type: 'busy', value: true, backendId: 'codex', threadId: 't1' });
+  const message = "You've hit your usage limit. Try again at 11:00 AM.";
+  const once = reduce(busy, {
+    type: 'agentEvent',
+    event: { type: 'error', backendId: 'codex', threadId: 't1', message, recoverable: true, code: 'provider' }
+  });
+  const twice = reduce(once, {
+    type: 'agentEvent',
+    event: { type: 'error', backendId: 'codex', threadId: 't1', message, recoverable: true, code: 'provider' }
+  });
+  const banners = twice.transcript.filter((item) => item.detail === 'status' && item.text === message);
+  assert.equal(banners.length, 1);
+  assert.equal(banners[0]?.noticeAction, 'retry');
+  assert.equal(twice.busy, false);
+  const distinct = reduce(twice, {
+    type: 'agentEvent',
+    event: {
+      type: 'error',
+      backendId: 'codex',
+      threadId: 't1',
+      message: 'The Codex turn failed.',
+      recoverable: true,
+      code: 'provider'
+    }
+  });
+  assert.equal(distinct.transcript.filter((item) => item.detail === 'status').length, 2);
+  const cleared = reduce(distinct, { type: 'dismissStatusNotice', text: message });
+  assert.equal(cleared.transcript.some((item) => item.text === message), false);
+  assert.equal(cleared.transcript.some((item) => item.text === 'The Codex turn failed.'), true);
+});
+
 test('a warning with a recovery action is a transcript line, not a pinned banner', () => {
   const open = reduce(initialState, { type: 'conversation', backendId: 'ollama', threadId: 'thread_1' });
   const warned = reduce(open, {

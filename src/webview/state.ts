@@ -43,7 +43,7 @@ import type {
 /** Lifecycle of one transcript item, driving its status affordance. */
 export type ItemStatus = 'streaming' | 'completed' | 'failed' | 'warning' | 'canceled' | 'pending';
 
-export type NoticeAction = 'setToken' | 'clearToken' | 'refresh';
+export type NoticeAction = 'setToken' | 'clearToken' | 'refresh' | 'retry';
 
 export interface TranscriptItemView {
   id: string;
@@ -302,6 +302,8 @@ export type Action =
   | { type: 'restoring'; value: boolean }
   | { type: 'busy'; value: boolean; backendId?: string; threadId?: string }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string; action?: NoticeAction }
+  /** Remove the status line a Retry or refresh click is answering. */
+  | { type: 'dismissStatusNotice'; text: string }
   | { type: 'dismissNotice' }
   /** Add picked/pasted files to the pending message; duplicates are ignored. */
   | { type: 'addAttachments'; attachments: Attachment[] }
@@ -743,6 +745,22 @@ export function reduce(state: AppState, action: Action): AppState {
       });
     case 'dismissNotice':
       return { ...state, notice: undefined };
+    case 'dismissStatusNotice': {
+      const text = action.text.trim();
+      if (!text) {
+        return state;
+      }
+      const transcript = state.transcript.filter(
+        (item) => !(item.kind === 'notice' && item.detail === 'status' && item.text === text)
+      );
+      return {
+        ...state,
+        notice: undefined,
+        busy: false,
+        startingTurn: false,
+        transcript
+      };
+    }
     case 'addAttachments': {
       // A file already on the message is never added twice; two picks of the
       // same path would otherwise render duplicate chips.
@@ -1265,7 +1283,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         level: 'info',
         message: `${event.subject ? `${event.subject}: ` : ''}the request was denied and the agent was told.`
       });
-    case 'error':
+    case 'error': {
       // A backend the user is not currently driving must never surface a status
       // or error: a failed Codex auth attempt stays invisible while Ollama is
       // the selected provider, and vice versa. A failure from another chat
@@ -1273,7 +1291,19 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
       if (!eventForActiveChat(state, event.backendId, event.threadId)) {
         return state;
       }
-      return placeNotice({ ...state, planRevising: false }, noticeForError(event));
+      const failure = noticeForError(event);
+      // A provider failure ends the turn. Leave the composer free so Retry can
+      // send again; a still-running turn is cleared by `turn/interrupted`.
+      const idle = failure.action === 'retry';
+      return placeNotice(
+        {
+          ...state,
+          planRevising: false,
+          ...(idle ? { busy: false, startingTurn: false } : {})
+        },
+        failure
+      );
+    }
     case 'turn/interrupted':
       if (!eventForActiveChat(state, event.backendId, event.threadId)) {
         return state;
@@ -1452,6 +1482,18 @@ function appendStatusNotice(
   if (!text) {
     return { ...state, notice: undefined };
   }
+  const previous = state.transcript.at(-1);
+  // Codex reports one failure twice (the error notification and the failed
+  // turn). The second copy is the same sentence and must not become a second banner.
+  if (
+    previous?.kind === 'notice' &&
+    previous.detail === 'status' &&
+    previous.text === text &&
+    previous.noticeLevel === level &&
+    previous.noticeAction === action
+  ) {
+    return { ...state, notice: undefined };
+  }
   return {
     ...state,
     notice: undefined,
@@ -1478,7 +1520,7 @@ function withoutFailureNotice(notice: AppState['notice']): AppState['notice'] {
   return notice;
 }
 
-function noticeForError(event: Extract<AgentEvent, { type: 'error' }>): AppState['notice'] {
+function noticeForError(event: Extract<AgentEvent, { type: 'error' }>): NonNullable<AppState['notice']> {
   switch (event.code) {
     case 'unauthenticated':
       return { level: 'warning', message: event.message, action: 'setToken' };
@@ -1499,9 +1541,9 @@ function noticeForError(event: Extract<AgentEvent, { type: 'error' }>): AppState
       // a crash or a silent stall.
       return { level: 'error', message: event.message, action: 'refresh' };
     case 'provider':
-      return { level: 'error', message: event.message, action: 'refresh' };
+      return { level: 'error', message: event.message, action: 'retry' };
     default:
-      return { level: 'error', message: event.message, action: 'refresh' };
+      return { level: 'error', message: event.message, action: 'retry' };
   }
 }
 

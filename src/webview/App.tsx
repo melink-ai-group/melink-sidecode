@@ -48,6 +48,7 @@ import { ContextMeter, ContextStrip } from './ContextStrip';
 import { ChangesReview } from './ChangesReview';
 import { ChangedFilesStrip } from './ChangedFilesStrip';
 import { showBuiltPlanDock } from '../backends/plan';
+import { continueAfterStopInstruction } from '../backends/threadRecovery';
 import { PlanSurface } from './PlanSurface';
 import { backendStatusView, incompatibleBackends, authMismatchBackends } from './backendStatus';
 import {
@@ -1163,7 +1164,31 @@ export function App(): JSX.Element {
     bridge.post({ type: 'cancelTurn' });
   };
 
-  const runNoticeAction = (action: 'setToken' | 'clearToken' | 'refresh'): void => {
+  const retryLastTurn = (noticeText: string): void => {
+    if (state.restoring || pending || state.pendingQuestion) {
+      return;
+    }
+    // Continue the unfinished turn. The original prompt and the work already
+    // done stay in the thread; sending them again would start that work over.
+    const text = continueAfterStopInstruction();
+    followSentMessage();
+    dispatch({ type: 'dismissStatusNotice', text: noticeText });
+    dispatch({ type: 'localUserMessage', text });
+    setHistoryStale(true);
+    bridge.post({
+      type: 'sendTurn',
+      text,
+      backendId: state.selectedBackendId,
+      model: state.selectedModel,
+      permissionLevel: state.permissionLevel
+    });
+  };
+
+  const runNoticeAction = (action: 'setToken' | 'clearToken' | 'refresh' | 'retry', noticeText?: string): void => {
+    if (action === 'retry') {
+      retryLastTurn(noticeText ?? '');
+      return;
+    }
     dispatch({ type: 'dismissNotice' });
     if (action === 'refresh') {
       dispatch({ type: 'refresh' });
@@ -3205,6 +3230,19 @@ function RestoreResultStrip({
   );
 }
 
+function noticeActionLabel(action: 'setToken' | 'clearToken' | 'refresh' | 'retry'): string {
+  switch (action) {
+    case 'setToken':
+      return 'Set token';
+    case 'clearToken':
+      return 'Clear token';
+    case 'refresh':
+      return 'Refresh backends';
+    case 'retry':
+      return 'Retry';
+  }
+}
+
 function TranscriptRow({
   item,
   providerId,
@@ -3231,7 +3269,7 @@ function TranscriptRow({
   onOpenRules: () => void;
   onRestore: (messageId: string) => void;
   onViewImage: (images: ViewableImage[], index: number) => void;
-  onNoticeAction: (action: 'setToken' | 'clearToken' | 'refresh') => void;
+  onNoticeAction: (action: 'setToken' | 'clearToken' | 'refresh' | 'retry', noticeText?: string) => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
     const text = visibleTranscriptText(item.text);
@@ -3305,12 +3343,18 @@ function TranscriptRow({
         <p className="banner-text">{item.text}</p>
         {item.noticeAction ? (
           <div className="banner-actions">
-            <button className="btn btn--primary" type="button" onClick={() => onNoticeAction(item.noticeAction ?? 'refresh')}>
-              {item.noticeAction === 'setToken' ? 'Set token' : item.noticeAction === 'clearToken' ? 'Clear token' : 'Retry'}
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={() => onNoticeAction(item.noticeAction ?? 'refresh', item.text)}
+            >
+              {noticeActionLabel(item.noticeAction)}
             </button>
-            <button className="btn btn--quiet" type="button" onClick={() => onNoticeAction('refresh')}>
-              Refresh backends
-            </button>
+            {item.noticeAction === 'refresh' ? null : (
+              <button className="btn btn--quiet" type="button" onClick={() => onNoticeAction('refresh')}>
+                Refresh backends
+              </button>
+            )}
           </div>
         ) : null}
       </div>
