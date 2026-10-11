@@ -4464,6 +4464,52 @@ html body {
   gap: 6px;
 }
 
+/* Mode switch sits above the restore dialog. It replaces the native window prompt. */
+.mode-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 72%, transparent);
+}
+
+.mode-modal__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, 100%);
+  padding: 16px;
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-foreground);
+  box-shadow: 0 12px 40px color-mix(in srgb, #000 45%, transparent);
+}
+
+.mode-modal__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.mode-modal__text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+}
+
+.mode-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .confirm-gate__paths {
   margin: 6px 0 0;
   padding: 0 0 0 16px;

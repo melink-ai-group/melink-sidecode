@@ -147,8 +147,9 @@ opens tall so the first message has room to be written.
 The host recognizes explicit plan requests and direct workspace action requests
 before sending a turn. It can switch automatically to Plan; Ask remains a manual
 choice in the mode selector. Switching to a mode that permits more activity
-asks first; choose **Switch and continue** to send the original request under
-that mode. Closing the prompt keeps the selected mode. Ambiguous requests keep
+asks first in the sidebar; choose **Switch and continue** to send the original
+request under that mode, or **Stay in** the current mode to send without
+switching. Closing the dialog keeps the selected mode. Ambiguous requests keep
 the current mode, and unsupported modes are never selected.
 
 ## Reading the transcript

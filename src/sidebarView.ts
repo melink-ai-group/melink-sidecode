@@ -213,6 +213,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   /** True once the webview script has posted `ready`. */
   private webviewMounted = false;
+  /** In-flight mode-switch dialogs. Dismissing one keeps the current mode. */
+  private modeSwitchSeq = 0;
+  private readonly modeSwitchWaiters = new Map<string, (accept: boolean) => void>();
   /** The title-bar gear was used before the webview script was listening. */
   private openSettingsOnReady = false;
   private webviewMountTimers: ReturnType<typeof setTimeout>[] = [];
@@ -1155,12 +1158,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   ): void {
     this.view = view;
     this.webviewMounted = false;
+    this.declinePendingModeSwitches();
     this.clearWebviewMountTimers();
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')]
     };
     const messages = view.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
+      if (message.type === 'modeSwitchChoice') {
+        this.answerModeSwitch(message.requestId, message.accept);
+        return;
+      }
       if (message.type === 'ready') {
         this.webviewMounted = true;
         this.clearWebviewMountTimers();
@@ -1204,6 +1212,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     view.onDidDispose(() => {
       messages.dispose();
       this.dictation.dispose();
+      this.declinePendingModeSwitches();
       this.clearWebviewMountTimers();
       if (this.view === view) {
         this.view = undefined;
@@ -1629,7 +1638,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       message.type === 'context' ||
       message.type === 'threads' ||
       message.type === 'chatTabs' ||
-      message.type === 'showSettings';
+      message.type === 'showSettings' ||
+      message.type === 'modeSwitchPrompt';
     if (!shared && this.session && this.visible && this.session !== this.visible) {
       return;
     }
@@ -3031,6 +3041,39 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Ask in the sidebar before a turn moves to a mode that can do more.
+   * Closing the sidebar, or a webview that is not listening, keeps the current mode.
+   */
+  private confirmPermissiveModeSwitch(from: DefaultMode, to: DefaultMode): Promise<boolean> {
+    this.declinePendingModeSwitches();
+    if (!this.view || !this.webviewMounted) {
+      return Promise.resolve(false);
+    }
+    const requestId = `mode-switch-${++this.modeSwitchSeq}`;
+    return new Promise((resolve) => {
+      this.modeSwitchWaiters.set(requestId, resolve);
+      this.post({ type: 'modeSwitchPrompt', requestId, from, to });
+    });
+  }
+
+  private answerModeSwitch(requestId: string, accept: boolean): void {
+    const resolve = this.modeSwitchWaiters.get(requestId);
+    if (!resolve) {
+      return;
+    }
+    this.modeSwitchWaiters.delete(requestId);
+    resolve(accept);
+  }
+
+  /** A dialog that is no longer on screen must not leave its turn waiting. */
+  private declinePendingModeSwitches(): void {
+    for (const resolve of this.modeSwitchWaiters.values()) {
+      resolve(false);
+    }
+    this.modeSwitchWaiters.clear();
+  }
+
   /** Detect mode only before this user request enters a provider turn. */
   private async sendTurnCore(
     text: string,
@@ -3068,13 +3111,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         if (modeIsMoreRestrictive(currentMode, suggestedMode)) {
           selectedMode = suggestedMode;
         } else {
-          const choice = await vscode.window.showInformationMessage(
-            `This request sounds like it needs ${suggestedMode === 'agent' ? 'Agent' : suggestedMode === 'plan' ? 'Plan' : 'Ask'} mode. Switch from ${currentMode === 'plan' ? 'Plan' : 'Ask'} and continue?`,
-            { modal: true },
-            'Switch and continue',
-            'Stay in current mode'
-          );
-          selectedMode = choice === 'Switch and continue' ? suggestedMode : undefined;
+          const accept = await this.confirmPermissiveModeSwitch(currentMode, suggestedMode);
+          selectedMode = accept ? suggestedMode : undefined;
         }
         if (selectedMode) {
           await this.selectMode(selectedMode, true, candidateBackend);
