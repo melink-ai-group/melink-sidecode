@@ -1848,7 +1848,6 @@ export function App(): JSX.Element {
   if (state.settingsOpen) {
     return (
       <main className="app">
-      {tabStrip}
       <div className="chat-tab-body">
       <SettingsScreen
         settings={state.settings}
