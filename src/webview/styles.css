@@ -781,9 +781,9 @@ html body {
  * stick-to-bottom both use scrollHeight, which includes this gap. */
 .transcript::after {
   content: "";
-  flex: 0 0 20vh;
-  height: 20vh;
-  max-height: 250px;
+  flex: 0 0 15vh;
+  height: 15vh;
+  max-height: 200px;
   margin-top: -16px;
 }
 

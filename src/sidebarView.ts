@@ -1204,6 +1204,26 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       const session = this.visible;
+      // The composer asks for settings as soon as the webview mounts, before
+      // `ready` has created the first chat tab. Dropping that request leaves
+      // the mic on "Loading settings" until the settings screen asks again.
+      if (
+        !session &&
+        (message.type === 'getSettings' ||
+          message.type === 'saveSettings' ||
+          message.type === 'setOllamaToken' ||
+          message.type === 'clearOllamaToken' ||
+          message.type === 'testConnection' ||
+          message.type === 'upgradeOpencode' ||
+          message.type === 'installOpencode' ||
+          message.type === 'setZvecGrep' ||
+          message.type === 'openSettings' ||
+          message.type === 'startDictation' ||
+          message.type === 'stopDictation')
+      ) {
+        void this.handle(message);
+        return;
+      }
       if (!session) {
         return;
       }
@@ -1639,6 +1659,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       message.type === 'threads' ||
       message.type === 'chatTabs' ||
       message.type === 'showSettings' ||
+      message.type === 'settings' ||
+      message.type === 'dictationStatus' ||
+      message.type === 'dictationCleaned' ||
+      message.type === 'dictationError' ||
       message.type === 'modeSwitchPrompt';
     if (!shared && this.session && this.visible && this.session !== this.visible) {
       return;
