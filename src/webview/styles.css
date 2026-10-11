@@ -123,13 +123,6 @@ html body {
   padding: 0 6px 4px 4px;
 }
 
-.chat-tabs__sep {
-  width: 1px;
-  align-self: stretch;
-  margin: 4px 4px 8px;
-  background: var(--vscode-panel-border);
-}
-
 .chat-tab {
   display: flex;
   align-items: center;

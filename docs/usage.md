@@ -30,10 +30,11 @@ focuses that tab when it is already open.
 +--------------------------------------------------+
 ```
 
-**+** is the primary new-chat button, on the right of the tab row next to the title-bar
-refresh. History sits beside it: a searchable list (title and model) that still
-shows Busy and Unread. Drag a tab to reorder it. The cog opens settings. Backend
-availability is refreshed from the title bar, not from the model row.
+The view title, from left to right, is **Refresh project context**, **Refresh
+backend availability**, and the settings gear. On the tab row, conversation
+history sits to the left of the primary **+** new-chat button, which is the
+rightmost control. History is a searchable list (title and model) that still
+shows Busy and Unread. Drag a tab to reorder it.
 
 ## Providers
 
@@ -169,14 +170,15 @@ conversation is easy to read.
 
 ## Conversations
 
-- **New chat** (the primary `+` button, on the tab row) opens another sidebar
-  tab. It does not clear the tab you are in. An unused SideCode tab is focused
-  instead of opening a second blank one. Drag a tab to change the order.
-- **Conversation history** (the clock icon, next to `+`) opens a searchable list
+- **Conversation history** (the clock icon on the tab row) opens a searchable list
   of recent conversations for the active provider, newest first, with a title
   taken from the first user turn, the model it used, and Busy / Unread when
   those apply. Choosing one opens that conversation in a new sidebar tab, or
   focuses the tab when it is already open.
+- **New chat** (the primary `+` button, the rightmost control on the tab row)
+  opens another sidebar tab. It does not clear the tab you are in. An unused
+  SideCode tab is focused instead of opening a second blank one. Drag a tab to
+  change the order.
 
 ### Reload resume
 
@@ -203,10 +205,11 @@ useful, an action:
 | User canceled a turn | *Response stopped* | — |
 | Stale conversation on reload | *The previous conversation could not be restored…* | — |
 
-The title bar's **Refresh backends** button re-probes every provider and drops
-cached model lists, so a model added or removed on the server shows up after a
-refresh. The **gear** button opens the extension's settings
-(**SideCode: Open settings**).
+The view title, from left to right, is **Refresh project context** (rebuilds the
+workspace snapshot for the next turn), **Refresh backend availability** (re-probes
+every provider and drops cached model lists, so a model added or removed on the
+server shows up after a refresh), and the **gear**, which opens the extension's
+settings (**SideCode: Open settings**).
 
 ## Commands
 
@@ -214,8 +217,9 @@ refresh. The **gear** button opens the extension's settings
 |---|---|
 | **SideCode: Set Ollama Cloud token** | Prompt for the bearer token, store it in secret storage. |
 | **SideCode: Clear Ollama Cloud token** | Delete the stored token. |
+| **SideCode: Refresh project context** | Rebuild the project context snapshot for the next turn. |
 | **SideCode: Refresh backend availability** | Re-probe both providers. |
-| **SideCode: Open settings** | Open the `melink` settings. |
+| **SideCode: Open settings** | Open the inline settings screen. |
 
 ## Settings reference
 

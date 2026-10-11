@@ -57,13 +57,19 @@
         "title": "SideCode: Clear Ollama Cloud token"
       },
       {
+        "command": "melink.refreshContext",
+        "title": "SideCode: Refresh project context",
+        "icon": "$(notebook)"
+      },
+      {
         "command": "melink.refreshBackends",
         "title": "SideCode: Refresh backend availability",
         "icon": "$(refresh)"
       },
       {
         "command": "melink.openSettings",
-        "title": "SideCode: Open settings"
+        "title": "SideCode: Open settings",
+        "icon": "$(gear)"
       }
     ],
     "markdown.previewStyles": [
@@ -72,9 +78,19 @@
     "menus": {
       "view/title": [
         {
+          "command": "melink.refreshContext",
+          "when": "view == melinkAgent.chat",
+          "group": "navigation@1"
+        },
+        {
           "command": "melink.refreshBackends",
           "when": "view == melinkAgent.chat",
-          "group": "navigation"
+          "group": "navigation@2"
+        },
+        {
+          "command": "melink.openSettings",
+          "when": "view == melinkAgent.chat",
+          "group": "navigation@3"
         }
       ]
     },

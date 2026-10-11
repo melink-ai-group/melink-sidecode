@@ -336,6 +336,8 @@ export type HostToWebviewMessage =
    */
   | { type: 'composerDraft'; tabId: string; text: string; attachments: Attachment[] }
   | { type: 'settings'; settings: SettingsSnapshot }
+  /** Open the inline settings screen. Sent from the view-title gear. */
+  | { type: 'showSettings' }
   | { type: 'permissions'; permissions: PermissionSnapshot }
   | { type: 'modes'; modes: ModeSnapshot }
   /** The active conversation's plan, whenever it is created or revised. */

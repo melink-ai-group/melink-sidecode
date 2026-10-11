@@ -213,6 +213,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   /** True once the webview script has posted `ready`. */
   private webviewMounted = false;
+  /** The title-bar gear was used before the webview script was listening. */
+  private openSettingsOnReady = false;
   private webviewMountTimers: ReturnType<typeof setTimeout>[] = [];
   /** The tab whose transcript is on screen. */
   private visible?: ChatSession;
@@ -1164,6 +1166,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.clearWebviewMountTimers();
         // No tab exists yet on a cold start, so this cannot wait for `visible`.
         void this.handle(message);
+        if (this.openSettingsOnReady) {
+          this.openSettingsOnReady = false;
+          this.post({ type: 'showSettings' });
+        }
         return;
       }
       if (message.type === 'newChat') {
@@ -1622,7 +1628,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       message.type === 'snapshot' ||
       message.type === 'context' ||
       message.type === 'threads' ||
-      message.type === 'chatTabs';
+      message.type === 'chatTabs' ||
+      message.type === 'showSettings';
     if (!shared && this.session && this.visible && this.session !== this.visible) {
       return;
     }
@@ -3402,6 +3409,33 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         notice: 'Project context is not available right now. Continue without it; do not block the turn.'
       };
     }
+  }
+
+  /**
+   * Title-bar refresh: drop the cached workspace picture and re-arm priming so
+   * the next turn sends a fresh snapshot. Also refreshes backend availability.
+   */
+  refreshProjectContext(): Promise<void> {
+    return this.refreshContext();
+  }
+
+  /**
+   * Title-bar gear. Opens the inline settings screen in the sidebar. If the
+   * webview script is not listening yet, the open is sent once it reports ready.
+   */
+  async openInlineSettings(): Promise<void> {
+    if (!this.view) {
+      this.openSettingsOnReady = true;
+      await vscode.commands.executeCommand(`${SidebarViewProvider.viewType}.focus`);
+    } else {
+      this.view.show(false);
+    }
+    if (!this.webviewMounted) {
+      this.openSettingsOnReady = true;
+      return;
+    }
+    this.openSettingsOnReady = false;
+    this.post({ type: 'showSettings' });
   }
 
   /**
