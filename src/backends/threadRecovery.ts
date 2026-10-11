@@ -34,6 +34,16 @@ export function stopContinueNotice(attempt: number, max = STOP_CONTINUE_ATTEMPTS
   return `The provider stopped. Continuing automatically (${attempt} of ${max}).`;
 }
 
+/** Status line when a live turn went quiet and is continued on its own. */
+export function quietContinueNotice(attempt: number, max = STOP_CONTINUE_ATTEMPTS): string {
+  return `Nothing new arrived, so this continues automatically (${attempt} of ${max}).`;
+}
+
+/** True when this failure is a quiet OpenCode turn, not a crash. */
+export function isQuietTurnError(error: unknown): boolean {
+  return /went quiet before it finished/i.test(errorText(error));
+}
+
 /**
  * True when this failure should start another turn instead of showing an error.
  * A cancel, a missing CLI, and an auth failure are shown immediately.
@@ -52,7 +62,7 @@ export function shouldAutoContinue(error: unknown, attempts: number, max = STOP_
   if (isMissingThreadError(error)) {
     return true;
   }
-  return /stopped unexpectedly|exited unexpectedly|connection closed|not accepting requests|session could not be started or resumed|stream ended before the turn completed|reached the output limit/i.test(
+  return /stopped unexpectedly|exited unexpectedly|connection closed|not accepting requests|session could not be started or resumed|stream ended before the turn completed|reached the output limit|went quiet before it finished/i.test(
     message
   );
 }

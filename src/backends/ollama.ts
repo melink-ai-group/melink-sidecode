@@ -38,7 +38,7 @@ import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './mod
 // the runtime module nor any child-process code; the runtime is dynamically
 // imported inside the enabled branch only. `isFileTool` is a pure predicate
 // with no child-process dependency, so it is safe to import directly.
-import { isFileTool, reportedChangeOfTool } from './opencode/events';
+import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
 import { ollamaContextUsed } from './contextUsage';
 import {
   COMPACTION_INSTRUCTIONS,
@@ -52,6 +52,7 @@ import { recoveryHandover, threadRecoveredNotice } from './threadRecovery';
 import { cleanToolTarget, friendlyToolTitle, isStatusText } from './toolLabel.ts';
 import { DICTATION_INSTRUCTIONS, dictationText } from '../dictation/prompt';
 import type { OpencodeEvent } from './opencode/events';
+import { quietTurnMessage, watchOpencodeQuiet } from './opencode/quiet';
 import type { OpencodeOutcome } from './opencode/runtime';
 import { isAbsolute, resolve } from 'node:path';
 
@@ -294,6 +295,8 @@ export class OllamaBackend implements AgentBackend {
   private readonly flights = new Map<string, AbortController>();
   /** User texts waiting to be folded into one chat's turn. Stop clears that chat. */
   private readonly steerQueues = new Map<string, string[]>();
+  /** Chats whose live OpenCode turn was ended because nothing new arrived. */
+  private readonly quietStops = new Set<string>();
   /** Compaction and other work that is not a chat turn. */
   private sideFlight?: AbortController;
 
@@ -564,6 +567,7 @@ export class OllamaBackend implements AgentBackend {
   cancel(threadId?: string): void {
     if (threadId) {
       this.steerQueues.delete(threadId);
+      this.quietStops.delete(threadId);
       this.flights.get(threadId)?.abort();
       return;
     }
@@ -571,6 +575,7 @@ export class OllamaBackend implements AgentBackend {
     this.sideFlight = undefined;
     for (const [id, controller] of this.flights) {
       this.steerQueues.delete(id);
+      this.quietStops.delete(id);
       controller.abort();
     }
   }
@@ -974,6 +979,16 @@ export class OllamaBackend implements AgentBackend {
 
     try {
       for (;;) {
+        const openTools = new Set<string>();
+        const pace = { slowCall: false };
+        const quietWatch = watchOpencodeQuiet({
+          blocked: () => openTools.size > 0 || this.waitingOnUser(handle.threadId),
+          slowCall: () => pace.slowCall,
+          onQuiet: () => {
+            this.quietStops.add(handle.threadId);
+            controller.abort();
+          }
+        });
         const runOnce = (prompt: string, resumeId: string | undefined) =>
           runOpencodeTurn(
             {
@@ -997,34 +1012,42 @@ export class OllamaBackend implements AgentBackend {
                   ? undefined
                   : (ask, signal) => this.decideOpencodeQuestion(handle.threadId, ask, signal)
             },
-            (event) => this.handleOpencodeEvent(event, handle.threadId, opencodeCwd)
+            (event) => {
+              this.noteOpencodeActivity(event, openTools, pace, quietWatch);
+              this.handleOpencodeEvent(event, handle.threadId, opencodeCwd);
+            }
           );
 
-        let result = await runOnce(promptFor(), sessionId);
+        let result: Awaited<ReturnType<typeof runOnce>>;
+        try {
+          result = await runOnce(promptFor(), sessionId);
 
-        // A stale session id degrades to a fresh session, says so, and retries
-        // exactly once — the same degradation rule the reload-resume work uses.
-        if (result.outcome === 'stale-session' && sessionId) {
-          await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
-          sessionId = undefined;
-          barePrompt = false;
-          const transcript = this.store?.getTranscript(this.id, handle.threadId) ?? [];
-          recovery = recoveryHandover({
-            provider: 'OpenCode',
-            transcript,
-            plan: this.store?.getPlanState(this.id, handle.threadId),
-            omitTrailingUserText: visibleText
-          });
-          this.events.fire({
-            type: 'notice',
-            backendId: this.id,
-            threadId: handle.threadId,
-            level: 'info',
-            message: recovery
-              ? threadRecoveredNotice('OpenCode')
-              : 'The saved opencode session was not available, so a new one was started.'
-          });
-          result = await runOnce(promptFor(), undefined);
+          // A stale session id degrades to a fresh session, says so, and retries
+          // exactly once — the same degradation rule the reload-resume work uses.
+          if (result.outcome === 'stale-session' && sessionId) {
+            await this.store?.setOpencodeSession(this.id, handle.threadId, undefined);
+            sessionId = undefined;
+            barePrompt = false;
+            const transcript = this.store?.getTranscript(this.id, handle.threadId) ?? [];
+            recovery = recoveryHandover({
+              provider: 'OpenCode',
+              transcript,
+              plan: this.store?.getPlanState(this.id, handle.threadId),
+              omitTrailingUserText: visibleText
+            });
+            this.events.fire({
+              type: 'notice',
+              backendId: this.id,
+              threadId: handle.threadId,
+              level: 'info',
+              message: recovery
+                ? threadRecoveredNotice('OpenCode')
+                : 'The saved opencode session was not available, so a new one was started.'
+            });
+            result = await runOnce(promptFor(), undefined);
+          }
+        } finally {
+          quietWatch.stop();
         }
 
         if (result.sessionId) {
@@ -1034,10 +1057,12 @@ export class OllamaBackend implements AgentBackend {
 
         const next =
           result.outcome === 'canceled' || result.outcome === 'completed' ? this.drainSteers(handle.threadId) : undefined;
+        const quiet = this.quietStops.delete(handle.threadId);
         if (next) {
           // Keep this turn open. A live session already has the original prompt,
           // so the continuation is the steer text alone. Without a session id
-          // the next child is fresh and must see both.
+          // the next child is fresh and must see both. A steer wins over a
+          // quiet stop: the user already said what to do next.
           if (sessionId) {
             visibleText = next;
             barePrompt = true;
@@ -1049,6 +1074,11 @@ export class OllamaBackend implements AgentBackend {
           continue;
         }
 
+        if (result.outcome === 'canceled' && quiet) {
+          const failure = { code: 'stream' as const, message: quietTurnMessage() };
+          this.failTurn(handle, '', turnId, failure);
+          throw new BackendError('provider', failure.message);
+        }
         if (result.outcome === 'canceled') {
           this.failTurn(handle, '', turnId, { code: 'canceled', message: 'Turn canceled.' });
           return;
@@ -1093,6 +1123,7 @@ export class OllamaBackend implements AgentBackend {
     } finally {
       this.endFlight(handle.threadId, controller);
       this.steerQueues.delete(handle.threadId);
+      this.quietStops.delete(handle.threadId);
     }
   }
 
@@ -1223,6 +1254,50 @@ export class OllamaBackend implements AgentBackend {
       subject,
       reason
     });
+  }
+
+  /** An approval or a question card is the user, not a stuck runtime. */
+  private waitingOnUser(threadId: string): boolean {
+    for (const pending of this.pendingApprovals.values()) {
+      if (pending.threadId === threadId) {
+        return true;
+      }
+    }
+    for (const pending of this.pendingQuestions.values()) {
+      if (pending.threadId === threadId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Reset the quiet clock. A command that is still running does not count as
+   * silence. A model step, or a tool that has not reached a finished step, is
+   * a slow call: the 90s look keeps it until the cap.
+   */
+  private noteOpencodeActivity(
+    event: OpencodeEvent,
+    openTools: Set<string>,
+    pace: { slowCall: boolean },
+    watch: { activity: () => void }
+  ): void {
+    if (event.kind === 'malformed') {
+      return;
+    }
+    if (event.kind === 'tool') {
+      if (event.status === 'pending' || event.status === 'running') {
+        openTools.add(event.callId);
+      } else {
+        openTools.delete(event.callId);
+      }
+      pace.slowCall = true;
+    } else if (event.kind === 'step-start') {
+      pace.slowCall = true;
+    } else if (event.kind === 'step-finish') {
+      pace.slowCall = !isTerminalStepReason(event.reason);
+    }
+    watch.activity();
   }
 
   /** Translate one opencode event into the normalized union. */

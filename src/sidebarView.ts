@@ -43,6 +43,8 @@ import { compactedSummary, compactedTranscript, compactionSource } from './backe
 import {
   continueAfterStopInstruction,
   isMissingThreadError,
+  isQuietTurnError,
+  quietContinueNotice,
   shouldAutoContinue,
   stopContinueNotice,
   threadRecoveredNotice
@@ -3277,7 +3279,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.post({
           type: 'notice',
           level: 'info',
-          message: stopContinueNotice(this.session.stopContinueAttempts)
+          message: isQuietTurnError(error)
+            ? quietContinueNotice(this.session.stopContinueAttempts)
+            : stopContinueNotice(this.session.stopContinueAttempts)
         });
       } else if (error instanceof BackendError && error.code === 'unauthenticated') {
         this.post({ type: 'notice', level: 'warning', message: error.message, action: 'setToken' });
