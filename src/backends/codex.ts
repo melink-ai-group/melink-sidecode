@@ -208,6 +208,12 @@ export class CodexBackend implements AgentBackend {
   private connecting?: Promise<AppServerConnection>;
   /** One waiter per chat. A second tab does not replace the first chat's turn. */
   private readonly pendingTurns = new Map<string, PendingTurn>();
+  /**
+   * Turn ids already shown as a failure. Codex reports the same limit or
+   * provider error on the `error` notification and again on `turn/completed`,
+   * and both would otherwise become a banner.
+   */
+  private readonly reportedFailures = new Set<string>();
   private disposing?: Promise<void>;
   /** Threads used only to clean a transcript. Their events never reach the chat. */
   private readonly quietThreads = new Set<string>();
@@ -1096,6 +1102,25 @@ export class CodexBackend implements AgentBackend {
     this.pendingTurns.clear();
   }
 
+  /**
+   * Accept the first failure report for a turn. Later reports of the same turn
+   * — the error notification and the failed `turn/completed` — are dropped.
+   */
+  private claimTurnFailure(threadId: string, turnId: string | undefined): boolean {
+    const key = `${threadId}:${turnId ?? ''}`;
+    if (this.reportedFailures.has(key)) {
+      return false;
+    }
+    this.reportedFailures.add(key);
+    if (this.reportedFailures.size > 200) {
+      const oldest = this.reportedFailures.values().next().value;
+      if (oldest !== undefined) {
+        this.reportedFailures.delete(oldest);
+      }
+    }
+    return true;
+  }
+
   /** Drop a waiter only when it is still the one this send registered. */
   private dropPending(threadId: string, pending: PendingTurn | undefined): void {
     if (pending && this.pendingTurns.get(threadId) === pending) {
@@ -1124,8 +1149,12 @@ export class CodexBackend implements AgentBackend {
       const turn = (params as { turn?: { status?: string; error?: { message?: string } } }).turn;
       this.finishQuiet(threadId, turn?.status, turn?.error?.message);
     } else if (method === 'error') {
-      const message = (params as { error?: { message?: string } }).error?.message;
-      this.finishQuiet(threadId, 'failed', message);
+      const note = params as { error?: { message?: string }; willRetry?: boolean };
+      // A retrying error is not the outcome. The later failed turn, or the
+      // error that will not be retried, settles the cleanup.
+      if (!note.willRetry) {
+        this.finishQuiet(threadId, 'failed', note.error?.message);
+      }
     }
     return true;
   }
@@ -1326,14 +1355,20 @@ export class CodexBackend implements AgentBackend {
         break;
       }
       case 'error': {
-        const { error, threadId } = params as ErrorNotification;
+        const note = params as ErrorNotification;
+        // This arrives while the turn is still open. Codex then completes the
+        // turn with the same error, and it may send the notification once per
+        // automatic retry. Only the final failure is a banner, and only once.
+        if (note.willRetry || !this.claimTurnFailure(note.threadId, note.turnId)) {
+          break;
+        }
         this.events.fire({
           type: 'error',
           backendId: this.id,
-          threadId,
-          message: this.errorMessage(error.message, 'The Codex turn failed.'),
+          threadId: note.threadId,
+          message: this.errorMessage(note.error.message, 'The Codex turn failed.'),
           recoverable: true,
-          code: errorCodeFor(error.message)
+          code: errorCodeFor(note.error.message)
         });
         break;
       }
@@ -1406,18 +1441,22 @@ export class CodexBackend implements AgentBackend {
         });
         break;
       case 'failed':
-        this.events.fire({
-          type: 'error',
-          backendId: this.id,
-          threadId,
-          // A failed-turn body that names an API-key rejection, a missing
-          // credential, or an unrefreshable OAuth session maps to a distinct,
-          // secret-free sentence and (for the API-key case) its own code. The
-          // raw body is never forwarded: it can carry an `sk-...` fragment.
-          message: this.errorMessage(turn.error?.message, 'The Codex turn failed.'),
-          recoverable: true,
-          code: errorCodeFor(turn.error?.message)
-        });
+        // The `error` notification may already have reported this turn. A
+        // second event would repeat the same sentence under the reply.
+        if (this.claimTurnFailure(threadId, turn.id)) {
+          this.events.fire({
+            type: 'error',
+            backendId: this.id,
+            threadId,
+            // A failed-turn body that names an API-key rejection, a missing
+            // credential, or an unrefreshable OAuth session maps to a distinct,
+            // secret-free sentence and (for the API-key case) its own code. The
+            // raw body is never forwarded: it can carry an `sk-...` fragment.
+            message: this.errorMessage(turn.error?.message, 'The Codex turn failed.'),
+            recoverable: true,
+            code: errorCodeFor(turn.error?.message)
+          });
+        }
         this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId, turnId: turn.id });
         break;
       case 'inProgress':
