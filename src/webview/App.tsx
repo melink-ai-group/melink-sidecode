@@ -22,7 +22,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  ContextIcon,
   CopyIcon,
   CrossIcon,
   FileIcon,
@@ -35,7 +34,6 @@ import {
   RefreshIcon,
   RestoreIcon,
   SearchIcon,
-  SettingsIcon,
   ShieldIcon,
   SlidersIcon,
   SparkIcon,
@@ -351,6 +349,10 @@ export function App(): JSX.Element {
           break;
         case 'settings':
           dispatch({ type: 'settings', settings: message.settings });
+          break;
+        case 'showSettings':
+          dispatch({ type: 'openSettings' });
+          bridge.post({ type: 'getSettings' });
           break;
         case 'permissions':
           dispatch({ type: 'permissions', permissions: message.permissions });
@@ -914,11 +916,6 @@ export function App(): JSX.Element {
       }
       return next;
     });
-  };
-
-  const openSettings = (): void => {
-    dispatch({ type: 'openSettings' });
-    bridge.post({ type: 'getSettings' });
   };
 
   const closeSettings = (): void => {
@@ -1804,15 +1801,6 @@ export function App(): JSX.Element {
       activity={state.threadActivity}
       actions={
         <span className="chat-tabs__actions">
-          <button
-            className="icon-btn icon-btn--primary"
-            type="button"
-            aria-label="New chat"
-            title="New chat"
-            onClick={newConversation}
-          >
-            <PlusIcon />
-          </button>
           <div className="history-anchor" ref={historyRef}>
             <button
               className="icon-btn"
@@ -1839,25 +1827,14 @@ export function App(): JSX.Element {
               />
             ) : null}
           </div>
-          <span className="chat-tabs__sep" aria-hidden="true" />
           <button
-            className="icon-btn"
+            className="icon-btn icon-btn--primary"
             type="button"
-            aria-label="Refresh project context"
-            title="Refresh project context"
-            disabled={!active}
-            onClick={() => bridge.post({ type: 'refreshContext' })}
+            aria-label="New chat"
+            title="New chat"
+            onClick={newConversation}
           >
-            <ContextIcon />
-          </button>
-          <button
-            className="icon-btn"
-            type="button"
-            aria-label="Open settings"
-            title="Open settings"
-            onClick={openSettings}
-          >
-            <SettingsIcon />
+            <PlusIcon />
           </button>
         </span>
       }

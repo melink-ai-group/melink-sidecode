@@ -78,10 +78,9 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
       await context.secrets.delete(OLLAMA_TOKEN_SECRET_KEY);
       await activeRegistry.refresh();
     }),
+    vscode.commands.registerCommand('melink.refreshContext', () => provider.refreshProjectContext()),
     vscode.commands.registerCommand('melink.refreshBackends', () => activeRegistry.refresh()),
-    vscode.commands.registerCommand('melink.openSettings', () =>
-      vscode.commands.executeCommand('workbench.action.openSettings', 'melink')
-    )
+    vscode.commands.registerCommand('melink.openSettings', () => provider.openInlineSettings())
   );
 
   void activeRegistry.refresh();
