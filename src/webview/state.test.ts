@@ -805,6 +805,28 @@ test('a restore confirmation opens from a preview, including other chats, and cl
   assert.equal(restored.restoreResult?.ok, true);
 });
 
+test('a mode switch prompt stays up until it is answered', () => {
+  const opened = reduce(initialState, {
+    type: 'modeSwitchPrompt',
+    requestId: 'mode-switch-1',
+    from: 'plan',
+    to: 'agent'
+  });
+  assert.equal(opened.modeSwitch?.from, 'plan');
+  assert.equal(opened.modeSwitch?.to, 'agent');
+
+  const replaced = reduce(opened, {
+    type: 'modeSwitchPrompt',
+    requestId: 'mode-switch-2',
+    from: 'ask',
+    to: 'plan'
+  });
+  assert.equal(replaced.modeSwitch?.requestId, 'mode-switch-2');
+
+  const cleared = reduce(replaced, { type: 'clearModeSwitch' });
+  assert.equal(cleared.modeSwitch, undefined);
+});
+
 test('a partial restore result is carried so the surface can report it as partial', () => {
   const state = reduce(initialState, {
     type: 'restoreResult',

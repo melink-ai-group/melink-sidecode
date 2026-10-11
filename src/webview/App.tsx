@@ -96,6 +96,7 @@ import type {
   ThinkingLevel
 } from '../protocol';
 import type { Attachment, DefaultMode, PermissionLevel } from '../backends/types';
+import { modeDescriptor } from '../backends/modes.ts';
 import { formatQuestionAnswers } from '../questions';
 import { QuestionCard } from './QuestionCard';
 
@@ -219,6 +220,8 @@ export function App(): JSX.Element {
    * pick is ignored, so an old response cannot repopulate cleared chips.
    */
   const attachRequestRef = useRef<string | undefined>(undefined);
+  /** The mode-switch dialog on screen, so a replacement can decline the one it covers. */
+  const modeSwitchRequestRef = useRef<string | undefined>(undefined);
   const attachCounterRef = useRef(0);
   /** Unsent composer text and files, remembered per open tab. */
   const composerMemoryRef = useRef<Record<string, ComposerDraft>>({});
@@ -447,6 +450,20 @@ export function App(): JSX.Element {
         case 'changes/restorePreview':
           dispatch({ type: 'restorePreview', preview: message.preview });
           break;
+        case 'modeSwitchPrompt': {
+          const previous = modeSwitchRequestRef.current;
+          if (previous && previous !== message.requestId) {
+            bridge.post({ type: 'modeSwitchChoice', requestId: previous, accept: false });
+          }
+          modeSwitchRequestRef.current = message.requestId;
+          dispatch({
+            type: 'modeSwitchPrompt',
+            requestId: message.requestId,
+            from: message.from,
+            to: message.to
+          });
+          break;
+        }
         case 'changes/restoreResult':
           dispatch({ type: 'restoreResult', result: message.result });
           break;
@@ -1063,7 +1080,13 @@ export function App(): JSX.Element {
 
   const send = (): void => {
     const text = draft.trim();
-    if ((!text && state.attachments.length === 0) || state.restoring || pending || state.pendingQuestion) {
+    if (
+      (!text && state.attachments.length === 0) ||
+      state.restoring ||
+      pending ||
+      state.pendingQuestion ||
+      state.modeSwitch
+    ) {
       return;
     }
     if (state.busy) {
@@ -1165,7 +1188,7 @@ export function App(): JSX.Element {
   };
 
   const retryLastTurn = (noticeText: string): void => {
-    if (state.restoring || pending || state.pendingQuestion) {
+    if (state.restoring || pending || state.pendingQuestion || state.modeSwitch) {
       return;
     }
     // Continue the unfinished turn. The original prompt and the work already
@@ -1209,12 +1232,14 @@ export function App(): JSX.Element {
     state.attachments.length === 0 &&
     !state.restoring &&
     !pending &&
-    !asking;
+    !asking &&
+    !state.modeSwitch;
   const canSend =
     (Boolean(draft.trim()) || state.attachments.length > 0) &&
     !state.restoring &&
     !pending &&
     !asking &&
+    !state.modeSwitch &&
     active?.status === 'available' &&
     (!state.busy || canSteer);
 
@@ -1532,6 +1557,15 @@ export function App(): JSX.Element {
       return;
     }
     bridge.post({ type: 'changes/previewRestore', backendId, threadId, messageId });
+  };
+
+  const answerModeSwitch = (accept: boolean): void => {
+    const requestId = modeSwitchRequestRef.current ?? state.modeSwitch?.requestId;
+    modeSwitchRequestRef.current = undefined;
+    dispatch({ type: 'clearModeSwitch' });
+    if (requestId) {
+      bridge.post({ type: 'modeSwitchChoice', requestId, accept });
+    }
   };
 
   const confirmRestore = (): void => {
@@ -2387,6 +2421,14 @@ export function App(): JSX.Element {
           preview={state.restoreConfirmation}
           onConfirm={confirmRestore}
           onCancel={() => dispatch({ type: 'cancelRestoreConfirmation' })}
+        />
+      ) : null}
+      {state.modeSwitch ? (
+        <ModeSwitchModal
+          from={state.modeSwitch.from}
+          to={state.modeSwitch.to}
+          onAccept={() => answerModeSwitch(true)}
+          onDecline={() => answerModeSwitch(false)}
         />
       ) : null}
       {imageViewer ? (
@@ -4834,6 +4876,81 @@ function UnrestrictedConfirmation({
         <button className="btn btn--danger" type="button" onClick={onConfirm}>
           Enable unrestricted
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Confirmation before a turn moves into a mode that can do more than the one
+ * already selected. Dismissing it keeps the current mode and still sends.
+ */
+function ModeSwitchModal({
+  from,
+  to,
+  onAccept,
+  onDecline
+}: {
+  from: DefaultMode;
+  to: DefaultMode;
+  onAccept: () => void;
+  onDecline: () => void;
+}): JSX.Element {
+  const fromLabel = modeDescriptor(from).label;
+  const toLabel = modeDescriptor(to).label;
+  const declineRef = useRef(onDecline);
+  const acceptRef = useRef(onAccept);
+  declineRef.current = onDecline;
+  acceptRef.current = onAccept;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        declineRef.current();
+        return;
+      }
+      // Enter on a dialog button activates that button. Enter from the composer
+      // would otherwise insert a newline under the dialog, so it confirms instead.
+      if (event.key === 'Enter' && !(event.target instanceof HTMLButtonElement)) {
+        event.preventDefault();
+        event.stopPropagation();
+        acceptRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      // The chat surface can be replaced (settings, for example) while the
+      // host is still waiting. Treat that as a dismiss so the turn continues.
+      declineRef.current();
+    };
+  }, []);
+
+  return (
+    <div className="mode-modal" role="presentation" onClick={() => declineRef.current()}>
+      <div
+        className="mode-modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mode-switch-title"
+        aria-describedby="mode-switch-text"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <p id="mode-switch-title" className="mode-modal__title">
+          Switch to {toLabel} mode?
+        </p>
+        <p id="mode-switch-text" className="mode-modal__text">
+          This request sounds like it needs {toLabel} mode. Switch from {fromLabel} and continue?
+        </p>
+        <div className="mode-modal__actions">
+          <button className="btn btn--secondary" type="button" onClick={() => declineRef.current()}>
+            Stay in {fromLabel}
+          </button>
+          <button className="btn btn--primary" type="button" autoFocus onClick={() => acceptRef.current()}>
+            Switch and continue
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -251,6 +251,11 @@ export interface AppState {
    * and, when other chats would lose work, those chats too.
    */
   restoreConfirmation?: RestorePreview;
+  /**
+   * A send that would move into a mode with more reach. The turn stays paused
+   * until the user switches or stays.
+   */
+  modeSwitch?: { requestId: string; from: DefaultMode; to: DefaultMode };
 }
 
 export type Action =
@@ -382,6 +387,9 @@ export type Action =
   /** Open the confirmation from a host preview. Nothing has been written yet. */
   | { type: 'restorePreview'; preview: RestorePreview }
   | { type: 'cancelRestoreConfirmation' }
+  /** Open the mode-switch dialog. A later prompt replaces one still on screen. */
+  | { type: 'modeSwitchPrompt'; requestId: string; from: DefaultMode; to: DefaultMode }
+  | { type: 'clearModeSwitch' }
   /**
    * Open the destructive reject confirmation for one file or the whole turn.
    * Rejecting writes to disk, so the paths are named before anything is posted.
@@ -979,6 +987,13 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, restoreConfirmation: action.preview };
     case 'cancelRestoreConfirmation':
       return { ...state, restoreConfirmation: undefined };
+    case 'modeSwitchPrompt':
+      return {
+        ...state,
+        modeSwitch: { requestId: action.requestId, from: action.from, to: action.to }
+      };
+    case 'clearModeSwitch':
+      return { ...state, modeSwitch: undefined };
     case 'modelCapability':
       // The host resolved and clamped these values; the webview stores them and
       // the inline settings panel renders them. Ignore a late answer for a model

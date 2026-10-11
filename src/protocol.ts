@@ -464,6 +464,11 @@ export type HostToWebviewMessage =
    * rewinds this chat's later messages, todos, and plans.
    */
   | { type: 'changes/restoreResult'; result: RestoreCheckpointResult }
+  /**
+   * Ask before a turn moves into a mode that can do more than the current one.
+   * The sidebar shows its own dialog; the host waits for `modeSwitchChoice`.
+   */
+  | { type: 'modeSwitchPrompt'; requestId: string; from: DefaultMode; to: DefaultMode }
   /** A Plan or Agent question card. Replaces any card already on screen. */
   | { type: 'question/asked'; request: QuestionRequest }
   /** The card was answered, skipped, or the turn that raised it was stopped. */
@@ -601,6 +606,11 @@ export type WebviewToHostMessage =
    * turn only: the existing transcript is never mutated or invalidated.
    * Persisted on the active thread when that thread belongs to `backendId`.
    */
+  /**
+   * The answer to `modeSwitchPrompt`. `accept` sends the turn in the suggested
+   * mode. Declining, or dismissing the dialog, keeps the mode already selected.
+   */
+  | { type: 'modeSwitchChoice'; requestId: string; accept: boolean }
   | { type: 'selectMode'; mode: DefaultMode; backendId?: string }
   /**
    * Remember the model the user picked for the open chat. The choice stays on
