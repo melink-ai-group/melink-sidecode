@@ -28,7 +28,7 @@ test('a checkpoint links a turn that has no message id of its own', () => {
   assert.deepEqual(placed.afterItem.get('a1')?.map((turn) => turn.turnId), ['t1']);
 });
 
-test('a turn whose message is not on screen yet stays above the composer', () => {
+test('a turn whose message is not in the transcript is left unplaced', () => {
   const placed = placeTurnChanges([reply('a1')], [{ turnId: 't1', messageId: 'u1' }], []);
   assert.equal(placed.afterItem.size, 0);
   assert.deepEqual(placed.unplaced.map((turn) => turn.turnId), ['t1']);

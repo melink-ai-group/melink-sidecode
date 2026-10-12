@@ -2,9 +2,8 @@
  * Place each turn's file-change card on the user message that opened it.
  *
  * The card follows the last transcript item of that turn, so it reads as
- * belonging to the turn rather than to the whole chat. A turn whose message
- * is not in the transcript yet stays unplaced, and the composer shows it
- * until the message id arrives.
+ * belonging to the turn rather than to the whole chat. A turn whose opening
+ * message is not in the transcript is left unplaced and is not shown.
  */
 
 export interface TurnChangeAnchor {
@@ -15,7 +14,7 @@ export interface TurnChangeAnchor {
 export interface PlacedTurnChanges<T extends TurnChangeAnchor> {
   /** Cards to render after this transcript item, in turn order. */
   afterItem: Map<string, T[]>;
-  /** Turns whose opening message is not in the transcript yet. */
+  /** Turns whose opening message is not in the transcript. These are not shown. */
   unplaced: T[];
 }
 
