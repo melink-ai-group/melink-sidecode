@@ -2160,7 +2160,6 @@ export function App(): JSX.Element {
             The agent is paused until you answer above.
           </p>
         ) : null}
-        {placedTurns.unplaced.map((turn) => renderTurnCard(turn))}
         <ContextStrip
           view={state.contextView}
           settingsEnabled={state.contextSettingsEnabled}
