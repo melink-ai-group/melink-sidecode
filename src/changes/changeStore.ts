@@ -1,7 +1,6 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import { filterListedFiles, listedForReview, reviewSources, workspaceRootOf } from './ignore.ts';
 import type { JournalFileEntry, JournalStorage, JournalTurn } from './journal';
-import { sessionChangeSet } from './sessionFiles.ts';
 import { applyRejectedHunks, diffLines, type DiffLine } from './diff.ts';
 import { hashBytes } from './hash.ts';
 
@@ -92,6 +91,8 @@ export interface ChangeView {
   backendId: string;
   threadId: string;
   turnId: string;
+  /** The user message that opened this turn, when the journal recorded one. */
+  messageId?: string;
   files: ChangeFileView[];
   additions: number;
   deletions: number;
@@ -145,7 +146,6 @@ export interface ChangeWorkspaceFs {
 /** The recorded-artifact read seam, satisfied by `ChangeJournal`. */
 export interface ChangeArtifacts {
   getTurn(turnId: string): JournalTurn | undefined;
-  listTurns(threadId: string): JournalTurn[];
   getBefore(turnId: string, relPath: string): Promise<Uint8Array | undefined>;
   getAfter(turnId: string, relPath: string): Promise<Uint8Array | undefined>;
   readBlob(key: string): Promise<Uint8Array | undefined>;
@@ -230,38 +230,11 @@ export class ChangeStore {
   }
 
   /**
-   * The review snapshot for the whole thread: every step's files, netted to one
-   * row per path. `turnId` is the newest observed turn, which is what the
-   * surface is already showing. Returns `undefined` when the thread has no
-   * observed turn.
-   */
-  async viewSession(backendId: string, threadId: string): Promise<ChangeView | undefined> {
-    const session = sessionChangeSet(this.artifacts.listTurns(threadId));
-    if (!session) {
-      return undefined;
-    }
-    const turn = this.artifacts.getTurn(session.turnId);
-    if (!turn) {
-      return undefined;
-    }
-    return this.compose(backendId, threadId, { ...turn, files: session.files.map((file) => file.entry) });
-  }
-
-  /**
-   * The turn a decision addresses. The newest observed turn stands for the
-   * whole thread, so keep and undo see every step's files and restore the
-   * first baseline. An older turn id still addresses only that turn.
+   * The turn a decision addresses. Keep and undo apply to that turn's own
+   * files and its own baseline, never to earlier steps in the same chat.
    */
   private reviewedTurn(turnId: string): JournalTurn | undefined {
-    const turn = this.artifacts.getTurn(turnId);
-    if (!turn) {
-      return undefined;
-    }
-    const session = sessionChangeSet(this.artifacts.listTurns(turn.threadId));
-    if (!session || session.turnId !== turnId) {
-      return turn;
-    }
-    return { ...turn, files: session.files.map((file) => file.entry) };
+    return this.artifacts.getTurn(turnId);
   }
 
   private async compose(backendId: string, threadId: string, turn: JournalTurn): Promise<ChangeView> {
@@ -277,7 +250,16 @@ export class ChangeStore {
       files.every(
         (file) => file.decision !== 'pending' && file.hunks.every((hunk) => hunk.decision !== 'pending')
       );
-    return { backendId, threadId, turnId: turn.turnId, files, additions, deletions, fullyDecided };
+    return {
+      backendId,
+      threadId,
+      turnId: turn.turnId,
+      ...(turn.messageId ? { messageId: turn.messageId } : {}),
+      files,
+      additions,
+      deletions,
+      fullyDecided
+    };
   }
 
   /** True when the strip and the review page show this file. */

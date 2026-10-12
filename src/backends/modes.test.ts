@@ -43,6 +43,8 @@ test('every mode carries the shared plan-document contract', () => {
     assert.match(text, /\.melink\/plans\//);
     assert.match(text, /\.melink\/reports\//);
     assert.match(text, /Do not create or write those files in `docs\/` or `reports\/`/);
+    assert.match(text, /Do not create a plan file yourself/);
+    assert.match(text, /never name a plan after a thread id or uuid/);
   }
   assert.equal(ask.includes('.melink/plans/'), false);
 });

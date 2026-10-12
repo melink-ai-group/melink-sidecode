@@ -492,7 +492,7 @@ test('a nested gitignore keeps a file out of the review', async () => {
   assert.deepEqual(view.files.map((file) => file.path), ['pkg/keep.ts']);
 });
 
-test('a session review lists every step and undoes a file back to the first baseline', async () => {
+test('undoing one turn restores that turn baseline and leaves earlier steps alone', async () => {
   const fs = new FakeFs();
   fs.files.set('/ws/a.ts', text('one\n'));
   const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
@@ -507,16 +507,19 @@ test('a session review lists every step and undoes a file back to the first base
   await journal.endTurn('t2', ['/ws/b.ts']);
   const store = new ChangeStore({ storage: storage(), fs, artifacts: journal, now: () => 1_000 });
 
-  const session = await store.viewSession('codex', 'thr');
-  assert.ok(session);
-  assert.equal(session.turnId, 't2');
+  const first = await store.view('codex', 'thr', 't1');
+  assert.ok(first);
+  assert.deepEqual(first.files.map((file) => file.path), ['a.ts']);
+
+  const second = await store.view('codex', 'thr', 't2');
+  assert.ok(second);
   assert.deepEqual(
-    session.files.map((file) => file.path).sort(),
+    second.files.map((file) => file.path).sort(),
     ['a.ts', 'b.ts']
   );
-  const edited = session.files.find((file) => file.path === 'a.ts');
+  const edited = second.files.find((file) => file.path === 'a.ts');
   assert.equal(edited?.status, 'modified');
-  assert.ok(edited?.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'del' && line.text === 'one')));
+  assert.ok(edited?.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'del' && line.text === 'two')));
   assert.ok(edited?.hunks.some((hunk) => hunk.lines.some((line) => line.kind === 'add' && line.text === 'three')));
 
   const rejected = await store.decide({
@@ -527,8 +530,11 @@ test('a session review lists every step and undoes a file back to the first base
     decision: 'rejected'
   });
   assert.equal(rejected.ok, true);
-  assert.equal(decode(fs.files.get('/ws/a.ts')), 'one\n');
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'two\n');
   assert.equal(decode(fs.files.get('/ws/b.ts')), 'bee\n');
+
+  const earlier = await store.view('codex', 'thr', 't1');
+  assert.ok(earlier?.files.some((file) => file.path === 'a.ts'));
 });
 
 test('an unknown turn has no view', async () => {

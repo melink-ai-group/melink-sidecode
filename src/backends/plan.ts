@@ -5,17 +5,16 @@ import type { PlanArtifact, TodoStep, TodoStepStatus, TranscriptItem } from './t
  *
  * Location (documented, workspace-relative):
  *
- *     .melink/plans/<thread-id>.md
+ *     .melink/plans/<friendly-name>.md
  *
- * The name is derived from the **thread id**, never the raw prompt, so a second
- * turn in the same thread updates the same file instead of creating a second
- * plan. The directory is stable and ignored by default (the extension's
- * `.gitignore` covers `.melink/`).
+ * The file name comes from the plan title (`acme-board-status-and-location.md`),
+ * not the thread id. A thread id path is only the legacy file this replaces.
+ * Once a chat has a plan path, later turns update that same file. The directory
+ * is stable and ignored by default (the extension's `.gitignore` covers `.melink/`).
  *
  * This module is host-free: it renders and parses markdown and computes paths,
  * and takes the filesystem write as a caller-provided function. That keeps the
- * per-thread naming and the bullet-list contract under unit test without a VS
- * Code host.
+ * naming and the bullet-list contract under unit test without a VS Code host.
  */
 
 /** Directory the plan files live in, workspace-relative. */
@@ -24,9 +23,58 @@ export const PLAN_DIRECTORY = '.melink/plans';
 /** Heading the parser and renderer share. */
 export const PLAN_STEPS_HEADING = '## Steps';
 
-/** The one permitted write in Plan mode is this plan file. */
+/** Legacy path: `.melink/plans/<thread-id>.md`. New plans use the title instead. */
 export function planRelativePath(threadId: string): string {
   return `${PLAN_DIRECTORY}/${planFileName(threadId)}`;
+}
+
+/**
+ * The plan file the host creates: a short kebab-case name from the title.
+ * "Acme board status and location" becomes
+ * `.melink/plans/acme-board-status-and-location.md`.
+ */
+export function planRelativePathForTitle(title: string): string {
+  return `${PLAN_DIRECTORY}/${planSlugFromTitle(title)}.md`;
+}
+
+/** A filesystem-safe stem for a plan title. Empty titles become `plan`. */
+export function planSlugFromTitle(title: string): string {
+  const slug = title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+    .replace(/-+$/g, '');
+  return slug.length > 0 ? slug : 'plan';
+}
+
+/**
+ * The one plan file for this chat. A friendly path already on the chat is kept,
+ * so a retitle does not create a second file. A missing path, or the legacy
+ * thread-id file, resolves to the title slug. `retire` is the thread-id file
+ * to delete once the friendly file is written.
+ */
+export function canonicalPlanPath(input: {
+  threadId: string;
+  title: string;
+  existingPath?: string;
+}): { path: string; retire?: string } {
+  const friendly = planRelativePathForTitle(input.title);
+  const existing = input.existingPath?.replace(/\\/g, '/');
+  const threadPath = planRelativePath(input.threadId);
+  const placeholder = planRelativePathForTitle('Plan');
+  // A thread-id file, or the placeholder written before the title is known,
+  // is replaced by the friendly name. Any other path stays, so a later retitle
+  // does not create a second file.
+  if (!existing || existing === threadPath || (existing === placeholder && friendly !== placeholder)) {
+    return {
+      path: friendly,
+      retire: existing && existing !== friendly ? existing : undefined
+    };
+  }
+  return { path: existing };
 }
 
 /**

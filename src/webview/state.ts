@@ -46,6 +46,15 @@ export type ItemStatus = 'streaming' | 'completed' | 'failed' | 'warning' | 'can
 
 export type NoticeAction = 'setToken' | 'clearToken' | 'refresh' | 'retry';
 
+/** The files one chat turn changed, plus the review snapshot once the host sends it. */
+export interface TurnChange {
+  turnId: string;
+  /** The user message that opened the turn, when the host recorded one. */
+  messageId?: string;
+  entries: ChangeEntry[];
+  review?: ChangeView;
+}
+
 export interface TranscriptItemView {
   id: string;
   kind: TranscriptItemKind;
@@ -213,20 +222,11 @@ export interface AppState {
   /** Whether the file open in the editor is sent with the next turn. Default off. */
   includeViewedFile: boolean;
   /**
-   * The files the most recent turn recorded, or `undefined` when no change set
-   * has been verified for the active thread. `undefined` is distinct from `[]`:
-   * an empty array is a verified no-op, while `undefined` means nothing was
-   * observed and no claim is being made.
+   * One card per turn that changed files, oldest first. A later turn is added
+   * beside earlier ones. An empty list means this thread has no verified file
+   * changes on screen.
    */
-  changes?: ChangeEntry[];
-  /** The turn the current `changes` set belongs to. */
-  changesTurnId?: string;
-  /**
-   * The post-hoc review snapshot for the active turn, when the host pushed one.
-   * `undefined` means no review has been read; the review UI is a later ticket,
-   * so this is carried as data only and never inferred.
-   */
-  changeReview?: ChangeView;
+  turnChanges: TurnChange[];
   /**
    * The most recent decision outcome, surfaced so a partial failure (a refused
    * write, a conflict) is reported rather than silently swallowed.
@@ -238,7 +238,7 @@ export interface AppState {
    * the host is asked to act. `scope` distinguishes a whole-turn reject-all from
    * a single-file reject; both name their paths.
    */
-  changeRejectConfirm?: { scope: 'file' | 'all'; paths: string[] };
+  changeRejectConfirm?: { turnId: string; scope: 'file' | 'all'; paths: string[] };
   /**
    * True while a decision request is in flight, so the review surface disables
    * its controls rather than accepting a second, racing decision.
@@ -379,7 +379,14 @@ export type Action =
    * verified no-op; the host never sends this message for a turn it could not
    * observe, so the state's `undefined` stays distinct from an empty set.
    */
-  | { type: 'changesChanged'; backendId: string; threadId: string; turnId: string; entries: ChangeEntry[] }
+  | {
+      type: 'changesChanged';
+      backendId: string;
+      threadId: string;
+      turnId: string;
+      messageId?: string;
+      entries: ChangeEntry[];
+    }
   /** The host's post-hoc review snapshot for a turn. */
   | { type: 'changeReview'; review: ChangeView }
   | { type: 'changeHunks'; turnId: string; path: string; hunks: ChangeHunkView[]; truncated: boolean }
@@ -399,7 +406,7 @@ export type Action =
    * Open the destructive reject confirmation for one file or the whole turn.
    * Rejecting writes to disk, so the paths are named before anything is posted.
    */
-  | { type: 'requestChangeRejectConfirmation'; scope: 'file' | 'all'; paths: string[] }
+  | { type: 'requestChangeRejectConfirmation'; turnId: string; scope: 'file' | 'all'; paths: string[] }
   | { type: 'cancelChangeRejectConfirmation' }
   /** A decision request is now in flight, so the review controls lock. */
   | { type: 'changeDeciding'; value: boolean };
@@ -432,6 +439,7 @@ export const initialState: AppState = {
   workspaceRoots: [],
   contextExclusions: [],
   includeViewedFile: false,
+  turnChanges: [],
   changeDeciding: false
 };
 
@@ -461,6 +469,16 @@ export function visibleModeSnapshot(state: AppState): ModeSnapshot | undefined {
     })),
     selected: hosted?.backendId === backendId ? hosted.selected : state.mode
   };
+}
+
+function upsertTurnChange(turns: readonly TurnChange[], next: TurnChange): TurnChange[] {
+  const index = turns.findIndex((turn) => turn.turnId === next.turnId);
+  if (index === -1) {
+    return [...turns, next];
+  }
+  const copy = turns.slice();
+  copy[index] = next;
+  return copy;
 }
 
 export function reduce(state: AppState, action: Action): AppState {
@@ -694,15 +712,10 @@ export function reduce(state: AppState, action: Action): AppState {
         contextWindowTokens: changedModel ? undefined : state.contextWindowTokens,
         // A plan is carried with the conversation so a resumed thread reopens it.
         plan: action.plan,
-        // A change set belongs to the thread it was recorded for; a switch drops
-        // it rather than showing the previous conversation's files against this
-        // one. The host re-posts the resumed thread's set right after.
-        changes: undefined,
-        changesTurnId: undefined,
-        // The review snapshot and any destructive confirmation likewise belong to
-        // the thread in view; both are cleared so a switch can never show the
-        // previous thread's files or act on them.
-        changeReview: undefined,
+        // Turn cards belong to the thread they were recorded for; a switch drops
+        // them rather than showing the previous conversation's files against this
+        // one. The host re-posts the resumed thread's turns right after.
+        turnChanges: [],
         changeDecision: undefined,
         changeRejectConfirm: undefined,
         changeDeciding: false,
@@ -922,55 +935,85 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'resetContextExclusions':
       return { ...state, contextExclusions: [] };
     case 'changesChanged': {
-      // Only the active thread's turn replaces the visible set; a background
+      // Only the active thread's turn updates the visible cards; a background
       // thread's set must not overwrite what the surface is showing.
       if (state.activeThreadId && state.activeThreadId !== action.threadId) {
         return state;
       }
-      // A different turn replaces the visible review. The previous review is
-      // dropped here so a turn that changed nothing (`entries: []`) shows no
-      // panel at all — not the last turn's rows. A turn that did change files
-      // repaints from the review snapshot the reader effect reads next.
-      const turnChanged = state.changeReview !== undefined && state.changeReview.turnId !== action.turnId;
-      return {
-        ...state,
-        changes: action.entries,
-        changesTurnId: action.turnId,
-        ...(turnChanged
-          ? { changeReview: undefined, changeDecision: undefined, changeRejectConfirm: undefined, changeDeciding: false }
-          : {})
+      // A blank turn id is the host clearing every card before it reposts the
+      // turns that survived a reload or a restore.
+      if (!action.turnId) {
+        return {
+          ...state,
+          turnChanges: [],
+          changeDecision: undefined,
+          changeRejectConfirm: undefined,
+          changeDeciding: false
+        };
+      }
+      // A verified no-op does not open a card and does not erase other turns.
+      // A repaint of a turn that already has a review keeps that review.
+      if (action.entries.length === 0) {
+        return state;
+      }
+      const existing = state.turnChanges.find((turn) => turn.turnId === action.turnId);
+      const next: TurnChange = {
+        turnId: action.turnId,
+        messageId: action.messageId ?? existing?.messageId,
+        entries: action.entries,
+        review: existing?.review
       };
+      return { ...state, turnChanges: upsertTurnChange(state.turnChanges, next) };
     }
-    case 'changeReview':
-      // A review belongs to the turn it was recorded for; the host is the only
-      // source, so the snapshot replaces whatever was on screen. A background
-      // thread's review is ignored, exactly like its `changes/changed` set.
+    case 'changeReview': {
+      // A review belongs to the turn it was recorded for. A background thread's
+      // review is ignored. Other turns' cards stay.
       if (state.activeThreadId && state.activeThreadId !== action.review.threadId) {
         return state;
       }
+      const existingReview = state.turnChanges.find((turn) => turn.turnId === action.review.turnId);
+      const reviewed: TurnChange = {
+        turnId: action.review.turnId,
+        messageId: action.review.messageId ?? existingReview?.messageId,
+        entries: existingReview?.entries ?? [],
+        review: action.review
+      };
       return {
         ...state,
-        changeReview: action.review,
-        // A fresh snapshot supersedes any confirmation opened against the old one.
-        changeRejectConfirm: undefined,
+        turnChanges: upsertTurnChange(state.turnChanges, reviewed),
+        changeRejectConfirm:
+          state.changeRejectConfirm?.turnId === action.review.turnId ? undefined : state.changeRejectConfirm,
         changeDeciding: false
       };
+    }
     case 'changeHunks': {
-      const review = state.changeReview;
-      if (!review || review.turnId !== action.turnId) {
+      const index = state.turnChanges.findIndex((turn) => turn.review?.turnId === action.turnId);
+      if (index === -1) {
         return state;
       }
-      return {
-        ...state,
-        changeReview: {
+      const turn = state.turnChanges[index];
+      const review = turn.review;
+      if (!review) {
+        return state;
+      }
+      const turnChanges = state.turnChanges.slice();
+      turnChanges[index] = {
+        ...turn,
+        review: {
           ...review,
           files: review.files.map((file) =>
             file.path === action.path
-              ? { ...file, hunks: action.hunks, linesOmitted: false, detail: action.truncated ? 'Showing the first lines. Open the diff to see the rest.' : file.detail }
+              ? {
+                  ...file,
+                  hunks: action.hunks,
+                  linesOmitted: false,
+                  detail: action.truncated ? 'Showing the first lines. Open the diff to see the rest.' : file.detail
+                }
               : file
           )
         }
       };
+      return { ...state, turnChanges };
     }
     case 'changeDecision':
       return {
@@ -983,7 +1026,7 @@ export function reduce(state: AppState, action: Action): AppState {
         changeRejectConfirm: undefined
       };
     case 'requestChangeRejectConfirmation':
-      return { ...state, changeRejectConfirm: { scope: action.scope, paths: action.paths } };
+      return { ...state, changeRejectConfirm: { turnId: action.turnId, scope: action.scope, paths: action.paths } };
     case 'cancelChangeRejectConfirmation':
       return { ...state, changeRejectConfirm: undefined };
     case 'changeDeciding':

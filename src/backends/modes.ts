@@ -64,12 +64,12 @@ const QUESTION_BLOCK =
 
 /**
  * Where generated documents go. Codex and OpenCode both receive the mode text,
- * so this is the one rule for both. The host already stores the tracked plan at
- * `.melink/plans/<thread-id>.md`; this stops the model from also dropping plans,
- * reports, and similar notes in workspace-root `docs/` or `reports/`.
+ * so this is the one rule for both. The host writes the single plan file at
+ * `.melink/plans/<friendly-name>.md` from the reply. The model must not also
+ * write a plan, or a thread-id copy appears beside the friendly file.
  */
 const ARTIFACT_HOME =
-  'When you write a plan, report, investigation, design note, or other generated document to disk, save it under `.melink/` and nowhere else: plans in `.melink/plans/`, reports and similar notes in `.melink/reports/`. Do not create or write those files in `docs/` or `reports/`. A documentation file the project already keeps stays where it is when the user asks you to edit that file.';
+  'When you write a report, investigation, design note, or other generated document to disk, save it under `.melink/reports/` and nowhere else. Do not create or write those files in `docs/` or `reports/`. A documentation file the project already keeps stays where it is when the user asks you to edit that file. Do not create a plan file yourself. The host saves the one plan from your reply at `.melink/plans/<kebab-case title>.md`. Never create a second plan file, and never name a plan after a thread id or uuid.';
 
 export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
   {

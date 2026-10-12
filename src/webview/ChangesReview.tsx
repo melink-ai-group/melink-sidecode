@@ -104,22 +104,9 @@ export function ChangesReview({
    */
   const [outcomeMemory, setOutcomeMemory] = useState<Map<string, ChangeDecisionResult>>(() => new Map());
   const outcomeTurnRef = useRef<string | undefined>(undefined);
-  const panelRef = useRef<HTMLElement>(null);
-  const focusedTurnRef = useRef<string | undefined>(undefined);
-
-  // Focus lands on the panel when it first opens, matching the approval-prompt
-  // precedent. A repaint of the same turn does not steal focus back.
   useEffect(() => {
     setVisibleFileCount(24);
     setExpanded(false);
-  }, [review.turnId]);
-
-  useEffect(() => {
-    if (focusedTurnRef.current === review.turnId) {
-      return;
-    }
-    focusedTurnRef.current = review.turnId;
-    panelRef.current?.focus();
   }, [review.turnId]);
 
   useEffect(() => {
@@ -164,10 +151,8 @@ export function ChangesReview({
 
   return (
     <section
-      className={`changes-review${expanded ? ' is-open' : ''}`}
-      ref={panelRef}
-      tabIndex={-1}
-      aria-labelledby="changes-review-title"
+      className={`changes-review${expanded ? ' is-open' : ''}${allKept ? ' changes-review--kept' : ''}`}
+      aria-labelledby={`changes-review-title-${review.turnId}`}
       aria-busy={busy}
     >
       <header className="changes-review__head">
@@ -175,12 +160,12 @@ export function ChangesReview({
           className="changes-review__collapse"
           type="button"
           aria-expanded={expanded}
-          aria-controls="changes-review-files"
+          aria-controls={`changes-review-files-${review.turnId}`}
           onClick={() => setExpanded((value) => !value)}
         >
           <ChevronRightIcon className="ico ico--xs changes-review__chevron" />
-          <span className="changes-review__title" id="changes-review-title">
-            Files changed
+          <span className="changes-review__title" id={`changes-review-title-${review.turnId}`}>
+            {allKept ? 'Kept' : 'Files changed'}
           </span>
           {busy ? (
             <span className="status-chip status-chip--icon status-chip--running" title="Running" role="status" aria-label="Running">
@@ -192,22 +177,34 @@ export function ChangesReview({
         </button>
         <span className="spacer" />
         {allKept ? null : (
-          <button
-            className="btn btn--primary changes-review__icon-btn"
-            type="button"
-            disabled={locked || review.files.length === 0}
-            aria-label="Keep"
-            title="Keep all changes from this session."
-            onClick={onKeepAll}
-          >
-            <CheckIcon className="ico ico--xs" />
-          </button>
+          <>
+            <button
+              className="btn changes-review__icon-btn changes-review__icon-btn--danger"
+              type="button"
+              disabled={locked || review.files.length === 0}
+              aria-label="Undo this turn"
+              title="Undo this turn's file changes. Restoring the chat to this message stays available."
+              onClick={() => onRequestReject('all', review.files.map((file) => file.path))}
+            >
+              <RestoreIcon className="ico ico--xs" />
+            </button>
+            <button
+              className="btn btn--primary changes-review__icon-btn"
+              type="button"
+              disabled={locked || review.files.length === 0}
+              aria-label="Keep this turn"
+              title="Keep this turn's file changes."
+              onClick={onKeepAll}
+            >
+              <CheckIcon className="ico ico--xs" />
+            </button>
+          </>
         )}
         <button
           className="btn changes-review__review changes-review__icon-btn"
           type="button"
           aria-label="Review"
-          title="Review every changed file in the workbench changes editor."
+          title="Review this turn's files in the workbench changes editor."
           onClick={onOpenAllInEditor}
         >
           <DiffIcon className="ico ico--sm" />
@@ -215,7 +212,7 @@ export function ChangesReview({
       </header>
 
       {expanded ? (
-        <div id="changes-review-files">
+        <div id={`changes-review-files-${review.turnId}`}>
           {busy ? (
             <div className="changes-review__pending" role="status" aria-live="polite">
               <span className="spinner" aria-hidden="true" />
@@ -261,7 +258,7 @@ export function ChangesReview({
           <div className="changes-review__confirm-body">
             <span>
               {rejectConfirm.scope === 'all'
-                ? `Reject all ${rejectPaths.length} file${rejectPaths.length === 1 ? '' : 's'}? The pre-turn content is written back to disk.`
+                ? `Undo this turn's ${rejectPaths.length} file${rejectPaths.length === 1 ? '' : 's'}? The pre-turn content is written back. Restoring the chat to this message stays available.`
                 : discardCopy(review, rejectPaths, 'prompt')}
             </span>
             {rejectPaths.length > 0 ? (
@@ -280,9 +277,7 @@ export function ChangesReview({
               Cancel
             </button>
             <button className="btn btn--danger" type="button" onClick={onConfirmReject}>
-              {rejectConfirm.scope === 'all'
-                ? `Reject ${rejectPaths.length} file${rejectPaths.length === 1 ? '' : 's'}`
-                : discardCopy(review, rejectPaths, 'confirm')}
+              {rejectConfirm.scope === 'all' ? 'Undo turn' : discardCopy(review, rejectPaths, 'confirm')}
             </button>
           </span>
         </div>
@@ -402,7 +397,7 @@ function ChangeRow({
                   <CheckIcon className="ico ico--xs" />
                 </button>
               )}
-              {decision === 'accepted' && file.restorable !== true ? null : (
+              {decision === 'accepted' ? null : (
                 <button
                   className="btn btn--link change-row__icon-btn change-row__icon-btn--danger"
                   type="button"
