@@ -513,6 +513,16 @@ export interface TranscriptItem {
    */
   text?: string;
   /**
+   * Epoch milliseconds when the user message that opened a turn was stored.
+   * The turn's elapsed line is measured from here.
+   */
+  sentAt?: number;
+  /**
+   * Milliseconds from `sentAt` until the turn finished. Set once, on the user
+   * message that opened the turn.
+   */
+  workedMs?: number;
+  /**
    * Lifecycle status, populated when a thread is replayed after a reload.
    * `pending` is carried by an unresolved `approval-requested` item so a
    * reload can repaint exactly one decision card and never a settled one.

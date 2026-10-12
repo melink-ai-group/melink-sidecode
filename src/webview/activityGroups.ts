@@ -131,6 +131,43 @@ function foldNarration(entries: TranscriptEntry[]): TranscriptEntry[] {
   return folded;
 }
 
+/**
+ * Entry id that should carry the finished-turn note. The note sits under the
+ * last row of the turn that started at the user message storing `workedMs`.
+ * A later user message without its own duration, such as a steer, stays in
+ * that same turn.
+ */
+export function turnElapsedNotes(entries: TranscriptEntry[]): Map<string, number> {
+  const notes = new Map<string, number>();
+  let workedMs: number | undefined;
+  let lastId: string | undefined;
+  const flush = (): void => {
+    if (lastId != null && workedMs != null) {
+      notes.set(lastId, workedMs);
+    }
+    workedMs = undefined;
+    lastId = undefined;
+  };
+  for (const entry of entries) {
+    if (entry.kind === 'item' && entry.item.kind === 'message' && entry.item.role === 'user') {
+      if (entry.item.workedMs != null) {
+        flush();
+        workedMs = entry.item.workedMs;
+      }
+      if (workedMs != null) {
+        lastId = entry.item.id;
+      }
+      continue;
+    }
+    if (workedMs == null || (entry.kind === 'item' && entry.item.kind === 'notice')) {
+      continue;
+    }
+    lastId = entry.kind === 'item' ? entry.item.id : entry.id;
+  }
+  flush();
+  return notes;
+}
+
 /** Ids of replies that should show the speaker name: the first, and the last once the turn has settled. */
 export function speakerRows(entries: TranscriptEntry[], settled: boolean): Set<string> {
   const shown = new Set<string>();
