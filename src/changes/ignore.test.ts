@@ -6,7 +6,15 @@ test('dependency and tool directories are ignored at any depth', () => {
   assert.equal(hasIgnoredSegment('node_modules/left-pad/index.js'), true);
   assert.equal(hasIgnoredSegment('.opencode/node_modules/@opencode-ai/sdk/package.json'), true);
   assert.equal(hasIgnoredSegment('.git/objects/ab'), true);
+  assert.equal(hasIgnoredSegment('frontend/dist/assets/index.js'), true);
+  assert.equal(hasIgnoredSegment('frontend/src/Card.tsx'), false);
   assert.equal(hasIgnoredSegment('src/app.ts'), false);
+});
+
+test('a gitignore directory pattern hides files nested inside it', () => {
+  assert.equal(isIgnoredRelPath('frontend/dist/assets/index-abc.css', '**/dist'), true);
+  assert.equal(isIgnoredRelPath('frontend/dist/index.html', '**/dist'), true);
+  assert.equal(isIgnoredRelPath('frontend/src/Card.tsx', '**/dist'), false);
 });
 
 test('a root gitignore hides matching paths and keeps everything else', () => {

@@ -1186,13 +1186,9 @@ export class ChangeJournal {
     for (const path of observedOnly) {
       const observation = observations.get(path);
       const hint = observation?.status;
-      // A watcher `modified` with no pre-turn snapshot cannot prove the bytes
-      // changed. Recording it shows the whole file as an addition, which is
-      // what a read or a touch looks like. A structured report still counts:
-      // the tool named an edit. Creates and deletes are evidence on their own.
-      if (hint !== 'created' && hint !== 'deleted' && observation?.source !== 'reported') {
-        continue;
-      }
+      // A watcher event with no pre-turn snapshot still names a file the turn
+      // wrote. It is listed as that kind of change. The review does not invent
+      // a line diff when the before bytes were never stored.
       const status: ChangeStatus = hint === 'deleted' ? 'deleted' : hint === 'created' ? 'created' : 'modified';
       const a = after.get(path) ?? undefined;
       // A reported edit with no pre-turn snapshot used to diff the finished
