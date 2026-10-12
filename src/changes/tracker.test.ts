@@ -89,17 +89,38 @@ test('a watched modify of a snapshotted file is recorded when the bytes change',
   assert.equal(set.entries[0].status, 'modified');
 });
 
-test('a watched modify with no pre-turn snapshot is not a change', async () => {
+test('a watched modify with no pre-turn snapshot is still listed', async () => {
   const fs = new FakeFs();
   fs.files.set('/ws/readme.md', text('hello'));
   const change = tracker(fs);
 
   await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  fs.files.set('/ws/readme.md', text('hello\nmore'));
   change.watch('/ws/readme.md', 'modified');
   const set = await change.endTurn();
 
   assert.ok(set, 'the turn was observed');
-  assert.deepEqual(set.entries, []);
+  assert.equal(set.entries.length, 1);
+  assert.equal(set.entries[0].path, 'readme.md');
+  assert.equal(set.entries[0].status, 'modified');
+});
+
+test('build output is not attributed to the turn', async () => {
+  const fs = new FakeFs();
+  const change = tracker(fs);
+
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  fs.files.set('/ws/frontend/dist/assets/index.js', text('bundle'));
+  fs.files.set('/ws/frontend/src/Card.tsx', text('export function Card() {}'));
+  change.watch('/ws/frontend/dist/assets/index.js', 'created');
+  change.watch('/ws/frontend/src/Card.tsx', 'modified');
+  const set = await change.endTurn();
+
+  assert.ok(set);
+  assert.deepEqual(
+    set.entries.map((entry) => entry.path),
+    ['frontend/src/Card.tsx']
+  );
 });
 
 test('files under ignored directories are not attributed to the turn', async () => {

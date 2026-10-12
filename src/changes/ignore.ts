@@ -2,9 +2,30 @@
  * Directory names that are never a conversation change. `node_modules` and VCS
  * metadata are ignored even when a workspace forgets to list them. `.opencode`
  * is the opencode CLI's own project state (its lockfile and install tree), not
- * a file the agent edited for the user.
+ * a file the agent edited for the user. `dist` and the other names are build
+ * output: a production build rewrites them, and they are not the source file
+ * the turn edited.
  */
-const IGNORED_SEGMENTS = new Set(['node_modules', '.git', '.hg', '.svn', 'bower_components', '.opencode']);
+const IGNORED_SEGMENTS = new Set([
+  'node_modules',
+  '.git',
+  '.hg',
+  '.svn',
+  'bower_components',
+  '.opencode',
+  'dist',
+  'dist-ssr',
+  'coverage',
+  '.next',
+  '.nuxt',
+  '.turbo',
+  '.cache',
+  '.parcel-cache',
+  '.vite',
+  '.output',
+  'storybook-static',
+  '__pycache__'
+]);
 
 function posix(path: string): string {
   return path.replace(/\\/g, '/');
@@ -241,15 +262,17 @@ function classifyPath(relPath: string, expression: RegExp, directory: boolean): 
   if (expression.test(relPath)) {
     return directory ? { kind: 'dir', prefix: relPath } : { kind: 'file' };
   }
-  const slash = relPath.indexOf('/');
-  if (slash === -1) {
-    return undefined;
+  // A rule that names a directory ignores every file inside it, not only the
+  // directory's first segment. `**/dist` must hide `frontend/dist/index.html`.
+  const parts = relPath.split('/');
+  let acc = '';
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    acc = acc ? `${acc}/${parts[index]}` : parts[index];
+    if (expression.test(acc)) {
+      return { kind: 'dir', prefix: acc };
+    }
   }
-  const parent = relPath.slice(0, slash);
-  if (!expression.test(parent)) {
-    return undefined;
-  }
-  return { kind: 'dir', prefix: parent };
+  return undefined;
 }
 
 function globToRegExp(pattern: string): RegExp {
