@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, type TranscriptEntry } from './activityGroups.ts';
+import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, turnElapsedNotes, type TranscriptEntry } from './activityGroups.ts';
 import type { TranscriptItemView } from './state.ts';
 
 function row(partial: Partial<TranscriptItemView> & Pick<TranscriptItemView, 'id'>): TranscriptItemView {
@@ -261,6 +261,21 @@ test('melink is marked on the first reply, and on the last only once the turn ha
   assert.equal(settled.has('a1'), true);
   assert.equal(settled.has('a2'), false);
   assert.equal(settled.has('a3'), true);
+});
+
+test('a finished turn puts its duration on the last row, including a steer', () => {
+  const entries = groupTranscript([
+    row({ id: 'u1', kind: 'message', role: 'user', text: 'look', workedMs: 110_000 }),
+    row({ id: 'a1', kind: 'message', role: 'assistant', text: 'Looking.' }),
+    row({ id: 'u2', kind: 'message', role: 'user', text: 'also this' }),
+    row({ id: 'a2', kind: 'message', role: 'assistant', text: 'Done.\n\nHere.' }),
+    row({ id: 'u3', kind: 'message', role: 'user', text: 'next', workedMs: 5_000 }),
+    row({ id: 'a3', kind: 'message', role: 'assistant', text: 'Ok.' })
+  ]);
+  const notes = turnElapsedNotes(entries);
+  assert.equal(notes.get('a2'), 110_000);
+  assert.equal(notes.get('a3'), 5_000);
+  assert.equal(notes.has('u1'), false);
 });
 
 test('an unknown tool is its own line and splits the neighbors', () => {

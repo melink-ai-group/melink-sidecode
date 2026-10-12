@@ -152,6 +152,27 @@ test('a later tool start fills the command without opening a second card', () =>
   assert.notEqual(updated.transcript[0]?.command, 'completed');
 });
 
+test('a finished turn records how long it ran from the user message', () => {
+  const sentAt = Date.now() - 110_000;
+  const active = reduce(initialState, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 't',
+    replay: [{ id: 'u', kind: 'message', role: 'user', text: 'hi', sentAt, status: 'completed' }]
+  });
+  const done = reduce(active, {
+    type: 'agentEvent',
+    event: { type: 'turn/completed', backendId: 'codex', threadId: 't', turnId: 'turn_1' }
+  });
+  const worked = done.transcript[0]?.workedMs ?? -1;
+  assert.ok(worked >= 110_000 && worked < 130_000);
+  const again = reduce(done, {
+    type: 'agentEvent',
+    event: { type: 'turn/completed', backendId: 'codex', threadId: 't', turnId: 'turn_1' }
+  });
+  assert.equal(again.transcript[0]?.workedMs, worked);
+});
+
 test('a finished turn drops any lingering pending request', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't' });
   const state = reduce(active, {

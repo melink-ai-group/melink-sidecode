@@ -91,6 +91,15 @@ test('a provider attachment list matches the stored prompt and keeps its files',
   assert.equal(merged[0]?.attachments?.[0]?.path, 'C:\\work\\image.png');
 });
 
+test('a stored turn duration stays on the matching server user row', () => {
+  const server = [item('server-user', 'user', 'fix the scroll')];
+  const stored = [{ ...item('user_2', 'user', 'fix the scroll'), sentAt: 1_700_000_000_000, workedMs: 110_000 }];
+  const merged = withStoredUserIds(server, stored);
+  assert.equal(merged[0]?.id, 'user_2');
+  assert.equal(merged[0]?.sentAt, 1_700_000_000_000);
+  assert.equal(merged[0]?.workedMs, 110_000);
+});
+
 test('a user message sent after the server snapshot stays at the end', () => {
   const server = [item('server-user', 'user', 'first')];
   const stored = [item('user_1', 'user', 'first'), item('user_2', 'user', 'second')];

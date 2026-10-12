@@ -447,7 +447,7 @@ export type HostToWebviewMessage =
    * The host message id for the user line just stored, so the live bubble can
    * offer restore before a conversation replay replaces its temporary id.
    */
-  | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string }
+  | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string; sentAt?: number }
   /**
    * The send was not accepted. Drop the optimistic user bubble so the composer
    * can show the text again.

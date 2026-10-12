@@ -116,7 +116,9 @@ export function withStoredUserIds(serverItems: readonly TranscriptItem[], stored
       ...item,
       id: match.id,
       text: match.text ?? item.text,
-      attachments: preferStoredAttachments(match.attachments, item.attachments)
+      attachments: preferStoredAttachments(match.attachments, item.attachments),
+      ...(match.sentAt != null ? { sentAt: match.sentAt } : {}),
+      ...(match.workedMs != null ? { workedMs: match.workedMs } : {})
     };
   });
   const seen = new Set(overlaid.filter((item) => item.kind === 'message' && item.role === 'user').map((item) => promptKey(item.text)));

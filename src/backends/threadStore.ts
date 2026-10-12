@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { stampTurnWorked } from './turnTiming.ts';
 import { PERMISSION_LEVELS, type AgentEvent, type DefaultMode, type PermissionLevel, type TodoStep, type TranscriptItem } from './types';
 import { mergeThreadRef } from './threadRef.ts';
 
@@ -308,15 +309,24 @@ export class ThreadStore implements vscode.Disposable {
    * Returns the created item's id, which is the message id a checkpoint for the
    * turn it opens is addressed by.
    */
-  appendUserMessage(backendId: string, threadId: string, text: string, attachments?: TranscriptItem['attachments']): string {
+  appendUserMessage(
+    backendId: string,
+    threadId: string,
+    text: string,
+    attachments?: TranscriptItem['attachments'],
+    opensTurn = true
+  ): string {
     const stored = this.getTranscript(backendId, threadId);
+    const sentAt = Date.now();
     const item: TranscriptItem = {
-      id: `user_${Date.now()}_${stored.length}`,
+      id: `user_${sentAt}_${stored.length}`,
       kind: 'message',
       role: 'user',
       text,
       attachments,
-      status: 'completed'
+      status: 'completed',
+      // A steer or a mid-turn answer is not the start of the clock.
+      ...(opensTurn ? { sentAt } : {})
     };
     this.setTranscript(backendId, threadId, [...stored, item]);
     return item.id;
@@ -324,8 +334,8 @@ export class ThreadStore implements vscode.Disposable {
 
   /**
    * Folds a normalized event into the stored transcript so a reload can repaint
-   * the conversation. Only item events carry renderable content; turn and error
-   * events are transient.
+   * the conversation. Item events carry the rows. A finished or interrupted
+   * turn also records how long it ran, on the user message that opened it.
    */
   applyEvent(event: AgentEvent): void {
     switch (event.type) {
@@ -399,6 +409,15 @@ export class ThreadStore implements vscode.Disposable {
               : item
           )
         );
+        break;
+      }
+      case 'turn/completed':
+      case 'turn/interrupted': {
+        const stored = this.getTranscript(event.backendId, event.threadId);
+        const stamped = stampTurnWorked(stored, Date.now());
+        if (stamped !== stored) {
+          this.setTranscript(event.backendId, event.threadId, stamped);
+        }
         break;
       }
       default:

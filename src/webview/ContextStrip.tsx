@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { applyViewExclusions, type ContextView } from '../protocol';
 import { canCompactContext, contextUsagePercent } from '../backends/contextUsage';
-import { AlertIcon, ContextIcon, FileIcon } from './Icons';
+import { AlertIcon, CircleMinusIcon, CirclePlusIcon, ContextIcon, FileIcon } from './Icons';
 
 /**
  * The strip directly above the composer.
@@ -38,6 +38,7 @@ export function ContextStrip({
 
   const effective = applyViewExclusions(view, exclusions);
   const status = settingsEnabled ? effective.status : 'empty';
+  const included = includeViewedFile && !effective.viewedFileBlocked;
 
   const selectionLabel =
     effective.selectionLines > 0
@@ -55,7 +56,7 @@ export function ContextStrip({
               ·
             </span>
             <span
-              className={`context-file${includeViewedFile && !effective.viewedFileBlocked ? ' is-on' : ' is-ghost'}`}
+              className={`context-file${included ? ' is-on' : ' is-ghost'}`}
             >
               <button
                 className="context-path"
@@ -66,28 +67,27 @@ export function ContextStrip({
                 <FileIcon className="ico ico--xs" />
                 <span className="context-path-text">{effective.viewedFile}</span>
               </button>
-              {effective.viewedFileBlocked ? (
-                <span className="context-file-note">excluded</span>
-              ) : (
-                <button
-                  className="context-file-toggle"
-                  type="button"
-                  aria-pressed={includeViewedFile}
-                  aria-label={
-                    includeViewedFile
-                      ? `Remove ${effective.viewedFile} from context`
-                      : `Add ${effective.viewedFile} to context`
-                  }
-                  title={
-                    includeViewedFile
+              <button
+                className="context-file-toggle"
+                type="button"
+                aria-pressed={included}
+                aria-label={
+                  included
+                    ? `Remove ${effective.viewedFile} from context`
+                    : `Add ${effective.viewedFile} to context`
+                }
+                title={
+                  effective.viewedFileBlocked
+                    ? 'This file cannot be added to the next turn'
+                    : included
                       ? 'Remove the current file from the next turn'
                       : 'Add the current file to the next turn'
-                  }
-                  onClick={() => onSetIncludeViewedFile(!includeViewedFile)}
-                >
-                  {includeViewedFile ? '−' : '+'}
-                </button>
-              )}
+                }
+                disabled={effective.viewedFileBlocked}
+                onClick={() => onSetIncludeViewedFile(!included)}
+              >
+                {included ? <CircleMinusIcon /> : <CirclePlusIcon />}
+              </button>
             </span>
           </>
         ) : null}

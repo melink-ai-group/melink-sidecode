@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -80,7 +80,8 @@ import {
 } from './state';
 import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
 import { prettyPath, setPrettyPathRoots } from './prettyPath.ts';
-import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, type ActivityFamily } from './activityGroups.ts';
+import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, turnElapsedNotes, type ActivityFamily } from './activityGroups.ts';
+import { formatWorked } from '../backends/turnTiming.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
 import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
 import type {
@@ -441,7 +442,8 @@ export function App(): JSX.Element {
             type: 'userMessageId',
             backendId: message.backendId,
             threadId: message.threadId,
-            messageId: message.messageId
+            messageId: message.messageId,
+            sentAt: message.sentAt
           });
           break;
         case 'revertLocalSend':
@@ -1946,6 +1948,7 @@ export function App(): JSX.Element {
   const chatEmpty = state.transcript.length === 0 && !state.restoring;
   const transcriptEntries = groupTranscript(state.transcript);
   const speakers = speakerRows(transcriptEntries, !state.busy);
+  const elapsedNotes = turnElapsedNotes(transcriptEntries);
   const pinnedItem = pinnedUserId
     ? state.transcript.find((item) => item.id === pinnedUserId && item.kind === 'message' && item.role === 'user')
     : undefined;
@@ -1994,35 +1997,40 @@ export function App(): JSX.Element {
         ) : state.transcript.length === 0 && !state.startingTurn && !state.notice ? (
           <EmptyState state={state} dispatch={dispatch} hasAvailable={available.length > 0} />
         ) : (
-          transcriptEntries.map((entry) =>
-            entry.kind === 'group' ? (
-              <ActivityGroup key={entry.id} family={entry.family} items={entry.items} />
-            ) : entry.kind === 'narration' ? (
-              <NarrationRow
-                key={entry.id}
-                message={entry.message}
-                items={entry.items}
-                showSpeaker={speakers.has(entry.id)}
-                providerId={entry.message.backendId ?? active?.id ?? 'ollama'}
-                hideQuestions={state.mode !== 'ask'}
-              />
-            ) : (
-              <TranscriptRow
-                key={entry.item.id}
-                item={entry.item}
-                showSpeaker={speakers.has(entry.item.id)}
-                hideQuestions={state.mode !== 'ask'}
-                providerId={entry.item.backendId ?? active?.id ?? 'ollama'}
-                pendingId={pending?.id}
-                checkpoint={state.checkpoints?.find((checkpoint) => checkpoint.messageId === entry.item.id)}
-                onDecide={decide}
-                onOpenRules={() => dispatch({ type: 'openRules' })}
-                onRestore={restoreCheckpoint}
-                onViewImage={(images, index) => setImageViewer({ images, index })}
-                onNoticeAction={runNoticeAction}
-              />
-            )
-          )
+          transcriptEntries.map((entry) => {
+            const entryId = entry.kind === 'item' ? entry.item.id : entry.id;
+            const elapsed = elapsedNotes.get(entryId);
+            return (
+              <Fragment key={entryId}>
+                {entry.kind === 'group' ? (
+                  <ActivityGroup family={entry.family} items={entry.items} />
+                ) : entry.kind === 'narration' ? (
+                  <NarrationRow
+                    message={entry.message}
+                    items={entry.items}
+                    showSpeaker={speakers.has(entry.id)}
+                    providerId={entry.message.backendId ?? active?.id ?? 'ollama'}
+                    hideQuestions={state.mode !== 'ask'}
+                  />
+                ) : (
+                  <TranscriptRow
+                    item={entry.item}
+                    showSpeaker={speakers.has(entry.item.id)}
+                    hideQuestions={state.mode !== 'ask'}
+                    providerId={entry.item.backendId ?? active?.id ?? 'ollama'}
+                    pendingId={pending?.id}
+                    checkpoint={state.checkpoints?.find((checkpoint) => checkpoint.messageId === entry.item.id)}
+                    onDecide={decide}
+                    onOpenRules={() => dispatch({ type: 'openRules' })}
+                    onRestore={restoreCheckpoint}
+                    onViewImage={(images, index) => setImageViewer({ images, index })}
+                    onNoticeAction={runNoticeAction}
+                  />
+                )}
+                {elapsed != null ? <p className="turn-elapsed">{formatWorked(elapsed)}</p> : null}
+              </Fragment>
+            );
+          })
         )}
 
         {state.plan && !state.plan.built ? (
@@ -3514,7 +3522,8 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
       ? 'Waiting for a reasoning summary…'
       : incomplete
         ? 'Thinking stopped early; this section may be incomplete.'
-        : 'No reasoning summary was provided for this step.');
+        : '');
+  const showEllipsis = !expanded && Boolean(preview || !text);
   const toggle = (): void => setExpanded((value) => !value);
 
   return (
@@ -3528,7 +3537,7 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
       >
         <span className="reasoning-lead">
           <span className="meta-strong">{label}</span>
-          {!expanded && preview ? (
+          {showEllipsis ? (
             <span className="reasoning-snippet__sep" aria-hidden="true">
               ...
             </span>
@@ -3549,15 +3558,13 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
           <ChevronDownIcon />
         </span>
       </button>
-      {expanded ? (
+      {expanded && (text || item.status === 'streaming' || incomplete) ? (
         <div className="turn-body md" onClick={toggle}>
           {text ? (
             <Markdown text={item.text} />
           ) : item.status === 'streaming' ? (
             <p className="reasoning-pending">Waiting for a reasoning summary…</p>
-          ) : incomplete ? null : (
-            <p className="reasoning-pending">No reasoning summary was provided for this step.</p>
-          )}
+          ) : null}
           {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
           {incomplete ? (
             <p className="reasoning-incomplete" role="status">

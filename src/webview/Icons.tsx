@@ -252,6 +252,22 @@ export const DiffIcon = (props: IconProps): JSX.Element =>
 export const PlusIcon = (props: IconProps): JSX.Element =>
   base('ico ico--xs', 2, props, <path d="M12 5v14M5 12h14" />);
 
+export const CirclePlusIcon = (props: IconProps): JSX.Element =>
+  base('ico ico--xs', 1.8, props, (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8v8M8 12h8" />
+    </>
+  ));
+
+export const CircleMinusIcon = (props: IconProps): JSX.Element =>
+  base('ico ico--xs', 1.8, props, (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12h8" />
+    </>
+  ));
+
 export const PencilIcon = (props: IconProps): JSX.Element =>
   base('ico ico--xs', 2, props, (
     <>

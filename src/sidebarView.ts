@@ -1015,7 +1015,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         message: `A checkpoint could not be saved (${error instanceof Error ? error.message : String(error)}).`
       });
     }
-    this.post({ type: 'userMessageId', backendId, threadId, messageId });
+    const sentAt = this.store.getTranscript(backendId, threadId).find((item) => item.id === messageId)?.sentAt;
+    this.post({
+      type: 'userMessageId',
+      backendId,
+      threadId,
+      messageId,
+      ...(sentAt != null ? { sentAt } : {})
+    });
     if (this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
       await this.postCheckpoints(backendId, threadId);
     }
@@ -3058,7 +3065,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     try {
-      const messageId = await this.store.appendUserMessage(active.backendId, active.threadId, value);
+      const messageId = await this.store.appendUserMessage(active.backendId, active.threadId, value, undefined, false);
       await this.captureSentMessage(active.backendId, active.threadId, messageId);
       await backend.steerTurn(active, this.consumeRewindNote(active.backendId, active.threadId, value), messageId);
       await this.store.flush();
@@ -4506,7 +4513,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.revisePlanThisTurn = true;
       }
       this.registry.answerQuestion(pending.request.backendId, pending.request.threadId, requestId, answers);
-      await this.store.appendUserMessage(pending.request.backendId, pending.request.threadId, text);
+      await this.store.appendUserMessage(pending.request.backendId, pending.request.threadId, text, undefined, false);
       return;
     }
     await this.sendTurn(

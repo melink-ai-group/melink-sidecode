@@ -16,6 +16,7 @@ import type {
   TranscriptItemKind
 } from '../backends/types';
 import { cleanToolTarget, isStatusText } from '../backends/toolLabel.ts';
+import { stampTurnWorked } from '../backends/turnTiming.ts';
 import { tokensFromText } from '../backends/contextUsage.ts';
 import { carriedPlanDismissal, shouldDismissCompletedPlan } from '../backends/plan.ts';
 import { estimateConversationTokens } from './modelControls.ts';
@@ -68,6 +69,10 @@ export interface TranscriptItemView {
   /** `message` items: files the user attached to the turn. */
   attachments?: Attachment[];
   text: string;
+  /** Epoch milliseconds when this user message was stored. */
+  sentAt?: number;
+  /** Milliseconds from that user message until the turn finished. */
+  workedMs?: number;
   status: ItemStatus;
   /** Status-line notices: severity. Errors stay red; the line has no title. */
   noticeLevel?: 'info' | 'warning' | 'error';
@@ -270,7 +275,7 @@ export type Action =
   | { type: 'agentEvent'; event: AgentEvent }
   | { type: 'localUserMessage'; text: string; attachments?: Attachment[] }
   /** Replace the optimistic user bubble id with the host message id. */
-  | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string }
+  | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string; sentAt?: number }
   /** Remove the optimistic user bubble when the host did not accept the send. */
   | { type: 'revertLocalSend'; text: string }
   | {
@@ -578,7 +583,11 @@ export function reduce(state: AppState, action: Action): AppState {
       if (!item) {
         return state;
       }
-      transcript[index] = { ...item, id: action.messageId };
+      transcript[index] = {
+        ...item,
+        id: action.messageId,
+        ...(action.sentAt != null ? { sentAt: action.sentAt } : {})
+      };
       return { ...state, transcript };
     }
     case 'revertLocalSend': {
@@ -1088,6 +1097,8 @@ function toTranscriptItemView(backendId: string) {
     approvalDecision: item.approvalDecision,
     attachments: item.attachments,
     text: item.text ?? '',
+    sentAt: item.sentAt,
+    workedMs: item.workedMs,
     status: item.status ?? 'completed'
   });
 }
@@ -1330,7 +1341,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
           startingTurn: false,
           pendingApproval: undefined,
           planRevising: false,
-          transcript: markStreamingItems(state.transcript, 'canceled'),
+          transcript: stampTurnWorked(markStreamingItems(state.transcript, 'canceled'), Date.now()),
           notice: undefined
         };
         return event.reason ? appendStatusNotice(stopped, event.reason, 'info') : stopped;
@@ -1341,7 +1352,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         startingTurn: false,
         pendingApproval: undefined,
         planRevising: false,
-        transcript: markStreamingItems(state.transcript, 'warning'),
+        transcript: stampTurnWorked(markStreamingItems(state.transcript, 'warning'), Date.now()),
         notice: undefined
       };
       return event.reason ? appendStatusNotice(interrupted, event.reason, 'warning') : interrupted;
@@ -1349,7 +1360,14 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
       // A finished turn cannot still be blocking on an approval; a card that
       // somehow survived is stale, so it is dropped rather than left pending. A
       // revision in flight also resolves here if its plan echo was missed.
-      return { ...state, busy: false, startingTurn: false, pendingApproval: undefined, planRevising: false };
+      return {
+        ...state,
+        busy: false,
+        startingTurn: false,
+        pendingApproval: undefined,
+        planRevising: false,
+        transcript: stampTurnWorked(state.transcript, Date.now())
+      };
     case 'plan/updated':
       // A native plan update carries the provider's bullet list; mirror it as
       // the active plan so the review surface reflects the tracked steps. The
