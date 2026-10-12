@@ -298,9 +298,9 @@ test('a changes snapshot replaces the visible set for the active thread', () => 
       { absPath: '/w/b.ts', path: 'b.ts', status: 'created', source: 'watched' }
     ]
   });
-  assert.equal(changed.changesTurnId, 'turn_1');
+  assert.equal(changed.turnChanges[0]?.turnId, 'turn_1');
   assert.deepEqual(
-    changed.changes?.map((entry) => [entry.path, entry.source]),
+    changed.turnChanges[0]?.entries.map((entry) => [entry.path, entry.source]),
     [
       ['a.ts', 'reported'],
       ['b.ts', 'watched']
@@ -308,17 +308,70 @@ test('a changes snapshot replaces the visible set for the active thread', () => 
   );
 });
 
-test('an empty verified change set stays distinct from no observation', () => {
+test('an empty change set for one turn does not erase another turn', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
-  assert.equal(active.changes, undefined, 'no observation is not an empty set');
-  const verifiedNoop = reduce(active, {
+  assert.deepEqual(active.turnChanges, [], 'no observation is not a card');
+  const withSet = reduce(active, {
     type: 'changesChanged',
     backendId: 'codex',
     threadId: 't1',
     turnId: 'turn_1',
+    entries: [{ absPath: '/w/a.ts', path: 'a.ts', status: 'modified', source: 'reported' }]
+  });
+  const verifiedNoop = reduce(withSet, {
+    type: 'changesChanged',
+    backendId: 'codex',
+    threadId: 't1',
+    turnId: 'turn_2',
     entries: []
   });
-  assert.deepEqual(verifiedNoop.changes, []);
+  assert.equal(verifiedNoop.turnChanges.length, 1);
+  assert.equal(verifiedNoop.turnChanges[0]?.turnId, 'turn_1');
+});
+
+test('a blank turn id clears every turn card', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
+  const withSet = reduce(active, {
+    type: 'changesChanged',
+    backendId: 'codex',
+    threadId: 't1',
+    turnId: 'turn_1',
+    entries: [{ absPath: '/w/a.ts', path: 'a.ts', status: 'modified', source: 'reported' }]
+  });
+  const cleared = reduce(withSet, {
+    type: 'changesChanged',
+    backendId: 'codex',
+    threadId: 't1',
+    turnId: '',
+    entries: []
+  });
+  assert.deepEqual(cleared.turnChanges, []);
+});
+
+test('a later turn keeps the earlier turn changes', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
+  const first = reduce(active, {
+    type: 'changesChanged',
+    backendId: 'codex',
+    threadId: 't1',
+    turnId: 'turn_1',
+    messageId: 'user_1',
+    entries: [{ absPath: '/w/a.ts', path: 'a.ts', status: 'modified', source: 'reported' }]
+  });
+  const second = reduce(first, {
+    type: 'changesChanged',
+    backendId: 'codex',
+    threadId: 't1',
+    turnId: 'turn_2',
+    messageId: 'user_2',
+    entries: [{ absPath: '/w/b.ts', path: 'b.ts', status: 'created', source: 'reported' }]
+  });
+  assert.deepEqual(
+    second.turnChanges.map((turn) => turn.turnId),
+    ['turn_1', 'turn_2']
+  );
+  assert.equal(second.turnChanges[0]?.messageId, 'user_1');
+  assert.equal(second.turnChanges[1]?.entries[0]?.path, 'b.ts');
 });
 
 test('a background thread change set never replaces the visible one', () => {
@@ -337,8 +390,8 @@ test('a background thread change set never replaces the visible one', () => {
     turnId: 'turn_bg',
     entries: []
   });
-  assert.equal(background.changesTurnId, 'turn_1');
-  assert.equal(background.changes?.length, 1);
+  assert.equal(background.turnChanges[0]?.turnId, 'turn_1');
+  assert.equal(background.turnChanges.length, 1);
 });
 
 test('a send that opens a thread keeps the optimistic user line and binds the new thread', () => {
@@ -428,8 +481,7 @@ test('switching conversation drops the previous thread change set', () => {
     entries: [{ absPath: '/w/a.ts', path: 'a.ts', status: 'modified', source: 'reported' }]
   });
   const switched = reduce(withSet, { type: 'conversation', backendId: 'codex', threadId: 't2' });
-  assert.equal(switched.changes, undefined);
-  assert.equal(switched.changesTurnId, undefined);
+  assert.deepEqual(switched.turnChanges, []);
 });
 
 test('sending a message clears the pending attachments and stamps them on the turn', () => {
@@ -895,7 +947,7 @@ test('a review snapshot for the active thread replaces the visible one', () => {
     fullyDecided: false
   };
   const withReview = reduce(active, { type: 'changeReview', review });
-  assert.equal(withReview.changeReview?.turnId, 'turn_1');
+  assert.equal(withReview.turnChanges[0]?.review?.turnId, 'turn_1');
 });
 
 test('a background thread review never replaces the visible one', () => {
@@ -904,7 +956,7 @@ test('a background thread review never replaces the visible one', () => {
     type: 'changeReview',
     review: { backendId: 'codex', threadId: 'other', turnId: 'turn_bg', files: [], additions: 0, deletions: 0, fullyDecided: false }
   });
-  assert.equal(background.changeReview, undefined, 'a background thread review is ignored');
+  assert.deepEqual(background.turnChanges, [], 'a background thread review is ignored');
 });
 
 test('switching conversation drops the review and any destructive confirmation', () => {
@@ -913,21 +965,27 @@ test('switching conversation drops the review and any destructive confirmation',
     type: 'changeReview',
     review: { backendId: 'codex', threadId: 't1', turnId: 'turn_1', files: [], additions: 0, deletions: 0, fullyDecided: false }
   });
-  const opened = reduce(withReview, { type: 'requestChangeRejectConfirmation', scope: 'all', paths: ['a.ts'] });
+  const opened = reduce(withReview, {
+    type: 'requestChangeRejectConfirmation',
+    turnId: 'turn_1',
+    scope: 'all',
+    paths: ['a.ts']
+  });
   assert.equal(opened.changeRejectConfirm?.scope, 'all');
 
   const switched = reduce(opened, { type: 'conversation', backendId: 'codex', threadId: 't2' });
-  assert.equal(switched.changeReview, undefined);
+  assert.deepEqual(switched.turnChanges, []);
   assert.equal(switched.changeRejectConfirm, undefined);
 });
 
 test('a reject confirmation names its scope and clears once cancelled', () => {
   const fileScoped = reduce(initialState, {
     type: 'requestChangeRejectConfirmation',
+    turnId: 'turn_1',
     scope: 'file',
     paths: ['src/a.ts']
   });
-  assert.deepEqual(fileScoped.changeRejectConfirm, { scope: 'file', paths: ['src/a.ts'] });
+  assert.deepEqual(fileScoped.changeRejectConfirm, { turnId: 'turn_1', scope: 'file', paths: ['src/a.ts'] });
   const cancelled = reduce(fileScoped, { type: 'cancelChangeRejectConfirmation' });
   assert.equal(cancelled.changeRejectConfirm, undefined);
 });
@@ -935,7 +993,12 @@ test('a reject confirmation names its scope and clears once cancelled', () => {
 test('a decision answer settles the in-flight lock and closes the confirmation', () => {
   const deciding = reduce(initialState, { type: 'changeDeciding', value: true });
   assert.equal(deciding.changeDeciding, true);
-  const opened = reduce(deciding, { type: 'requestChangeRejectConfirmation', scope: 'file', paths: ['a.ts'] });
+  const opened = reduce(deciding, {
+    type: 'requestChangeRejectConfirmation',
+    turnId: 'turn_1',
+    scope: 'file',
+    paths: ['a.ts']
+  });
   const answered = reduce(opened, {
     type: 'changeDecision',
     results: [{ relPath: 'a.ts', decision: 'rejected', ok: true }]
@@ -985,16 +1048,16 @@ test('a new turn keeps the review but stops claiming a decision is in flight', (
   assert.equal(started.busy, true);
   assert.equal(started.changeDeciding, false);
   assert.equal(started.changeRejectConfirm, undefined);
-  assert.equal(started.changeReview?.turnId, 'turn_1', 'the panel keeps the last review to render it pending');
+  assert.equal(started.turnChanges[0]?.review?.turnId, 'turn_1', 'the earlier turn keeps its review');
 });
 
-test('a new turn with no changes drops the previous review so no stale panel lingers', () => {
+test('a later turn with no changes leaves the earlier review in place', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
   const withReview = reduce(active, {
     type: 'changeReview',
     review: { backendId: 'codex', threadId: 't1', turnId: 'turn_1', files: [], additions: 0, deletions: 0, fullyDecided: false }
   });
-  assert.equal(withReview.changeReview?.turnId, 'turn_1');
+  assert.equal(withReview.turnChanges[0]?.review?.turnId, 'turn_1');
 
   const noop = reduce(withReview, {
     type: 'changesChanged',
@@ -1003,8 +1066,8 @@ test('a new turn with no changes drops the previous review so no stale panel lin
     turnId: 'turn_2',
     entries: []
   });
-  assert.deepEqual(noop.changes, []);
-  assert.equal(noop.changeReview, undefined, 'a verified no-op turn shows no review surface');
+  assert.equal(noop.turnChanges.length, 1);
+  assert.equal(noop.turnChanges[0]?.turnId, 'turn_1', 'a verified no-op turn does not erase an earlier card');
 });
 
 test('a repaint of the same turn keeps the current review instead of clearing it', () => {
@@ -1020,7 +1083,7 @@ test('a repaint of the same turn keeps the current review instead of clearing it
     turnId: 'turn_1',
     entries: []
   });
-  assert.equal(repaint.changeReview?.turnId, 'turn_1', 'the same turn keeps its review across a repaint');
+  assert.equal(repaint.turnChanges[0]?.review?.turnId, 'turn_1', 'the same turn keeps its review across a repaint');
 });
 
 test('Ollama keeps Agent, Plan, and Ask when the host snapshot is missing or belongs to Codex', () => {

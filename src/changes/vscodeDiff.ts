@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { ChangeStatus } from '../backends/types';
 import { filterListedFiles } from './ignore';
 import type { JournalFileEntry, JournalTurn } from './journal';
-import { sessionChangeSet, type SessionFile } from './sessionFiles';
+import type { SessionFile } from './sessionFiles';
 import {
   MELINK_CHANGES_SCHEME,
   OPEN_CHANGE_DIFF_COMMAND,
@@ -69,7 +69,6 @@ export interface NativeDiffResult {
 }
 
 const DEFAULT_TURN_TITLE = 'Changes this turn';
-const DEFAULT_SESSION_TITLE = 'Changes this session';
 
 /**
  * Serves `melink-changes:` documents from the journal. A `before` side is the
@@ -152,7 +151,7 @@ export class NativeDiffService implements vscode.Disposable {
     const sides = diffSides(sideInput);
     const left = this.sideUri(resolved, sides.left);
     const right = this.sideUri(resolved, sides.right);
-    const title = diffTitle(entry.relPath, entry.status, this.sessionScope(input.turnId));
+    const title = diffTitle(entry.relPath, entry.status);
     try {
       await vscode.commands.executeCommand('vscode.diff', left, right, title);
       return { ok: true };
@@ -166,7 +165,7 @@ export class NativeDiffService implements vscode.Disposable {
    * path so the user can walk file to file the way Source Control does.
    */
   async openTurnChanges(input: OpenTurnChangesInput): Promise<NativeDiffResult> {
-    const recorded = this.sessionFiles(input.turnId);
+    const recorded = this.turnFiles(input.turnId);
     const files = recorded ? await listedSessionFiles(recorded) : undefined;
     if (!files || files.length === 0) {
       return this.report('That turn has no recorded changes to open.');
@@ -199,7 +198,7 @@ export class NativeDiffService implements vscode.Disposable {
       ];
     });
 
-    const title = input.title ?? (this.sessionScope(input.turnId) === 'session' ? DEFAULT_SESSION_TITLE : DEFAULT_TURN_TITLE);
+    const title = input.title ?? DEFAULT_TURN_TITLE;
     // `vscode.changes` is the documented multi-file entry point. The internal
     // `_workbench.openMultiDiffEditor` is a secondary route on hosts that do not
     // register it; when neither resolves, focus Source Control and explain.
@@ -247,33 +246,16 @@ export class NativeDiffService implements vscode.Disposable {
   /** The session row for a path, or that turn's own row when it is not the latest. */
   private sessionFile(turnId: string, relPath: string): SessionFile | undefined {
     const target = relPath.replace(/\\/g, '/').replace(/^\.\//, '');
-    return this.sessionFiles(turnId)?.find((file) => file.entry.relPath === target);
+    return this.turnFiles(turnId)?.find((file) => file.entry.relPath === target);
   }
 
-  /**
-   * Files the review should open. The newest observed turn stands for the
-   * whole thread, so Review lists every step. An older turn id opens only that
-   * turn.
-   */
-  private sessionFiles(turnId: string): SessionFile[] | undefined {
+  /** Files this turn recorded. Review opens this turn, not earlier steps. */
+  private turnFiles(turnId: string): SessionFile[] | undefined {
     const turn = this.artifacts.getTurn(turnId);
     if (!turn) {
       return undefined;
     }
-    const session = sessionChangeSet(this.artifacts.listTurns(turn.threadId));
-    if (session && session.turnId === turnId) {
-      return session.files;
-    }
     return turn.files.map((entry) => this.singleTurnFile(turn.turnId, entry));
-  }
-
-  private sessionScope(turnId: string): 'turn' | 'session' {
-    const turn = this.artifacts.getTurn(turnId);
-    if (!turn) {
-      return 'turn';
-    }
-    const observed = this.artifacts.listTurns(turn.threadId).filter((entry) => entry.observed);
-    return observed.length > 1 && observed[0]?.turnId === turnId ? 'session' : 'turn';
   }
 
   private singleTurnFile(turnId: string, entry: JournalFileEntry): SessionFile {
@@ -353,7 +335,7 @@ async function listedSessionFiles(files: readonly SessionFile[]): Promise<Sessio
 }
 
 /** A human title for a diff, honest about the status being shown. */
-function diffTitle(relPath: string, status: ChangeStatus, scope: 'turn' | 'session'): string {
+function diffTitle(relPath: string, status: ChangeStatus): string {
   const label = status === 'created' ? 'new' : status === 'deleted' ? 'deleted' : status === 'renamed' ? 'renamed' : 'modified';
-  return `${relPath} (${label} this ${scope})`;
+  return `${relPath} (${label} this turn)`;
 }

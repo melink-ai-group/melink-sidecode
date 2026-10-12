@@ -76,11 +76,13 @@ import {
   type AppState,
   type HostBridge,
   type ItemStatus,
-  type TranscriptItemView
+  type TranscriptItemView,
+  type TurnChange
 } from './state';
 import { friendlyToolTitle, isRawToolName, isStatusText, toolCardPresentation } from '../backends/toolLabel.ts';
 import { prettyPath, setPrettyPathRoots } from './prettyPath.ts';
-import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, turnElapsedNotes, type ActivityFamily } from './activityGroups.ts';
+import { activitySections, activitySummary, groupTranscript, speakerRows, toolBursts, turnElapsedNotes, type ActivityFamily, type TranscriptEntry } from './activityGroups.ts';
+import { placeTurnChanges } from './turnChanges.ts';
 import { formatWorked } from '../backends/turnTiming.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
 import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
@@ -416,6 +418,7 @@ export function App(): JSX.Element {
             backendId: message.backendId,
             threadId: message.threadId,
             turnId: message.turnId,
+            messageId: message.messageId,
             entries: message.entries
           });
           break;
@@ -734,23 +737,26 @@ export function App(): JSX.Element {
     };
   }, [state.settingsOpen, state.rulesOpen, syncPinnedUser]);
 
-  // Read the review snapshot for a turn the host recorded. The host pushes the
-  // authoritative change set (and reposts the latest one on reload); the review
-  // — paths, diffs and decisions — is read through `changes/list`, the same path
-  // a decision repaint uses, so the panel never disagrees with the host. Keyed on
-  // the turn id so a new finished turn always re-reads, and a repaint of the same
-  // turn does not.
+  // Read a review for each turn that has files but no snapshot yet. The host
+  // also pushes the review when the turn ends; this covers a reload that
+  // delivered the file list first.
+  const turnsNeedingReview = state.turnChanges
+    .filter((turn) => turn.entries.length > 0 && !turn.review)
+    .map((turn) => turn.turnId)
+    .join('\n');
   useEffect(() => {
-    if (!state.activeThreadId || !state.selectedBackendId || !state.changesTurnId) {
+    if (!state.activeThreadId || !state.selectedBackendId || !turnsNeedingReview) {
       return;
     }
-    bridge.post({
-      type: 'changes/list',
-      backendId: state.selectedBackendId,
-      threadId: state.activeThreadId,
-      turnId: state.changesTurnId
-    });
-  }, [state.activeThreadId, state.selectedBackendId, state.changesTurnId]);
+    for (const turnId of turnsNeedingReview.split('\n')) {
+      bridge.post({
+        type: 'changes/list',
+        backendId: state.selectedBackendId,
+        threadId: state.activeThreadId,
+        turnId
+      });
+    }
+  }, [state.activeThreadId, state.selectedBackendId, turnsNeedingReview]);
 
   // Providers the switcher may show: those reporting `available` or
   // `unauthenticated`. A provider with no usable integration (Codex CLI not
@@ -1639,24 +1645,22 @@ export function App(): JSX.Element {
   // The full-fidelity review paths. The workbench owns the diff and changes
   // views; the host serves the pre-turn side from the journal, so nothing is
   // computed or written here. Each falls back to a notice, never a throw.
-  const openChangeDiff = (path: string): void => {
-    const review = state.changeReview;
+  const openChangeDiff = (turnId: string, path: string): void => {
     const threadId = state.activeThreadId;
     const backendId = state.selectedBackendId;
-    if (!review || !threadId || !backendId) {
+    if (!threadId || !backendId) {
       return;
     }
-    bridge.post({ type: 'changes/openDiff', backendId, threadId, turnId: review.turnId, path });
+    bridge.post({ type: 'changes/openDiff', backendId, threadId, turnId, path });
   };
 
-  const openChangeView = (): void => {
-    const review = state.changeReview;
+  const openChangeView = (turnId: string): void => {
     const threadId = state.activeThreadId;
     const backendId = state.selectedBackendId;
-    if (!review || !threadId || !backendId) {
+    if (!threadId || !backendId) {
       return;
     }
-    bridge.post({ type: 'changes/openView', backendId, threadId, turnId: review.turnId });
+    bridge.post({ type: 'changes/openView', backendId, threadId, turnId });
   };
 
   const revealChangeInSourceControl = (absPath?: string): void => {
@@ -1669,14 +1673,14 @@ export function App(): JSX.Element {
    * host never overwrites silently, so this is the only way one is sent.
    */
   const postChangeDecision = (
+    turnId: string,
     target: { kind: 'file'; path: string } | { kind: 'all' },
     decision: 'accepted' | 'rejected',
     conflictResolution?: ConflictResolution
   ): void => {
-    const review = state.changeReview;
     const threadId = state.activeThreadId;
     const backendId = state.selectedBackendId;
-    if (!review || !threadId || !backendId) {
+    if (!threadId || !backendId) {
       return;
     }
     dispatch({ type: 'changeDeciding', value: true });
@@ -1685,7 +1689,7 @@ export function App(): JSX.Element {
         type: 'changes/decideAll',
         backendId,
         threadId,
-        turnId: review.turnId,
+        turnId,
         decision,
         ...(conflictResolution !== undefined ? { conflictResolution } : {})
       });
@@ -1695,32 +1699,31 @@ export function App(): JSX.Element {
       type: 'changes/decide',
       backendId,
       threadId,
-      turnId: review.turnId,
+      turnId,
       path: target.path,
       decision,
       ...(conflictResolution !== undefined ? { conflictResolution } : {})
     });
   };
 
-  const keepChange = (path: string): void => {
-    postChangeDecision({ kind: 'file', path }, 'accepted');
+  const keepChange = (turnId: string, path: string): void => {
+    postChangeDecision(turnId, { kind: 'file', path }, 'accepted');
   };
 
-  const resolveConflict = (path: string, resolution: ConflictResolution): void => {
+  const resolveConflict = (turnId: string, path: string, resolution: ConflictResolution): void => {
     // Any explicit choice is a reject against the file: keep-current records the
     // decision and writes nothing, overwrite-pre-turn restores the pre-turn bytes.
-    postChangeDecision({ kind: 'file', path }, 'rejected', resolution);
+    postChangeDecision(turnId, { kind: 'file', path }, 'rejected', resolution);
   };
 
-  const keepAll = (): void => {
-    postChangeDecision({ kind: 'all' }, 'accepted');
+  const keepAll = (turnId: string): void => {
+    postChangeDecision(turnId, { kind: 'all' }, 'accepted');
   };
 
-  const loadChangeHunks = (path: string): void => {
+  const loadChangeHunks = (turnId: string, path: string): void => {
     const backendId = state.selectedBackendId;
     const threadId = state.activeThreadId;
-    const turnId = state.changeReview?.turnId ?? state.changesTurnId;
-    if (!backendId || !threadId || !turnId) {
+    if (!backendId || !threadId) {
       return;
     }
     bridge.post({ type: 'changes/hunks', backendId, threadId, turnId, path });
@@ -1736,11 +1739,11 @@ export function App(): JSX.Element {
       return;
     }
     if (confirmation.scope === 'all') {
-      postChangeDecision({ kind: 'all' }, 'rejected');
+      postChangeDecision(confirmation.turnId, { kind: 'all' }, 'rejected');
     } else {
       const path = confirmation.paths[0];
       if (path) {
-        postChangeDecision({ kind: 'file', path }, 'rejected');
+        postChangeDecision(confirmation.turnId, { kind: 'file', path }, 'rejected');
       }
     }
   };
@@ -1947,6 +1950,56 @@ export function App(): JSX.Element {
 
   const chatEmpty = state.transcript.length === 0 && !state.restoring;
   const transcriptEntries = groupTranscript(state.transcript);
+  const visibleTurns = state.turnChanges.filter(
+    (turn) => (turn.review ? turn.review.files.length > 0 : turn.entries.length > 0)
+  );
+  const placedTurns = placeTurnChanges(state.transcript, visibleTurns, state.checkpoints ?? []);
+  const renderTurnCard = (turn: TurnChange): JSX.Element => {
+    const review = turn.review;
+    if (!review || review.files.length === 0) {
+      return (
+        <div className="turn-changes" key={turn.turnId}>
+          <ChangedFilesStrip entries={turn.entries} onOpenFile={openChangeFile} />
+        </div>
+      );
+    }
+    return (
+      <div className="turn-changes" key={turn.turnId}>
+        <ChangesReview
+          review={review}
+          busy={state.busy}
+          deciding={state.changeDeciding}
+          decisionResults={state.changeDecision?.results}
+          rejectConfirm={state.changeRejectConfirm?.turnId === review.turnId ? state.changeRejectConfirm : undefined}
+          onOpenFile={openChangeFile}
+          onOpenDiff={(path) => openChangeDiff(review.turnId, path)}
+          onOpenAllInEditor={() => openChangeView(review.turnId)}
+          onRevealInSourceControl={revealChangeInSourceControl}
+          onKeep={(path) => keepChange(review.turnId, path)}
+          onRequestReject={(scope, paths) =>
+            dispatch({ type: 'requestChangeRejectConfirmation', turnId: review.turnId, scope, paths })
+          }
+          onCancelReject={() => dispatch({ type: 'cancelChangeRejectConfirmation' })}
+          onConfirmReject={confirmChangeReject}
+          onKeepAll={() => keepAll(review.turnId)}
+          onResolveConflict={(path, resolution) => resolveConflict(review.turnId, path, resolution)}
+          onLoadHunks={(path) => loadChangeHunks(review.turnId, path)}
+        />
+      </div>
+    );
+  };
+  const cardsAfter = (entry: TranscriptEntry): JSX.Element[] => {
+    const cards: JSX.Element[] = [];
+    for (const [afterId, turns] of placedTurns.afterItem) {
+      if (!entryContains(entry, afterId)) {
+        continue;
+      }
+      for (const turn of turns) {
+        cards.push(renderTurnCard(turn));
+      }
+    }
+    return cards;
+  };
   const speakers = speakerRows(transcriptEntries, !state.busy);
   const elapsedNotes = turnElapsedNotes(transcriptEntries);
   const pinnedItem = pinnedUserId
@@ -2028,6 +2081,7 @@ export function App(): JSX.Element {
                   />
                 )}
                 {elapsed != null ? <p className="turn-elapsed">{formatWorked(elapsed)}</p> : null}
+                {cardsAfter(entry)}
               </Fragment>
             );
           })
@@ -2106,34 +2160,7 @@ export function App(): JSX.Element {
             The agent is paused until you answer above.
           </p>
         ) : null}
-        {state.changes && state.changes.length > 0 ? (
-          <ChangedFilesStrip
-            entries={state.changes}
-            files={state.changeReview && state.changeReview.turnId === state.changesTurnId ? state.changeReview.files : []}
-            onOpenFile={openChangeFile}
-          >
-            {state.changeReview && state.changeReview.files.length > 0 ? (
-              <ChangesReview
-                review={state.changeReview}
-                busy={state.busy}
-                deciding={state.changeDeciding}
-                decisionResults={state.changeDecision?.results}
-                rejectConfirm={state.changeRejectConfirm}
-                onOpenFile={openChangeFile}
-                onOpenDiff={openChangeDiff}
-                onOpenAllInEditor={openChangeView}
-                onRevealInSourceControl={revealChangeInSourceControl}
-                onKeep={keepChange}
-                onRequestReject={(scope, paths) => dispatch({ type: 'requestChangeRejectConfirmation', scope, paths })}
-                onCancelReject={() => dispatch({ type: 'cancelChangeRejectConfirmation' })}
-                onConfirmReject={confirmChangeReject}
-                onKeepAll={keepAll}
-                onResolveConflict={resolveConflict}
-                onLoadHunks={loadChangeHunks}
-              />
-            ) : null}
-          </ChangedFilesStrip>
-        ) : null}
+        {placedTurns.unplaced.map((turn) => renderTurnCard(turn))}
         <ContextStrip
           view={state.contextView}
           settingsEnabled={state.contextSettingsEnabled}
@@ -3293,6 +3320,16 @@ function noticeActionLabel(action: 'setToken' | 'clearToken' | 'refresh' | 'retr
   }
 }
 
+function entryContains(entry: TranscriptEntry, itemId: string): boolean {
+  if (entry.kind === 'item') {
+    return entry.item.id === itemId;
+  }
+  if (entry.kind === 'group') {
+    return entry.items.some((item) => item.id === itemId);
+  }
+  return entry.id === itemId || entry.message.id === itemId || entry.items.some((item) => item.id === itemId);
+}
+
 function TranscriptRow({
   item,
   providerId,
@@ -3345,7 +3382,7 @@ function TranscriptRow({
                 type="button"
                 className="checkpoint-restore"
                 aria-label="Restore to before this message"
-                title="Restore files, todos, and this chat to before this message was sent."
+                title="Restore this chat to before this message. This stays available after you keep a turn's files."
                 onClick={() => onRestore(checkpoint.messageId)}
               >
                 <RestoreIcon />
@@ -3510,20 +3547,28 @@ function reasoningSnippet(text: string): string {
   return plainRowText(text);
 }
 
+/** One dot, then two, then three, then none, then it repeats. */
+function ReasoningWaitDots(): JSX.Element {
+  return (
+    <span className="reasoning-wait" aria-hidden="true">
+      <span>.</span>
+      <span>.</span>
+      <span>.</span>
+    </span>
+  );
+}
+
 function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const text = item.text.trim();
   const label = item.title || 'Reasoning';
   const incomplete = item.status === 'failed' || item.status === 'canceled' || item.status === 'warning';
   const snippet = reasoningSnippet(text);
-  const preview =
-    snippet ||
-    (item.status === 'streaming'
-      ? 'Waiting for a reasoning summary…'
-      : incomplete
-        ? 'Thinking stopped early; this section may be incomplete.'
-        : '');
-  const showEllipsis = !expanded && Boolean(preview || !text);
+  const waiting = item.status === 'streaming' && !snippet;
+  const preview = waiting
+    ? ''
+    : snippet || (incomplete ? 'Thinking stopped early; this section may be incomplete.' : '');
+  const showEllipsis = !expanded && !waiting && Boolean(preview || !text);
   const toggle = (): void => setExpanded((value) => !value);
 
   return (
@@ -3537,6 +3582,7 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
       >
         <span className="reasoning-lead">
           <span className="meta-strong">{label}</span>
+          {waiting && !expanded ? <ReasoningWaitDots /> : null}
           {showEllipsis ? (
             <span className="reasoning-snippet__sep" aria-hidden="true">
               ...
@@ -3563,9 +3609,9 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
           {text ? (
             <Markdown text={item.text} />
           ) : item.status === 'streaming' ? (
-            <p className="reasoning-pending">Waiting for a reasoning summary…</p>
+            <ReasoningWaitDots />
           ) : null}
-          {item.status === 'streaming' ? <span className="caret" aria-hidden="true" /> : null}
+          {item.status === 'streaming' && text ? <span className="caret" aria-hidden="true" /> : null}
           {incomplete ? (
             <p className="reasoning-incomplete" role="status">
               Thinking stopped early; this section may be incomplete.

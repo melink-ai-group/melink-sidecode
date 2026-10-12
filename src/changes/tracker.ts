@@ -32,6 +32,8 @@ export interface TurnChangeSet {
   backendId: string;
   threadId: string;
   turnId: string;
+  /** The user message that opened the turn, when one was recorded. */
+  messageId?: string;
   entries: ChangeEntry[];
 }
 
@@ -175,6 +177,33 @@ export class ChangeTracker {
    * touched on an earlier step stays listed, and a path a later step restored
    * does not.
    */
+  /**
+   * One change set per observed turn that still has listed files, oldest first.
+   * A turn that observed nothing, or whose files are all omitted, is skipped
+   * so a reload cannot invent a card for it.
+   */
+  async observedSets(threadId: string): Promise<TurnChangeSet[]> {
+    const turns = [...this.journal.listTurns(threadId)].reverse();
+    const sets: TurnChangeSet[] = [];
+    for (const turn of turns) {
+      if (!turn.observed) {
+        continue;
+      }
+      const entries = (await this.listed(turn.files)).map(toChangeEntry);
+      if (entries.length === 0) {
+        continue;
+      }
+      sets.push({
+        backendId: turn.backendId,
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        ...(turn.messageId ? { messageId: turn.messageId } : {}),
+        entries
+      });
+    }
+    return sets;
+  }
+
   async sessionFor(threadId: string): Promise<TurnChangeSet | undefined> {
     const session = sessionChangeSet(this.journal.listTurns(threadId));
     if (!session) {
@@ -219,6 +248,7 @@ export class ChangeTracker {
       backendId: active.backendId,
       threadId: active.threadId,
       turnId: active.turnId,
+      ...(turn.messageId ? { messageId: turn.messageId } : {}),
       entries: (await this.listed(turn.files)).map(toChangeEntry)
     };
     for (const listener of this.listeners) {

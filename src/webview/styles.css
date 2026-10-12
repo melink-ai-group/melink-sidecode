@@ -1057,6 +1057,73 @@ html body {
   flex: 0 0 auto;
 }
 
+.reasoning-wait {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1.5em;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.reasoning-wait span {
+  opacity: 0;
+  animation-duration: 1.6s;
+  animation-timing-function: step-end;
+  animation-iteration-count: infinite;
+}
+
+.reasoning-wait span:nth-child(1) {
+  animation-name: reasoning-wait-dot-1;
+}
+
+.reasoning-wait span:nth-child(2) {
+  animation-name: reasoning-wait-dot-2;
+}
+
+.reasoning-wait span:nth-child(3) {
+  animation-name: reasoning-wait-dot-3;
+}
+
+@keyframes reasoning-wait-dot-1 {
+  0% {
+    opacity: 1;
+  }
+
+  75% {
+    opacity: 0;
+  }
+}
+
+@keyframes reasoning-wait-dot-2 {
+  0% {
+    opacity: 0;
+  }
+
+  25% {
+    opacity: 1;
+  }
+
+  75% {
+    opacity: 0;
+  }
+}
+
+@keyframes reasoning-wait-dot-3 {
+  0% {
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  75% {
+    opacity: 0;
+  }
+}
+
 .reasoning-snippet__text {
   flex: 1 1 auto;
   min-width: 0;
@@ -1232,6 +1299,11 @@ html body {
 @media (prefers-reduced-motion: reduce) {
   .caret {
     animation: none;
+  }
+
+  .reasoning-wait span {
+    animation: none;
+    opacity: 1;
   }
 }
 
@@ -5837,6 +5909,10 @@ button.context-meter:hover {
  * is carried by text plus an icon, never colour alone.
  */
 
+.turn-changes {
+  margin: 2px 0 10px;
+}
+
 .changes-review {
   min-width: 0;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
@@ -5940,6 +6016,14 @@ button.context-meter:hover {
   padding: 0;
   justify-content: center;
   overflow: hidden;
+}
+
+.changes-review__head .changes-review__icon-btn--danger {
+  color: var(--vscode-errorForeground);
+}
+
+.changes-review--kept .changes-review__title {
+  color: var(--vscode-descriptionForeground);
 }
 
 /* The check and diff paths sit inset in a 24px view box, so a 1:1 icon

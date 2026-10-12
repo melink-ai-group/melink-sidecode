@@ -69,6 +69,7 @@ import {
   isLoosePlanFile,
   mergeCheckboxStatuses,
   mergeReportedStepStatuses,
+  canonicalPlanPath,
   planDocumentFromReply,
   planRelativePath,
   planTitleFromFileName,
@@ -93,7 +94,7 @@ import { VscodeCheckpointStore } from './changes/vscodeCheckpoint';
 import { WorkspaceChangeWatcher } from './changes/vscodeChanges';
 import { NativeDiffService, type NativeDiffResult } from './changes/vscodeDiff';
 import { OPEN_CHANGE_DIFF_COMMAND, OPEN_TURN_CHANGES_COMMAND } from './changes/nativeDiff';
-import { ChangeTracker } from './changes/tracker';
+import { ChangeTracker, type TurnChangeSet } from './changes/tracker';
 import type { VscodeProjectContext } from './context/vscodeHost';
 import type {
   HostToWebviewMessage,
@@ -679,8 +680,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * something; a turn with no observation pushes nothing, so the UI never reads
    * silence as "the agent changed nothing".
    *
-   * The set is the whole thread, not this turn alone. A plan runs one turn per
-   * step, and the surface has to keep every step's files.
+   * The set is this turn alone. Earlier turns keep the cards already on screen.
    */
   private async finishChangeTurn(turnId: string): Promise<void> {
     // A terminus for a turn that already ended (a late event after this chat
@@ -695,46 +695,51 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!set) {
       return;
     }
-    const session = await this.changeTracker.sessionFor(set.threadId);
-    if (!session) {
-      return;
-    }
     // Only the active conversation's own turn is pushed: a background thread's
     // change set must not replace what the visible surface is showing.
-    if (this.activeThread?.backendId !== session.backendId || this.activeThread?.threadId !== session.threadId) {
+    if (this.activeThread?.backendId !== set.backendId || this.activeThread?.threadId !== set.threadId) {
       return;
     }
-    this.post({
-      type: 'changes/changed',
-      backendId: session.backendId,
-      threadId: session.threadId,
-      turnId: session.turnId,
-      entries: session.entries
-    });
+    this.postTurnChanged(set);
+    await this.postChangeReview(set.backendId, set.threadId, set.turnId);
     // A turn that just touched files makes its opening message a checkpoint, so
     // the per-message entry point offers it without waiting for a reload.
     await this.postCheckpoints(set.backendId, set.threadId);
   }
 
   /**
-   * Push the active thread's session change set, so a webview reload repaints
-   * every step, not only the latest turn. Nothing is pushed when the thread
-   * never observed a change, so a reload cannot manufacture a verified empty set.
+   * Push every surviving turn for the active thread, oldest first, after
+   * clearing the cards. A reload and a restore both go through here so a
+   * removed turn cannot linger and a later step cannot hide an earlier one.
    */
   private async postLatestChanges(): Promise<void> {
     const thread = this.activeThread;
     if (!thread) {
       return;
     }
-    const set = await this.changeTracker.sessionFor(thread.threadId);
-    if (!set) {
+    await this.postThreadChangeSets(thread.backendId, thread.threadId);
+  }
+
+  /** Replace the visible cards with one set per turn that still has files. */
+  private async postThreadChangeSets(backendId: string, threadId: string): Promise<void> {
+    if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
       return;
     }
+    const sets = await this.changeTracker.observedSets(threadId);
+    this.post({ type: 'changes/changed', backendId, threadId, turnId: '', entries: [] });
+    for (const set of sets) {
+      this.postTurnChanged(set);
+      await this.postChangeReview(set.backendId, set.threadId, set.turnId);
+    }
+  }
+
+  private postTurnChanged(set: TurnChangeSet): void {
     this.post({
       type: 'changes/changed',
       backendId: set.backendId,
       threadId: set.threadId,
       turnId: set.turnId,
+      ...(set.messageId ? { messageId: set.messageId } : {}),
       entries: set.entries
     });
   }
@@ -746,9 +751,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * never be left showing three different versions of the same turn.
    */
   private async postChangeReview(backendId: string, threadId: string, turnId: string): Promise<void> {
-    const review =
-      (await this.changeStore.viewSession(backendId, threadId)) ??
-      (await this.changeStore.view(backendId, threadId, turnId));
+    const review = await this.changeStore.view(backendId, threadId, turnId);
     if (!review) {
       return;
     }
@@ -771,9 +774,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   /** Hunk lines for one expanded row, capped so a large file cannot fill the sidebar. */
   private async postChangeHunks(backendId: string, threadId: string, turnId: string, path: string): Promise<void> {
-    const review =
-      (await this.changeStore.viewSession(backendId, threadId)) ??
-      (await this.changeStore.view(backendId, threadId, turnId));
+    const review = await this.changeStore.view(backendId, threadId, turnId);
     const file = review?.files.find((entry) => entry.path === path);
     if (!review || !file) {
       return;
@@ -1069,20 +1070,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private async writePlanRecord(record: CheckpointPlanRecord): Promise<void> {
     if (!record.state) {
+      const current = this.store.getPlanState(record.backendId, record.threadId);
+      await this.plans.remove(record.threadId, current?.path);
       await this.store.clearPlanState(record.backendId, record.threadId);
-      await this.plans.remove(record.threadId);
       return;
     }
     const steps = record.state.steps as TodoStep[];
-    await this.plans.write({
+    const written = await this.plans.write({
       threadId: record.threadId,
       title: record.state.title,
       summary: record.state.summary,
       body: record.state.body,
-      steps
+      steps,
+      path: record.state.path
     });
     await this.store.setPlanState(record.backendId, record.threadId, {
-      path: record.state.path,
+      path: written.path,
       title: record.state.title,
       summary: record.state.summary,
       body: record.state.body,
@@ -1130,24 +1133,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Repaint the change strip from the journal turns that survived a restore. */
+  /** Repaint one card per journal turn that survived a restore. */
   private async refreshChanges(backendId: string, threadId: string): Promise<void> {
     if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
       return;
     }
-    const set = await this.changeTracker.sessionFor(threadId);
-    if (!set) {
-      this.post({ type: 'changes/changed', backendId, threadId, turnId: '', entries: [] });
-      return;
-    }
-    this.post({
-      type: 'changes/changed',
-      backendId: set.backendId,
-      threadId: set.threadId,
-      turnId: set.turnId,
-      entries: set.entries
-    });
-    await this.postChangeReview(set.backendId, set.threadId, set.turnId);
+    await this.postThreadChangeSets(backendId, threadId);
   }
 
   /** Prefix the next provider turn once, then forget the note. */
@@ -3758,9 +3749,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Write or revise the active thread's plan file. The path is derived from the
-   * thread id, so this always updates the same file rather than creating a
-   * second plan. Creating the file is the one permitted write in Plan mode.
+   * Write or revise the active thread's plan file. The file name is the plan
+   * title. A chat that already has a plan updates that file. Creating the file
+   * is the one permitted write in Plan mode.
    */
   private async writePlan(
     title: string,
@@ -3772,8 +3763,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const { backendId, threadId } = this.activeThread;
-    const artifact = await this.plans.write({ threadId, title, summary, body, steps });
     const previous = this.store.getPlanState(backendId, threadId);
+    const artifact = await this.plans.write({
+      threadId,
+      title,
+      summary,
+      body,
+      steps,
+      path: previous?.path
+    });
     const completedDismissed = carriedPlanDismissal(artifact.steps, previous?.completedDismissed);
     const plan = { ...artifact, built: previous?.built ?? false, completedDismissed };
     await this.store.setPlanState(backendId, threadId, {
@@ -3822,7 +3820,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         title: existing?.title ?? 'Plan',
         body: existing?.body,
         summary: existing?.body ? existing.summary : (existing?.summary ?? explanation),
-        steps: nextSteps
+        steps: nextSteps,
+        path: existing?.path
       });
       const built = existing?.built ?? this.mode !== 'plan';
       const completedDismissed = carriedPlanDismissal(artifact.steps, existing?.completedDismissed);
@@ -3846,7 +3845,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     await this.store.setPlanState(backendId, threadId, {
-      path: existing?.path ?? planRelativePath(threadId),
+      path: canonicalPlanPath({
+        threadId,
+        title: existing?.title ?? 'Plan',
+        existingPath: existing?.path
+      }).path,
       title: existing?.title ?? 'Plan',
       summary: existing?.summary,
       body: existing?.body,
@@ -3921,8 +3924,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * and any plan that has steps but no body yet, is created here. A later
    * Plan-mode turn replaces that file only when the user asked for a revision.
    * When a native todo update already arrived this turn, those steps stay and
-   * the reply supplies the body. The path is derived from the thread id, so a
-   * revision updates the same file.
+   * the reply supplies the body. The file name is the plan title, and a
+   * revision updates that same file.
    */
   private async capturePlanFromReply(
     backendId: string,
@@ -3960,7 +3963,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       title,
       summary: draft.summary ?? existing?.summary,
       body: applyPlanDecisions(draft.body ?? existing?.body, this.planDecisions),
-      steps
+      steps,
+      path: existing?.path
     });
     const completedDismissed = carriedPlanDismissal(artifact.steps, existing?.completedDismissed);
     const plan = { ...artifact, built: existing?.built ?? false, completedDismissed };
@@ -4185,18 +4189,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const backendIds = ids.length > 0 ? ids : ['ollama', 'codex'];
     for (const backendId of backendIds) {
       for (const thread of this.store.listThreads(backendId)) {
-        paths.add(planRelativePath(thread.threadId));
         const state = this.store.getPlanState(backendId, thread.threadId);
-        if (state?.path) {
-          paths.add(state.path.replace(/\\/g, '/'));
-        }
+        paths.add((state?.path ?? planRelativePath(thread.threadId)).replace(/\\/g, '/'));
       }
     }
     for (const session of this.sessions) {
-      const threadId = session.activeThread?.threadId;
-      if (threadId) {
-        paths.add(planRelativePath(threadId));
+      const thread = session.activeThread;
+      if (!thread) {
+        continue;
       }
+      const state = this.store.getPlanState(thread.backendId, thread.threadId);
+      paths.add((state?.path ?? planRelativePath(thread.threadId)).replace(/\\/g, '/'));
     }
     return paths;
   }
@@ -4231,7 +4234,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return false;
     }
     const existing = this.store.getPlanState(thread.backendId, thread.threadId);
-    if (existing && existing.steps.length > 0) {
+    const threadPath = planRelativePath(thread.threadId);
+    const existingPath = existing?.path?.replace(/\\/g, '/');
+    // The thread-id file is the duplicate. Once the friendly plan exists, drop it.
+    if (relative === threadPath && existingPath && existingPath !== threadPath) {
+      await this.plans.remove(thread.threadId);
+      return false;
+    }
+    // A friendly file that just appeared replaces a thread-id plan. A chat that
+    // already tracks a different friendly plan stays.
+    const legacyHostFile = !existingPath || existingPath === threadPath || existingPath === relative;
+    if (existing && existing.steps.length > 0 && !legacyHostFile) {
       if (explicit) {
         this.post({
           type: 'notice',
@@ -4264,18 +4277,27 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           title: draft.title || 'Plan',
           summary: draft.summary,
           body: draft.body,
-          steps: draft.steps
+          steps: draft.steps,
+          path: relative
         });
-        const plan = { ...artifact, built: false as const };
+        const plan = {
+          ...artifact,
+          built: existing?.built ?? false,
+          completedDismissed: existing?.completedDismissed
+        };
         await this.store.setPlanState(thread.backendId, thread.threadId, {
           path: plan.path,
           title: plan.title,
           summary: plan.summary,
           body: plan.body,
           steps: plan.steps,
-          built: false,
+          built: plan.built,
+          completedDismissed: plan.completedDismissed,
           updatedAt: plan.updatedAt
         });
+        if (existingPath && existingPath !== plan.path) {
+          await this.plans.remove(thread.threadId, existingPath === threadPath ? undefined : existingPath);
+        }
         this.post({ type: 'plan', plan });
         this.publishPlanDocument(plan, true);
         this.post({
@@ -4298,8 +4320,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private adoptExternalPlanFile(uri: vscode.Uri): void {
     const relative = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
     const session = this.sessions.find((entry) => {
-      const threadId = entry.activeThread?.threadId;
-      return threadId !== undefined && planRelativePath(threadId) === relative;
+      const thread = entry.activeThread;
+      if (!thread) {
+        return false;
+      }
+      const state = this.store.getPlanState(thread.backendId, thread.threadId);
+      const owned = (state?.path ?? planRelativePath(thread.threadId)).replace(/\\/g, '/');
+      return owned === relative;
     });
     const thread = session?.activeThread;
     if (!session || !thread) {
@@ -4315,7 +4342,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!existing?.built || existing.steps.length === 0) {
       return;
     }
-    const artifact = await this.plans.read(threadId);
+    const artifact = await this.plans.read(threadId, existing.path);
     if (!artifact) {
       return;
     }
@@ -4362,7 +4389,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       title: existing.title,
       summary: existing.summary,
       body: existing.body,
-      steps
+      steps,
+      path: existing.path
     });
     const completedDismissed = carriedPlanDismissal(artifact.steps, existing.completedDismissed);
     const plan = {
@@ -4396,7 +4424,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private planArtifact(backendId: string, threadId: string): PlanArtifact {
     const state = this.store.getPlanState(backendId, threadId);
     return {
-      path: state?.path ?? planRelativePath(threadId),
+      path: canonicalPlanPath({
+        threadId,
+        title: state?.title ?? 'Plan',
+        existingPath: state?.path
+      }).path,
       title: state?.title ?? 'Plan',
       summary: state?.summary,
       body: state?.body,

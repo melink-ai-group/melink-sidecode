@@ -639,9 +639,9 @@ export interface TodoStep {
 }
 
 /**
- * A plan written to the workspace for one thread. The path is stable and
- * per-thread (derived from the thread id, never the raw prompt), so a revision
- * updates the same file rather than creating a second plan.
+ * A plan written to the workspace for one thread. The path is the friendly
+ * file name from the plan title. Once chosen, a revision updates that same
+ * file rather than creating a second plan.
  */
 export interface PlanArtifact {
   /** Workspace-relative path the plan markdown was written to. */

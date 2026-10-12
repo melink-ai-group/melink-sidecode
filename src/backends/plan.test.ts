@@ -14,8 +14,11 @@ import {
   planArtifactFromMarkdown,
   isLoosePlanFile,
   planDocumentFromReply,
+  canonicalPlanPath,
   planFileName,
   planRelativePath,
+  planRelativePathForTitle,
+  planSlugFromTitle,
   planTitleFromFileName,
   recoverPlanDraft,
   planStepsFromReply,
@@ -49,6 +52,42 @@ test('a plan lives at one path derived from the thread id, never the prompt', ()
   assert.equal(first, planRelativePath('thread-abc'));
   // A different thread gets a different file.
   assert.notEqual(first, planRelativePath('thread-def'));
+});
+
+test('a new plan file uses the title, and a later write keeps that file', () => {
+  assert.equal(planSlugFromTitle('Acme Board Status and Location'), 'acme-board-status-and-location');
+  assert.equal(
+    planRelativePathForTitle('Acme Board Status and Location'),
+    `${PLAN_DIRECTORY}/acme-board-status-and-location.md`
+  );
+  assert.equal(planSlugFromTitle(''), 'plan');
+  const created = canonicalPlanPath({
+    threadId: '01a10c52-6f1d-7802-af48-7a3542a6b586',
+    title: 'Acme board status and location'
+  });
+  assert.equal(created.path, `${PLAN_DIRECTORY}/acme-board-status-and-location.md`);
+  assert.equal(created.retire, undefined);
+  const legacy = canonicalPlanPath({
+    threadId: '01a10c52-6f1d-7802-af48-7a3542a6b586',
+    title: 'Acme board status and location',
+    existingPath: planRelativePath('01a10c52-6f1d-7802-af48-7a3542a6b586')
+  });
+  assert.equal(legacy.path, created.path);
+  assert.equal(legacy.retire, planRelativePath('01a10c52-6f1d-7802-af48-7a3542a6b586'));
+  const kept = canonicalPlanPath({
+    threadId: '01a10c52-6f1d-7802-af48-7a3542a6b586',
+    title: 'A different title',
+    existingPath: created.path
+  });
+  assert.equal(kept.path, created.path);
+  assert.equal(kept.retire, undefined);
+  const named = canonicalPlanPath({
+    threadId: '01a10c52-6f1d-7802-af48-7a3542a6b586',
+    title: 'Acme board status and location',
+    existingPath: `${PLAN_DIRECTORY}/plan.md`
+  });
+  assert.equal(named.path, created.path);
+  assert.equal(named.retire, `${PLAN_DIRECTORY}/plan.md`);
 });
 
 test('a new unbuilt plan opens once; a built plan or a repeat does not', () => {

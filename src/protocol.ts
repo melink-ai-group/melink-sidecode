@@ -407,18 +407,23 @@ export type HostToWebviewMessage =
       workspaceRoots?: string[];
     }
   /**
-   * The files the thread has changed, pushed on turn end and on webview reload.
+   * The files one turn changed, pushed when that turn ends and again on reload.
    *
-   * `entries` is the net of every observed turn in the thread, not only `turnId`.
-   * A plan runs one turn per step, and a later step must not hide the files an
-   * earlier step wrote. `turnId` is the newest observed turn, which is the turn
-   * the review snapshot is addressed by. An empty array means the host verified
-   * the thread nets to no file changes (a real no-op), never that it failed to
-   * observe. When no change could be observed at all, the host sends no
-   * `changes/changed` message rather than an empty one, so the UI never
-   * mistakes silence for a verified no-op.
+   * `entries` are this turn only. A later turn does not replace an earlier
+   * turn's files. `messageId` is the user message that opened the turn, so the
+   * card can sit on that turn. An empty `turnId` clears every card for the
+   * thread (a restore that left nothing, or the reload that is about to
+   * repost each surviving turn). An empty `entries` array for a real turn id
+   * is that turn's verified no-op and does not erase other turns.
    */
-  | { type: 'changes/changed'; backendId: string; threadId: string; turnId: string; entries: ChangeEntry[] }
+  | {
+      type: 'changes/changed';
+      backendId: string;
+      threadId: string;
+      turnId: string;
+      messageId?: string;
+      entries: ChangeEntry[];
+    }
   /**
    * The post-hoc review snapshot for a turn: every recorded file, its diff, and
    * the decisions made so far. Pushed through one helper so the change-review
