@@ -668,9 +668,20 @@ export function reduce(state: AppState, action: Action): AppState {
       };
     case 'conversation': {
       const replay = action.replay ? action.replay.map(toTranscriptItemView(action.backendId)) : [];
-      const pendingUser = action.keepPendingUserMessage
-        ? [...state.transcript].reverse().find((item) => item.kind === 'message' && item.role === 'user' && item.id.startsWith('local_'))
-        : undefined;
+      const localUser = [...state.transcript]
+        .reverse()
+        .find((item) => item.kind === 'message' && item.role === 'user' && item.id.startsWith('local_'));
+      const sameChat =
+        Boolean(action.threadId) &&
+        action.threadId === state.activeThreadId &&
+        action.backendId === state.selectedBackendId;
+      const replayHasUser =
+        localUser != null &&
+        replay.some((item) => item.kind === 'message' && item.role === 'user' && item.text === localUser.text);
+      // A send that is still only on screen must survive a repaint of this chat.
+      // A rate-limit failure reloads history that does not contain the message yet.
+      const pendingUser =
+        localUser && !replayHasUser && (action.keepPendingUserMessage || sameChat) ? localUser : undefined;
       // Exactly one pending prompt per request: drop any replayed
       // `approval-requested` card that is not the still-open request, then
       // re-inject the live one so a reload can never show none or two.

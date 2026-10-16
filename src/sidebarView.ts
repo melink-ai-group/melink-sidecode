@@ -2894,16 +2894,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
     }
     if (!sent && origin === 'user') {
-      this.holdUnsent(text, attachments);
+      // The bubble is already on screen. A rate limit or any other failed send
+      // leaves it there and only restores the composer so the text can be sent again.
+      this.holdUnsent(text, attachments, undefined, true);
     }
     this.flushQueuedTurns();
   }
 
   /**
-   * The send was not stored. Put the text back on this tab and, when `notice`
-   * is set, keep that warning with the tab across switches.
+   * The send did not start a turn. Put the text back on this tab and, when
+   * `notice` is set, keep that warning with the tab across switches.
+   * `keepMessage` leaves the chat bubble in place. A usage-limit failure is
+   * one of those: the words the user sent stay visible above the error.
    */
-  private holdUnsent(text: string, attachments: Attachment[] | undefined, notice?: string): void {
+  private holdUnsent(
+    text: string,
+    attachments: Attachment[] | undefined,
+    notice?: string,
+    keepMessage = false
+  ): void {
     const session = this.session;
     if (!session) {
       if (notice) {
@@ -2920,7 +2929,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       session.heldNotice = { level: 'info', message: notice };
       this.post({ type: 'notice', level: 'info', message: notice });
     }
-    this.post({ type: 'revertLocalSend', text });
+    if (!keepMessage) {
+      this.post({ type: 'revertLocalSend', text });
+    }
     void this.postComposerDraft(session);
   }
 

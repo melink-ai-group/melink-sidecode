@@ -1248,6 +1248,25 @@ test('an info notice stays in the transcript where it happened', () => {
   assert.equal(continued.notice, undefined);
 });
 
+test('a usage limit leaves the user message in the chat', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
+  const sent = reduce(active, { type: 'localUserMessage', text: 'fix the ring' });
+  const message = "You've hit your usage limit. Try again at 11:00 AM.";
+  const failed = reduce(sent, {
+    type: 'agentEvent',
+    event: { type: 'error', backendId: 'codex', threadId: 't1', message, recoverable: true, code: 'provider' }
+  });
+  assert.equal(failed.transcript.some((item) => item.role === 'user' && item.text === 'fix the ring'), true);
+  assert.equal(failed.transcript.some((item) => item.text === message), true);
+  const repainted = reduce(failed, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 't1',
+    replay: []
+  });
+  assert.equal(repainted.transcript.some((item) => item.role === 'user' && item.text === 'fix the ring'), true);
+});
+
 test('the same provider failure is one status line, and Retry can clear it', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
   const busy = reduce(active, { type: 'busy', value: true, backendId: 'codex', threadId: 't1' });
