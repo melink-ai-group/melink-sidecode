@@ -20,13 +20,13 @@ export const PINNED_CODEX_VERSION = '0.156.1';
 /**
  * The range of server versions this pin is known to interoperate with, as
  * `major`/`minor` numbers. The window spans the previously verified pin
- * (`0.154.0`) through `0.160.x` (Codex app-server `0.160.1`). A patch inside
+ * (`0.154.0`) through `0.163.x` (Codex app-server `0.163.0`). A patch inside
  * that window is accepted; a minor bump past it is reported precisely instead
  * of silently wedging. The checked-in `schemas/` remain generated from the pin.
  */
 export const SUPPORTED_CODEX_MAJOR = 0;
 export const SUPPORTED_CODEX_MINOR_MIN = 154;
-export const SUPPORTED_CODEX_MINOR_MAX = 160;
+export const SUPPORTED_CODEX_MINOR_MAX = 163;
 
 /** A parsed `major.minor.patch`, with the exact server-reported text kept. */
 export interface CodexVersion {
@@ -94,9 +94,36 @@ export function isSupportedCodexVersion(version: CodexVersion | string | undefin
 }
 
 /**
- * The human-readable protocol window, e.g. `0.154.0–0.160.x`, used in the
+ * The human-readable protocol window, e.g. `0.154.0–0.163.x`, used in the
  * plain-language `incompatible` status so the drift is named, not just detected.
  */
 export function supportedCodexVersionRange(): string {
   return `${SUPPORTED_CODEX_MAJOR}.${SUPPORTED_CODEX_MINOR_MIN}.0–${SUPPORTED_CODEX_MAJOR}.${SUPPORTED_CODEX_MINOR_MAX}.x`;
+}
+
+/**
+ * Sentence appended to an out-of-range status so the chat warning names the
+ * recovery: Settings → Codex → Validate version.
+ */
+export const CODEX_VERSION_VALIDATION_HINT =
+  'Open Settings, select the Codex provider, and use Validate version.';
+
+/**
+ * Whether a server version may be used: it is inside the built-in window, or
+ * it is an exact `major.minor.patch` a successful Validate version run stored.
+ * An unparseable version is never accepted, including when it appears in the
+ * stored list.
+ */
+export function isAcceptedCodexVersion(
+  version: CodexVersion | string | undefined,
+  allowedVersions: readonly string[] = []
+): boolean {
+  if (isSupportedCodexVersion(version)) {
+    return true;
+  }
+  const parsed = typeof version === 'string' ? parseCodexVersion(version) : version;
+  if (!parsed) {
+    return false;
+  }
+  return allowedVersions.some((entry) => parseCodexVersion(entry)?.raw === parsed.raw);
 }

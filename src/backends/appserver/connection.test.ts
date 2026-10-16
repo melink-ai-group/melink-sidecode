@@ -207,8 +207,78 @@ test('an out-of-range server version reports incompatible with the version', asy
     assert.ok(error instanceof ServerVersionMismatchError);
     assert.equal(error.kind, 'incompatible');
     assert.equal(error.reportedVersion, '9.9.9');
+    assert.match(error.message, /Validate version/);
     return true;
   });
+});
+
+function versionedConnection(
+  allowedVersions?: readonly string[],
+  acceptOutOfRangeVersion = false
+): AppServerConnection {
+  return new AppServerConnection({
+    executable: 'codex',
+    cwd: process.cwd(),
+    startTimeoutMs: 2_000,
+    ...(allowedVersions ? { allowedVersions } : {}),
+    ...(acceptOutOfRangeVersion ? { acceptOutOfRangeVersion: true } : {}),
+    spawnImpl: (() => {
+      const emitter = new EventEmitter();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      Object.assign(emitter, {
+        pid: 1,
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        stdin,
+        stdout,
+        stderr,
+        kill: () => {
+          (emitter as unknown as { exitCode: number | null }).exitCode = 0;
+          emitter.emit('close', 0);
+          return true;
+        }
+      });
+      stdin.on('data', (chunk: Buffer) => {
+        const parsed = JSON.parse(chunk.toString());
+        if (parsed.method === 'initialize') {
+          setTimeout(() => {
+            stdout.write(
+              `${JSON.stringify({
+                id: parsed.id,
+                result: {
+                  userAgent: 'melink-agent-sidebar/9.9.9 (Windows; x86_64) (melink-agent-sidebar; 0.1.0)',
+                  codexHome: '/home/x/.codex',
+                  platformFamily: 'unix',
+                  platformOs: 'linux'
+                }
+              })}\n`
+            );
+          }, 5);
+        }
+      });
+      stdin.on('end', () => {
+        (emitter as unknown as { exitCode: number | null }).exitCode = 0;
+        emitter.emit('close', 0);
+      });
+      return emitter as unknown as ChildProcessWithoutNullStreams;
+    }) as unknown as typeof import('node:child_process').spawn
+  });
+}
+
+test('a previously validated version is allowed through the handshake', async () => {
+  const connection = versionedConnection(['9.9.9']);
+  const result = await connection.start();
+  assert.match(result.userAgent, /9\.9\.9/);
+  await connection.dispose();
+});
+
+test('the version probe can handshake an out-of-range server without allowing it', async () => {
+  const connection = versionedConnection(undefined, true);
+  const result = await connection.start();
+  assert.match(result.userAgent, /9\.9\.9/);
+  await connection.dispose();
 });
 
 test('only an early close is worth retrying with the next form', () => {

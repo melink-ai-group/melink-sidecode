@@ -278,6 +278,19 @@ test('a finished turn puts its duration on the last row, including a steer', () 
   assert.equal(notes.has('u1'), false);
 });
 
+test('a later message keeps the earlier duration where that turn ended', () => {
+  const entries = groupTranscript([
+    row({ id: 'u1', kind: 'message', role: 'user', text: 'look', sentAt: 1_700_000_000_000, workedMs: 110_000 }),
+    row({ id: 'a1', kind: 'message', role: 'assistant', text: 'Looking.' }),
+    row({ id: 'u2', kind: 'message', role: 'user', text: 'next', sentAt: 1_700_000_012_000 }),
+    row({ id: 'a2', kind: 'message', role: 'assistant', text: 'Still going.' })
+  ]);
+  const notes = turnElapsedNotes(entries);
+  assert.equal(notes.get('a1'), 110_000);
+  assert.equal(notes.has('a2'), false);
+  assert.equal(notes.has('u2'), false);
+});
+
 test('an unknown tool is its own line and splits the neighbors', () => {
   const entries = groupTranscript([
     row({ id: 'r1', title: 'Reading a.ts' }),

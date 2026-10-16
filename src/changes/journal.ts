@@ -380,6 +380,8 @@ interface PendingTurn {
   startedAt: number;
   /** Candidate paths in workspace order, mapped to their pre-turn snapshot. */
   before: Map<string, FileSnapshot | null>;
+  /** Canonical path key to the absolute path used for display and reads. */
+  display: Map<string, string>;
   /**
    * Paths a backend report or the watcher named during the turn, with how it was
    * learned and any status hint. Kept separate from `before` on purpose: a
@@ -440,11 +442,14 @@ export class ChangeJournal {
       // shape, still accepted so existing callers need no change.
       const candidates = input.candidates ?? input.candidatePaths ?? [];
       const before = new Map<string, FileSnapshot | null>();
+      const display = new Map<string, string>();
       for (const candidate of candidates) {
-        if (!workspaceRelative(candidate, roots) || (await this.ignored(candidate))) {
+        const key = canonicalAbsPath(candidate);
+        if (display.has(key) || !workspaceRelative(candidate, roots) || (await this.ignored(candidate))) {
           continue;
         }
-        before.set(candidate, await this.snapshot(candidate));
+        display.set(key, candidate);
+        before.set(key, await this.snapshot(candidate));
       }
       const startedAt = input.startedAt ?? this.now();
       this.pending.set(input.turnId, {
@@ -453,6 +458,7 @@ export class ChangeJournal {
         backendId: input.backendId,
         startedAt,
         before,
+        display,
         observations: new Map(),
         // A pre-seeded candidate is not an observation: it only gives the diff a
         // real before side. `observed` is set only when a report or the watcher
@@ -505,13 +511,18 @@ export class ChangeJournal {
       if (!pending) {
         return;
       }
-      if (!workspaceRelative(absPath, this.fs.workspaceRoots()) || (await this.ignored(absPath))) {
+      const path = canonicalAbsPath(absPath);
+      if (!pending.display.has(path)) {
+        pending.display.set(path, absPath);
+      }
+      const shown = pending.display.get(path) ?? absPath;
+      if (!workspaceRelative(shown, this.fs.workspaceRoots()) || (await this.ignored(shown))) {
         return;
       }
       // Never snapshot here: a watcher fires after the write, so snapshotting
       // now would record the post-change content as the "before". A path with no
       // pre-turn candidate is recovered from the reported diff or replacement.
-      const existing = pending.observations.get(absPath);
+      const existing = pending.observations.get(path);
       const diffs = existing?.diffs.slice() ?? [];
       if (diff && diff.trim().length > 0 && diffs[diffs.length - 1] !== diff) {
         diffs.push(diff);
@@ -542,7 +553,7 @@ export class ChangeJournal {
         (detail?.beforeText !== undefined && detail.beforeText !== existing.beforeText) ||
         (detail?.afterText !== undefined && detail.afterText !== existing.afterText);
       if (changed) {
-        pending.observations.set(absPath, {
+        pending.observations.set(path, {
           source: nextSource,
           ...(nextStatus !== undefined ? { status: nextStatus } : {}),
           diffs,
@@ -585,18 +596,22 @@ export class ChangeJournal {
       for (const path of pending.observations.keys()) {
         afterKeys.add(path);
       }
-      for (const path of afterPaths) {
-        if (workspaceRelative(path, roots) && !(await this.ignored(path))) {
+      for (const raw of afterPaths) {
+        const path = canonicalAbsPath(raw);
+        if (!pending.display.has(path)) {
+          pending.display.set(path, raw);
+        }
+        const shown = pending.display.get(path) ?? raw;
+        if (workspaceRelative(shown, roots) && !(await this.ignored(shown))) {
           afterKeys.add(path);
         }
       }
       const after = new Map<string, FileSnapshot | null>();
       for (const path of afterKeys) {
-        after.set(path, await this.snapshot(path));
+        after.set(path, await this.snapshot(pending.display.get(path) ?? path));
       }
 
       const { drafts, bytes } = await this.buildDrafts(pending, after);
-      drafts.sort((a, b) => (a.entry.relPath < b.entry.relPath ? -1 : a.entry.relPath > b.entry.relPath ? 1 : 0));
 
       const index = this.loadIndex();
       const turn = index.turns.find((entry) => entry.turnId === turnId);
@@ -1106,15 +1121,16 @@ export class ChangeJournal {
     }
 
     const roots = this.fs.workspaceRoots();
+    const shown = (key: string): string => pending.display.get(key) ?? key;
     const drafts: Draft[] = [];
     const usedAfter = new Set<string>();
 
     for (const path of modified) {
       const b = before.get(path) as FileSnapshot;
       const a = after.get(path) as FileSnapshot;
-      const relPath = workspaceRelative(path, roots)?.relPath ?? toPosix(path);
+      const relPath = workspaceRelative(shown(path), roots)?.relPath ?? toPosix(shown(path));
       drafts.push({
-        entry: this.entryFor({ absPath: path, relPath, source: sourceOf(pending, path), beforeHash: b.hash, afterHash: a.hash, sizeBytes: a.size, binary: b.binary || a.binary }),
+        entry: this.entryFor({ absPath: shown(path), relPath, source: sourceOf(pending, path), beforeHash: b.hash, afterHash: a.hash, sizeBytes: a.size, binary: b.binary || a.binary }),
         before: b,
         after: a
       });
@@ -1129,14 +1145,14 @@ export class ChangeJournal {
         drafts.push({
           entry: {
             ...this.entryFor({
-              absPath: to,
-              relPath: workspaceRelative(to, roots)?.relPath ?? toPosix(to),
+              absPath: shown(to),
+              relPath: workspaceRelative(shown(to), roots)?.relPath ?? toPosix(shown(to)),
               source: sourceOf(pending, from, to),
               beforeHash: b.hash,
               afterHash: a.hash,
               sizeBytes: a.size,
               binary: b.binary || a.binary,
-              renamedFrom: workspaceRelative(from, roots)?.relPath ?? toPosix(from)
+              renamedFrom: workspaceRelative(shown(from), roots)?.relPath ?? toPosix(shown(from))
             }),
             status: 'renamed'
           },
@@ -1147,8 +1163,8 @@ export class ChangeJournal {
         drafts.push({
           entry: {
             ...this.entryFor({
-              absPath: from,
-              relPath: workspaceRelative(from, roots)?.relPath ?? toPosix(from),
+              absPath: shown(from),
+              relPath: workspaceRelative(shown(from), roots)?.relPath ?? toPosix(shown(from)),
               source: sourceOf(pending, from),
               beforeHash: b.hash,
               sizeBytes: b.size,
@@ -1169,8 +1185,8 @@ export class ChangeJournal {
       drafts.push({
         entry: {
           ...this.entryFor({
-            absPath: path,
-            relPath: workspaceRelative(path, roots)?.relPath ?? toPosix(path),
+            absPath: shown(path),
+            relPath: workspaceRelative(shown(path), roots)?.relPath ?? toPosix(shown(path)),
             source: sourceOf(pending, path),
             afterHash: a.hash,
             sizeBytes: a.size,
@@ -1206,10 +1222,10 @@ export class ChangeJournal {
             bytes: beforeBytes
           };
           if (beforeSnap.hash !== a.hash) {
-            const relPath = workspaceRelative(path, roots)?.relPath ?? toPosix(path);
+            const relPath = workspaceRelative(shown(path), roots)?.relPath ?? toPosix(shown(path));
             drafts.push({
               entry: this.entryFor({
-                absPath: path,
+                absPath: shown(path),
                 relPath,
                 source: observation.source,
                 beforeHash: beforeSnap.hash,
@@ -1227,8 +1243,8 @@ export class ChangeJournal {
       drafts.push({
         entry: {
           ...this.entryFor({
-            absPath: path,
-            relPath: workspaceRelative(path, roots)?.relPath ?? toPosix(path),
+            absPath: shown(path),
+            relPath: workspaceRelative(shown(path), roots)?.relPath ?? toPosix(shown(path)),
             source: observation?.source ?? 'watched',
             afterHash: status === 'deleted' ? undefined : a?.hash,
             sizeBytes: a?.size ?? 0,
@@ -1242,9 +1258,20 @@ export class ChangeJournal {
       });
     }
 
+    const uniqueDrafts = new Map<string, Draft>();
+    for (const draft of drafts) {
+      const key = relPathKey(draft.entry.relPath);
+      const existing = uniqueDrafts.get(key);
+      if (!existing || draftRank(draft) > draftRank(existing)) {
+        uniqueDrafts.set(key, draft);
+      }
+    }
+    const unique = [...uniqueDrafts.values()];
+    unique.sort((a, b) => (a.entry.relPath < b.entry.relPath ? -1 : a.entry.relPath > b.entry.relPath ? 1 : 0));
+
     let bytes = 0;
-    for (let i = 0; i < drafts.length; i += 1) {
-      const draft = drafts[i];
+    for (let i = 0; i < unique.length; i += 1) {
+      const draft = unique[i];
       const { entry } = draft;
       // A side is storable only when the content is text and within the cap.
       // The entry is inline-able only when every side it represents is storable,
@@ -1267,7 +1294,7 @@ export class ChangeJournal {
         bytes += draft.after.bytes.length;
       }
     }
-    return { drafts, bytes };
+    return { drafts: unique, bytes };
   }
 
   /** Build a draft entry with the shared fields filled, status `modified`. */
@@ -1599,6 +1626,27 @@ function sourceOf(pending: PendingTurn, ...paths: string[]): ChangeSource {
 
 export function toPosix(path: string): string {
   return path.replace(/\\/g, '/');
+}
+
+/**
+ * One identity for an absolute path. Slash style never makes two keys, and on
+ * Windows neither does letter case, so a report and a watcher event for the
+ * same file stay one observation.
+ */
+export function canonicalAbsPath(absPath: string): string {
+  const posix = stripTrailingSlash(toPosix(absPath));
+  return process.platform === 'win32' ? posix.toLowerCase() : posix;
+}
+
+/** Identity of a workspace-relative path, matching `canonicalAbsPath`. */
+export function relPathKey(relPath: string): string {
+  const posix = toPosix(relPath).replace(/^\.\//, '').replace(/^\/+/, '');
+  return process.platform === 'win32' ? posix.toLowerCase() : posix;
+}
+
+/** Prefer a draft that has real before and after bytes over a second alias of the same file. */
+function draftRank(draft: Draft): number {
+  return (draft.before ? 2 : 0) + (draft.after ? 1 : 0);
 }
 
 function stripTrailingSlash(path: string): string {

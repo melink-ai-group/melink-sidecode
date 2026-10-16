@@ -39,7 +39,7 @@ import {
 } from './questions';
 import { overridesFromResolved, resolveModelSettings, sanitizeOverrides } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
-import { compactedSummary, compactedTranscript, compactionSource } from './backends/compaction';
+import { compactionSource } from './backends/compaction';
 import {
   continueAfterStopInstruction,
   isMissingThreadError,
@@ -1214,6 +1214,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.type === 'setOllamaToken' ||
           message.type === 'clearOllamaToken' ||
           message.type === 'testConnection' ||
+          message.type === 'validateCodexVersion' ||
+          message.type === 'showAppSettings' ||
           message.type === 'upgradeOpencode' ||
           message.type === 'installOpencode' ||
           message.type === 'setZvecGrep' ||
@@ -1660,6 +1662,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       message.type === 'chatTabs' ||
       message.type === 'showSettings' ||
       message.type === 'settings' ||
+      message.type === 'codexVersionCheck' ||
       message.type === 'dictationStatus' ||
       message.type === 'dictationCleaned' ||
       message.type === 'dictationError' ||
@@ -1860,6 +1863,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'testConnection':
         this.post({ type: 'connectionTest', result: await this.settings.testConnection(message.backendId) });
         break;
+      case 'showAppSettings':
+        this.post({ type: 'showSettings', ...(message.section ? { section: message.section } : {}) });
+        break;
+      case 'validateCodexVersion': {
+        this.post({ type: 'codexVersionCheck', pending: true });
+        const checked = await this.settings.validateCodexVersion();
+        if (checked.ok) {
+          const availability = await this.registry.refresh();
+          this.post({ type: 'snapshot', availability });
+          this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        }
+        this.post({
+          type: 'codexVersionCheck',
+          pending: false,
+          ok: checked.ok,
+          message: checked.message
+        });
+        break;
+      }
       case 'upgradeOpencode': {
         this.post({ type: 'opencodeUpgrade', pending: true });
         const upgraded = await this.settings.upgradeOpencode();
@@ -2393,6 +2415,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // still open on the old thread is abandoned with it.
     this.pendingApproval = undefined;
     const previous = this.activeThread;
+    // The chat the user is looking at. A provider switch copies it onto the
+    // new thread so the transcript stays the conversation, while the model
+    // receives only the summary.
+    const carriedHistory =
+      handover?.trim() && previous ? this.store.getTranscript(previous.backendId, previous.threadId) : undefined;
     if (previous) {
       await this.registry.endThreadSession(previous.backendId, previous.threadId);
       this.contextDelivery.forget(ContextDelivery.key(previous.backendId, previous.threadId));
@@ -2426,9 +2453,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           this.session.composerModelId = chosenModel;
         }
       }
-      const seeded = handover?.trim() ? compactedTranscript(handover) : undefined;
-      if (seeded) {
-        this.store.setTranscript(backendId, handle.threadId, seeded);
+      const carried = carriedHistory && carriedHistory.length > 0 ? carriedHistory : undefined;
+      if (carried) {
+        this.store.setTranscript(backendId, handle.threadId, carried);
       }
       if (handover?.trim() && previous) {
         const plan = this.store.getPlanState(previous.backendId, previous.threadId);
@@ -2442,11 +2469,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         modelId: model ?? handle.model,
         mode,
         updatedAt: Date.now(),
-        ...(handover?.trim() ? { handoverSummary: handover.trim() } : {})
+        ...(handover?.trim() ? { handoverSummary: handover.trim() } : {}),
+        ...(carried ? { handoverHistoryCount: carried.length } : {})
       });
       await this.store.setLastUsedModel({ backendId, modelId: model ?? handle.model ?? '' });
       if (notify) {
-        const history = seeded ? this.openHistory(seeded) : undefined;
+        const history = carried ? this.openHistory(carried) : undefined;
         this.post({
           type: 'conversation',
           backendId,
@@ -2732,15 +2760,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.publishTabs();
       }
       const storedItems = this.store.getTranscript(backendId, threadId);
-      const source =
-        result.items.length > 0
-          ? withStoredUserIds(
-              ref?.handoverSummary && !compactedSummary(result.items)
-                ? [...compactedTranscript(ref.handoverSummary), ...result.items]
-                : result.items,
-              storedItems
-            )
-          : storedItems;
+      const carriedCount = ref?.handoverHistoryCount ?? 0;
+      const carried = carriedCount > 0 ? storedItems.slice(0, carriedCount) : [];
+      const tailStored = carriedCount > 0 ? storedItems.slice(carriedCount) : storedItems;
+      const tail = result.items.length > 0 ? withStoredUserIds(result.items, tailStored) : tailStored;
+      const source = carried.length > 0 ? [...carried, ...tail] : result.items.length > 0 ? tail : storedItems;
       const history = this.openHistory(
         this.store.mergeApprovalMarkers(backendId, threadId, source),
         Boolean(result.hasOlderHistory)
@@ -2916,11 +2940,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return undefined;
     }
     this.post({ type: 'busy', value: true });
-    this.post({
-      type: 'notice',
-      level: 'info',
-      message: 'Compacting this chat so it can continue on the other provider.'
-    });
     try {
       const modelSettings = await this.resolveTurnSettings(thread.backendId, thread.model);
       const summary = await backend.summarize({
@@ -3109,6 +3128,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     updatePlan?: boolean,
     origin: 'user' | 'autopilot' | 'continue' = 'user'
   ): Promise<boolean> {
+    const openedAt = Date.now();
     const automatic = origin === 'autopilot';
     const continuing = origin === 'continue';
     if (this.session) {
@@ -3153,8 +3173,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return false;
     }
     // A model pick only updates the webview. A different provider continues
-    // this chat: the current transcript is compacted, and that summary is the
-    // next thread's opening context. An empty chat just opens a thread.
+    // this chat: the transcript stays on screen, and a summary of it is the
+    // next thread's model context. An empty chat just opens a thread.
     let handover: string | undefined;
     if (this.activeThread && this.activeThread.backendId !== candidateBackend) {
       const summary = await this.compactHandover(this.activeThread);
@@ -3214,7 +3234,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!automatic) {
       await this.dismissCompletedPlan(activeBackendId, threadId);
     }
-    const messageId = await this.store.appendUserMessage(activeBackendId, threadId, text, persisted);
+    const messageId = await this.store.appendUserMessage(
+      activeBackendId,
+      threadId,
+      text,
+      persisted,
+      true,
+      openedAt
+    );
     const indexed = this.store.listThreads(activeBackendId).find((entry) => entry.threadId === threadId);
     const title = historyThreadTitle(indexed?.title, text);
     await this.store.setActiveThread({

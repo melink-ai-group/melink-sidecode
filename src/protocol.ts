@@ -336,13 +336,18 @@ export type HostToWebviewMessage =
    */
   | { type: 'composerDraft'; tabId: string; text: string; attachments: Attachment[] }
   | { type: 'settings'; settings: SettingsSnapshot }
-  /** Open the inline settings screen. Sent from the view-title gear. */
-  | { type: 'showSettings' }
+  /**
+   * Open the inline settings screen. Sent from the view-title gear.
+   * `section: 'codex'` opens the Codex provider page, used by the protocol warning.
+   */
+  | { type: 'showSettings'; section?: 'codex' }
   | { type: 'permissions'; permissions: PermissionSnapshot }
   | { type: 'modes'; modes: ModeSnapshot }
   /** The active conversation's plan, whenever it is created or revised. */
   | { type: 'plan'; plan: PlanArtifact }
   | { type: 'connectionTest'; result: ConnectionTestResult }
+  /** Result of Validate version. `pending` is true while the checks are still running. */
+  | { type: 'codexVersionCheck'; pending: boolean; ok?: boolean; message?: string }
   /** Result of `opencode upgrade`. `pending` is true while the CLI is still running. */
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   /**
@@ -505,6 +510,8 @@ export type WebviewToHostMessage =
   /** Open a context file in the editor (the active file named in the strip). */
   | { type: 'openContextFile'; path: string }
   | { type: 'openSettings' }
+  /** Open the sidebar's own settings screen. `section: 'codex'` selects the Codex provider. */
+  | { type: 'showAppSettings'; section?: 'codex' }
   | { type: 'setToken'; backendId: string }
   | { type: 'clearToken'; backendId: string }
   | { type: 'listModels'; backendId: string }
@@ -585,6 +592,11 @@ export type WebviewToHostMessage =
   | { type: 'setOllamaToken'; value: string }
   | { type: 'clearOllamaToken' }
   | { type: 'testConnection'; backendId: string }
+  /**
+   * Run the Codex protocol checks. The host answers with `codexVersionCheck`,
+   * and stores the version when the checks pass.
+   */
+  | { type: 'validateCodexVersion' }
   /** Run `opencode upgrade` when the CLI is connected. */
   | { type: 'upgradeOpencode' }
   /** Download and install the opencode CLI when it was not detected. */

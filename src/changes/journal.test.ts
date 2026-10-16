@@ -104,6 +104,22 @@ test('a turn records one entry with per-file before/after hashes and statuses', 
   assert.equal(bytesToText(await store.getAfter('t1', 'a.ts')), 'two');
 });
 
+test('two spellings of one path record a single file', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/board.py', text('before\n'));
+  const store = journal(fs);
+
+  await store.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'codex', candidates: ['/ws/board.py'] });
+  fs.files.set('/ws/board.py', text('after\n'));
+  await store.observe('t1', '/ws/board.py', 'reported', 'modified');
+  await store.observe('t1', '\\ws\\board.py', 'watched', 'modified');
+  await store.endTurn('t1');
+
+  const files = store.getTurn('t1')?.files ?? [];
+  assert.equal(files.length, 1);
+  assert.equal(files[0]?.relPath, 'board.py');
+});
+
 test('turn metadata lives in workspaceState while content lives in the blob store', async () => {
   const fs = new FakeFs();
   fs.files.set('/ws/a.ts', text('secret-body-content'));

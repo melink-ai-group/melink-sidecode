@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChangeJournal, type JournalFs, type JournalStorage } from './journal.ts';
-import { ChangeStore } from './changeStore.ts';
+import { ChangeStore, dedupeChangeFiles, type ChangeFileView } from './changeStore.ts';
 
 /**
  * A fake that is both the journal's fs seam and the store's workspace fs seam,
@@ -90,6 +90,34 @@ async function turnModified(fs: FakeFs, before: string, after: string): Promise<
   await journal.endTurn('t1');
   return journal;
 }
+
+test('duplicate paths collapse to one row', () => {
+  const row = (path: string, additions: number, deletions: number, decision: ChangeFileView['decision']): ChangeFileView => ({
+    absPath: `/ws/${path}`,
+    path,
+    status: 'modified',
+    source: 'reported',
+    binary: false,
+    diffable: true,
+    additions,
+    deletions,
+    decision,
+    hunks: []
+  });
+  const files = dedupeChangeFiles([
+    row('backend/app/services/board_paths.py', 3, 0, 'pending'),
+    row('backend/app/services/board_paths.py', 8, 6, 'accepted'),
+    row('frontend/src/components/board/Milestones.tsx', 1, 1, 'accepted'),
+    row('frontend/src/components/board/Milestones.tsx', 1, 1, 'accepted')
+  ]);
+  assert.deepEqual(
+    files.map((file) => [file.path, file.additions, file.decision]),
+    [
+      ['backend/app/services/board_paths.py', 8, 'accepted'],
+      ['frontend/src/components/board/Milestones.tsx', 1, 'accepted']
+    ]
+  );
+});
 
 test('every file and hunk defaults to pending with no decision made', async () => {
   const fs = new FakeFs();

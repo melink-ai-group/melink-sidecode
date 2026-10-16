@@ -152,6 +152,28 @@ test('a later tool start fills the command without opening a second card', () =>
   assert.notEqual(updated.transcript[0]?.command, 'completed');
 });
 
+test('a later turn keeps the earlier duration and records its own', () => {
+  const firstSent = Date.now() - 20_000;
+  const secondSent = Date.now() - 5_000;
+  const active = reduce(initialState, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 't',
+    replay: [
+      { id: 'u1', kind: 'message', role: 'user', text: 'one', sentAt: firstSent, workedMs: 12_000, status: 'completed' },
+      { id: 'a1', kind: 'message', role: 'assistant', text: 'done', status: 'completed' },
+      { id: 'u2', kind: 'message', role: 'user', text: 'two', sentAt: secondSent, status: 'completed' }
+    ]
+  });
+  const done = reduce(active, {
+    type: 'agentEvent',
+    event: { type: 'turn/completed', backendId: 'codex', threadId: 't', turnId: 'turn_2' }
+  });
+  assert.equal(done.transcript[0]?.workedMs, 12_000);
+  const second = done.transcript[2]?.workedMs ?? -1;
+  assert.ok(second >= 5_000 && second < 15_000);
+});
+
 test('a finished turn records how long it ran from the user message', () => {
   const sentAt = Date.now() - 110_000;
   const active = reduce(initialState, {
@@ -434,6 +456,34 @@ test('a provider handover keeps the optimistic user line after the compacted rep
   assert.equal(bound.transcript.length, 3);
   assert.equal(bound.transcript[1]?.text, 'Keep the plan.');
   assert.equal(bound.transcript[2]?.text, 'continue over there');
+});
+
+test('a provider switch replays the chat the user had and keeps the message they sent', () => {
+  const open = reduce(initialState, {
+    type: 'conversation',
+    backendId: 'ollama',
+    threadId: 'old',
+    replay: [
+      { id: 'u0', kind: 'message', role: 'user', text: 'fix the ring', status: 'completed' },
+      { id: 'a0', kind: 'message', role: 'assistant', text: 'I started the ring.', status: 'completed' }
+    ]
+  });
+  const sent = reduce(open, { type: 'localUserMessage', text: 'continue over there' });
+  const bound = reduce(sent, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 'codex_thread',
+    keepPendingUserMessage: true,
+    replay: [
+      { id: 'u0', kind: 'message', role: 'user', text: 'fix the ring', status: 'completed' },
+      { id: 'a0', kind: 'message', role: 'assistant', text: 'I started the ring.', status: 'completed' }
+    ]
+  });
+  assert.equal(bound.transcript.map((item) => item.text).join('\n'), 'fix the ring\nI started the ring.\ncontinue over there');
+  assert.equal(
+    bound.transcript.some((item) => item.text?.includes('Compacting this chat')),
+    false
+  );
 });
 
 test('switching conversation clears a failure banner from the previous chat', () => {

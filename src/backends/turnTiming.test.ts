@@ -33,6 +33,21 @@ test('a finished turn is measured from the user message that opened it', () => {
   assert.equal(stampTurnWorked(stamped, sentAt + 200_000)[2]?.workedMs, 110_000);
 });
 
+test('each sent message keeps its own duration', () => {
+  const items = [
+    user('user_1', { sentAt }),
+    { id: 'a1', kind: 'message', role: 'assistant' },
+    user('user_2', { sentAt: sentAt + 12_000 }),
+    { id: 'a2', kind: 'message', role: 'assistant' }
+  ];
+  const stamped = stampTurnWorked(items, sentAt + 20_000);
+  assert.equal(stamped[0]?.workedMs, 12_000);
+  assert.equal(stamped[2]?.workedMs, 8_000);
+  const again = stampTurnWorked(stamped, sentAt + 50_000);
+  assert.equal(again[0]?.workedMs, 12_000);
+  assert.equal(again[2]?.workedMs, 8_000);
+});
+
 test('a start time has to be a real timestamp on the message', () => {
   assert.equal(messageSentAt({ sentAt }), sentAt);
   assert.equal(messageSentAt({ sentAt: 1 }), undefined);

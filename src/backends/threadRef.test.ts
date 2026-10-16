@@ -9,6 +9,7 @@ interface SampleRef {
   mode?: 'agent';
   opencodeSessionId?: string;
   handoverSummary?: string;
+  handoverHistoryCount?: number;
 }
 
 test('refreshing a thread keeps the opencode session and a codex thread id', () => {
@@ -53,4 +54,11 @@ test('refreshing a thread keeps the compaction handover', () => {
   });
   assert.equal(refreshed.handoverSummary, 'Keep the plan.');
   assert.equal(refreshed.title, 'Hello again');
+
+  const carried = mergeThreadRef(
+    { ...refreshed, handoverHistoryCount: 4 },
+    { backendId: 'codex', threadId: 'thr_codex', title: 'Still going' }
+  );
+  assert.equal(carried.handoverSummary, 'Keep the plan.');
+  assert.equal(carried.handoverHistoryCount, 4);
 });

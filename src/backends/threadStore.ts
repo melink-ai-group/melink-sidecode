@@ -40,6 +40,12 @@ export interface PersistedThreadRef {
    * earlier turns.
    */
   handoverSummary?: string;
+  /**
+   * How many leading transcript items were copied from the previous provider
+   * so the chat stays on screen. The model receives `handoverSummary` instead
+   * of those items.
+   */
+  handoverHistoryCount?: number;
 }
 
 export interface LastUsedModel {
@@ -314,10 +320,10 @@ export class ThreadStore implements vscode.Disposable {
     threadId: string,
     text: string,
     attachments?: TranscriptItem['attachments'],
-    opensTurn = true
+    opensTurn = true,
+    sentAt = Date.now()
   ): string {
     const stored = this.getTranscript(backendId, threadId);
-    const sentAt = Date.now();
     const item: TranscriptItem = {
       id: `user_${sentAt}_${stored.length}`,
       kind: 'message',

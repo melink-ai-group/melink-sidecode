@@ -23,36 +23,39 @@ export function messageSentAt(item: { sentAt?: number }): number | undefined {
 }
 
 /**
- * Record the elapsed time on the user message that opened the turn still in
- * progress. A later user message in the same turn (a steer) does not move the
- * start. A turn that already has a duration is left alone.
+ * Record each turn's elapsed time on the user message that opened it.
+ * A message without a start time (a steer or a mid-turn answer) stays in the
+ * turn already open. A duration already stored is left alone, so a later turn
+ * cannot stretch an earlier one.
  */
 export function stampTurnWorked<T extends TimedTurnItem>(items: readonly T[], endedAt: number): T[] {
-  let opening = -1;
+  const openers: number[] = [];
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
-    if (!item || item.kind !== 'message' || item.role !== 'user') {
+    if (!item || item.kind !== 'message' || item.role !== 'user' || messageSentAt(item) == null) {
       continue;
     }
-    if (item.workedMs != null) {
-      opening = -1;
-      continue;
-    }
-    if (messageSentAt(item) == null) {
-      continue;
-    }
-    if (opening === -1) {
-      opening = index;
-    }
+    openers.push(index);
   }
-  const item = opening === -1 ? undefined : items[opening];
-  const sentAt = item ? messageSentAt(item) : undefined;
-  if (!item || sentAt == null) {
-    return items as T[];
+  let next: T[] | undefined;
+  for (let cursor = 0; cursor < openers.length; cursor += 1) {
+    const index = openers[cursor];
+    const item = items[index];
+    const sentAt = item ? messageSentAt(item) : undefined;
+    if (!item || sentAt == null || item.workedMs != null) {
+      continue;
+    }
+    const following = cursor + 1 < openers.length ? items[openers[cursor + 1] ?? -1] : undefined;
+    const end = following ? messageSentAt(following) : endedAt;
+    if (end == null) {
+      continue;
+    }
+    if (!next) {
+      next = items.slice();
+    }
+    next[index] = { ...item, sentAt, workedMs: Math.max(0, end - sentAt) };
   }
-  const next = items.slice();
-  next[opening] = { ...item, sentAt, workedMs: Math.max(0, endedAt - sentAt) };
-  return next;
+  return next ?? (items as T[]);
 }
 
 /** "Worked for 1m 50s", "Worked for 2h 43m", or "Worked for 12s". */

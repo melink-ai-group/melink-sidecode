@@ -60,6 +60,7 @@ import {
 } from './appserver/reportedChanges';
 import { logDiagnostic } from './diagnostics';
 import { AppServerConnection, ConnectionError } from './appserver/connection';
+import { CODEX_VERSION_VALIDATION_HINT } from './appserver/version';
 import { isServerOverloaded, JsonRpcError } from './appserver/jsonrpc';
 import {
   authFailureMessage,
@@ -231,7 +232,8 @@ export class CodexBackend implements AgentBackend {
 
   constructor(
     private readonly store?: ThreadStore,
-    private readonly approvals?: ApprovalStore
+    private readonly approvals?: ApprovalStore,
+    private readonly allowedVersions: () => readonly string[] = () => []
   ) {}
 
   /**
@@ -364,8 +366,8 @@ export class CodexBackend implements AgentBackend {
           backendId: this.id,
           outcome: 'provider',
           message: failure.version
-            ? `The Codex CLI reports version ${failure.version}, outside the supported protocol range. Update or re-pin the extension, then test again.`
-            : 'The Codex CLI started but did not answer the pinned handshake. Update the CLI or the extension, then test again.'
+            ? `The Codex CLI reports version ${failure.version}, outside the supported protocol range. ${CODEX_VERSION_VALIDATION_HINT}`
+            : `The Codex CLI started but did not answer the pinned handshake. ${CODEX_VERSION_VALIDATION_HINT}`
         };
       }
       return {
@@ -1034,6 +1036,7 @@ export class CodexBackend implements AgentBackend {
       executable: this.executable,
       cwd: this.cwd,
       startTimeoutMs: START_TIMEOUT_MS,
+      allowedVersions: this.allowedVersions(),
       // Diagnostics only: records which argument form started, so an argument
       // drift is visible rather than falling silently into `unavailable`.
       log: logDiagnostic
