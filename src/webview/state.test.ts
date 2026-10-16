@@ -292,6 +292,9 @@ test('switching chats applies that chat\'s mode to the mode menu', () => {
   assert.equal(planned.mode, 'plan');
   assert.equal(planned.modeOptions?.selected, 'plan');
   assert.equal(planned.selectedModel, 'gpt-6');
+  const switched = reduce(planned, { type: 'conversation', backendId: 'ollama', threadId: 'ollama_thread' });
+  assert.equal(switched.selectedBackendId, 'ollama');
+  assert.equal(switched.selectedModel, undefined);
 });
 
 test('attachments accumulate, dedupe by path, and remove one chip at a time', () => {

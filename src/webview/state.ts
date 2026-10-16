@@ -692,7 +692,11 @@ export function reduce(state: AppState, action: Action): AppState {
         action.pendingApproval
       );
       const nextTranscript = pendingUser ? [...transcript, pendingUser] : transcript;
-      const nextModel = action.model ?? state.selectedModel;
+      // A provider change must not keep the previous provider's model. That
+      // pairing sent an Ollama Cloud model to the Codex thread left open
+      // after a compaction failure.
+      const providerChanged = action.backendId !== state.selectedBackendId;
+      const nextModel = action.model ?? (providerChanged ? undefined : state.selectedModel);
       const activityKey = action.threadId ? `${action.backendId}:${action.threadId}` : undefined;
       const changedModel = nextModel !== state.selectedModel;
       return {
