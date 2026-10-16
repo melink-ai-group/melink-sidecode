@@ -6,6 +6,7 @@ import { AlertIcon, BackIcon, CheckIcon, CrossIcon, InfoIcon } from './Icons';
 import { summarizeOpencodeCliOutput } from '../backends/opencode/upgradeText';
 import { opencodeRuntimeView } from './runtimeStatus';
 import { contextPatternError } from '../context/contextSettings';
+import { CODEX_VERSION_VALIDATION_HINT } from '../backends/appserver/version.ts';
 import { TabList, TabPanel, type TabItem } from './Tabs';
 
 /**
@@ -50,6 +51,10 @@ export interface SettingsScreenProps {
   onSaveToken: (value: string) => void;
   onClearToken: () => void;
   onTestConnection: (backendId: string) => void;
+  /** Set when the protocol warning opened settings, so the Codex page is selected. */
+  settingsProvider?: 'codex';
+  codexVersionCheck?: { pending: boolean; ok?: boolean; message?: string };
+  onValidateCodexVersion: () => void;
   opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
   onUpgradeOpencode: () => void;
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
@@ -113,6 +118,9 @@ export function SettingsScreen({
   onSaveToken,
   onClearToken,
   onTestConnection,
+  settingsProvider,
+  codexVersionCheck,
+  onValidateCodexVersion,
   opencodeUpgrade,
   onUpgradeOpencode,
   opencodeInstall,
@@ -135,7 +143,9 @@ export function SettingsScreen({
   const [tab, setTab] = useState<'providers' | 'defaults' | 'context' | 'skills'>('providers');
   // Ollama and Codex are separate pages inside Providers. The choice is view
   // state only; it does not touch the draft.
-  const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-codex'>('provider-ollama');
+  const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-codex'>(
+    settingsProvider === 'codex' ? 'provider-codex' : 'provider-ollama'
+  );
   const backRef = useRef<HTMLButtonElement>(null);
   const lastSettingsRef = useRef<SettingsSnapshot | undefined>(undefined);
 
@@ -165,6 +175,12 @@ export function SettingsScreen({
   useEffect(() => {
     backRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (settingsProvider === 'codex') {
+      setProviderTab('provider-codex');
+    }
+  }, [settingsProvider]);
 
   const update = <K extends keyof Draft>(key: K, value: Draft[K]): void => {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
@@ -737,7 +753,36 @@ export function SettingsScreen({
                   <RefreshIconInline />
                   {connectionTest?.backendId === 'codex' && connectionTest.pending ? 'Testing...' : 'Test connection'}
                 </button>
+                {settings.codex.status === 'incompatible' ? (
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={codexVersionCheck?.pending}
+                    onClick={onValidateCodexVersion}
+                  >
+                    {codexVersionCheck?.pending ? 'Validating...' : 'Validate version'}
+                  </button>
+                ) : null}
               </div>
+              {settings.codex.status === 'incompatible' ? (
+                <p className="field-help">
+                  Checks this CLI against the protocol SideCode uses. A version that passes is allowed.
+                </p>
+              ) : null}
+              {codexVersionCheck && !codexVersionCheck.pending && codexVersionCheck.message ? (
+                <div
+                  className={`test-result ${codexVersionCheck.ok ? 'test-result--ok' : 'test-result--error'}`}
+                  role={codexVersionCheck.ok ? 'status' : 'alert'}
+                >
+                  {codexVersionCheck.ok ? <CheckIcon /> : <AlertIcon />}
+                  <div className="test-body">
+                    <div className="test-title">
+                      {codexVersionCheck.ok ? 'Version allowed' : 'Version still unsupported'}
+                    </div>
+                    <div className="test-text">{codexVersionCheck.message}</div>
+                  </div>
+                </div>
+              ) : null}
 
               {codexStatus ? <TestResult backendLabel="Codex" test={codexStatus} onRetry={() => onTestConnection('codex')} /> : null}
             </div>
@@ -1390,7 +1435,7 @@ function codexAuthDetail(settings: SettingsSnapshot): string {
   if (settings.codex.status === 'incompatible') {
     return (
       settings.codex.detail ??
-      'The Codex CLI is installed but its protocol version is not supported. Update the CLI, or update the extension (its pinned protocol bindings), then test again.'
+      `The Codex CLI is installed but its protocol version is not supported. ${CODEX_VERSION_VALIDATION_HINT}`
     );
   }
   if (settings.codex.status === 'auth-mismatch') {

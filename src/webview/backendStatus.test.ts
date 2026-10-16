@@ -30,6 +30,11 @@ test('an incompatible server carries the version and is actionable', () => {
   assert.match(view.detail, /9\.9\.9/);
 });
 
+test('an incompatible server without a detail names Validate version', () => {
+  const view = backendStatusView(availability({ status: 'incompatible', version: '9.9.9' }));
+  assert.match(view.detail, /Validate version/);
+});
+
 test('only incompatible providers are listed for the notice', () => {
   const list = [
     availability({ status: 'available' }),

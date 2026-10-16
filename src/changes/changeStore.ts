@@ -1,6 +1,6 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import { filterListedFiles, listedForReview, reviewSources, workspaceRootOf } from './ignore.ts';
-import type { JournalFileEntry, JournalStorage, JournalTurn } from './journal';
+import { relPathKey, type JournalFileEntry, type JournalStorage, type JournalTurn } from './journal.ts';
 import { applyRejectedHunks, diffLines, type DiffLine } from './diff.ts';
 import { hashBytes } from './hash.ts';
 
@@ -243,11 +243,12 @@ export class ChangeStore {
     for (const entry of await filterListedFiles(turn.files, (path) => this.fs.readFile(path))) {
       files.push(await this.fileView(turn.turnId, entry, decisions));
     }
-    const additions = files.reduce((sum, file) => sum + file.additions, 0);
-    const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+    const unique = dedupeChangeFiles(files);
+    const additions = unique.reduce((sum, file) => sum + file.additions, 0);
+    const deletions = unique.reduce((sum, file) => sum + file.deletions, 0);
     const fullyDecided =
-      files.length > 0 &&
-      files.every(
+      unique.length > 0 &&
+      unique.every(
         (file) => file.decision !== 'pending' && file.hunks.every((hunk) => hunk.decision !== 'pending')
       );
     return {
@@ -255,7 +256,7 @@ export class ChangeStore {
       threadId,
       turnId: turn.turnId,
       ...(turn.messageId ? { messageId: turn.messageId } : {}),
-      files,
+      files: unique,
       additions,
       deletions,
       fullyDecided
@@ -305,17 +306,25 @@ export class ChangeStore {
    */
   async decide(input: DecideChangeInput): Promise<ChangeDecisionResult> {
     const turn = this.reviewedTurn(input.turnId);
-    const entry = turn?.files.find((file) => file.relPath === toPosixRel(input.relPath));
+    const wanted = relPathKey(toPosixRel(input.relPath));
+    const matches = (turn?.files ?? []).filter((file) => relPathKey(file.relPath) === wanted);
+    const entry = matches[0];
     if (!turn || !entry || !(await this.listedFile(entry))) {
       return { relPath: input.relPath, decision: 'pending', ok: false, error: 'That file is no longer part of this turn.' };
     }
 
     if (input.decision === 'accepted') {
-      await this.record({
-        ...input,
-        decision: 'accepted',
-        contentKey: contentKey(entry)
-      });
+      for (const match of matches) {
+        if (!(await this.listedFile(match))) {
+          continue;
+        }
+        await this.record({
+          ...input,
+          relPath: match.relPath,
+          decision: 'accepted',
+          contentKey: contentKey(match)
+        });
+      }
       return { relPath: entry.relPath, decision: 'accepted', ok: true };
     }
 
@@ -334,7 +343,13 @@ export class ChangeStore {
       return [];
     }
     const results: ChangeDecisionResult[] = [];
+    const seen = new Set<string>();
     for (const entry of await filterListedFiles(turn.files, (path) => this.fs.readFile(path))) {
+      const key = relPathKey(entry.relPath);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
       results.push(
         await this.decide({
           backendId: input.backendId,
@@ -620,6 +635,27 @@ export class ChangeStore {
     this.cache = map;
     await this.storage.update(CHANGE_DECISIONS_KEY, map);
   }
+}
+
+/**
+ * One row per path. A report and a watcher event can record the same file twice
+ * when their path spellings differ. Keep the decided row, then the larger diff.
+ */
+export function dedupeChangeFiles(files: readonly ChangeFileView[]): ChangeFileView[] {
+  const byPath = new Map<string, ChangeFileView>();
+  for (const file of files) {
+    const key = relPathKey(file.path);
+    const existing = byPath.get(key);
+    if (!existing || changeFileRank(file) > changeFileRank(existing)) {
+      byPath.set(key, file);
+    }
+  }
+  return files.filter((file) => byPath.get(relPathKey(file.path)) === file);
+}
+
+function changeFileRank(file: ChangeFileView): number {
+  const decided = file.decision === 'pending' ? 0 : 1;
+  return decided * 1_000_000 + file.additions + file.deletions;
 }
 
 /** A workspace-relative path in the journal's POSIX spelling. */

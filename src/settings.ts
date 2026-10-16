@@ -18,6 +18,7 @@ import {
 } from './backends/opencode/status';
 import { applyZvecGrep, detectZvecGrep, type ZvecGrepApplyResult, type ZvecGrepStatus } from './backends/opencode/zvecGrep';
 import { browserLaunchError } from './browser/skill.ts';
+import { validateInstalledCodex, type CodexVersionCheckResult } from './backends/codex/versionCheckRun.ts';
 import { browserSkillEnabled } from './browser/policy.ts';
 import {
   CONTEXT_SECTION,
@@ -411,6 +412,31 @@ export class SettingsService {
       return { ok: false, message: 'opencode is not connected. Check the path, then try again.' };
     }
     return upgradeOpencode(path);
+  }
+
+  /**
+   * Run the Codex protocol checks against the configured CLI. A passing version
+   * outside the built-in window is stored so the next connection allows it.
+   * Never throws, and never returns a credential.
+   */
+  async validateCodexVersion(): Promise<CodexVersionCheckResult> {
+    const executable = vscode.workspace.getConfiguration(CODEX_SECTION).get<string>('path', 'codex') || 'codex';
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    try {
+      const result = await validateInstalledCodex({
+        executable,
+        cwd: folder ? folder.uri.fsPath : process.cwd()
+      });
+      if (result.ok && result.version) {
+        await this.registry.allowCodexVersion(result.version);
+      }
+      return result;
+    } catch {
+      return {
+        ok: false,
+        message: 'The Codex version check did not finish. Try again.'
+      };
+    }
   }
 
   async testConnection(backendId: string): Promise<ConnectionTestResult> {

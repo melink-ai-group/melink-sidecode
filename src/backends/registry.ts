@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { CodexBackend } from './codex';
+import { ValidatedCodexVersions } from './codex/validatedVersions';
 import { OllamaBackend } from './ollama';
 import { ApprovalStore } from './approvalStore';
 import { ThreadStore } from './threadStore';
@@ -40,6 +41,7 @@ export class BackendRegistry implements Disposable {
   private readonly store: ThreadStore;
   private readonly approvals: ApprovalStore;
   private readonly settings: ModelSettingsStore;
+  private readonly codexVersions: ValidatedCodexVersions;
   /**
    * Capability descriptors read from a provider, keyed `providerId:modelId`.
    * Dropped on every refresh so a provider-side change is re-read rather than
@@ -58,9 +60,10 @@ export class BackendRegistry implements Disposable {
     this.store = new ThreadStore(context);
     this.approvals = new ApprovalStore(context);
     this.settings = new ModelSettingsStore(context.globalState);
+    this.codexVersions = new ValidatedCodexVersions(context.globalState);
     this.backends = [
       new OllamaBackend(context, this.store, this.approvals),
-      new CodexBackend(this.store, this.approvals)
+      new CodexBackend(this.store, this.approvals, () => this.codexVersions.list())
     ];
     for (const backend of this.backends) {
       this.disposables.push(
@@ -83,6 +86,15 @@ export class BackendRegistry implements Disposable {
   /** Durable state shared with the view so it can restore across reloads. */
   get threads(): ThreadStore {
     return this.store;
+  }
+
+  /**
+   * Remember one Codex version that passed Validate version. Later connections
+   * treat that exact version as allowed. A version already inside the built-in
+   * window is not stored.
+   */
+  allowCodexVersion(version: string): Promise<void> {
+    return this.codexVersions.allow(version).then(() => undefined);
   }
 
   /** Per-backend status for the UI. Never throws. */

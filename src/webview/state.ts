@@ -16,7 +16,7 @@ import type {
   TranscriptItemKind
 } from '../backends/types';
 import { cleanToolTarget, isStatusText } from '../backends/toolLabel.ts';
-import { stampTurnWorked } from '../backends/turnTiming.ts';
+import { messageSentAt, stampTurnWorked } from '../backends/turnTiming.ts';
 import { tokensFromText } from '../backends/contextUsage.ts';
 import { carriedPlanDismissal, shouldDismissCompletedPlan } from '../backends/plan.ts';
 import { estimateConversationTokens } from './modelControls.ts';
@@ -174,6 +174,10 @@ export interface AppState {
   notice?: { level: 'info' | 'warning' | 'error'; message: string; action?: NoticeAction };
   /** True while the settings screen is open (inline surface, never a popover). */
   settingsOpen: boolean;
+  /** Provider page to select when settings opens from the protocol warning. */
+  settingsProvider?: 'codex';
+  /** Result of Validate version, or a pending marker while the checks run. */
+  codexVersionCheck?: { pending: boolean; ok?: boolean; message?: string };
   /** The settings read model, present once the host has answered `getSettings`. */
   settings?: SettingsSnapshot;
   /**
@@ -273,7 +277,7 @@ export type Action =
   | { type: 'selectBackend'; backendId: string }
   | { type: 'selectModel'; model: string }
   | { type: 'agentEvent'; event: AgentEvent }
-  | { type: 'localUserMessage'; text: string; attachments?: Attachment[] }
+  | { type: 'localUserMessage'; text: string; attachments?: Attachment[]; opensTurn?: boolean }
   /** Replace the optimistic user bubble id with the host message id. */
   | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string; sentAt?: number }
   /** Remove the optimistic user bubble when the host did not accept the send. */
@@ -325,7 +329,7 @@ export type Action =
   | { type: 'attachmentError'; message: string }
   | { type: 'dismissAttachmentError' }
   | { type: 'refresh' }
-  | { type: 'openSettings' }
+  | { type: 'openSettings'; provider?: 'codex' }
   | { type: 'closeSettings' }
   | { type: 'settings'; settings: SettingsSnapshot }
   | { type: 'permissions'; permissions: PermissionSnapshot }
@@ -350,6 +354,7 @@ export type Action =
   | { type: 'closeRules' }
   | { type: 'connectionTestPending'; backendId: string }
   | { type: 'connectionTest'; result: ConnectionTestResult }
+  | { type: 'codexVersionCheck'; pending: boolean; ok?: boolean; message?: string }
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   | { type: 'opencodeInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   | { type: 'zvecGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
@@ -601,10 +606,20 @@ export function reduce(state: AppState, action: Action): AppState {
       if (!item) {
         return state;
       }
+      const existing = messageSentAt(item);
+      const incoming = action.sentAt != null ? messageSentAt({ sentAt: action.sentAt }) : undefined;
+      // Keep the moment the user sent. A later host stamp must not move the
+      // start, and a finished turn must not be remeasured.
+      const sentAt =
+        item.workedMs != null
+          ? existing
+          : existing != null && incoming != null
+            ? Math.min(existing, incoming)
+            : (existing ?? incoming);
       transcript[index] = {
         ...item,
         id: action.messageId,
-        ...(action.sentAt != null ? { sentAt: action.sentAt } : {})
+        ...(sentAt != null ? { sentAt } : {})
       };
       return { ...state, transcript };
     }
@@ -645,7 +660,9 @@ export function reduce(state: AppState, action: Action): AppState {
             role: 'user',
             attachments: action.attachments,
             text: action.text,
-            status: 'completed'
+            status: 'completed',
+            // A steer or a mid-turn answer stays on the turn already running.
+            ...(action.opensTurn === false ? {} : { sentAt: Date.now() })
           }
         ]
       };
@@ -819,14 +836,20 @@ export function reduce(state: AppState, action: Action): AppState {
       // picker; a model removed server-side disappears on the next fetch.
       return { ...state, models: {}, modelErrors: {}, threads: {}, threadLoading: {} };
     case 'openSettings':
-      return { ...state, settingsOpen: true };
+      return {
+        ...state,
+        settingsOpen: true,
+        settingsProvider: action.provider
+      };
     case 'closeSettings':
       // Leaving the screen discards a transient test result so re-opening it
       // never shows a stale success or failure.
       return {
         ...state,
         settingsOpen: false,
+        settingsProvider: undefined,
         connectionTest: undefined,
+        codexVersionCheck: undefined,
         opencodeUpgrade: undefined,
         opencodeInstall: undefined,
         zvecGrep: undefined
@@ -890,6 +913,11 @@ export function reduce(state: AppState, action: Action): AppState {
       return {
         ...state,
         connectionTest: { backendId: action.result.backendId, pending: false, result: action.result }
+      };
+    case 'codexVersionCheck':
+      return {
+        ...state,
+        codexVersionCheck: { pending: action.pending, ok: action.ok, message: action.message }
       };
     case 'opencodeUpgrade':
       return {

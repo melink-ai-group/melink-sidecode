@@ -358,8 +358,16 @@ export function App(): JSX.Element {
           dispatch({ type: 'settings', settings: message.settings });
           break;
         case 'showSettings':
-          dispatch({ type: 'openSettings' });
+          dispatch({ type: 'openSettings', provider: message.section });
           bridge.post({ type: 'getSettings' });
+          break;
+        case 'codexVersionCheck':
+          dispatch({
+            type: 'codexVersionCheck',
+            pending: message.pending,
+            ok: message.ok,
+            message: message.message
+          });
           break;
         case 'permissions':
           dispatch({ type: 'permissions', permissions: message.permissions });
@@ -980,6 +988,11 @@ export function App(): JSX.Element {
     bridge.post({ type: 'testConnection', backendId });
   };
 
+  const validateCodexVersion = (): void => {
+    dispatch({ type: 'codexVersionCheck', pending: true });
+    bridge.post({ type: 'validateCodexVersion' });
+  };
+
   // The permission picker is driven by the host's read model, so it only offers
   // levels this backend actually serves. A backend without an approval channel
   // reports one level and the picker is absent.
@@ -1100,7 +1113,7 @@ export function App(): JSX.Element {
     if (state.busy) {
       if (!text || state.attachments.length > 0 || !acceptsSteer(active?.id)) return;
       followSentMessage();
-      dispatch({ type: 'localUserMessage', text });
+      dispatch({ type: 'localUserMessage', text, opensTurn: false });
       bridge.post({ type: 'steerTurn', text });
       dispatch({ type: 'dismissNotice' });
       setDraft('');
@@ -1916,11 +1929,14 @@ export function App(): JSX.Element {
       <SettingsScreen
         settings={state.settings}
         connectionTest={state.connectionTest}
+        settingsProvider={state.settingsProvider}
+        codexVersionCheck={state.codexVersionCheck}
         onBack={closeSettings}
         onSave={saveSettings}
         onSaveToken={saveOllamaToken}
         onClearToken={clearOllamaToken}
         onTestConnection={testConnection}
+        onValidateCodexVersion={validateCodexVersion}
         opencodeUpgrade={state.opencodeUpgrade}
         onUpgradeOpencode={upgradeOpencode}
         opencodeInstall={state.opencodeInstall}
@@ -2179,7 +2195,11 @@ export function App(): JSX.Element {
               }
               dispatch({ type: 'questionCleared' });
               followSentMessage();
-              dispatch({ type: 'localUserMessage', text: formatQuestionAnswers(request.questions, answers) });
+              dispatch({
+                type: 'localUserMessage',
+                text: formatQuestionAnswers(request.questions, answers),
+                opensTurn: false
+              });
               bridge.post({ type: 'answerQuestion', requestId: request.id, answers });
             }}
           />
@@ -2674,7 +2694,7 @@ function ModelPanel({
                           {view.version ? (
                             <span className="status-chip status-chip--warning">v{view.version}</span>
                           ) : null}
-                          <button className="btn" type="button" onClick={() => bridge.post({ type: 'openSettings' })}>
+                          <button className="btn" type="button" onClick={() => bridge.post({ type: 'showAppSettings', section: 'codex' })}>
                             Open settings
                           </button>
                         </>
@@ -3200,7 +3220,7 @@ function EmptyState({
             {incompatible.version ? (
               <span className="status-chip status-chip--warning">v{incompatible.version}</span>
             ) : null}
-            <button className="btn" type="button" onClick={() => bridge.post({ type: 'openSettings' })}>
+            <button className="btn" type="button" onClick={() => bridge.post({ type: 'showAppSettings', section: 'codex' })}>
               Open settings
             </button>
             <button className="btn" type="button" onClick={() => bridge.post({ type: 'refresh' })}>

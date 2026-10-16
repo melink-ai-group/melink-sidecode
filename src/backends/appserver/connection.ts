@@ -3,8 +3,9 @@ import { StringDecoder } from 'node:string_decoder';
 import { Emitter } from '../base.ts';
 import type { Disposable } from '../types.ts';
 import {
+  CODEX_VERSION_VALIDATION_HINT,
   codexVersionFromUserAgent,
-  isSupportedCodexVersion,
+  isAcceptedCodexVersion,
   supportedCodexVersionRange
 } from './version.ts';
 import {
@@ -86,7 +87,7 @@ export class ServerVersionMismatchError extends ConnectionError {
   constructor(reportedVersion: string) {
     super(
       'incompatible',
-      `Codex app-server version ${reportedVersion} is outside the supported protocol range ${supportedCodexVersionRange()}.`,
+      `Codex app-server version ${reportedVersion} is outside the supported protocol range ${supportedCodexVersionRange()}. ${CODEX_VERSION_VALIDATION_HINT}`,
       undefined,
       reportedVersion
     );
@@ -124,6 +125,17 @@ export interface ConnectionOptions {
    * without launching a real CLI. Defaults to `node:child_process.spawn`.
    */
   spawnImpl?: typeof spawn;
+  /**
+   * Exact versions a previous Validate version run allowed, in addition to the
+   * built-in protocol window.
+   */
+  allowedVersions?: readonly string[];
+  /**
+   * Complete the handshake even when the server version is outside the window.
+   * Only the version validator sets this. A normal connection still refuses
+   * the version so an unchecked CLI is never used.
+   */
+  acceptOutOfRangeVersion?: boolean;
 }
 
 /** One way to launch the app-server, tried in order. */
@@ -336,7 +348,8 @@ export class AppServerConnection implements Disposable {
         // `schemas/` no longer describe this server, so it is reported as a
         // specific `incompatible` carrying the version rather than used blindly.
         const reported = codexVersionFromUserAgent(result.userAgent);
-        if (reported && !isSupportedCodexVersion(reported)) {
+        const accepted = !reported || isAcceptedCodexVersion(reported, this.options.allowedVersions);
+        if (reported && !accepted && !this.options.acceptOutOfRangeVersion) {
           throw new ServerVersionMismatchError(reported);
         }
         // `initialized` is the second half of the handshake and carries no params.
@@ -364,8 +377,8 @@ export class AppServerConnection implements Disposable {
       throw new ConnectionError(
         'incompatible',
         version
-          ? `Codex app-server ${version} did not answer the pinned initialize handshake.`
-          : 'The Codex app-server did not answer the pinned initialize handshake.',
+          ? `Codex app-server ${version} did not answer the pinned initialize handshake. ${CODEX_VERSION_VALIDATION_HINT}`
+          : `The Codex app-server did not answer the pinned initialize handshake. ${CODEX_VERSION_VALIDATION_HINT}`,
         error,
         version
       );

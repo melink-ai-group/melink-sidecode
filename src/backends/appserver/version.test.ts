@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   codexVersionFromUserAgent,
+  isAcceptedCodexVersion,
   isSupportedCodexVersion,
   parseCodexVersion,
   PINNED_CODEX_VERSION,
@@ -37,12 +38,21 @@ test('the pinned version is inside the supported window', () => {
   assert.equal(isSupportedCodexVersion('0.155.7'), true);
   assert.equal(isSupportedCodexVersion('0.156.99'), true);
   assert.equal(isSupportedCodexVersion('0.160.1'), true);
+  assert.equal(isSupportedCodexVersion('0.163.0'), true);
 });
 
 test('a version outside the window is unsupported', () => {
   assert.equal(isSupportedCodexVersion('0.153.0'), false);
-  assert.equal(isSupportedCodexVersion('0.161.0'), false);
+  assert.equal(isSupportedCodexVersion('0.164.0'), false);
   assert.equal(isSupportedCodexVersion('1.0.0'), false);
+});
+
+test('a stored exact version is accepted and a neighbour is not', () => {
+  assert.equal(isAcceptedCodexVersion('9.9.9', ['9.9.9']), true);
+  assert.equal(isAcceptedCodexVersion('9.9.10', ['9.9.9']), false);
+  assert.equal(isAcceptedCodexVersion('9.9.9'), false);
+  assert.equal(isAcceptedCodexVersion('dev', ['dev']), false);
+  assert.equal(isAcceptedCodexVersion(PINNED_CODEX_VERSION, []), true);
 });
 
 test('an unparseable version is never treated as supported', () => {
@@ -52,5 +62,5 @@ test('an unparseable version is never treated as supported', () => {
 
 test('the supported range names both ends', () => {
   assert.match(supportedCodexVersionRange(), /0\.154\.0/);
-  assert.match(supportedCodexVersionRange(), /0\.160\.x/);
+  assert.match(supportedCodexVersionRange(), /0\.163\.x/);
 });

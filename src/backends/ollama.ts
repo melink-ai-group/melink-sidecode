@@ -952,7 +952,7 @@ export class OllamaBackend implements AgentBackend {
     // even when this is not the thread's first turn, so a stale-session retry
     // does not start a new session with only a delta. The cwd above is the
     // workspace root, so opencode's own `AGENTS.md` discovery works either way.
-    const summary = compactedSummary(this.store?.getTranscript(this.id, handle.threadId) ?? []);
+    const summary = this.handoverSummary(handle.threadId) ?? compactedSummary(this.store?.getTranscript(this.id, handle.threadId) ?? []);
     // A steer on a live session sends only the new text. Until a session id
     // exists, the text is still primed with the snapshot.
     let visibleText = request.text;
@@ -1460,6 +1460,19 @@ export class OllamaBackend implements AgentBackend {
   }
 
   /**
+   * Summary carried from another provider. Present only when the leading
+   * transcript items are the previous chat, which the model must not see again.
+   */
+  private handoverSummary(threadId: string): string | undefined {
+    const ref = this.store?.listThreads(this.id).find((entry) => entry.threadId === threadId);
+    if (!ref?.handoverHistoryCount) {
+      return undefined;
+    }
+    const summary = ref.handoverSummary?.trim();
+    return summary || undefined;
+  }
+
+  /**
    * Build the `/api/chat` message list. `/api/chat` is stateless, so a resumed
    * thread is sent as its stored user/assistant turns followed by the new turn —
    * the same interface, with the conversation's context replayed in.
@@ -1468,6 +1481,8 @@ export class OllamaBackend implements AgentBackend {
    * `buildContextMessages`: the snapshot first (once per session), then the
    * per-turn delta immediately before the user turn. The stored history is read
    * but never mutated, so a delta can never be persisted as user content.
+   * A provider switch keeps the earlier chat in the transcript for display and
+   * sends the summary in its place.
    */
   private messagesFor(
     threadId: string,
@@ -1475,7 +1490,10 @@ export class OllamaBackend implements AgentBackend {
     context?: ContextPayload,
     mode?: DefaultMode
   ): Array<{ role: string; content: string }> {
+    const ref = this.store?.listThreads(this.id).find((entry) => entry.threadId === threadId);
+    const skip = ref?.handoverHistoryCount ?? 0;
     const history = (this.store?.getTranscript(this.id, threadId) ?? [])
+      .slice(skip)
       .filter((item) => item.kind === 'message' && (item.role === 'user' || item.role === 'assistant'))
       .map((item) => ({ role: item.role as 'user' | 'assistant', content: item.text ?? '' }))
       .filter((message) => message.content.length > 0);
@@ -1485,6 +1503,13 @@ export class OllamaBackend implements AgentBackend {
     const last = history[history.length - 1];
     if (last && last.role === 'user' && last.content === text) {
       history.pop();
+    }
+    const summary = skip > 0 ? ref?.handoverSummary?.trim() : undefined;
+    if (summary) {
+      const preface = compactedTranscript(summary)
+        .filter((item) => item.kind === 'message' && (item.role === 'user' || item.role === 'assistant') && item.text)
+        .map((item) => ({ role: item.role as 'user' | 'assistant', content: item.text ?? '' }));
+      history.unshift(...preface);
     }
     const messages = buildContextMessages(history, text, context);
     const instructions = modeInstructions(isDefaultMode(mode) ? mode : 'agent');

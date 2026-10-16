@@ -1,4 +1,5 @@
 import type { BackendAvailability } from '../backends/types';
+import { CODEX_VERSION_VALIDATION_HINT } from '../backends/appserver/version.ts';
 
 /**
  * The provider status as a surface renders it, kept pure so the mapping from the
@@ -46,7 +47,7 @@ export function backendStatusView(
       return {
         tone: 'incompatible',
         label: 'Protocol mismatch',
-        detail: backend.detail ?? 'The CLI is installed but its protocol version is not supported.',
+        detail: backend.detail ?? `The CLI is installed but its protocol version is not supported. ${CODEX_VERSION_VALIDATION_HINT}`,
         ...(backend.version ? { version: backend.version } : {}),
         actionable: true
       };

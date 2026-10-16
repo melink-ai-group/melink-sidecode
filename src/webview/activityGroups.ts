@@ -8,6 +8,7 @@
  */
 
 import { isRawToolName, isZvecSemanticSearch } from '../backends/toolLabel.ts';
+import { messageSentAt } from '../backends/turnTiming.ts';
 import { plainRowText } from './plainRowText.ts';
 import type { ItemStatus, TranscriptItemView } from './state.ts';
 
@@ -133,9 +134,10 @@ function foldNarration(entries: TranscriptEntry[]): TranscriptEntry[] {
 
 /**
  * Entry id that should carry the finished-turn note. The note sits under the
- * last row of the turn that started at the user message storing `workedMs`.
- * A later user message without its own duration, such as a steer, stays in
- * that same turn.
+ * last row of the turn that started at the user message storing `workedMs`,
+ * and it stays there. A later message that opened its own turn gets its own
+ * note once that turn finishes. A steer, which has no start time, stays in
+ * the turn already open.
  */
 export function turnElapsedNotes(entries: TranscriptEntry[]): Map<string, number> {
   const notes = new Map<string, number>();
@@ -150,11 +152,13 @@ export function turnElapsedNotes(entries: TranscriptEntry[]): Map<string, number
   };
   for (const entry of entries) {
     if (entry.kind === 'item' && entry.item.kind === 'message' && entry.item.role === 'user') {
-      if (entry.item.workedMs != null) {
+      const opensTurn = entry.item.workedMs != null || messageSentAt(entry.item) != null;
+      if (opensTurn) {
         flush();
-        workedMs = entry.item.workedMs;
-      }
-      if (workedMs != null) {
+        if (entry.item.workedMs != null) {
+          workedMs = entry.item.workedMs;
+        }
+      } else if (workedMs != null) {
         lastId = entry.item.id;
       }
       continue;
