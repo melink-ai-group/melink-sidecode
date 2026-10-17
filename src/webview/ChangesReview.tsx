@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type {
   ChangeDecisionResult,
   ChangeFileView,
@@ -76,7 +76,7 @@ export interface ChangesReviewProps {
   onLoadHunks: (path: string) => void;
 }
 
-export function ChangesReview({
+function ChangesReviewView({
   review,
   busy,
   deciding,
@@ -286,6 +286,19 @@ export function ChangesReview({
     </section>
   );
 }
+
+function sameChangesReview(prev: ChangesReviewProps, next: ChangesReviewProps): boolean {
+  return (
+    prev.review === next.review &&
+    prev.busy === next.busy &&
+    prev.deciding === next.deciding &&
+    prev.decisionResults === next.decisionResults &&
+    prev.rejectConfirm === next.rejectConfirm
+  );
+}
+
+/** Skip a re-render unless the snapshot the row shows actually changed. */
+export const ChangesReview = memo(ChangesReviewView, sameChangesReview);
 
 /** One changed file, as a single compact full-width row. The diff opens in the editor. */
 function ChangeRow({

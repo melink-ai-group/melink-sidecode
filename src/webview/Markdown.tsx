@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react';
+import { memo, type JSX, type ReactNode } from 'react';
 import { statusForMarker } from '../backends/plan';
 import type { TodoStepStatus } from '../backends/types';
 import { stepStatusKind, stepStatusLabel } from '../planStepIcon';
@@ -86,7 +86,7 @@ export interface MarkdownProps {
   renderCodeHeader?: (language: string, code: string) => ReactNode;
 }
 
-export function Markdown({ text, renderCodeHeader }: MarkdownProps): JSX.Element {
+export const Markdown = memo(function Markdown({ text, renderCodeHeader }: MarkdownProps): JSX.Element {
   const blocks = parseMarkdownBlocks(text);
   return (
     <div className="md">
@@ -184,4 +184,4 @@ export function Markdown({ text, renderCodeHeader }: MarkdownProps): JSX.Element
       })}
     </div>
   );
-}
+}, (prev, next) => prev.text === next.text);

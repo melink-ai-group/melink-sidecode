@@ -779,8 +779,7 @@ html body {
 /* Trailing padding on an overflowing flex column is omitted from scroll
  * height, so a spacer item reserves the room instead. Scroll-to-end and
  * stick-to-bottom both use scrollHeight, which includes this gap. */
-.transcript::after {
-  content: "";
+.transcript-end {
   flex: 0 0 15vh;
   height: 15vh;
   max-height: 200px;
@@ -788,10 +787,53 @@ html body {
 }
 
 @supports (height: 100dvh) {
-  .transcript::after {
+  .transcript-end {
     flex-basis: 35dvh;
     height: 35dvh;
   }
+}
+
+/* Sticks to the visible bottom-right of the transcript while the reader scrolls. */
+.busy-corner-slot {
+  position: sticky;
+  bottom: 10px;
+  align-self: flex-end;
+  flex: 0 0 auto;
+  z-index: 6;
+  width: 22px;
+  height: 0;
+  margin-top: -16px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.busy-corner-slot--overlay {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+}
+
+.busy-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid var(--vscode-widget-border, transparent);
+  border-radius: 999px;
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  color: var(--vscode-foreground);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+}
+
+.busy-corner .spinner {
+  width: 12px;
+  height: 12px;
 }
 
 /* Zero-height sticky anchor. Negative margin cancels the transcript's flex
@@ -946,6 +988,7 @@ html body {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+  contain: layout style;
 }
 
 .turn-user-box {
@@ -2097,8 +2140,8 @@ html body {
   min-height: 148px;
 }
 
-.app--chat-empty .transcript::after {
-  content: none;
+.app--chat-empty .transcript-end {
+  display: none;
 }
 
 .app--chat-empty .composer.composer--expanded {

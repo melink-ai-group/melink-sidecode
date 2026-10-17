@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { Fragment, memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch, type JSX, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -89,6 +89,7 @@ import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
 import type {
   CheckpointView,
   ConflictResolution,
+  HostToWebviewMessage,
   ModeSnapshot,
   ModelSettingField,
   ModelSettingOverrides,
@@ -98,6 +99,8 @@ import type {
   SettingsPatch,
   ThinkingLevel
 } from '../protocol';
+import { deferHostClick, setHostBacklog, useHostActivity } from './hostActivity';
+import { createMessagePump, isUrgentHostMessage } from './messagePump';
 import type { Attachment, DefaultMode, PermissionLevel } from '../backends/types';
 import { modeDescriptor } from '../backends/modes.ts';
 import { formatQuestionAnswers } from '../questions';
@@ -138,6 +141,21 @@ const bridge: HostBridge = createHostBridge();
 /** Codex steers in place. Ollama and its opencode runtime continue the same turn. */
 function acceptsSteer(backendId: string | undefined): boolean {
   return backendId === 'codex' || backendId === 'ollama';
+}
+
+/** Small corner spinner. It subscribes on its own so a click does not repaint the chat. */
+function BusyCorner({ busy, overlay = false }: { busy: boolean; overlay?: boolean }): JSX.Element {
+  const hostBusy = useHostActivity();
+  const active = busy || hostBusy;
+  return (
+    <div className={overlay ? 'busy-corner-slot busy-corner-slot--overlay' : 'busy-corner-slot'}>
+      {active ? (
+        <div className="busy-corner" role="status" aria-label="Working">
+          <span className="spinner" aria-hidden="true" />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 const POPUP_PREFERRED_WIDTH = 320;
@@ -212,6 +230,22 @@ export function App(): JSX.Element {
   const pinnedThreadRef = useRef<string | undefined>(undefined);
   /** Ignore the scroll event fired by our own jump to the bottom. */
   const ignoreTranscriptScrollRef = useRef(false);
+  /** True while the reader is scrolling, so streamed renders wait. */
+  const scrollingRef = useRef(false);
+  /** The latest scroll is near the top, checked after the scroll settles. */
+  const nearTopRef = useRef(false);
+  /** In-flight host clicks, released when the matching answer arrives. */
+  const hostFlightsRef = useRef<Record<string, Array<() => void>>>({});
+  const releaseHostFlightRef = useRef<(kind: string) => void>(() => {});
+  releaseHostFlightRef.current = (kind: string): void => {
+    hostFlightsRef.current[kind]?.shift()?.();
+  };
+  const runHostClick = (kind: string, work: () => void): void => {
+    const release = deferHostClick(work);
+    const queue = hostFlightsRef.current[kind] ?? [];
+    queue.push(release);
+    hostFlightsRef.current[kind] = queue;
+  };
   /** While a click is scrolling back to a user message, leave that message expanded. */
   const pinLockRef = useRef(false);
   /** Scroll height before older rows were prepended, so the reader stays on the same line. */
@@ -235,6 +269,10 @@ export function App(): JSX.Element {
   const composerCarryFromRef = useRef<string | undefined>(undefined);
   const composerSentBytesRef = useRef(new Set<string>());
   const activeChatTabIdRef = useRef<string | undefined>(undefined);
+  const activeThreadIdRef = useRef(state.activeThreadId);
+  const selectedBackendIdRef = useRef(state.selectedBackendId);
+  activeThreadIdRef.current = state.activeThreadId;
+  selectedBackendIdRef.current = state.selectedBackendId;
   const draftMirrorRef = useRef(draft);
   const attachmentsMirrorRef = useRef(state.attachments);
   draftMirrorRef.current = draft;
@@ -285,7 +323,7 @@ export function App(): JSX.Element {
   >(() => {});
 
   useEffect(() => {
-    const unsubscribe = bridge.subscribe((message) => {
+    const applyHostMessage = (message: HostToWebviewMessage): void => {
       switch (message.type) {
         case 'snapshot':
           dispatch({ type: 'snapshot', availability: message.availability });
@@ -304,6 +342,9 @@ export function App(): JSX.Element {
           break;
         case 'agentEvent':
           dispatch({ type: 'agentEvent', event: message.event });
+          if (message.event.type === 'approval/decided') {
+            releaseHostFlightRef.current('approval');
+          }
           break;
         case 'question/asked':
           dispatch({ type: 'questionAsked', request: message.request });
@@ -334,6 +375,7 @@ export function App(): JSX.Element {
           if (message.items.length === 0) {
             olderStallRef.current = true;
           }
+          releaseHostFlightRef.current('older');
           dispatch({
             type: 'olderHistory',
             backendId: message.backendId,
@@ -443,6 +485,7 @@ export function App(): JSX.Element {
           });
           break;
         case 'changes/decisionResult':
+          releaseHostFlightRef.current('decide');
           dispatch({ type: 'changeDecision', results: message.results, message: message.message });
           break;
         case 'changes/checkpoints':
@@ -461,6 +504,7 @@ export function App(): JSX.Element {
           dispatch({ type: 'revertLocalSend', text: message.text });
           break;
         case 'changes/restorePreview':
+          releaseHostFlightRef.current('restorePreview');
           dispatch({ type: 'restorePreview', preview: message.preview });
           break;
         case 'modeSwitchPrompt': {
@@ -478,6 +522,7 @@ export function App(): JSX.Element {
           break;
         }
         case 'changes/restoreResult':
+          releaseHostFlightRef.current('restore');
           dispatch({ type: 'restoreResult', result: message.result });
           break;
         case 'modelCapabilityError':
@@ -506,10 +551,21 @@ export function App(): JSX.Element {
           onDictationRef.current(message);
           break;
       }
+    };
+    const pump = createMessagePump({
+      apply: applyHostMessage,
+      shouldDefer: () => scrollingRef.current && !stickToBottomRef.current,
+      onHold: setHostBacklog
+    });
+    const unsubscribe = bridge.subscribe((message) => {
+      pump.push(message, isUrgentHostMessage(message.type));
     });
     bridge.post({ type: 'ready' });
     bridge.post({ type: 'getSettings' });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      pump.dispose();
+    };
   }, []);
 
   useEffect(() => {
@@ -572,14 +628,21 @@ export function App(): JSX.Element {
     if (state.restoring || !state.hasOlderHistory || state.loadingOlder || olderStallRef.current) {
       return;
     }
+    if ((hostFlightsRef.current.older?.length ?? 0) > 0) {
+      return;
+    }
     const el = transcriptRef.current;
     if (el) {
       olderAnchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
     }
     stickToBottomRef.current = false;
-    dispatch({ type: 'olderHistoryLoading' });
-    bridge.post({ type: 'loadOlderHistory' });
+    runHostClick('older', () => {
+      startTransition(() => dispatch({ type: 'olderHistoryLoading' }));
+      bridge.post({ type: 'loadOlderHistory' });
+    });
   };
+  const requestOlderRef = useRef(requestOlder);
+  requestOlderRef.current = requestOlder;
 
   const syncPinnedUser = useCallback((): void => {
     if (pinLockRef.current) {
@@ -603,24 +666,47 @@ export function App(): JSX.Element {
     setPinnedUserId((current) => (current === next ? current : next));
   }, []);
 
-  const onTranscriptScroll = (): void => {
-    if (ignoreTranscriptScrollRef.current) {
-      return;
-    }
+  useEffect(() => {
     const el = transcriptRef.current;
-    if (!el) {
+    if (!el || state.settingsOpen || state.rulesOpen) {
       return;
     }
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distance <= 48;
-    if (el.scrollTop > 120) {
-      olderStallRef.current = false;
-    }
-    if (el.scrollTop < 48) {
-      requestOlder();
-    }
-    syncPinnedUser();
-  };
+    let idle = 0;
+    const settle = (): void => {
+      if (!scrollingRef.current) {
+        return;
+      }
+      scrollingRef.current = false;
+      if (nearTopRef.current) {
+        requestOlderRef.current();
+      }
+      if (!pinLockRef.current) {
+        syncPinnedUser();
+      }
+    };
+    const onScroll = (): void => {
+      if (ignoreTranscriptScrollRef.current) {
+        return;
+      }
+      scrollingRef.current = true;
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distance <= 48;
+      if (el.scrollTop > 120) {
+        olderStallRef.current = false;
+      }
+      nearTopRef.current = el.scrollTop < 48;
+      window.clearTimeout(idle);
+      idle = window.setTimeout(settle, 80);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('scrollend', settle);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('scrollend', settle);
+      window.clearTimeout(idle);
+      scrollingRef.current = false;
+    };
+  }, [state.settingsOpen, state.rulesOpen, syncPinnedUser]);
 
   const jumpToUserMessage = (id: string): void => {
     const el = transcriptRef.current;
@@ -655,7 +741,6 @@ export function App(): JSX.Element {
     ignoreTranscriptScrollRef.current = true;
     el.scrollTop = el.scrollHeight;
     ignoreTranscriptScrollRef.current = false;
-    syncPinnedUser();
   };
 
   /** A message the reader just sent should land in view, even after they scrolled up. */
@@ -719,8 +804,16 @@ export function App(): JSX.Element {
     syncPinnedUser();
   }, [state.transcript, state.loadingOlder, state.hasOlderHistory, syncPinnedUser]);
 
-  useLayoutEffect(() => {
-    syncPinnedUser();
+  useEffect(() => {
+    if (scrollingRef.current) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      if (!scrollingRef.current) {
+        syncPinnedUser();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
   }, [state.transcript, state.restoring, state.activeThreadId, state.settingsOpen, state.rulesOpen, syncPinnedUser]);
 
   useEffect(() => {
@@ -1037,12 +1130,18 @@ export function App(): JSX.Element {
     if (!pending?.approval) {
       return;
     }
-    bridge.post({
-      type: 'decideApproval',
+    if ((hostFlightsRef.current.approval?.length ?? 0) > 0) {
+      return;
+    }
+    const message = {
+      type: 'decideApproval' as const,
       backendId: pending.backendId ?? state.selectedBackendId ?? '',
       threadId: pending.threadId ?? state.activeThreadId ?? '',
       requestId: pending.approval.id,
       decision
+    };
+    runHostClick('approval', () => {
+      bridge.post(message);
     });
   };
 
@@ -1113,26 +1212,35 @@ export function App(): JSX.Element {
     if (state.busy) {
       if (!text || state.attachments.length > 0 || !acceptsSteer(active?.id)) return;
       followSentMessage();
-      dispatch({ type: 'localUserMessage', text, opensTurn: false });
-      bridge.post({ type: 'steerTurn', text });
-      dispatch({ type: 'dismissNotice' });
+      const attachments = state.attachments;
       setDraft('');
-      publishComposer(activeChatTabIdRef.current, '', state.attachments);
+      startTransition(() => {
+        dispatch({ type: 'localUserMessage', text, opensTurn: false });
+        dispatch({ type: 'dismissNotice' });
+      });
+      bridge.post({ type: 'steerTurn', text });
+      publishComposer(activeChatTabIdRef.current, '', attachments);
       return;
     }
     followSentMessage();
-    dispatch({ type: 'localUserMessage', text, attachments: state.attachments });
-    dispatch({ type: 'dismissNotice' });
+    const attachments = state.attachments;
+    const backendId = state.selectedBackendId;
+    const model = state.selectedModel;
+    const permissionLevel = state.permissionLevel;
+    setDraft('');
     setHistoryStale(true);
+    startTransition(() => {
+      dispatch({ type: 'localUserMessage', text, attachments });
+      dispatch({ type: 'dismissNotice' });
+    });
     bridge.post({
       type: 'sendTurn',
       text,
-      backendId: state.selectedBackendId,
-      model: state.selectedModel,
-      permissionLevel: state.permissionLevel,
-      attachments: state.attachments
+      backendId,
+      model,
+      permissionLevel,
+      attachments
     });
-    setDraft('');
     publishComposer(activeChatTabIdRef.current, '', []);
   };
 
@@ -1216,9 +1324,11 @@ export function App(): JSX.Element {
     // done stay in the thread; sending them again would start that work over.
     const text = continueAfterStopInstruction();
     followSentMessage();
-    dispatch({ type: 'dismissStatusNotice', text: noticeText });
-    dispatch({ type: 'localUserMessage', text });
     setHistoryStale(true);
+    startTransition(() => {
+      dispatch({ type: 'dismissStatusNotice', text: noticeText });
+      dispatch({ type: 'localUserMessage', text });
+    });
     bridge.post({
       type: 'sendTurn',
       text,
@@ -1489,6 +1599,23 @@ export function App(): JSX.Element {
     () => estimateConversationTokens(state.transcript),
     [state.transcript]
   );
+  const transcriptEntries = useMemo(() => groupTranscript(state.transcript), [state.transcript]);
+  const visibleTurns = useMemo(
+    () =>
+      state.turnChanges.filter((turn) => (turn.review ? turn.review.files.length > 0 : turn.entries.length > 0)),
+    [state.turnChanges]
+  );
+  const placedTurns = useMemo(
+    () => placeTurnChanges(state.transcript, visibleTurns, state.checkpoints ?? []),
+    [state.transcript, visibleTurns, state.checkpoints]
+  );
+  const speakers = useMemo(
+    () => speakerRows(transcriptEntries, !state.busy),
+    [transcriptEntries, state.busy]
+  );
+  const elapsedNotes = useMemo(() => turnElapsedNotes(transcriptEntries), [transcriptEntries]);
+  const backgroundBusy =
+    state.busy || state.changeDeciding || state.loadingOlder || state.restoring || state.planRevising;
 
   const updateModelSetting = (field: ModelSettingField, value: number | string): void => {
     if (!state.selectedBackendId || !state.selectedModel) {
@@ -1572,12 +1699,17 @@ export function App(): JSX.Element {
   // Restoring is destructive and never implicit. The click asks the host what
   // would be rewound, and only an explicit confirm posts the restore.
   const restoreCheckpoint = (messageId: string): void => {
-    const threadId = state.activeThreadId;
-    const backendId = state.selectedBackendId;
+    const threadId = activeThreadIdRef.current;
+    const backendId = selectedBackendIdRef.current;
     if (!threadId || !backendId) {
       return;
     }
-    bridge.post({ type: 'changes/previewRestore', backendId, threadId, messageId });
+    if ((hostFlightsRef.current.restorePreview?.length ?? 0) > 0) {
+      return;
+    }
+    runHostClick('restorePreview', () => {
+      bridge.post({ type: 'changes/previewRestore', backendId, threadId, messageId });
+    });
   };
 
   const answerModeSwitch = (accept: boolean): void => {
@@ -1594,34 +1726,45 @@ export function App(): JSX.Element {
     if (!confirmation) {
       return;
     }
-    const threadId = state.activeThreadId;
-    const backendId = state.selectedBackendId;
+    const threadId = activeThreadIdRef.current;
+    const backendId = selectedBackendIdRef.current;
     if (!threadId || !backendId) {
       dispatch({ type: 'cancelRestoreConfirmation' });
       return;
     }
-    dispatch({ type: 'cancelRestoreConfirmation' });
-    bridge.post({
-      type: 'changes/restoreCheckpoint',
-      backendId,
-      threadId,
-      messageId: confirmation.messageId
+    if ((hostFlightsRef.current.restore?.length ?? 0) > 0) {
+      return;
+    }
+    const messageId = confirmation.messageId;
+    runHostClick('restore', () => {
+      startTransition(() => dispatch({ type: 'cancelRestoreConfirmation' }));
+      bridge.post({
+        type: 'changes/restoreCheckpoint',
+        backendId,
+        threadId,
+        messageId
+      });
     });
   };
 
   // Undo a restore by restoring the snapshot captured just before it, including
   // the messages and plans the restore removed.
   const undoRestore = (restorePointId?: string): void => {
-    const threadId = state.activeThreadId;
-    const backendId = state.selectedBackendId;
+    const threadId = activeThreadIdRef.current;
+    const backendId = selectedBackendIdRef.current;
     if (!restorePointId || !threadId || !backendId) {
       return;
     }
-    bridge.post({
-      type: 'changes/restoreCheckpoint',
-      backendId,
-      threadId,
-      restorePointId
+    if ((hostFlightsRef.current.restore?.length ?? 0) > 0) {
+      return;
+    }
+    runHostClick('restore', () => {
+      bridge.post({
+        type: 'changes/restoreCheckpoint',
+        backendId,
+        threadId,
+        restorePointId
+      });
     });
   };
 
@@ -1633,16 +1776,21 @@ export function App(): JSX.Element {
     if (state.busy || !state.plan) {
       return;
     }
-    dispatch({ type: 'planRevising' });
     followSentMessage();
-    dispatch({ type: 'localUserMessage', text });
     setHistoryStale(true);
+    const backendId = state.selectedBackendId;
+    const model = state.selectedModel;
+    const permissionLevel = state.permissionLevel;
+    startTransition(() => {
+      dispatch({ type: 'planRevising' });
+      dispatch({ type: 'localUserMessage', text });
+    });
     bridge.post({
       type: 'sendTurn',
       text,
-      backendId: state.selectedBackendId,
-      model: state.selectedModel,
-      permissionLevel: state.permissionLevel,
+      backendId,
+      model,
+      permissionLevel,
       updatePlan: true
     });
   };
@@ -1659,8 +1807,8 @@ export function App(): JSX.Element {
   // views; the host serves the pre-turn side from the journal, so nothing is
   // computed or written here. Each falls back to a notice, never a throw.
   const openChangeDiff = (turnId: string, path: string): void => {
-    const threadId = state.activeThreadId;
-    const backendId = state.selectedBackendId;
+    const threadId = activeThreadIdRef.current;
+    const backendId = selectedBackendIdRef.current;
     if (!threadId || !backendId) {
       return;
     }
@@ -1668,8 +1816,8 @@ export function App(): JSX.Element {
   };
 
   const openChangeView = (turnId: string): void => {
-    const threadId = state.activeThreadId;
-    const backendId = state.selectedBackendId;
+    const threadId = activeThreadIdRef.current;
+    const backendId = selectedBackendIdRef.current;
     if (!threadId || !backendId) {
       return;
     }
@@ -1691,31 +1839,36 @@ export function App(): JSX.Element {
     decision: 'accepted' | 'rejected',
     conflictResolution?: ConflictResolution
   ): void => {
-    const threadId = state.activeThreadId;
-    const backendId = state.selectedBackendId;
+    const threadId = activeThreadIdRef.current;
+    const backendId = selectedBackendIdRef.current;
     if (!threadId || !backendId) {
       return;
     }
-    dispatch({ type: 'changeDeciding', value: true });
-    if (target.kind === 'all') {
-      bridge.post({
-        type: 'changes/decideAll',
-        backendId,
-        threadId,
-        turnId,
-        decision,
-        ...(conflictResolution !== undefined ? { conflictResolution } : {})
-      });
+    if ((hostFlightsRef.current.decide?.length ?? 0) > 0) {
       return;
     }
-    bridge.post({
-      type: 'changes/decide',
-      backendId,
-      threadId,
-      turnId,
-      path: target.path,
-      decision,
-      ...(conflictResolution !== undefined ? { conflictResolution } : {})
+    const message =
+      target.kind === 'all'
+        ? {
+            type: 'changes/decideAll' as const,
+            backendId,
+            threadId,
+            turnId,
+            decision,
+            ...(conflictResolution !== undefined ? { conflictResolution } : {})
+          }
+        : {
+            type: 'changes/decide' as const,
+            backendId,
+            threadId,
+            turnId,
+            path: target.path,
+            decision,
+            ...(conflictResolution !== undefined ? { conflictResolution } : {})
+          };
+    runHostClick('decide', () => {
+      startTransition(() => dispatch({ type: 'changeDeciding', value: true }));
+      bridge.post(message);
     });
   };
 
@@ -1945,6 +2098,7 @@ export function App(): JSX.Element {
         onSetZvecGrep={setZvecGrep}
       />
       </div>
+      <BusyCorner busy={backgroundBusy} overlay />
       </main>
     );
   }
@@ -1960,16 +2114,12 @@ export function App(): JSX.Element {
             onRevoke={revokeRule}
           />
         </div>
+        <BusyCorner busy={backgroundBusy} overlay />
       </main>
     );
   }
 
   const chatEmpty = state.transcript.length === 0 && !state.restoring;
-  const transcriptEntries = groupTranscript(state.transcript);
-  const visibleTurns = state.turnChanges.filter(
-    (turn) => (turn.review ? turn.review.files.length > 0 : turn.entries.length > 0)
-  );
-  const placedTurns = placeTurnChanges(state.transcript, visibleTurns, state.checkpoints ?? []);
   const renderTurnCard = (turn: TurnChange): JSX.Element => {
     const review = turn.review;
     if (!review || review.files.length === 0) {
@@ -2016,8 +2166,6 @@ export function App(): JSX.Element {
     }
     return cards;
   };
-  const speakers = speakerRows(transcriptEntries, !state.busy);
-  const elapsedNotes = turnElapsedNotes(transcriptEntries);
   const pinnedItem = pinnedUserId
     ? state.transcript.find((item) => item.id === pinnedUserId && item.kind === 'message' && item.role === 'user')
     : undefined;
@@ -2033,7 +2181,6 @@ export function App(): JSX.Element {
         ref={transcriptRef}
         role="log"
         aria-label="Conversation transcript"
-        onScroll={onTranscriptScroll}
       >
         <div className="user-pin-anchor">
           {pinnedPreview && pinnedUserId ? (
@@ -2145,6 +2292,8 @@ export function App(): JSX.Element {
             <span />
           </div>
         ) : null}
+        <div className="transcript-end" aria-hidden="true" />
+        <BusyCorner busy={backgroundBusy} />
       </div>
 
       <footer className={chatEmpty ? 'composer composer--expanded' : 'composer'}>
@@ -3349,7 +3498,22 @@ function entryContains(entry: TranscriptEntry, itemId: string): boolean {
   return entry.id === itemId || entry.message.id === itemId || entry.items.some((item) => item.id === itemId);
 }
 
-function TranscriptRow({
+function sameItems(left: readonly TranscriptItemView[], right: readonly TranscriptItemView[]): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const TranscriptRow = memo(function TranscriptRow({
   item,
   providerId,
   showSpeaker,
@@ -3541,7 +3705,14 @@ function TranscriptRow({
       </div>
     </article>
   );
-}
+}, (prev, next) =>
+  prev.item === next.item &&
+  prev.providerId === next.providerId &&
+  prev.showSpeaker === next.showSpeaker &&
+  prev.hideQuestions === next.hideQuestions &&
+  prev.pendingId === next.pendingId &&
+  prev.checkpoint === next.checkpoint
+);
 
 function AssistantReply({ text, settled }: { text: string; settled: boolean }): JSX.Element {
   const parts = settled ? splitReplyClose(text) : { body: text };
@@ -3642,7 +3813,7 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
   );
 }
 
-function NarrationRow({
+const NarrationRow = memo(function NarrationRow({
   message,
   items,
   showSpeaker,
@@ -3700,9 +3871,15 @@ function NarrationRow({
       ) : null}
     </article>
   );
-}
+}, (prev, next) =>
+  prev.message === next.message &&
+  prev.showSpeaker === next.showSpeaker &&
+  prev.providerId === next.providerId &&
+  prev.hideQuestions === next.hideQuestions &&
+  sameItems(prev.items, next.items)
+);
 
-function ActivityGroup({ family, items }: { family: ActivityFamily; items: TranscriptItemView[] }): JSX.Element {
+const ActivityGroup = memo(function ActivityGroup({ family, items }: { family: ActivityFamily; items: TranscriptItemView[] }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const summary = activitySummary(items);
   const Icon = family === 'command' ? TerminalIcon : family === 'change' ? FileIcon : family === 'work' ? SparkIcon : SearchIcon;
@@ -3748,7 +3925,7 @@ function ActivityGroup({ family, items }: { family: ActivityFamily; items: Trans
       ) : null}
     </div>
   );
-}
+}, (prev, next) => prev.family === next.family && sameItems(prev.items, next.items));
 
 function NestedBurst({ family, items }: { family: ActivityFamily; items: TranscriptItemView[] }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
