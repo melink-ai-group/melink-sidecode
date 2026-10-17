@@ -6,7 +6,7 @@ leave `[ ]` and record the failure (or promote it to a known limitation) for a m
 Run every step in both hosts (see [Per-host pass](#5-per-host-pass)) unless a step
 names a single host.
 
-- Extension under test: `melink-sidecode` 0.1.0 (`melink` publisher)
+- Extension under test: `melink-sidecode` 0.2.0 (`melink` publisher)
 - Build under test: `npm run build` output in `dist/`
 - Tester: ............................  Date: ............
 - Host A (plain VS Code): version ............
@@ -36,7 +36,7 @@ reload mid-review, approval interaction, and journal pruning, on both providers.
 ## 0. Setup
 
 - [ ] 0.1 Install the build: `npm run build`, then install the produced `.vsix` in
-      each host (`code -n --install-extension ./melink-sidecode-0.1.0.vsix` for
+      each host (`code -n --install-extension ./melink-sidecode-0.2.0.vsix` for
       VS Code; for Cursor use the Extensions view → `...` → *Install from VSIX*).
 - [ ] 0.2 Restart the host so `deactivate`/`activate` run against a clean state.
 - [ ] 0.3 Record the Codex CLI version: `codex --version`
