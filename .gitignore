@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# SideCode-managed opencode CLI download (settings → Bundled)
+vendor/opencode/
+
 # Build output
 dist/
 out/

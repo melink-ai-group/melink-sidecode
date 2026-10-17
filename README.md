@@ -145,7 +145,8 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. |
 | `melink.ollama.defaultModel` | *(empty)* | Default model; empty uses the first one the backend reports. |
 | `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the **opencode** agentic runtime. Turn it off to use the direct adapter. |
-| `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI used when the runtime is enabled. |
+| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download under `vendor/opencode` (gitignored). |
+| `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. On installs `zg` when it is missing and applies the OpenCode integration. Off removes that integration and leaves `zg` installed. |
 
 `Ollama Cloud` lists exactly the models the live server returns from
@@ -160,8 +161,14 @@ identity stays **Ollama**: no new provider, badge, or dot is added. Turning
 (`GET /api/tags` for models and `POST /api/chat` with `stream: true`), which
 streams chat and does not spawn opencode.
 
-- **Path.** `melink.ollama.opencode.path` defaults to `opencode`, resolved from
-  `PATH` when it is a bare name, exactly like `melink.codex.path`.
+- **CLI source.** `melink.ollama.opencode.cliSource` is `local` (path / PATH) or
+  `bundled` (SideCode download under `vendor/opencode`, gitignored). Bundled
+  turns always use that binary. Install and Update fetch the official GitHub
+  release into the active install directory (they do not rely on
+  `opencode upgrade`, which can report success without replacing the binary).
+- **Path.** When `cliSource` is `local`, `melink.ollama.opencode.path` defaults
+  to `opencode`, resolved from `PATH` when it is a bare name, exactly like
+  `melink.codex.path`.
 - **zvec-grep.** With the runtime on, **OpenCode Semantic Search** → **Use semantic search** connects
   [zvec-grep](https://github.com/zvec-ai/zvec-grep) through its official
   OpenCode installer (`zg install --target opencode`). If `zg` is not on

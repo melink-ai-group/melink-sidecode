@@ -1,17 +1,19 @@
 import { execFile } from 'node:child_process';
-import { appendFile, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
+import { randomBytes } from 'node:crypto';
 
 /**
  * Download the official opencode CLI and install it for the settings screen.
  *
  * The bytes come from the anomalyco/opencode GitHub release named by the same
  * asset the opencode install script uses. Nothing is piped through a shell.
- * The binary is written only under `~/.opencode/bin`, and the caller points
- * `melink.ollama.opencode.path` at that file so the running host can find it
- * without waiting for a new PATH.
+ * The caller chooses `installDir` (bundled `vendor/opencode/bin`, a local
+ * absolute path's parent, or `~/.opencode/bin`). SideCode upgrades by calling
+ * this again rather than `opencode upgrade`, which can report success without
+ * replacing the binary the path setting points at.
  */
 
 export interface OpencodeInstallPlatform {
@@ -91,9 +93,24 @@ export async function installOpencodeRelease(
     const executableName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
     const executablePath = join(installDir, executableName);
     await mkdir(installDir, { recursive: true });
-    await writeFile(executablePath, binary);
+    // Write beside the target then rename so an in-use Windows binary can be
+    // replaced more reliably than an in-place overwrite.
+    const stagingPath = join(installDir, `.opencode-download-${randomBytes(6).toString('hex')}`);
+    await writeFile(stagingPath, binary);
     if (process.platform !== 'win32') {
-      await chmod(executablePath, 0o755);
+      await chmod(stagingPath, 0o755);
+    }
+    try {
+      await rename(stagingPath, executablePath);
+    } catch (error) {
+      // Windows often refuses rename-over-existing; delete then rename.
+      try {
+        await unlink(executablePath);
+        await rename(stagingPath, executablePath);
+      } catch {
+        await unlink(stagingPath).catch(() => undefined);
+        throw error;
+      }
     }
     if (options.persistPath !== false) {
       await rememberInstallDir(installDir);

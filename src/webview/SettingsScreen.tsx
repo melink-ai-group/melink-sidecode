@@ -74,6 +74,7 @@ interface Draft {
   thinking: SettingsSnapshot['defaults']['thinking'] | '';
   dictationModel: string;
   opencodeEnabled: boolean;
+  opencodeCliSource: 'local' | 'bundled';
   opencodePath: string;
   contextIncludeInstructions: boolean;
   contextIncludeShape: boolean;
@@ -98,6 +99,7 @@ function draftFrom(settings: SettingsSnapshot): Draft {
     thinking: settings.defaults.thinking ?? '',
     dictationModel: formatDictationTarget(settings.defaults.dictationModel),
     opencodeEnabled: settings.opencode.enabled,
+    opencodeCliSource: settings.opencode.cliSource,
     opencodePath: settings.opencode.path,
     contextIncludeInstructions: settings.context.includeInstructions,
     contextIncludeShape: settings.context.includeShape,
@@ -219,6 +221,7 @@ export function SettingsScreen({
       draft.thinking !== (settings.defaults.thinking ?? '') ||
       draft.dictationModel !== formatDictationTarget(settings.defaults.dictationModel) ||
       draft.opencodeEnabled !== settings.opencode.enabled ||
+      draft.opencodeCliSource !== settings.opencode.cliSource ||
       draft.opencodePath !== settings.opencode.path ||
       draft.contextIncludeInstructions !== settings.context.includeInstructions ||
       draft.contextIncludeShape !== settings.context.includeShape ||
@@ -266,9 +269,8 @@ export function SettingsScreen({
     if (!draft.codexPath.trim()) {
       nextErrors.codexPath = 'Enter the CLI path or name. This value was not saved.';
     }
-    // The path is only meaningful while the runtime is on, so it is validated
-    // only then; an invalid value is never sent, so the stored path survives.
-    if (draft.opencodeEnabled && !draft.opencodePath.trim()) {
+    // The path is only meaningful for a local CLI while the runtime is on.
+    if (draft.opencodeEnabled && draft.opencodeCliSource === 'local' && !draft.opencodePath.trim()) {
       nextErrors.opencodePath = 'Enter the opencode CLI path or name. This value was not saved.';
     }
     // The cap is entered in kilobytes, so the value the user sees is readable;
@@ -295,9 +297,14 @@ export function SettingsScreen({
       thinking: draft.thinking,
       dictationModel: draft.dictationModel.trim(),
       opencodeEnabled: draft.opencodeEnabled,
-      // The path is sent only while the runtime is on: an off runtime must not
-      // write an empty path over a previously stored valid one.
-      ...(draft.opencodeEnabled ? { opencodePath: draft.opencodePath.trim() } : {}),
+      ...(draft.opencodeEnabled
+        ? {
+            opencodeCliSource: draft.opencodeCliSource,
+            // Local path only: bundled ignores it for spawns, and an off runtime
+            // must not write an empty path over a previously stored valid one.
+            ...(draft.opencodeCliSource === 'local' ? { opencodePath: draft.opencodePath.trim() } : {})
+          }
+        : {}),
       contextIncludeInstructions: draft.contextIncludeInstructions,
       contextIncludeShape: draft.contextIncludeShape,
       contextIncludeEditorState: draft.contextIncludeEditorState,
@@ -564,24 +571,53 @@ export function SettingsScreen({
 
                   {draft.opencodeEnabled ? (
                     <>
-                      <label className="field-label" htmlFor="opencode-path">
-                        opencode CLI path
+                      <label className="field-label" htmlFor="opencode-cli-source">
+                        opencode CLI source
                       </label>
-                      <input
-                        className="input"
-                        id="opencode-path"
-                        type="text"
-                        value={draft.opencodePath}
-                        spellCheck={false}
-                        autoComplete="off"
-                        aria-invalid={errors.opencodePath ? true : undefined}
-                        aria-describedby={errors.opencodePath ? 'opencode-path-error' : 'opencode-status'}
-                        onChange={(event) => update('opencodePath', event.target.value)}
-                      />
-                      {errors.opencodePath ? (
-                        <p className="field-msg field-msg--error" id="opencode-path-error" role="alert">
-                          <AlertIcon />
-                          <span>{errors.opencodePath}</span>
+                      <select
+                        className="select"
+                        id="opencode-cli-source"
+                        value={draft.opencodeCliSource}
+                        aria-describedby="opencode-cli-source-help"
+                        onChange={(event) =>
+                          update('opencodeCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
+                        }
+                      >
+                        <option value="local">Local machine</option>
+                        <option value="bundled">Bundled (vendor/opencode)</option>
+                      </select>
+                      <p className="field-help" id="opencode-cli-source-help">
+                        {draft.opencodeCliSource === 'bundled'
+                          ? 'Install downloads into vendor/opencode (gitignored). Every turn uses that binary, not PATH.'
+                          : 'Use the path below or PATH. Save settings before installing or updating.'}
+                      </p>
+
+                      {draft.opencodeCliSource === 'local' ? (
+                        <>
+                          <label className="field-label" htmlFor="opencode-path">
+                            opencode CLI path
+                          </label>
+                          <input
+                            className="input"
+                            id="opencode-path"
+                            type="text"
+                            value={draft.opencodePath}
+                            spellCheck={false}
+                            autoComplete="off"
+                            aria-invalid={errors.opencodePath ? true : undefined}
+                            aria-describedby={errors.opencodePath ? 'opencode-path-error' : 'opencode-status'}
+                            onChange={(event) => update('opencodePath', event.target.value)}
+                          />
+                          {errors.opencodePath ? (
+                            <p className="field-msg field-msg--error" id="opencode-path-error" role="alert">
+                              <AlertIcon />
+                              <span>{errors.opencodePath}</span>
+                            </p>
+                          ) : null}
+                        </>
+                      ) : settings.opencode.cliSource === 'bundled' ? (
+                        <p className="field-help" id="opencode-bundled-path">
+                          Bundled path: <code>{settings.opencode.path}</code>
                         </p>
                       ) : null}
                     </>

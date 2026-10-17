@@ -63,10 +63,12 @@ Ollama Cloud runs through [opencode](https://opencode.ai) by default, so those
 models can read the project, edit files, and run commands. Turning
 **`melink.ollama.opencode.enabled`** off uses the direct streaming adapter
 instead: it answers in the transcript but cannot edit files, run commands, or
-keep a tool-driven session. When the CLI is not detected, Settings offers
-**Install opencode**, which downloads the current release into `~/.opencode/bin`
-and points the path setting at it. When opencode is already connected, Settings
-offers **Update opencode**, which runs `opencode upgrade`.
+keep a tool-driven session. Settings chooses a CLI source: **Local machine** (path / PATH) or **Bundled**
+(`vendor/opencode`, gitignored). When the CLI is not detected, **Install
+opencode** downloads the current GitHub release into that source's install
+directory. When opencode is already connected, **Update opencode** re-downloads
+the same way (it does not run `opencode upgrade`, which can leave a custom
+install on an old version).
 
 - **Identity is unchanged.** There is still one **Ollama Cloud** provider with
   the same badge and dot; opencode is a runtime behind it, not a new provider.
@@ -229,7 +231,8 @@ settings (**SideCode: Open settings**).
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. The token is sent only to this host. |
 | `melink.ollama.defaultModel` | *(empty)* | Default Ollama model; empty uses the first model reported. |
 | `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the opencode agentic runtime (tool execution, file edits, session resume). Off uses the direct `/api/chat` adapter and spawns no opencode process. |
-| `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI used when the runtime is enabled; a bare name is resolved from `PATH`. |
+| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download under `vendor/opencode` (gitignored). |
+| `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`; a bare name is resolved from `PATH`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Connect zvec-grep to OpenCode. Turning it on installs the `zg` CLI when it is missing (Node.js 22+) and runs `zg install --target opencode`. Turning it off runs `zg uninstall --target opencode` and leaves the CLI and workspace indexes in place. Stored in user settings. A new OpenCode session picks up the change. |
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
 | `melink.codex.defaultModel` | *(empty)* | Default model for Codex; empty uses the CLI default. |

@@ -106,6 +106,15 @@ export interface SettingsSnapshot {
    */
   opencode: {
     enabled: boolean;
+    /**
+     * Where the CLI comes from. `bundled` uses the SideCode download under
+     * `vendor/opencode`; `local` uses `path` / PATH.
+     */
+    cliSource: 'local' | 'bundled';
+    /**
+     * Configured local path, or the effective bundled path when `cliSource` is
+     * `bundled` (so the screen can show what will be spawned).
+     */
     path: string;
     status: 'detected' | 'missing' | 'not-runnable';
     /** Present only when `status` is `detected`. */
@@ -182,6 +191,8 @@ export interface SettingsPatch {
   /** Ollama model id for dictation cleanup. Empty clears the choice. */
   dictationModel?: string;
   opencodeEnabled?: boolean;
+  /** `local` uses the path field; `bundled` uses the SideCode-managed download. */
+  opencodeCliSource?: 'local' | 'bundled';
   opencodePath?: string;
   contextIncludeInstructions?: boolean;
   contextIncludeShape?: boolean;

@@ -1,6 +1,7 @@
 .vscode/**
 src/**
 out/**
+vendor/opencode/**
 node_modules/**
 !node_modules/playwright-core/**
 .eslintrc.json

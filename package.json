@@ -115,7 +115,20 @@
         "melink.ollama.opencode.path": {
           "type": "string",
           "default": "opencode",
-          "description": "Path to the opencode CLI executable used when melink.ollama.opencode.enabled is on. Resolved from PATH when it is a bare name."
+          "description": "Path to the opencode CLI executable used when melink.ollama.opencode.enabled is on and melink.ollama.opencode.cliSource is local. Resolved from PATH when it is a bare name. Ignored when cliSource is bundled."
+        },
+        "melink.ollama.opencode.cliSource": {
+          "type": "string",
+          "enum": [
+            "local",
+            "bundled"
+          ],
+          "enumDescriptions": [
+            "Use the opencode CLI on this machine (path setting or PATH).",
+            "Use the SideCode-downloaded CLI under vendor/opencode (gitignored). Install and Update fetch the official GitHub release into that folder."
+          ],
+          "default": "local",
+          "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path`. **bundled** downloads into `vendor/opencode` and every turn uses that binary instead of the machine PATH."
         },
         "melink.ollama.opencode.zvecGrep": {
           "type": "boolean",

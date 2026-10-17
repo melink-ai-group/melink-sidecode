@@ -10,9 +10,14 @@ import type { SettingsPatch, SettingsSnapshot } from './protocol';
 import { existsSync } from 'node:fs';
 import { installOpencodeRelease, type OpencodeInstallResult } from './backends/opencode/install';
 import {
+  opencodeInstallDirFor,
+  readOpencodeCliSource,
+  resolveOpencodeExecutable,
+  type OpencodeCliSource
+} from './backends/opencode/resolve';
+import {
   opencodePathError,
   probeOpencode,
-  upgradeOpencode,
   type OpencodeProbeResult,
   type OpencodeUpgradeResult
 } from './backends/opencode/status';
@@ -191,10 +196,18 @@ export class SettingsService {
       await config.update(`${OLLAMA_OPENCODE_SECTION}.enabled`, patch.opencodeEnabled, this.target);
     }
 
+    if (patch.opencodeCliSource !== undefined) {
+      if (patch.opencodeCliSource !== 'local' && patch.opencodeCliSource !== 'bundled') {
+        errors.opencodeCliSource = 'Pick local machine or bundled. This value was not saved.';
+      } else {
+        await config.update(`${OLLAMA_OPENCODE_SECTION}.cliSource`, patch.opencodeCliSource, this.target);
+      }
+    }
+
     if (patch.opencodePath !== undefined) {
-      // A path-shaped value that does not exist is refused inline, so a
-      // previously stored valid path is never overwritten by a bad one. A bare
-      // command name is left to PATH and reported as a status instead.
+      // Path is only meaningful for the local source. Bundled ignores it for
+      // spawns, so a bad draft must not overwrite a stored local path while
+      // bundled is selected — still validate when the patch asks to write one.
       const pathError = opencodePathError(patch.opencodePath, (candidate) => existsSync(candidate));
       if (pathError) {
         errors.opencodePath = pathError;
@@ -288,9 +301,26 @@ export class SettingsService {
     return config.get<boolean>(`${OLLAMA_OPENCODE_SECTION}.enabled`, true) !== false;
   }
 
-  /** Executable path for the runtime; a bare name is resolved from PATH. */
-  private opencodePath(config: vscode.WorkspaceConfiguration): string {
+  /** Stored local path; ignored for spawns when `cliSource` is bundled. */
+  private opencodePathSetting(config: vscode.WorkspaceConfiguration): string {
     return config.get<string>(`${OLLAMA_OPENCODE_SECTION}.path`, 'opencode') || 'opencode';
+  }
+
+  private opencodeCliSource(config: vscode.WorkspaceConfiguration): OpencodeCliSource {
+    return readOpencodeCliSource(config.get<unknown>(`${OLLAMA_OPENCODE_SECTION}.cliSource`));
+  }
+
+  private opencodeRoots(): { extensionPath: string } {
+    return { extensionPath: this.context.extensionPath };
+  }
+
+  /** Executable every opencode spawn and probe must use. */
+  private resolveOpencode(config: vscode.WorkspaceConfiguration): string {
+    return resolveOpencodeExecutable({
+      source: this.opencodeCliSource(config),
+      path: this.opencodePathSetting(config),
+      roots: this.opencodeRoots()
+    });
   }
 
   /**
@@ -304,15 +334,22 @@ export class SettingsService {
     config: vscode.WorkspaceConfiguration
   ): Promise<SettingsSnapshot['opencode']> {
     const enabled = this.opencodeEnabled(config);
-    const path = this.opencodePath(config);
+    const cliSource = this.opencodeCliSource(config);
+    const path = this.resolveOpencode(config);
     if (!enabled) {
-      return { enabled, path, status: 'missing', zvecGrep: { enabled: false, cli: 'missing' } };
+      return {
+        enabled,
+        cliSource,
+        path,
+        status: 'missing',
+        zvecGrep: { enabled: false, cli: 'missing' }
+      };
     }
     const result: OpencodeProbeResult = await probeOpencode(path);
     const zvecGrep = await this.zvecGrepStatus();
     return result.version !== undefined
-      ? { enabled, path, status: result.status, version: result.version, zvecGrep }
-      : { enabled, path, status: result.status, zvecGrep };
+      ? { enabled, cliSource, path, status: result.status, version: result.version, zvecGrep }
+      : { enabled, cliSource, path, status: result.status, zvecGrep };
   }
 
   /**
@@ -356,31 +393,85 @@ export class SettingsService {
   }
 
   /**
-   * Run the backend's real authenticated call. Falls back to an availability
-   * probe when a backend has no bespoke test, so the action never silently
-   * no-ops.
-   */
-  /**
-   * Run `opencode upgrade` when the runtime is on and the CLI probe succeeded.
-   * A missing or disabled CLI is not started.
-   */
-  /**
-   * Download the official opencode CLI when the probe did not find one, then
-   * point the path setting at the installed binary. A CLI that is already
-   * detected is left in place.
+   * Download the official opencode release into the active install directory.
+   *
+   * Bundled writes under `vendor/opencode/bin`. Local writes beside an absolute
+   * path, or into `~/.opencode/bin` for a bare name. The CLI's own `upgrade`
+   * command is not used: it can report success without replacing the binary
+   * the path setting points at.
    */
   async installOpencode(): Promise<OpencodeInstallResult> {
     const config = vscode.workspace.getConfiguration();
     const enabled = this.opencodeEnabled(config);
-    const path = this.opencodePath(config);
     if (!enabled) {
       return { ok: false, message: 'Turn on opencode before installing it.' };
     }
-    const probe = await probeOpencode(path);
+    const source = this.opencodeCliSource(config);
+    const executable = this.resolveOpencode(config);
+    const probe = await probeOpencode(executable);
     if (probe.status === 'detected') {
       return { ok: true, message: 'opencode is already installed.' };
     }
-    const installed = await installOpencodeRelease();
+    return this.downloadOpencodeRelease(config, source, 'installed');
+  }
+
+  /**
+   * Replace the active CLI with the latest GitHub release in place.
+   *
+   * Same download path as install. Does not spawn `opencode upgrade`, which
+   * often leaves a custom or non-npm install on the previous version.
+   */
+  async upgradeOpencode(): Promise<OpencodeUpgradeResult> {
+    const config = vscode.workspace.getConfiguration();
+    const enabled = this.opencodeEnabled(config);
+    if (!enabled) {
+      return { ok: false, message: 'Turn on opencode before updating it.' };
+    }
+    const source = this.opencodeCliSource(config);
+    const executable = this.resolveOpencode(config);
+    const before = await probeOpencode(executable);
+    if (before.status !== 'detected') {
+      return { ok: false, message: 'opencode is not connected. Check the path, then try again.' };
+    }
+    const installed = await this.downloadOpencodeRelease(config, source, 'updated');
+    if (!installed.ok) {
+      return { ok: false, message: installed.message };
+    }
+    const after = await probeOpencode(installed.executablePath ?? executable);
+    if (after.status !== 'detected') {
+      return {
+        ok: false,
+        message: 'opencode was downloaded, but it did not start. Check the path, then try again.'
+      };
+    }
+    if (before.version && after.version && before.version === after.version) {
+      return { ok: true, message: `Already up to date (${after.version}).` };
+    }
+    if (after.version) {
+      return { ok: true, message: `Updated to ${after.version}.` };
+    }
+    return { ok: true, message: installed.message };
+  }
+
+  /**
+   * Fetch the latest release into the directory for `source`, then point the
+   * local path setting at the binary when the source is local.
+   */
+  private async downloadOpencodeRelease(
+    config: vscode.WorkspaceConfiguration,
+    source: OpencodeCliSource,
+    verb: 'installed' | 'updated'
+  ): Promise<OpencodeInstallResult> {
+    const installDir = opencodeInstallDirFor({
+      source,
+      path: this.opencodePathSetting(config),
+      roots: this.opencodeRoots()
+    });
+    const installed = await installOpencodeRelease({
+      installDir,
+      // Bundled stays inside the extension tree; do not rewrite the user PATH.
+      persistPath: source === 'local'
+    });
     if (!installed.ok || !installed.executablePath) {
       return installed;
     }
@@ -391,27 +482,15 @@ export class SettingsService {
         message: 'opencode was downloaded, but it did not start. Check the path, then try again.'
       };
     }
-    await config.update(`${OLLAMA_OPENCODE_SECTION}.path`, installed.executablePath, this.target);
+    if (source === 'local') {
+      await config.update(`${OLLAMA_OPENCODE_SECTION}.path`, installed.executablePath, this.target);
+    }
     const version = after.version ? ` ${after.version}` : '';
     return {
       ok: true,
-      message: `opencode${version} installed.`,
+      message: `opencode${version} ${verb}.`,
       executablePath: installed.executablePath
     };
-  }
-
-  async upgradeOpencode(): Promise<OpencodeUpgradeResult> {
-    const config = vscode.workspace.getConfiguration();
-    const enabled = this.opencodeEnabled(config);
-    const path = this.opencodePath(config);
-    if (!enabled) {
-      return { ok: false, message: 'Turn on opencode before updating it.' };
-    }
-    const probe = await probeOpencode(path);
-    if (probe.status !== 'detected') {
-      return { ok: false, message: 'opencode is not connected. Check the path, then try again.' };
-    }
-    return upgradeOpencode(path);
   }
 
   /**
