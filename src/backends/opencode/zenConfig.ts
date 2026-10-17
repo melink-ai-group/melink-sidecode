@@ -44,6 +44,8 @@ export interface ZenConfigInput {
   mode: DefaultMode;
   permissionLevel: PermissionLevel;
   browser?: BrowserCommand;
+  skillMcp?: Record<string, unknown>;
+  skillPermissions?: Record<string, 'allow'>;
 }
 
 /**
@@ -51,7 +53,8 @@ export interface ZenConfigInput {
  * free subset); the selected model carries limit/reasoning when known.
  */
 export function buildZenOpencodeConfig(input: ZenConfigInput): OpencodeConfigResult {
-  const { modelIds, modelId, settings, capabilities, mode, permissionLevel, browser } = input;
+  const { modelIds, modelId, settings, capabilities, mode, permissionLevel, browser, skillMcp, skillPermissions } =
+    input;
   const resolvedMode: DefaultMode = isDefaultMode(mode) ? mode : 'agent';
 
   const models: Record<string, unknown> = {};
@@ -104,10 +107,11 @@ export function buildZenOpencodeConfig(input: ZenConfigInput): OpencodeConfigRes
     autoupdate: false,
     permission: {
       ...opencodePermission(permissionLevel, resolvedMode),
-      ...(browser ? browserPermissionKeys() : {})
+      ...(browser ? browserPermissionKeys() : {}),
+      ...(skillPermissions ?? {})
     }
   };
-  const mcp = mergeOpencodeMcp(undefined, browser);
+  const mcp = mergeOpencodeMcp(skillMcp, browser);
   if (mcp) {
     config.mcp = mcp;
   }

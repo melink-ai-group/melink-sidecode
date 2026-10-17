@@ -99,6 +99,13 @@ export interface OpencodeConfigInput {
    * merges this object over that config.
    */
   browser?: BrowserCommand;
+  /**
+   * Extra MCP servers (zvec-grep, ast-grep) merged beside the browser server.
+   * Absolute command paths keep bundled installs working without PATH.
+   */
+  skillMcp?: Record<string, unknown>;
+  /** Permission allows for enabled skill MCP servers/tools. */
+  skillPermissions?: Record<string, 'allow'>;
 }
 
 /**
@@ -292,10 +299,11 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
     // are set explicitly so the turn's level is honoured here too.
     permission: {
       ...opencodePermission(permissionLevel, resolvedMode),
-      ...(browser ? browserPermissionKeys() : {})
+      ...(browser ? browserPermissionKeys() : {}),
+      ...(input.skillPermissions ?? {})
     }
   };
-  const mcp = mergeOpencodeMcp(undefined, browser);
+  const mcp = mergeOpencodeMcp(input.skillMcp, browser);
   if (mcp) {
     config.mcp = mcp;
   }

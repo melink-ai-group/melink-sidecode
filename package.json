@@ -146,7 +146,7 @@
         "melink.ollama.opencode.zvecGrep": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. Turning it on installs the `zg` CLI when it is missing and runs `zg install --target opencode`. Turning it off removes that integration and leaves the CLI installed. Stored in user settings because the installer edits the user OpenCode config."
+          "markdownDescription": "Legacy. Prefer `melink.skills.zvecGrep`. Used only when the skills key is unset."
         },
         "melink.codex.path": {
           "type": "string",
@@ -267,6 +267,46 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Legacy single switch. Used only when `melink.skills.browserCodex` / `browserOpencode` are unset. Prefer the per-provider settings."
+        },
+        "melink.skills.zvecGrep": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode (local semantic + keyword + ripgrep search as an MCP tool). Turning it on installs `zg` when missing and writes an absolute-path MCP entry. Turning it off removes that entry and leaves the CLI installed."
+        },
+        "melink.skills.zvecGrep.cliSource": {
+          "type": "string",
+          "enum": ["local", "bundled"],
+          "enumDescriptions": [
+            "Use zg on this machine (path setting or PATH / npm global).",
+            "Use the SideCode-managed install under extension global storage."
+          ],
+          "default": "local",
+          "markdownDescription": "Where the zvec-grep CLI comes from."
+        },
+        "melink.skills.zvecGrep.path": {
+          "type": "string",
+          "default": "zg",
+          "description": "Path to the zg CLI when melink.skills.zvecGrep.cliSource is local. Ignored when bundled."
+        },
+        "melink.skills.astGrep": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Connect [ast-grep](https://github.com/ast-grep/ast-grep) to OpenCode (syntax-aware structural search and rewrite via a SideCode MCP shim)."
+        },
+        "melink.skills.astGrep.cliSource": {
+          "type": "string",
+          "enum": ["local", "bundled"],
+          "enumDescriptions": [
+            "Use ast-grep on this machine (path setting or PATH).",
+            "Use the SideCode-downloaded CLI under extension global storage."
+          ],
+          "default": "local",
+          "markdownDescription": "Where the ast-grep CLI comes from."
+        },
+        "melink.skills.astGrep.path": {
+          "type": "string",
+          "default": "ast-grep",
+          "description": "Path to the ast-grep CLI when melink.skills.astGrep.cliSource is local. Ignored when bundled."
         }
       }
     }

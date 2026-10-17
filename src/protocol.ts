@@ -85,6 +85,12 @@ export interface OpencodeCliProbe {
  * `hasToken`, so the value can never be rendered back into the DOM.
  */
 export interface SettingsSnapshot {
+  /**
+   * Effective read scope for the header: `workspace` when any SideCode key is
+   * set in workspace settings (those values win on load), otherwise `global`.
+   * Primary Save always writes user settings; when this is `workspace`, the
+   * screen also offers Save to workspace.
+   */
   target: 'workspace' | 'global';
   ollama: {
     baseUrl: string;
@@ -141,8 +147,7 @@ export interface SettingsSnapshot {
     /** Probe for the bundled binary under extension global storage. */
     bundled: OpencodeCliProbe;
     /**
-     * zvec-grep's OpenCode integration. `enabled` is true only when `zg` runs
-     * and the user OpenCode config has a `zvec_grep` server.
+     * @deprecated Prefer `skills.zvecGrep`. Kept so older webview builds keep a status line.
      */
     zvecGrep: {
       enabled: boolean;
@@ -164,11 +169,14 @@ export interface SettingsSnapshot {
   /**
    * Optional agent skills. Browser control is per provider so Codex and
    * OpenCode can differ. `browserError` is set only after a launch failed.
+   * Search skills (zvec-grep, ast-grep) connect to OpenCode via MCP.
    */
   skills: {
     browserCodex: boolean;
     browserOpencode: boolean;
     browserError?: string;
+    zvecGrep: SkillCliSnapshot;
+    astGrep: SkillCliSnapshot;
   };
   /** Live model lists for the default-model picker, per backend id. */
   models: Record<string, BackendModel[]>;
@@ -178,6 +186,21 @@ export interface SettingsSnapshot {
    * accepted; a field with a message was never persisted.
    */
   saveErrors?: Partial<Record<keyof SettingsPatch, string>>;
+}
+
+/** One SideCode-managed skill CLI (local path or bundled download). */
+export interface SkillCliSnapshot {
+  enabled: boolean;
+  cliSource: 'local' | 'bundled';
+  /** Effective path for the saved cliSource. */
+  path: string;
+  status: 'detected' | 'missing' | 'not-runnable';
+  version?: string;
+  local: OpencodeCliProbe;
+  bundled: OpencodeCliProbe;
+  /** True when the CLI runs and the user OpenCode config has this MCP server. */
+  connected: boolean;
+  cli: 'missing' | 'installed';
 }
 
 /**
@@ -227,6 +250,12 @@ export interface SettingsPatch {
   browserCodex?: boolean;
   /** Browser control for OpenCode (Ollama) turns. */
   browserOpencode?: boolean;
+  zvecGrepEnabled?: boolean;
+  zvecGrepCliSource?: 'local' | 'bundled';
+  zvecGrepPath?: string;
+  astGrepEnabled?: boolean;
+  astGrepCliSource?: 'local' | 'bundled';
+  astGrepPath?: string;
 }
 
 /**
@@ -395,6 +424,9 @@ export type HostToWebviewMessage =
    * flight while `pending` is true, so the checkbox can follow the click.
    */
   | { type: 'zvecGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
+  | { type: 'astGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
+  | { type: 'astGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
+  | { type: 'zvecGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   /** The capability descriptor + effective settings for one provider+model. */
   | { type: 'modelCapability'; capability: ModelCapabilitySnapshot }
   /**
@@ -623,7 +655,12 @@ export type WebviewToHostMessage =
   /** Drag a sidebar chat tab to a new index among the open tabs. */
   | { type: 'reorderChatTab'; tabId: string; toIndex: number }
   | { type: 'getSettings' }
-  | { type: 'saveSettings'; patch: SettingsPatch }
+  | {
+      type: 'saveSettings';
+      patch: SettingsPatch;
+      /** Defaults to user (global) settings. */
+      target?: 'global' | 'workspace';
+    }
   | { type: 'setOllamaToken'; value: string }
   | { type: 'clearOllamaToken' }
   | { type: 'setOpencodeZenToken'; value: string }
@@ -648,7 +685,12 @@ export type WebviewToHostMessage =
   /** Download the opencode CLI for the draft source when that probe is not detected. */
   | { type: 'installOpencode'; cliSource?: 'local' | 'bundled'; path?: string }
   /** Install or remove zvec-grep's OpenCode integration. Applies immediately. */
-  | { type: 'setZvecGrep'; enabled: boolean }
+  | { type: 'setZvecGrep'; enabled: boolean; cliSource?: 'local' | 'bundled'; path?: string }
+  /** Install or remove ast-grep's OpenCode integration. Applies immediately. */
+  | { type: 'setAstGrep'; enabled: boolean; cliSource?: 'local' | 'bundled'; path?: string }
+  | { type: 'installAstGrep'; cliSource?: 'local' | 'bundled'; path?: string }
+  | { type: 'upgradeAstGrep'; cliSource?: 'local' | 'bundled'; path?: string }
+  | { type: 'installZvecGrep'; cliSource?: 'local' | 'bundled'; path?: string }
   /** A decision on a pending approval. Never sent by a timer or a retry. */
   | { type: 'decideApproval'; backendId: string; threadId: string; requestId: string; decision: ApprovalDecision }
   /**

@@ -147,9 +147,15 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 | `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the **opencode** agentic runtime. Turn it off to use the direct adapter. |
 | `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
-| `melink.ollama.opencode.zvecGrep` | `false` | Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. On installs `zg` when it is missing and applies the OpenCode integration. Off removes that integration and leaves `zg` installed. |
+| `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
 | `melink.skills.browserCodex` | `true` | Let Codex open a browser tab in the editor. |
 | `melink.skills.browserOpencode` | `true` | Let OpenCode open a browser tab in the editor. |
+| `melink.skills.zvecGrep` | `false` | Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode (semantic + keyword + ripgrep MCP). |
+| `melink.skills.zvecGrep.cliSource` | `local` | `local` (path / PATH) or `bundled` (extension global storage). |
+| `melink.skills.zvecGrep.path` | `zg` | Path to `zg` when `cliSource` is local. |
+| `melink.skills.astGrep` | `false` | Connect [ast-grep](https://github.com/ast-grep/ast-grep) to OpenCode (structural search/rewrite MCP). |
+| `melink.skills.astGrep.cliSource` | `local` | `local` or `bundled` (extension global storage). |
+| `melink.skills.astGrep.path` | `ast-grep` | Path to `ast-grep` when `cliSource` is local. |
 
 `Ollama Cloud` lists exactly the models the live server returns from
 `GET /api/tags` — there is no hardcoded fallback list.
@@ -172,15 +178,18 @@ streams chat and does not spawn opencode.
 - **Path.** When `cliSource` is `local`, `melink.ollama.opencode.path` defaults
   to `opencode`, resolved from `PATH` when it is a bare name, exactly like
   `melink.codex.path`.
-- **zvec-grep.** Under **Settings → Skills**, **Use semantic search** connects
-  [zvec-grep](https://github.com/zvec-ai/zvec-grep) through its official
-  OpenCode installer (`zg install --target opencode`). If `zg` is not on
-  `PATH`, the sidebar installs `@zvec/zvec-grep` (Node.js 22 or newer) first.
-  Turning it off runs `zg uninstall --target opencode` and does not remove
-  the package or any workspace index. The choice is stored in user settings
-  (`melink.ollama.opencode.zvecGrep`) because the installer edits the user
-  OpenCode config. A new session picks up the change. The generated per-turn
-  config does not carry the MCP entry, so uninstall can turn it off.
+- **zvec-grep.** Under **Settings → Skills**, enable semantic search to connect
+  [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. Choose **local**
+  or **bundled** (SideCode-managed install under extension global storage).
+  Enable writes an absolute-path `zvec_grep` MCP entry into the user OpenCode
+  config and injects the same server into each SideCode turn. Off removes that
+  entry and leaves the CLI installed. Stored as `melink.skills.zvecGrep`
+  (legacy key `melink.ollama.opencode.zvecGrep` is still read when unset).
+- **ast-grep.** Under **Settings → Skills**, enable structural search to connect
+  [ast-grep](https://github.com/ast-grep/ast-grep). Bundled downloads the
+  official GitHub release into extension global storage. SideCode ships a thin
+  MCP shim (`dist/ast-grep-mcp.js`) that shells out to the resolved binary.
+  Enable writes `ast_grep` into the user OpenCode config and injects it per turn.
 - **Config is generated per turn, never committed.** The generated config is
   handed to the child through the documented inline override
   `OPENCODE_CONFIG_CONTENT`; nothing is written into the workspace and no

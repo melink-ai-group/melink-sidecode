@@ -104,11 +104,12 @@ default) and, while it is on, an **opencode CLI path** field. The status line
 shows one of three distinct states — detected (with the CLI version), missing or
 not runnable, and off — and an invalid path is refused inline without
 overwriting a previously stored valid one. While the runtime is on, the
-**OpenCode Semantic Search** subsection's **Use semantic search** switch applies
-or removes zvec-grep's OpenCode integration immediately.
-The click installs `@zvec/zvec-grep` when `zg` is missing, then runs
-`zg install --target opencode` or `zg uninstall --target opencode`. It does
-not index the workspace and does not uninstall the npm package.
+**Skills** tab configures **ast-grep** (structural search/rewrite) and
+**zvec-grep** (semantic + keyword search). Each skill has a local or bundled
+CLI source (bundled lives under extension global storage, like opencode).
+Turning a skill on installs the CLI when needed, writes an absolute-path MCP
+entry into your user OpenCode config, and injects that server into SideCode
+turns. Turning it off removes the MCP entry and leaves the CLI installed.
 
 
 ## Choosing a model

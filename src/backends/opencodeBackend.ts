@@ -489,6 +489,11 @@ export class OpencodeBackend implements AgentBackend {
     const { runOpencodeTurn } = await import('./opencode/runtime.ts');
     const { browserCommand } = await import('../browser/skill.ts');
     const browser = await browserCommand('opencode');
+    const { skillMcpForOpencodeTurn } = await import('../skills/resolveForTurn.ts');
+    const skills = await skillMcpForOpencodeTurn({
+      extensionPath: this.context.extensionPath,
+      globalStoragePath: this.context.globalStorageUri.fsPath
+    });
     const capabilities = selected.capabilities;
 
     const built = buildZenOpencodeConfig({
@@ -498,7 +503,9 @@ export class OpencodeBackend implements AgentBackend {
       capabilities,
       mode: request.mode ?? 'agent',
       permissionLevel,
-      ...(browser ? { browser } : {})
+      ...(browser ? { browser } : {}),
+      ...(skills.mcp ? { skillMcp: skills.mcp } : {}),
+      ...(Object.keys(skills.permissions).length > 0 ? { skillPermissions: skills.permissions } : {})
     });
     if (built.reasoningUnsupported) {
       this.events.fire({

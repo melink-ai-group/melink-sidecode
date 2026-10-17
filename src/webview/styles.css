@@ -2211,7 +2211,7 @@ html body {
   left: var(--popup-left, 0);
   right: var(--popup-right, auto);
   bottom: calc(100% + 4px);
-  width: min(320px, var(--popup-max, calc(100vw - 28px)));
+  width: min(440px, var(--popup-max, calc(100vw - 28px)));
   max-width: var(--popup-max, calc(100vw - 28px));
   min-height: 0;
   max-height: min(420px, 62vh);
@@ -3039,8 +3039,20 @@ html body {
   flex-direction: column;
 }
 
-.settings .panel--fill > .tablist {
+.settings .panel--fill > .tablist,
+.settings .panel--fill > .panel__head,
+.settings .panel--fill > .panel__foot {
   flex: 0 0 auto;
+}
+
+/* Single scroll region for tall sections (CLI, Context). Providers and Skills
+ * keep scrolling in their nested tab panels instead. */
+.settings .panel--fill > .panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .settings .panel__head {
@@ -3121,6 +3133,44 @@ html body {
 
 .field-label--row {
   margin: 0;
+}
+
+.field-tip {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.field-tip:hover {
+  color: var(--vscode-foreground);
+}
+
+.field-tip .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.skill-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.skill-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.skill-check-row > .check {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.skill-check-row > .field-tip {
+  margin-top: 1px;
 }
 
 .field-help {

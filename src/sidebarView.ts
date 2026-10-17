@@ -1222,6 +1222,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.type === 'upgradeOpencode' ||
           message.type === 'installOpencode' ||
           message.type === 'setZvecGrep' ||
+          message.type === 'setAstGrep' ||
+          message.type === 'installAstGrep' ||
+          message.type === 'upgradeAstGrep' ||
+          message.type === 'installZvecGrep' ||
           message.type === 'openSettings' ||
           message.type === 'startDictation' ||
           message.type === 'stopDictation')
@@ -1851,7 +1855,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'settings', settings: await this.settingsSnapshot() });
         break;
       case 'saveSettings':
-        await this.saveSettings(message.patch);
+        await this.saveSettings(message.patch, message.target);
         break;
       case 'setOpencodeZenToken':
         await this.settings.setOpencodeZenToken(message.value);
@@ -1944,13 +1948,79 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       case 'setZvecGrep': {
         this.post({ type: 'zvecGrep', pending: true, requested: message.enabled });
-        const applied = await this.settings.setZvecGrep(message.enabled);
+        const applied = await this.settings.setZvecGrep(message.enabled, {
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
         this.post({ type: 'settings', settings: await this.settingsSnapshot() });
         this.post({
           type: 'zvecGrep',
           pending: false,
           ok: applied.ok,
           message: applied.message
+        });
+        break;
+      }
+      case 'setAstGrep': {
+        this.post({ type: 'astGrep', pending: true, requested: message.enabled });
+        const applied = await this.settings.setAstGrep(message.enabled, {
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
+        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        this.post({
+          type: 'astGrep',
+          pending: false,
+          ok: applied.ok,
+          message: applied.message
+        });
+        break;
+      }
+      case 'installAstGrep': {
+        this.post({ type: 'astGrepInstall', pending: true });
+        const installed = await this.settings.installAstGrep({
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
+        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        this.post({
+          type: 'astGrepInstall',
+          pending: false,
+          ok: installed.ok,
+          message: installed.message,
+          ...(installed.executablePath ? { path: installed.executablePath } : {})
+        });
+        break;
+      }
+      case 'upgradeAstGrep': {
+        this.post({ type: 'astGrepInstall', pending: true });
+        const upgraded = await this.settings.upgradeAstGrep({
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
+        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        this.post({
+          type: 'astGrepInstall',
+          pending: false,
+          ok: upgraded.ok,
+          message: upgraded.message,
+          ...(upgraded.executablePath ? { path: upgraded.executablePath } : {})
+        });
+        break;
+      }
+      case 'installZvecGrep': {
+        this.post({ type: 'zvecGrepInstall', pending: true });
+        const installed = await this.settings.installZvecGrep({
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
+        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        this.post({
+          type: 'zvecGrepInstall',
+          pending: false,
+          ok: installed.ok,
+          message: installed.message,
+          ...(installed.path ? { path: installed.path } : {})
         });
         break;
       }
@@ -2004,6 +2074,36 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * the registry. The webview receives only the neutral vocabulary: it never
    * sees an Ollama or Codex field name.
    */
+  /** The model capability read the composer is waiting for, if any. */
+  private expectedModelCapability(): { providerId: string; modelId: string } | undefined {
+    const visible = this.visible;
+    if (!visible || visible.disposed) {
+      return undefined;
+    }
+    const thread = visible.activeThread;
+    const providerId =
+      visible.composerBackendId && this.registry.get(visible.composerBackendId)
+        ? visible.composerBackendId
+        : (thread?.backendId ?? this.defaultBackendId());
+    const modelId = visible.composerModelId ?? thread?.model;
+    if (!modelId) {
+      return undefined;
+    }
+    return { providerId, modelId };
+  }
+
+  private shouldPublishModelCapability(
+    startedSession: ChatSession | undefined,
+    providerId: string,
+    modelId: string
+  ): boolean {
+    if (startedSession && this.visible !== startedSession) {
+      return false;
+    }
+    const expected = this.expectedModelCapability();
+    return expected?.providerId === providerId && expected.modelId === modelId;
+  }
+
   private async postModelCapability(providerId: string, modelId: string): Promise<void> {
     const session = this.session;
     if (session && pinnedModelSettings(session.modelSettings, providerId, modelId) === undefined) {
@@ -2016,7 +2116,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     try {
       const capabilities = await this.registry.modelCapabilities(providerId, modelId);
-      if (session && this.visible !== session) {
+      if (!this.shouldPublishModelCapability(session, providerId, modelId)) {
         return;
       }
       const overrides =
@@ -2031,7 +2131,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       });
       this.post({ type: 'modelCapability', capability: { providerId, modelId, capabilities, settings } });
     } catch (error) {
-      if (session && this.visible !== session) {
+      if (!this.shouldPublishModelCapability(session, providerId, modelId)) {
         return;
       }
       // A read that fails outright is reported as data, so the panel shows an
@@ -2227,8 +2327,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * Persist the settings patch, then echo the fresh read model so the screen
    * reflects exactly what was stored (including any field the host refused).
    */
-  private async saveSettings(patch: import('./protocol').SettingsPatch): Promise<void> {
-    const result = await this.settings.save(patch);
+  private async saveSettings(
+    patch: import('./protocol').SettingsPatch,
+    target?: 'global' | 'workspace'
+  ): Promise<void> {
+    const result = await this.settings.save(patch, target ?? 'global');
     // A saved context change must apply to the next turn of an already-open
     // conversation, not just to a new one. The delivery layer holds a rendered
     // snapshot prefix per thread; drop it so the next turn rebuilds from the new
