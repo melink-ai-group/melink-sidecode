@@ -163,7 +163,7 @@ const TERM_EXIT_GRACE_MS = 2_000;
 const DEFAULT_CLIENT_INFO = {
   name: 'melink-sidecode',
   title: 'SideCode',
-  version: '0.1.0'
+  version: '0.2.0'
 };
 
 /**
