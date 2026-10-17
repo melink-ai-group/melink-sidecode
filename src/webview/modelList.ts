@@ -13,8 +13,14 @@ export function defaultProviderTab(providerIds: readonly string[], selectedBacke
   return providerIds[0] ?? '';
 }
 
-export function sortModels<T extends { id: string; label: string }>(models: readonly T[]): T[] {
+export function sortModels<T extends { id: string; label: string; free?: boolean }>(models: readonly T[]): T[] {
   return [...models].sort((left, right) => {
+    // Free models first when the provider marks pricing (OpenCode Zen).
+    const leftFree = left.free === true ? 0 : 1;
+    const rightFree = right.free === true ? 0 : 1;
+    if (leftFree !== rightFree) {
+      return leftFree - rightFree;
+    }
     const byLabel = left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' });
     if (byLabel !== 0) {
       return byLabel;

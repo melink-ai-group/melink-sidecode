@@ -321,8 +321,23 @@ html body {
 }
 
 .provider-dot--ollama,
+.provider-dot--opencode,
 .provider-dot--codex {
   background: var(--melink-shell);
+}
+
+.model-free-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  color: var(--vscode-descriptionForeground);
+  background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
 }
 
 .provider-badge {
@@ -357,9 +372,9 @@ html body {
   left: 0;
   display: flex;
   flex-direction: column;
-  width: min(320px, calc(100vw - 28px));
-  min-height: min(180px, 35vh);
-  max-height: min(420px, 62vh);
+  width: min(440px, calc(100vw - 20px));
+  min-height: min(280px, 48vh);
+  max-height: min(560px, 78vh);
   margin: 0;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
@@ -3343,8 +3358,7 @@ html body {
   }
 }
 
-/* OpenCode and semantic search sit under the Ollama provider as their own
-   subsections, inset from the credential fields. */
+/* Nested settings subsections (kept for any remaining inset panels). */
 
 .settings-subs {
   display: flex;

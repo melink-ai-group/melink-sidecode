@@ -446,7 +446,7 @@ export class CodexBackend implements AgentBackend {
    * Quiet turns do not call this, so compaction and dictation stay as they are.
    */
   private async browserThreadFields(): Promise<{ config?: { [key: string]: import('../../schemas/serde_json/JsonValue.ts').JsonValue } }> {
-    const config = codexBrowserConfig(await browserCommand());
+    const config = codexBrowserConfig(await browserCommand('codex'));
     return config ? { config } : {};
   }
 

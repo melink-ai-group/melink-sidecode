@@ -177,7 +177,7 @@ export async function runOpencodeServerTurn(
       return { outcome: 'stale-session', terminal: false, sessionId, detail: 'The saved opencode session is no longer available.' };
     }
     if (prompt.status === 401 || prompt.status === 403 || state.sawError?.statusCode === 401 || state.sawError?.statusCode === 403) {
-      return { outcome: 'unauthenticated', terminal: false, sessionId, detail: 'The Ollama Cloud token was rejected.' };
+      return { outcome: 'unauthenticated', terminal: false, sessionId, detail: 'The API credential was rejected.' };
     }
     if (!prompt.ok) {
       return {

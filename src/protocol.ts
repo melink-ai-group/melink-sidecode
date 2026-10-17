@@ -72,6 +72,14 @@ export type {
 /** Every thinking level, so a picker can be built generically from the shared list. */
 export { THINKING_LEVELS } from './backends/types';
 
+/** Probe result for one opencode CLI location (local path or bundled download). */
+export interface OpencodeCliProbe {
+  path: string;
+  status: 'detected' | 'missing' | 'not-runnable';
+  /** Present only when `status` is `detected`. */
+  version?: string;
+}
+
 /**
  * The settings screen's read model. The stored token is never included: only
  * `hasToken`, so the value can never be rendered back into the DOM.
@@ -99,6 +107,16 @@ export interface SettingsSnapshot {
     authMode?: string;
   };
   /**
+   * OpenCode Zen as a model provider (free + paid). Distinct from `opencode`,
+   * which is the optional agentic runtime nested under Ollama.
+   */
+  opencodeZen: {
+    defaultModel: string;
+    hasToken: boolean;
+    status: BackendStatus;
+    detail?: string;
+  };
+  /**
    * The optional opencode agentic runtime for Ollama. Reported separately from
    * `ollama.status`: the token can be valid while the CLI is absent, and the
    * setting can be off while the CLI is present, so the three states the screen
@@ -108,21 +126,23 @@ export interface SettingsSnapshot {
     enabled: boolean;
     /**
      * Where the CLI comes from. `bundled` uses the SideCode download under
-     * `vendor/opencode`; `local` uses `path` / PATH.
+     * extension global storage; `local` uses `path` / PATH.
      */
     cliSource: 'local' | 'bundled';
     /**
-     * Configured local path, or the effective bundled path when `cliSource` is
-     * `bundled` (so the screen can show what will be spawned).
+     * Effective path for the saved `cliSource` (what turns spawn today).
      */
     path: string;
     status: 'detected' | 'missing' | 'not-runnable';
     /** Present only when `status` is `detected`. */
     version?: string;
+    /** Probe for the local-machine path, so the draft dropdown can switch without saving. */
+    local: OpencodeCliProbe;
+    /** Probe for the bundled binary under extension global storage. */
+    bundled: OpencodeCliProbe;
     /**
      * zvec-grep's OpenCode integration. `enabled` is true only when `zg` runs
-     * and the user OpenCode config has a `zvec_grep` server. The checkbox is
-     * hidden while the opencode runtime itself is off.
+     * and the user OpenCode config has a `zvec_grep` server.
      */
     zvecGrep: {
       enabled: boolean;
@@ -142,11 +162,12 @@ export interface SettingsSnapshot {
    */
   context: ContextSettingsSnapshot;
   /**
-   * Optional agent skills. `browser` is on unless the user turned it off.
-   * `browserError` is set only after a launch was attempted and failed.
+   * Optional agent skills. Browser control is per provider so Codex and
+   * OpenCode can differ. `browserError` is set only after a launch failed.
    */
   skills: {
-    browser: boolean;
+    browserCodex: boolean;
+    browserOpencode: boolean;
     browserError?: string;
   };
   /** Live model lists for the default-model picker, per backend id. */
@@ -183,6 +204,7 @@ export interface ContextSettingsSnapshot {
 export interface SettingsPatch {
   ollamaBaseUrl?: string;
   ollamaDefaultModel?: string;
+  opencodeDefaultModel?: string;
   codexPath?: string;
   codexDefaultModel?: string;
   permissionLevel?: PermissionLevel;
@@ -201,8 +223,10 @@ export interface SettingsPatch {
   contextIncludeChangedFiles?: boolean;
   contextMaxBytes?: number;
   contextExclude?: string[];
-  /** Browser control skill. On lets Codex and OpenCode drive the editor browser tab. */
-  browser?: boolean;
+  /** Browser control for Codex conversations. */
+  browserCodex?: boolean;
+  /** Browser control for OpenCode (Ollama) turns. */
+  browserOpencode?: boolean;
 }
 
 /**
@@ -602,16 +626,27 @@ export type WebviewToHostMessage =
   | { type: 'saveSettings'; patch: SettingsPatch }
   | { type: 'setOllamaToken'; value: string }
   | { type: 'clearOllamaToken' }
-  | { type: 'testConnection'; backendId: string }
+  | { type: 'setOpencodeZenToken'; value: string }
+  | { type: 'clearOpencodeZenToken' }
+  | {
+      type: 'testConnection';
+      backendId: string;
+      /** Draft CLI overrides so OpenCode Zen checks the CLI selected on the CLI tab. */
+      cliSource?: 'local' | 'bundled';
+      path?: string;
+    }
   /**
    * Run the Codex protocol checks. The host answers with `codexVersionCheck`,
    * and stores the version when the checks pass.
    */
   | { type: 'validateCodexVersion' }
-  /** Run `opencode upgrade` when the CLI is connected. */
-  | { type: 'upgradeOpencode' }
-  /** Download and install the opencode CLI when it was not detected. */
-  | { type: 'installOpencode' }
+  /**
+   * Re-download the opencode CLI for the draft source (no save required).
+   * `cliSource` / `path` come from the settings draft when the user has not saved yet.
+   */
+  | { type: 'upgradeOpencode'; cliSource?: 'local' | 'bundled'; path?: string }
+  /** Download the opencode CLI for the draft source when that probe is not detected. */
+  | { type: 'installOpencode'; cliSource?: 'local' | 'bundled'; path?: string }
   /** Install or remove zvec-grep's OpenCode integration. Applies immediately. */
   | { type: 'setZvecGrep'; enabled: boolean }
   /** A decision on a pending approval. Never sent by a timer or a retry. */

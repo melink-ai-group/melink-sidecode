@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { browserPermissionKeys, codexBrowserConfig, mergeOpencodeMcp, type BrowserCommand } from './config.ts';
-import { browserSkillEnabled, navigationDecision } from './policy.ts';
+import {
+  browserSkillEnabled,
+  browserSkillEnabledFor,
+  configuredSettingValue,
+  navigationDecision
+} from './policy.ts';
 import { runBrowserTool, type BrowserActions } from './tools.ts';
 import { buildOpencodeConfig } from '../backends/opencode/config.ts';
 
@@ -15,6 +20,20 @@ test('browser control defaults on and stays off only when set off', () => {
   assert.equal(browserSkillEnabled(undefined), true);
   assert.equal(browserSkillEnabled(true), true);
   assert.equal(browserSkillEnabled(false), false);
+});
+
+test('per-provider browser flags fall back to the legacy browser key', () => {
+  assert.equal(browserSkillEnabledFor('codex', {}), true);
+  assert.equal(browserSkillEnabledFor('opencode', { browser: false }), false);
+  assert.equal(browserSkillEnabledFor('codex', { browser: false, browserCodex: true }), true);
+  assert.equal(browserSkillEnabledFor('opencode', { browser: true, browserOpencode: false }), false);
+});
+
+test('configuredSettingValue ignores package defaults', () => {
+  assert.equal(configuredSettingValue(undefined), undefined);
+  assert.equal(configuredSettingValue({ defaultValue: true } as { globalValue?: boolean }), undefined);
+  assert.equal(configuredSettingValue({ globalValue: false }), false);
+  assert.equal(configuredSettingValue({ workspaceValue: true, globalValue: false }), true);
 });
 
 test('navigation allows localhost and asks before any other origin', () => {

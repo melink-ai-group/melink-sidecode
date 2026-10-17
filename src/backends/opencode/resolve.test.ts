@@ -4,12 +4,13 @@ import { join } from 'node:path';
 import {
   bundledOpencodeExecutable,
   bundledOpencodeInstallDir,
+  bundledOpencodePreferredExecutable,
   opencodeInstallDirFor,
   readOpencodeCliSource,
   resolveOpencodeExecutable
 } from './resolve.ts';
 
-const roots = { extensionPath: join('C:', 'ext') };
+const roots = { extensionPath: join('C:', 'ext'), globalStoragePath: join('C:', 'storage') };
 
 test('cli source falls back to local for unknown values', () => {
   assert.equal(readOpencodeCliSource('bundled'), 'bundled');
@@ -38,10 +39,23 @@ test('local resolve uses the configured path or the bare default', () => {
   assert.equal(resolveOpencodeExecutable({ source: 'local', path: 'opencode', roots }), 'opencode');
 });
 
-test('install dir for bundled is always vendor/opencode/bin', () => {
+test('install dir for bundled uses persistent global storage', () => {
   assert.equal(
     opencodeInstallDirFor({ source: 'bundled', path: 'C:\\Tools\\OpenCode\\opencode.exe', roots }),
     bundledOpencodeInstallDir(roots)
+  );
+  assert.equal(bundledOpencodeInstallDir(roots), join('C:', 'storage', 'opencode', 'bin'));
+  assert.equal(
+    bundledOpencodePreferredExecutable(roots),
+    join('C:', 'storage', 'opencode', 'bin', process.platform === 'win32' ? 'opencode.exe' : 'opencode')
+  );
+});
+
+test('bundled install dir falls back to extension vendor without global storage', () => {
+  const legacyRoots = { extensionPath: join('C:', 'ext') };
+  assert.equal(
+    bundledOpencodeInstallDir(legacyRoots),
+    join('C:', 'ext', 'vendor', 'opencode', 'bin')
   );
 });
 

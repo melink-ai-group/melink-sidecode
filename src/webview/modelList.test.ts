@@ -44,3 +44,19 @@ test('models that share a label stay ordered by id', () => {
     ['a', 'b']
   );
 });
+
+test('free models sort before paid models with the same label order otherwise', () => {
+  const models = [
+    { id: 'gpt-5.5', label: 'GPT 5.5' },
+    { id: 'big-pickle', label: 'Big Pickle', free: true },
+    { id: 'mimo-free', label: 'MiMo Free', free: true }
+  ];
+  assert.deepEqual(
+    sortModels(models).map((model) => model.id),
+    ['big-pickle', 'mimo-free', 'gpt-5.5']
+  );
+});
+
+test('the model picker can open on the OpenCode provider tab', () => {
+  assert.equal(defaultProviderTab(['ollama', 'opencode', 'codex'], 'opencode'), 'opencode');
+});

@@ -17,19 +17,43 @@ export interface RuntimeView {
   version?: string;
 }
 
-export function opencodeRuntimeView(opencode: SettingsSnapshot['opencode']): RuntimeView {
-  if (!opencode.enabled) {
-    return { tone: 'disabled', label: 'Runtime off. The direct Ollama adapter runs turns.' };
-  }
-  if (opencode.status === 'detected') {
+export interface OpencodeRuntimeViewOptions {
+  /** Draft CLI source; defaults to the saved `cliSource`. */
+  source?: 'local' | 'bundled';
+  /** Draft enabled flag; defaults to the saved `enabled`. */
+  enabled?: boolean;
+}
+
+export function opencodeRuntimeView(
+  opencode: SettingsSnapshot['opencode'],
+  options: OpencodeRuntimeViewOptions = {}
+): RuntimeView {
+  const enabled = options.enabled ?? opencode.enabled;
+  // When the Ollama nested runtime is off, still report the binary status for
+  // the CLI tab / OpenCode Zen — they share this install regardless of the flag.
+  const source = options.source ?? opencode.cliSource;
+  const probe = source === 'bundled' ? opencode.bundled : opencode.local;
+  if (probe.status === 'detected') {
     return {
       tone: 'detected',
-      label: 'opencode detected',
-      ...(opencode.version ? { version: opencode.version } : {})
+      label: !enabled
+        ? source === 'bundled'
+          ? 'Bundled opencode detected (Ollama uses the direct adapter)'
+          : 'opencode detected (Ollama uses the direct adapter)'
+        : source === 'bundled'
+          ? 'Bundled opencode detected'
+          : 'opencode detected',
+      ...(probe.version ? { version: probe.version } : {})
     };
   }
-  if (opencode.status === 'missing') {
-    return { tone: 'missing', label: 'Not found. Install opencode, or set the CLI path.' };
+  if (probe.status === 'missing') {
+    return {
+      tone: 'missing',
+      label:
+        source === 'bundled'
+          ? 'Bundled CLI not found. Install opencode to download it.'
+          : 'Not found. Install opencode, or set the CLI path.'
+    };
   }
   return { tone: 'not-runnable', label: 'Found but not runnable. Check the path or permissions.' };
 }

@@ -126,6 +126,11 @@ export interface BackendModel {
   label: string;
   description?: string;
   /**
+   * True when the provider reports this model as zero-cost (for example OpenCode
+   * Zen free models). Absent means the provider does not classify pricing.
+   */
+  free?: boolean;
+  /**
    * What this specific model can do, populated from the provider. Absent means
    * the provider does not describe capabilities for this model, which the UI
    * treats as all-`unknown` rather than a plausible-but-wrong default.

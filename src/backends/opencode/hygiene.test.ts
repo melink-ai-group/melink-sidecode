@@ -32,11 +32,18 @@ test('the runtime hands the credential over only through the child environment',
   assert.equal(/\bwriteFile\b/.test(text), false);
   // The generated config travels on OPENCODE_CONFIG_CONTENT, never on disk.
   assert.match(text, /OPENCODE_CONFIG_ENV\]/);
-  // The token is placed in the child env and asserted absent from the config.
-  assert.match(text, /OLLAMA_API_KEY: options\.token/);
+  // The token is placed in the child env under apiKeyEnv (default OLLAMA_API_KEY).
+  assert.match(text, /\[apiKeyEnv\]: options\.token/);
+  assert.match(text, /DEFAULT_OPENCODE_API_KEY_ENV/);
   assert.match(text, /configContainsSecret/);
   // No raw stderr or console is ever emitted.
   assert.equal(/\bconsole\./.test(text), false);
+});
+
+test('the registry registers the OpenCode Zen backend', async () => {
+  const text = await source('backends/registry.ts');
+  assert.match(text, /OpencodeBackend/);
+  assert.match(text, /new OpencodeBackend\(/);
 });
 
 test('the ollama adapter imports the runtime only inside the enabled branch', async () => {
