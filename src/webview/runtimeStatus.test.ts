@@ -4,17 +4,27 @@ import { opencodeRuntimeView } from './runtimeStatus.ts';
 
 const zvecOff = { enabled: false, cli: 'missing' as const };
 
-test('an off runtime reports the disabled tone, never a stale probe result', () => {
+const localDetected = {
+  path: 'opencode',
+  status: 'detected' as const,
+  version: '1.1.65'
+};
+const bundledMissing = { path: '/storage/opencode/bin/opencode', status: 'missing' as const };
+
+test('an off Ollama runtime still reports a detected CLI for Zen and the CLI tab', () => {
   const view = opencodeRuntimeView({
     enabled: false,
     cliSource: 'local',
     path: 'opencode',
     status: 'detected',
     version: '1.1.65',
+    local: localDetected,
+    bundled: bundledMissing,
     zvecGrep: zvecOff
   });
-  assert.equal(view.tone, 'disabled');
-  assert.equal(view.version, undefined);
+  assert.equal(view.tone, 'detected');
+  assert.equal(view.version, '1.1.65');
+  assert.match(view.label, /direct adapter/i);
 });
 
 test('a detected runtime carries the version', () => {
@@ -24,19 +34,38 @@ test('a detected runtime carries the version', () => {
     path: 'opencode',
     status: 'detected',
     version: '1.1.65',
+    local: localDetected,
+    bundled: bundledMissing,
     zvecGrep: zvecOff
   });
   assert.equal(view.tone, 'detected');
   assert.equal(view.version, '1.1.65');
 });
 
-test('missing and not-runnable are distinct from detected and disabled', () => {
+test('the draft source picks the matching probe without waiting for save', () => {
+  const opencode = {
+    enabled: true,
+    cliSource: 'local' as const,
+    path: 'opencode',
+    status: 'detected' as const,
+    version: '1.1.65',
+    local: localDetected,
+    bundled: bundledMissing,
+    zvecGrep: zvecOff
+  };
+  assert.equal(opencodeRuntimeView(opencode, { source: 'bundled' }).tone, 'missing');
+  assert.equal(opencodeRuntimeView(opencode, { source: 'local' }).tone, 'detected');
+});
+
+test('missing and not-runnable are distinct from detected', () => {
   assert.equal(
     opencodeRuntimeView({
       enabled: true,
       cliSource: 'local',
       path: 'opencode',
       status: 'missing',
+      local: { path: 'opencode', status: 'missing' },
+      bundled: bundledMissing,
       zvecGrep: zvecOff
     }).tone,
     'missing'
@@ -47,6 +76,8 @@ test('missing and not-runnable are distinct from detected and disabled', () => {
       cliSource: 'bundled',
       path: '/x',
       status: 'not-runnable',
+      local: localDetected,
+      bundled: { path: '/x', status: 'not-runnable' },
       zvecGrep: zvecOff
     }).tone,
     'not-runnable'

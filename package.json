@@ -57,6 +57,14 @@
         "title": "SideCode: Clear Ollama Cloud token"
       },
       {
+        "command": "melink.setOpencodeZenToken",
+        "title": "SideCode: Set OpenCode Zen API key"
+      },
+      {
+        "command": "melink.clearOpencodeZenToken",
+        "title": "SideCode: Clear OpenCode Zen API key"
+      },
+      {
         "command": "melink.refreshContext",
         "title": "SideCode: Refresh project context",
         "icon": "$(notebook)"
@@ -107,6 +115,11 @@
           "default": "",
           "description": "Default Ollama Cloud model. Empty means the first model reported by the backend is used."
         },
+        "melink.opencode.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Default OpenCode Zen model. Empty means the first free model reported by the backend is used. Free models work without a Zen API key; paid models require SideCode: Set OpenCode Zen API key."
+        },
         "melink.ollama.opencode.enabled": {
           "type": "boolean",
           "default": true,
@@ -125,10 +138,10 @@
           ],
           "enumDescriptions": [
             "Use the opencode CLI on this machine (path setting or PATH).",
-            "Use the SideCode-downloaded CLI under vendor/opencode (gitignored). Install and Update fetch the official GitHub release into that folder."
+            "Use the SideCode-downloaded CLI in extension global storage. Install and Update fetch the official GitHub release into that folder; it survives closing VS Code."
           ],
           "default": "local",
-          "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path`. **bundled** downloads into `vendor/opencode` and every turn uses that binary instead of the machine PATH."
+          "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path`. **bundled** downloads into extension global storage and every turn uses that binary instead of the machine PATH."
         },
         "melink.ollama.opencode.zvecGrep": {
           "type": "boolean",
@@ -240,10 +253,20 @@
           "default": [],
           "markdownDescription": "Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. An excluded path is never read, and a selection inside one is reported as excluded rather than quoted."
         },
+        "melink.skills.browserCodex": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let **Codex** open a browser tab in the editor to check layout. On by default. When off, Codex conversations do not get browser tools."
+        },
+        "melink.skills.browserOpencode": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let **OpenCode** (Ollama agentic runtime) open a browser tab in the editor to check layout. On by default. When off, OpenCode turns do not get browser tools."
+        },
         "melink.skills.browser": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Let Codex and OpenCode open a browser tab in the editor to check layout. On by default. Turn it off and browser control stays unavailable: no browser tab is opened and no browser process is started."
+          "markdownDescription": "Legacy single switch. Used only when `melink.skills.browserCodex` / `browserOpencode` are unset. Prefer the per-provider settings."
         }
       }
     }

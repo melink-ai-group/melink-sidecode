@@ -325,7 +325,10 @@ export class OllamaBackend implements AgentBackend {
     return resolveOpencodeExecutable({
       source: readOpencodeCliSource(config.get('cliSource')),
       path: config.get<string>('path', 'opencode') || 'opencode',
-      roots: { extensionPath: this.context.extensionPath }
+      roots: {
+        extensionPath: this.context.extensionPath,
+        globalStoragePath: this.context.globalStorageUri.fsPath
+      }
     });
   }
 
@@ -921,7 +924,7 @@ export class OllamaBackend implements AgentBackend {
     const { buildOpencodeConfig, opencodeRequiresApproval } = await import('./opencode/config.ts');
     const { runOpencodeTurn } = await import('./opencode/runtime.ts');
     const { browserCommand } = await import('../browser/skill.ts');
-    const browser = await browserCommand();
+    const browser = await browserCommand('opencode');
 
     const built = buildOpencodeConfig({
       baseUrl: this.baseUrl,

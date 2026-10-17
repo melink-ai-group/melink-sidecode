@@ -1214,6 +1214,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.type === 'saveSettings' ||
           message.type === 'setOllamaToken' ||
           message.type === 'clearOllamaToken' ||
+          message.type === 'setOpencodeZenToken' ||
+          message.type === 'clearOpencodeZenToken' ||
           message.type === 'testConnection' ||
           message.type === 'validateCodexVersion' ||
           message.type === 'showAppSettings' ||
@@ -1851,6 +1853,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'saveSettings':
         await this.saveSettings(message.patch);
         break;
+      case 'setOpencodeZenToken':
+        await this.settings.setOpencodeZenToken(message.value);
+        await this.registry.refresh();
+        await this.publishSettings();
+        break;
+      case 'clearOpencodeZenToken':
+        await this.settings.clearOpencodeZenToken();
+        await this.registry.refresh();
+        await this.publishSettings();
+        break;
       case 'setOllamaToken':
         await this.settings.setOllamaToken(message.value);
         this.post({ type: 'settings', settings: await this.settingsSnapshot() });
@@ -1861,9 +1873,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'settings', settings: await this.settingsSnapshot() });
         this.post({ type: 'snapshot', availability: await this.registry.refresh() });
         break;
-      case 'testConnection':
-        this.post({ type: 'connectionTest', result: await this.settings.testConnection(message.backendId) });
+      case 'testConnection': {
+        const result = await this.settings.testConnection(message.backendId, {
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
+        this.post({ type: 'connectionTest', result });
+        if (message.backendId === 'opencode') {
+          this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          this.post({ type: 'snapshot', availability: await this.registry.refresh() });
+        }
         break;
+      }
       case 'showAppSettings':
         this.post({ type: 'showSettings', ...(message.section ? { section: message.section } : {}) });
         break;
@@ -1885,7 +1906,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       case 'upgradeOpencode': {
         this.post({ type: 'opencodeUpgrade', pending: true });
-        const upgraded = await this.settings.upgradeOpencode();
+        const upgraded = await this.settings.upgradeOpencode({
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
         this.post({
           type: 'opencodeUpgrade',
           pending: false,
@@ -1894,14 +1918,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         });
         if (upgraded.ok) {
           this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          // OpenCode Zen becomes selectable once the shared CLI is present.
+          this.post({ type: 'snapshot', availability: await this.registry.refresh() });
         }
         break;
       }
       case 'installOpencode': {
         this.post({ type: 'opencodeInstall', pending: true });
-        const installed = await this.settings.installOpencode();
+        const installed = await this.settings.installOpencode({
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        });
         if (installed.ok && installed.executablePath) {
           this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          this.post({ type: 'snapshot', availability: await this.registry.refresh() });
         }
         this.post({
           type: 'opencodeInstall',

@@ -5,7 +5,11 @@ import * as vscode from 'vscode';
 import type { BrowserCommand } from './config.ts';
 import { BrowserBridge } from './bridge.ts';
 import { BrowserPanel, type BrowserTabState } from './panel.ts';
-import { browserSkillEnabled } from './policy.ts';
+import {
+  browserSkillEnabledFor,
+  configuredSettingValue,
+  type BrowserSkillProvider
+} from './policy.ts';
 import { BrowserPage } from './session.ts';
 import { runBrowserTool, type BrowserActions, type ToolResult } from './tools.ts';
 
@@ -35,21 +39,35 @@ export class BrowserSkill {
     this.launchErrorListener = listener;
   }
 
-  enabled(): boolean {
-    return browserSkillEnabled(vscode.workspace.getConfiguration('melink.skills').get('browser', true));
+  private skillSettings(): { browser?: unknown; browserCodex?: unknown; browserOpencode?: unknown } {
+    const config = vscode.workspace.getConfiguration('melink.skills');
+    return {
+      browser: configuredSettingValue(config.inspect('browser')),
+      browserCodex: configuredSettingValue(config.inspect('browserCodex')),
+      browserOpencode: configuredSettingValue(config.inspect('browserOpencode'))
+    };
+  }
+
+  /** Whether browser control is on for one provider (or either, when omitted). */
+  enabled(provider?: BrowserSkillProvider): boolean {
+    const settings = this.skillSettings();
+    if (provider) {
+      return browserSkillEnabledFor(provider, settings);
+    }
+    return browserSkillEnabledFor('codex', settings) || browserSkillEnabledFor('opencode', settings);
   }
 
   /**
    * Spawn description for a conversation. Starts the bridge only.
-   * Undefined when the skill is off.
+   * Undefined when the skill is off for that provider.
    */
-  async command(): Promise<BrowserCommand | undefined> {
-    if (!this.enabled()) {
+  async command(provider: BrowserSkillProvider): Promise<BrowserCommand | undefined> {
+    if (!this.enabled(provider)) {
       return undefined;
     }
     this.stopped = false;
     await this.ensureBridge();
-    if (this.stopped || !this.enabled()) {
+    if (this.stopped || !this.enabled(provider)) {
       return undefined;
     }
     return {
@@ -59,7 +77,7 @@ export class BrowserSkill {
     };
   }
 
-  /** Close the page and the bridge when the user turns the skill off. */
+  /** Close the page and the bridge when both providers have the skill off. */
   async syncEnabled(): Promise<void> {
     if (!this.enabled()) {
       await this.stop();
@@ -121,7 +139,7 @@ export class BrowserSkill {
 
   private async handle(name: string, args: unknown): Promise<ToolResult> {
     if (!this.enabled()) {
-      return { content: [{ type: 'text', text: 'Browser control is off.' }], isError: true };
+      return { content: [{ type: 'text', text: 'Browser control is off for this provider.' }], isError: true };
     }
     try {
       const page = await this.ensurePage();
@@ -238,9 +256,9 @@ export function attachBrowserSkill(skill: BrowserSkill): void {
   current = skill;
 }
 
-/** Command for the next conversation, or undefined when the skill is off. */
-export async function browserCommand(): Promise<BrowserCommand | undefined> {
-  return current?.command();
+/** Command for the next conversation, or undefined when the skill is off for that provider. */
+export async function browserCommand(provider: BrowserSkillProvider): Promise<BrowserCommand | undefined> {
+  return current?.command(provider);
 }
 
 /** The last launch failure, for the Skills tab. Absent until a launch fails. */

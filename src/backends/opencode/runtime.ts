@@ -68,8 +68,13 @@ export interface OpencodeRunOptions {
   prompt: string;
   /** Existing runtime session to resume, when one is recorded for this thread. */
   sessionId?: string;
-  /** The Ollama token; read into the child environment only. */
+  /** API credential; read into the child environment only under {@link apiKeyEnv}. */
   token: string;
+  /**
+   * Environment variable name that carries `token`. Defaults to `OLLAMA_API_KEY`
+   * for the Ollama nested runtime; Zen uses `OPENCODE_API_KEY`.
+   */
+  apiKeyEnv?: string;
   /** Aborted by `cancel()`; terminates the child process tree. */
   signal?: AbortSignal;
   /**
@@ -230,7 +235,7 @@ export async function runOpencodeTurn(
   }
   if (state.sawError) {
     if (state.sawError.statusCode === 401 || state.sawError.statusCode === 403) {
-      return { ...common, outcome: 'unauthenticated', detail: 'The Ollama Cloud token was rejected.' };
+      return { ...common, outcome: 'unauthenticated', detail: 'The API credential was rejected.' };
     }
     return { ...common, outcome: 'provider', detail: state.sawError.message };
   }
@@ -279,12 +284,16 @@ export function buildArgs(options: OpencodeRunOptions): string[] {
   return args;
 }
 
+/** Default credential env for the Ollama nested OpenCode runtime. */
+export const DEFAULT_OPENCODE_API_KEY_ENV = 'OLLAMA_API_KEY';
+
 /** Build the child environment; the config and the token travel only here. */
 export function buildEnv(options: OpencodeRunOptions): NodeJS.ProcessEnv {
+  const apiKeyEnv = options.apiKeyEnv?.trim() || DEFAULT_OPENCODE_API_KEY_ENV;
   return {
     ...process.env,
     [OPENCODE_CONFIG_ENV]: JSON.stringify(options.config),
-    OLLAMA_API_KEY: options.token
+    [apiKeyEnv]: options.token
   };
 }
 

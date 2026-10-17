@@ -50,15 +50,20 @@ export interface SettingsScreenProps {
   onSave: (patch: SettingsPatch) => void;
   onSaveToken: (value: string) => void;
   onClearToken: () => void;
-  onTestConnection: (backendId: string) => void;
+  onSaveZenToken: (value: string) => void;
+  onClearZenToken: () => void;
+  onTestConnection: (
+    backendId: string,
+    draft?: { cliSource: 'local' | 'bundled'; path: string }
+  ) => void;
   /** Set when the protocol warning opened settings, so the Codex page is selected. */
   settingsProvider?: 'codex';
   codexVersionCheck?: { pending: boolean; ok?: boolean; message?: string };
   onValidateCodexVersion: () => void;
   opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
-  onUpgradeOpencode: () => void;
+  onUpgradeOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
-  onInstallOpencode: () => void;
+  onInstallOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
   zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
   onSetZvecGrep: (enabled: boolean) => void;
 }
@@ -67,6 +72,7 @@ export interface SettingsScreenProps {
 interface Draft {
   ollamaBaseUrl: string;
   ollamaDefaultModel: string;
+  opencodeDefaultModel: string;
   codexPath: string;
   codexDefaultModel: string;
   permissionLevel: SettingsSnapshot['defaults']['permissionLevel'];
@@ -76,6 +82,8 @@ interface Draft {
   opencodeEnabled: boolean;
   opencodeCliSource: 'local' | 'bundled';
   opencodePath: string;
+  browserCodex: boolean;
+  browserOpencode: boolean;
   contextIncludeInstructions: boolean;
   contextIncludeShape: boolean;
   contextIncludeEditorState: boolean;
@@ -84,7 +92,6 @@ interface Draft {
   /** The overall cap, held as a string so a half-typed value is not coerced. */
   contextMaxKb: string;
   contextExclude: string[];
-  browser: boolean;
 }
 
 /** Seed the draft from a host snapshot; used on load, echo, and reset. */
@@ -92,6 +99,7 @@ function draftFrom(settings: SettingsSnapshot): Draft {
   return {
     ollamaBaseUrl: settings.ollama.baseUrl,
     ollamaDefaultModel: settings.ollama.defaultModel,
+    opencodeDefaultModel: settings.opencodeZen.defaultModel,
     codexPath: settings.codex.path,
     codexDefaultModel: settings.codex.defaultModel,
     permissionLevel: settings.defaults.permissionLevel,
@@ -100,15 +108,16 @@ function draftFrom(settings: SettingsSnapshot): Draft {
     dictationModel: formatDictationTarget(settings.defaults.dictationModel),
     opencodeEnabled: settings.opencode.enabled,
     opencodeCliSource: settings.opencode.cliSource,
-    opencodePath: settings.opencode.path,
+    opencodePath: settings.opencode.local.path,
+    browserCodex: settings.skills.browserCodex,
+    browserOpencode: settings.skills.browserOpencode,
     contextIncludeInstructions: settings.context.includeInstructions,
     contextIncludeShape: settings.context.includeShape,
     contextIncludeEditorState: settings.context.includeEditorState,
     contextIncludeSelection: settings.context.includeSelection,
     contextIncludeChangedFiles: settings.context.includeChangedFiles,
     contextMaxKb: String(Math.round(settings.context.maxBytes / 1024)),
-    contextExclude: [...settings.context.exclude],
-    browser: settings.skills.browser
+    contextExclude: [...settings.context.exclude]
   };
 }
 
@@ -119,6 +128,8 @@ export function SettingsScreen({
   onSave,
   onSaveToken,
   onClearToken,
+  onSaveZenToken,
+  onClearZenToken,
   onTestConnection,
   settingsProvider,
   codexVersionCheck,
@@ -134,6 +145,8 @@ export function SettingsScreen({
   const [errors, setErrors] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
   const [token, setToken] = useState('');
   const [tokenSaved, setTokenSaved] = useState(false);
+  const [zenToken, setZenToken] = useState('');
+  const [zenTokenSaved, setZenTokenSaved] = useState(false);
   // The pattern being typed; it only joins the draft list on Add or Enter, so a
   // half-typed pattern is never validated or saved mid-keystroke.
   const [patternDraft, setPatternDraft] = useState('');
@@ -142,10 +155,10 @@ export function SettingsScreen({
   const [permissionConfirm, setPermissionConfirm] = useState(false);
   // The visible settings section. Switching tabs never touches the draft, so an
   // unsaved edit in another section survives.
-  const [tab, setTab] = useState<'providers' | 'defaults' | 'context' | 'skills'>('providers');
-  // Ollama and Codex are separate pages inside Providers. The choice is view
-  // state only; it does not touch the draft.
-  const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-codex'>(
+  const [tab, setTab] = useState<'cli' | 'providers' | 'defaults' | 'context' | 'skills'>('cli');
+  // Ollama, OpenCode Zen, and Codex are separate pages inside Providers. The
+  // choice is view state only; it does not touch the draft.
+  const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-opencode' | 'provider-codex'>(
     settingsProvider === 'codex' ? 'provider-codex' : 'provider-ollama'
   );
   const backRef = useRef<HTMLButtonElement>(null);
@@ -162,15 +175,19 @@ export function SettingsScreen({
     setErrors(settings.saveErrors ?? {});
   }, [settings]);
 
-  // A successful install writes a new absolute path on the host. Adopt it in the
-  // draft so Save does not put the previous "not found" path back.
+  // A successful local install writes a new absolute path on the host. Adopt it
+  // in the draft when the draft source is local.
   useEffect(() => {
     const installedPath = opencodeInstall?.ok ? opencodeInstall.path : undefined;
     if (!installedPath) {
       return;
     }
     setDraft((current) =>
-      current && current.opencodePath !== installedPath ? { ...current, opencodePath: installedPath } : current
+      current &&
+      current.opencodeCliSource === 'local' &&
+      current.opencodePath !== installedPath
+        ? { ...current, opencodePath: installedPath }
+        : current
     );
   }, [opencodeInstall]);
 
@@ -214,6 +231,7 @@ export function SettingsScreen({
     return (
       draft.ollamaBaseUrl !== settings.ollama.baseUrl ||
       draft.ollamaDefaultModel !== settings.ollama.defaultModel ||
+      draft.opencodeDefaultModel !== settings.opencodeZen.defaultModel ||
       draft.codexPath !== settings.codex.path ||
       draft.codexDefaultModel !== settings.codex.defaultModel ||
       draft.permissionLevel !== settings.defaults.permissionLevel ||
@@ -222,15 +240,16 @@ export function SettingsScreen({
       draft.dictationModel !== formatDictationTarget(settings.defaults.dictationModel) ||
       draft.opencodeEnabled !== settings.opencode.enabled ||
       draft.opencodeCliSource !== settings.opencode.cliSource ||
-      draft.opencodePath !== settings.opencode.path ||
+      draft.opencodePath !== settings.opencode.local.path ||
+      draft.browserCodex !== settings.skills.browserCodex ||
+      draft.browserOpencode !== settings.skills.browserOpencode ||
       draft.contextIncludeInstructions !== settings.context.includeInstructions ||
       draft.contextIncludeShape !== settings.context.includeShape ||
       draft.contextIncludeEditorState !== settings.context.includeEditorState ||
       draft.contextIncludeSelection !== settings.context.includeSelection ||
       draft.contextIncludeChangedFiles !== settings.context.includeChangedFiles ||
       draft.contextMaxKb !== storedKb ||
-      JSON.stringify(draft.contextExclude) !== storedExclude ||
-      draft.browser !== settings.skills.browser
+      JSON.stringify(draft.contextExclude) !== storedExclude
     );
   }, [draft, settings]);
 
@@ -253,6 +272,8 @@ export function SettingsScreen({
     setErrors({});
     setToken('');
     setTokenSaved(false);
+    setZenToken('');
+    setZenTokenSaved(false);
     setPatternDraft('');
   };
 
@@ -269,8 +290,8 @@ export function SettingsScreen({
     if (!draft.codexPath.trim()) {
       nextErrors.codexPath = 'Enter the CLI path or name. This value was not saved.';
     }
-    // The path is only meaningful for a local CLI while the runtime is on.
-    if (draft.opencodeEnabled && draft.opencodeCliSource === 'local' && !draft.opencodePath.trim()) {
+    // The path is only meaningful for a local CLI.
+    if (draft.opencodeCliSource === 'local' && !draft.opencodePath.trim()) {
       nextErrors.opencodePath = 'Enter the opencode CLI path or name. This value was not saved.';
     }
     // The cap is entered in kilobytes, so the value the user sees is readable;
@@ -290,6 +311,7 @@ export function SettingsScreen({
     onSave({
       ollamaBaseUrl: draft.ollamaBaseUrl.trim(),
       ollamaDefaultModel: draft.ollamaDefaultModel.trim(),
+      opencodeDefaultModel: draft.opencodeDefaultModel.trim(),
       codexPath: draft.codexPath.trim(),
       codexDefaultModel: draft.codexDefaultModel.trim(),
       permissionLevel: draft.permissionLevel,
@@ -297,22 +319,19 @@ export function SettingsScreen({
       thinking: draft.thinking,
       dictationModel: draft.dictationModel.trim(),
       opencodeEnabled: draft.opencodeEnabled,
-      ...(draft.opencodeEnabled
-        ? {
-            opencodeCliSource: draft.opencodeCliSource,
-            // Local path only: bundled ignores it for spawns, and an off runtime
-            // must not write an empty path over a previously stored valid one.
-            ...(draft.opencodeCliSource === 'local' ? { opencodePath: draft.opencodePath.trim() } : {})
-          }
-        : {}),
+      opencodeCliSource: draft.opencodeCliSource,
+      // Local path only: bundled ignores it for spawns, so a bundled selection
+      // must not write an empty path over a previously stored valid one.
+      ...(draft.opencodeCliSource === 'local' ? { opencodePath: draft.opencodePath.trim() } : {}),
+      browserCodex: draft.browserCodex,
+      browserOpencode: draft.browserOpencode,
       contextIncludeInstructions: draft.contextIncludeInstructions,
       contextIncludeShape: draft.contextIncludeShape,
       contextIncludeEditorState: draft.contextIncludeEditorState,
       contextIncludeSelection: draft.contextIncludeSelection,
       contextIncludeChangedFiles: draft.contextIncludeChangedFiles,
       contextMaxBytes: maxKb * 1024,
-      contextExclude: draft.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0),
-      browser: draft.browser
+      contextExclude: draft.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0)
     });
   };
 
@@ -324,6 +343,16 @@ export function SettingsScreen({
     onSaveToken(value);
     setToken('');
     setTokenSaved(true);
+  };
+
+  const saveZenToken = (): void => {
+    const value = zenToken.trim();
+    if (!value) {
+      return;
+    }
+    onSaveZenToken(value);
+    setZenToken('');
+    setZenTokenSaved(true);
   };
 
   if (!settings || !draft) {
@@ -346,9 +375,19 @@ export function SettingsScreen({
   }
 
   const ollamaStatus = connectionTest?.backendId === 'ollama' ? connectionTest : undefined;
+  const opencodeStatus = connectionTest?.backendId === 'opencode' ? connectionTest : undefined;
   const codexStatus = connectionTest?.backendId === 'codex' ? connectionTest : undefined;
   const modelOptions = flattenModels(settings.models);
-  const runtimeView = opencodeRuntimeView(settings.opencode);
+  const runtimeView = opencodeRuntimeView(settings.opencode, {
+    enabled: draft.opencodeEnabled,
+    source: draft.opencodeCliSource
+  });
+  const draftCliAction = {
+    cliSource: draft.opencodeCliSource,
+    path: draft.opencodePath
+  };
+  const draftProbe =
+    draft.opencodeCliSource === 'bundled' ? settings.opencode.bundled : settings.opencode.local;
   const zvecChecked = zvecGrep?.pending
     ? zvecGrep.requested === true
     : settings.opencode.zvecGrep.enabled;
@@ -362,6 +401,7 @@ export function SettingsScreen({
         ? 'Installed. Turning this on connects it to OpenCode.'
         : 'Not installed. Turning this on installs it and connects it to OpenCode.';
   const tabs: readonly TabItem[] = [
+    { id: 'cli', label: 'CLI' },
     { id: 'providers', label: 'Providers' },
     { id: 'defaults', label: 'Defaults' },
     { id: 'context', label: 'Context' },
@@ -389,6 +429,144 @@ export function SettingsScreen({
           onChange={(id) => setTab(id as typeof tab)}
         />
 
+        {/* ---------- CLI ---------- */}
+        <TabPanel id="cli" active={tab}>
+        <section className="panel panel--fill" aria-labelledby="cli-title">
+          <div className="panel__head" id="cli-title">
+            <span>CLI</span>
+            <span className="spacer" />
+            <span className="panel__note">Shared OpenCode binary for Ollama turns and OpenCode Zen</span>
+          </div>
+          <div className="panel__body">
+            <div className="field">
+              <p className="field-help">
+                OpenCode Zen and the optional Ollama agentic runtime both use this CLI. Choose local or
+                bundled, then install or update. The selection is what Test connection and model refresh use.
+              </p>
+              <label className="check" htmlFor="opencode-enabled">
+                <input
+                  className="check-input"
+                  id="opencode-enabled"
+                  type="checkbox"
+                  checked={draft.opencodeEnabled}
+                  onChange={(event) => update('opencodeEnabled', event.target.checked)}
+                />
+                <span className="check-box" aria-hidden="true">
+                  <CheckIcon />
+                </span>
+                <span className="check-body">
+                  <span className="check-label">Use opencode for Ollama turns</span>
+                  <span className="check-text">
+                    Applies from the next turn. OpenCode Zen still uses this CLI when the box is off.
+                  </span>
+                </span>
+              </label>
+
+              <label className="field-label" htmlFor="opencode-cli-source">
+                opencode CLI source
+              </label>
+              <select
+                className="select"
+                id="opencode-cli-source"
+                value={draft.opencodeCliSource}
+                aria-describedby="opencode-cli-source-help"
+                onChange={(event) =>
+                  update('opencodeCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
+                }
+              >
+                <option value="local">Local machine</option>
+                <option value="bundled">Bundled (extension storage)</option>
+              </select>
+              <p className="field-help" id="opencode-cli-source-help">
+                {draft.opencodeCliSource === 'bundled'
+                  ? 'Install downloads into extension global storage so the binary survives closing VS Code. Every turn uses that binary, not PATH.'
+                  : 'Use the path below or PATH. Install and Update use this selection immediately.'}
+              </p>
+
+              {draft.opencodeCliSource === 'local' ? (
+                <>
+                  <label className="field-label" htmlFor="opencode-path">
+                    opencode CLI path
+                  </label>
+                  <input
+                    className="input"
+                    id="opencode-path"
+                    type="text"
+                    value={draft.opencodePath}
+                    spellCheck={false}
+                    autoComplete="off"
+                    aria-invalid={errors.opencodePath ? true : undefined}
+                    aria-describedby={errors.opencodePath ? 'opencode-path-error' : 'opencode-status'}
+                    onChange={(event) => update('opencodePath', event.target.value)}
+                  />
+                  {errors.opencodePath ? (
+                    <p className="field-msg field-msg--error" id="opencode-path-error" role="alert">
+                      <AlertIcon />
+                      <span>{errors.opencodePath}</span>
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="field-help" id="opencode-bundled-path">
+                  Bundled path: <code>{settings.opencode.bundled.path}</code>
+                </p>
+              )}
+
+              <p
+                className={`runtime-status runtime-status--${runtimeView.tone}`}
+                id="opencode-status"
+                role="status"
+              >
+                <span className="runtime-dot" aria-hidden="true" />
+                <span>{runtimeView.label}</span>
+                {runtimeView.version ? <span className="runtime-version">{runtimeView.version}</span> : null}
+              </p>
+
+              <div className="runtime-actions">
+                {draftProbe.status === 'detected' ? (
+                  <>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      disabled={opencodeUpgrade?.pending}
+                      onClick={() => onUpgradeOpencode(draftCliAction)}
+                    >
+                      {opencodeUpgrade?.pending
+                        ? 'Updating...'
+                        : draft.opencodeCliSource === 'bundled'
+                          ? 'Update bundled opencode'
+                          : 'Update opencode'}
+                    </button>
+                    {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
+                      <CliResult ok={opencodeUpgrade.ok} message={opencodeUpgrade.message} />
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="btn btn--secondary"
+                      type="button"
+                      disabled={opencodeInstall?.pending}
+                      onClick={() => onInstallOpencode(draftCliAction)}
+                    >
+                      {opencodeInstall?.pending
+                        ? 'Installing...'
+                        : draft.opencodeCliSource === 'bundled'
+                          ? 'Install bundled opencode'
+                          : 'Install opencode'}
+                    </button>
+                    {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
+                      <CliResult ok={opencodeInstall.ok} message={opencodeInstall.message} />
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <p className="panel__foot">Save the CLI source so OpenCode Zen model checks use it after a restart.</p>
+        </section>
+        </TabPanel>
+
         {/* ---------- Providers ---------- */}
         <TabPanel id="providers" active={tab}>
         <section className="panel panel--fill" aria-labelledby="providers-title">
@@ -402,10 +580,13 @@ export function SettingsScreen({
             label="Provider"
             tabs={[
               { id: 'provider-ollama', label: 'Ollama' },
+              { id: 'provider-opencode', label: 'OpenCode' },
               { id: 'provider-codex', label: 'Codex' }
             ]}
             active={providerTab}
-            onChange={(id) => setProviderTab(id as 'provider-ollama' | 'provider-codex')}
+            onChange={(id) =>
+              setProviderTab(id as 'provider-ollama' | 'provider-opencode' | 'provider-codex')
+            }
           />
           <TabPanel id="provider-ollama" active={providerTab} className="tabpanel--inline">
             {/* Ollama Cloud */}
@@ -542,170 +723,132 @@ export function SettingsScreen({
 
               {ollamaStatus ? <TestResult backendLabel="Ollama Cloud" test={ollamaStatus} onRetry={() => onTestConnection('ollama')} /> : null}
             </div>
+          </TabPanel>
 
-            <div className="settings-subs">
-              <section className="settings-sub" aria-labelledby="opencode-title">
-                <h3 className="settings-sub__title" id="opencode-title">
-                  OpenCode
-                </h3>
-                <p className="field-help">
-                  Optional runtime for Ollama Cloud. Turns use the opencode CLI when this is on, and the direct adapter when it is off.
+          <TabPanel id="provider-opencode" active={providerTab} className="tabpanel--inline">
+            <div className="field">
+              <div className="field__head">
+                <span className="provider-badge provider-badge--opencode">
+                  <span className="provider-dot provider-dot--opencode" aria-hidden="true" />
+                  <span className="provider-name">OpenCode Zen</span>
+                </span>
+                <span className="spacer" />
+                <span className={`chip ${settings.opencodeZen.hasToken ? 'chip--stored' : 'chip--missing'}`}>
+                  {settings.opencodeZen.hasToken ? 'Key stored' : 'Free models'}
+                </span>
+              </div>
+              <p className="field-help">
+                Free OpenCode models work without a key. Add a Zen API key to unlock paid models. Turns and
+                connection tests use the CLI selected under Settings → CLI (local or bundled).
+              </p>
+
+              <label className="field-label" htmlFor="opencode-default-model">
+                Default model
+              </label>
+              <select
+                className="select"
+                id="opencode-default-model"
+                value={draft.opencodeDefaultModel}
+                onChange={(event) => update('opencodeDefaultModel', event.target.value)}
+              >
+                <option value="">First free model reported by the provider</option>
+                {modelOptions
+                  .filter((option) => option.backendId === 'opencode')
+                  .map((option) => (
+                    <option value={option.id} key={option.id}>
+                      {option.free ? `${option.label} (Free)` : option.label}
+                    </option>
+                  ))}
+              </select>
+              <p className="field-help">
+                Used for a new conversation. Switching the model in the header overrides it for that conversation.
+              </p>
+
+              <label className="field-label" htmlFor="opencode-zen-api-key">
+                Zen API key (optional)
+              </label>
+              <div className="secret-row">
+                <input
+                  className="input secret-input"
+                  id="opencode-zen-api-key"
+                  type="password"
+                  value={zenToken}
+                  placeholder={settings.opencodeZen.hasToken ? '••••••••••••••••' : ''}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-describedby="opencode-zen-key-state"
+                  onChange={(event) => {
+                    setZenToken(event.target.value);
+                    setZenTokenSaved(false);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      saveZenToken();
+                    }
+                  }}
+                />
+              </div>
+              <p className="field-msg" id="opencode-zen-key-state">
+                {settings.opencodeZen.hasToken ? (
+                  <>
+                    <span className="stored-dot" aria-hidden="true" />
+                    <span>
+                      {zenTokenSaved
+                        ? 'Key saved. The stored value is never shown back.'
+                        : 'A key is stored. Enter a new key to replace it, or clear it.'}
+                    </span>
+                  </>
+                ) : (
+                  <span>
+                    {zenTokenSaved
+                      ? 'Key saved.'
+                      : 'No key stored. Free models are available; add a key for paid models.'}
+                  </span>
+                )}
+              </p>
+
+              <div className="field-row">
+                <button className="btn" type="button" disabled={!zenToken.trim()} onClick={saveZenToken}>
+                  Save key
+                </button>
+                <button
+                  className="btn btn--danger"
+                  type="button"
+                  disabled={!settings.opencodeZen.hasToken}
+                  onClick={() => {
+                    onClearZenToken();
+                    setZenToken('');
+                    setZenTokenSaved(false);
+                  }}
+                >
+                  Clear key
+                </button>
+                <span className="spacer" />
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={opencodeStatus?.pending}
+                  onClick={() => onTestConnection('opencode', draftCliAction)}
+                >
+                  <RefreshIconInline />
+                  {opencodeStatus?.pending ? 'Checking…' : 'Check models'}
+                </button>
+              </div>
+              <p className="field-help">
+                Check models probes the CLI selected under Settings → CLI (
+                {draft.opencodeCliSource === 'bundled' ? 'bundled' : 'local'}) and refreshes the Zen catalog.
+              </p>
+              {opencodeStatus?.result ? (
+                <p
+                  className={`field-msg ${opencodeStatus.result.outcome === 'ok' ? 'field-msg--ok' : 'field-msg--error'}`}
+                  role="status"
+                >
+                  {opencodeStatus.result.outcome === 'ok' ? <CheckIcon /> : <AlertIcon />}
+                  <span>{opencodeStatus.result.message}</span>
                 </p>
-                <div className="runtime">
-                  <label className="check" htmlFor="opencode-enabled">
-                    <input
-                      className="check-input"
-                      id="opencode-enabled"
-                      type="checkbox"
-                      checked={draft.opencodeEnabled}
-                      onChange={(event) => update('opencodeEnabled', event.target.checked)}
-                    />
-                    <span className="check-box" aria-hidden="true">
-                      <CheckIcon />
-                    </span>
-                    <span className="check-body">
-                      <span className="check-label">Use opencode for Ollama turns</span>
-                      <span className="check-text">Applies from the next turn. Save settings before installing or updating.</span>
-                    </span>
-                  </label>
-
-                  {draft.opencodeEnabled ? (
-                    <>
-                      <label className="field-label" htmlFor="opencode-cli-source">
-                        opencode CLI source
-                      </label>
-                      <select
-                        className="select"
-                        id="opencode-cli-source"
-                        value={draft.opencodeCliSource}
-                        aria-describedby="opencode-cli-source-help"
-                        onChange={(event) =>
-                          update('opencodeCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
-                        }
-                      >
-                        <option value="local">Local machine</option>
-                        <option value="bundled">Bundled (vendor/opencode)</option>
-                      </select>
-                      <p className="field-help" id="opencode-cli-source-help">
-                        {draft.opencodeCliSource === 'bundled'
-                          ? 'Install downloads into vendor/opencode (gitignored). Every turn uses that binary, not PATH.'
-                          : 'Use the path below or PATH. Save settings before installing or updating.'}
-                      </p>
-
-                      {draft.opencodeCliSource === 'local' ? (
-                        <>
-                          <label className="field-label" htmlFor="opencode-path">
-                            opencode CLI path
-                          </label>
-                          <input
-                            className="input"
-                            id="opencode-path"
-                            type="text"
-                            value={draft.opencodePath}
-                            spellCheck={false}
-                            autoComplete="off"
-                            aria-invalid={errors.opencodePath ? true : undefined}
-                            aria-describedby={errors.opencodePath ? 'opencode-path-error' : 'opencode-status'}
-                            onChange={(event) => update('opencodePath', event.target.value)}
-                          />
-                          {errors.opencodePath ? (
-                            <p className="field-msg field-msg--error" id="opencode-path-error" role="alert">
-                              <AlertIcon />
-                              <span>{errors.opencodePath}</span>
-                            </p>
-                          ) : null}
-                        </>
-                      ) : settings.opencode.cliSource === 'bundled' ? (
-                        <p className="field-help" id="opencode-bundled-path">
-                          Bundled path: <code>{settings.opencode.path}</code>
-                        </p>
-                      ) : null}
-                    </>
-                  ) : null}
-
-                  <p
-                    className={`runtime-status runtime-status--${runtimeView.tone}`}
-                    id="opencode-status"
-                    role="status"
-                  >
-                    <span className="runtime-dot" aria-hidden="true" />
-                    <span>{runtimeView.label}</span>
-                    {runtimeView.version ? <span className="runtime-version">{runtimeView.version}</span> : null}
-                  </p>
-
-                  {settings.opencode.enabled ? (
-                    <div className="runtime-actions">
-                      {settings.opencode.status === 'detected' ? (
-                        <>
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            disabled={opencodeUpgrade?.pending}
-                            onClick={onUpgradeOpencode}
-                          >
-                            {opencodeUpgrade?.pending ? 'Updating...' : 'Update opencode'}
-                          </button>
-                          {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
-                            <CliResult ok={opencodeUpgrade.ok} message={opencodeUpgrade.message} />
-                          ) : null}
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn btn--secondary"
-                            type="button"
-                            disabled={opencodeInstall?.pending}
-                            onClick={onInstallOpencode}
-                          >
-                            {opencodeInstall?.pending ? 'Installing...' : 'Install opencode'}
-                          </button>
-                          {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
-                            <CliResult ok={opencodeInstall.ok} message={opencodeInstall.message} />
-                          ) : null}
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </section>
-
-              {settings.opencode.enabled ? (
-                <section className="settings-sub" aria-labelledby="semantic-search-title">
-                  <h3 className="settings-sub__title" id="semantic-search-title">
-                    OpenCode Semantic Search
-                  </h3>
-                  <p className="field-help">
-                    Indexes this workspace locally so OpenCode can search by meaning instead of reading files into the prompt. That reduces token usage on each turn.
-                  </p>
-                  <div className="runtime">
-                    <label className="check" htmlFor="zvec-grep-enabled">
-                      <input
-                        className="check-input"
-                        id="zvec-grep-enabled"
-                        type="checkbox"
-                        checked={zvecChecked}
-                        disabled={zvecGrep?.pending}
-                        aria-describedby="zvec-grep-status"
-                        onChange={(event) => onSetZvecGrep(event.target.checked)}
-                      />
-                      <span className="check-box" aria-hidden="true">
-                        <CheckIcon />
-                      </span>
-                      <span className="check-body">
-                        <span className="check-label">Use semantic search</span>
-                        <span className="check-text">
-                          Updates your user OpenCode config. A new session picks it up.
-                        </span>
-                      </span>
-                    </label>
-                    <p className="field-help" id="zvec-grep-status">
-                      {zvecStatus}
-                    </p>
-                    {zvecGrep && !zvecGrep.pending && zvecGrep.message ? (
-                      <CliResult ok={zvecGrep.ok} message={zvecGrep.message} />
-                    ) : null}
-                  </div>
-                </section>
+              ) : settings.opencodeZen.detail ? (
+                <p className="field-help">{settings.opencodeZen.detail}</p>
               ) : null}
             </div>
           </TabPanel>
@@ -1226,16 +1369,23 @@ export function SettingsScreen({
           <div className="panel__body">
             <div className="field">
               <p className="field-help">
-                A skill is available to Codex and OpenCode while it is on. Turning it off leaves that
-                ability out of the next conversation.
+                Browser control can be on for Codex, OpenCode, or both. When it is off for a provider,
+                that provider does not get browser tools and no browser is started for it.
               </p>
               <ul className="context-list">
                 <ContextCategory
-                  id="skill-browser"
-                  name="Browser control"
-                  description="When this is on, the agent can open the app in an editor tab and check layout. When it is off, it cannot, and no browser is started. Uses the installed Edge or Chrome."
-                  checked={draft.browser}
-                  onChange={(value) => update('browser', value)}
+                  id="skill-browser-codex"
+                  name="Browser control — Codex"
+                  description="When this is on, Codex can open the app in an editor tab and check layout. Uses the installed Edge or Chrome."
+                  checked={draft.browserCodex}
+                  onChange={(value) => update('browserCodex', value)}
+                />
+                <ContextCategory
+                  id="skill-browser-opencode"
+                  name="Browser control — OpenCode"
+                  description="When this is on, OpenCode (Ollama agentic runtime and OpenCode Zen) can open the app in an editor tab and check layout. Uses the installed Edge or Chrome."
+                  checked={draft.browserOpencode}
+                  onChange={(value) => update('browserOpencode', value)}
                 />
               </ul>
               {settings.skills.browserError ? (
@@ -1245,10 +1395,43 @@ export function SettingsScreen({
                 </p>
               ) : (
                 <p className="field-help">
-                  Saved to <code className="key">melink.skills.browser</code>. On by default. A new Codex
-                  conversation and the next OpenCode turn pick up the change.
+                  Saved to <code className="key">melink.skills.browserCodex</code> and{' '}
+                  <code className="key">melink.skills.browserOpencode</code>. On by default. A new
+                  conversation picks up the change for that provider.
                 </p>
               )}
+            </div>
+
+            <div className="field">
+              <p className="field-label field-label--row">OpenCode Semantic Search</p>
+              <p className="field-help">
+                Indexes this workspace locally so OpenCode can search by meaning instead of reading files into
+                the prompt. That reduces token usage on each turn.
+              </p>
+              <label className="check" htmlFor="zvec-grep-enabled">
+                <input
+                  className="check-input"
+                  id="zvec-grep-enabled"
+                  type="checkbox"
+                  checked={zvecChecked}
+                  disabled={zvecGrep?.pending}
+                  aria-describedby="zvec-grep-status"
+                  onChange={(event) => onSetZvecGrep(event.target.checked)}
+                />
+                <span className="check-box" aria-hidden="true">
+                  <CheckIcon />
+                </span>
+                <span className="check-body">
+                  <span className="check-label">Use semantic search</span>
+                  <span className="check-text">Updates your user OpenCode config. A new session picks it up.</span>
+                </span>
+              </label>
+              <p className="field-help" id="zvec-grep-status">
+                {zvecStatus}
+              </p>
+              {zvecGrep && !zvecGrep.pending && zvecGrep.message ? (
+                <CliResult ok={zvecGrep.ok} message={zvecGrep.message} />
+              ) : null}
             </div>
           </div>
           <p className="panel__foot">Unsaved changes apply to the next turn.</p>

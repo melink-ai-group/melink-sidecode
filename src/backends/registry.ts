@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CodexBackend } from './codex';
 import { ValidatedCodexVersions } from './codex/validatedVersions';
 import { OllamaBackend } from './ollama';
+import { OpencodeBackend } from './opencodeBackend';
 import { ApprovalStore } from './approvalStore';
 import { ThreadStore } from './threadStore';
 import { ModelSettingsStore } from './modelSettings';
@@ -63,6 +64,7 @@ export class BackendRegistry implements Disposable {
     this.codexVersions = new ValidatedCodexVersions(context.globalState);
     this.backends = [
       new OllamaBackend(context, this.store, this.approvals),
+      new OpencodeBackend(context, this.store, this.approvals),
       new CodexBackend(this.store, this.approvals, () => this.codexVersions.list())
     ];
     for (const backend of this.backends) {

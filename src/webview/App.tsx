@@ -1061,14 +1061,22 @@ export function App(): JSX.Element {
     bridge.post({ type: 'clearOllamaToken' });
   };
 
-  const upgradeOpencode = (): void => {
-    dispatch({ type: 'opencodeUpgrade', pending: true });
-    bridge.post({ type: 'upgradeOpencode' });
+  const saveOpencodeZenToken = (value: string): void => {
+    bridge.post({ type: 'setOpencodeZenToken', value });
   };
 
-  const installOpencode = (): void => {
+  const clearOpencodeZenToken = (): void => {
+    bridge.post({ type: 'clearOpencodeZenToken' });
+  };
+
+  const upgradeOpencode = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
+    dispatch({ type: 'opencodeUpgrade', pending: true });
+    bridge.post({ type: 'upgradeOpencode', cliSource: draft.cliSource, path: draft.path });
+  };
+
+  const installOpencode = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
     dispatch({ type: 'opencodeInstall', pending: true });
-    bridge.post({ type: 'installOpencode' });
+    bridge.post({ type: 'installOpencode', cliSource: draft.cliSource, path: draft.path });
   };
 
   const setZvecGrep = (enabled: boolean): void => {
@@ -1076,9 +1084,21 @@ export function App(): JSX.Element {
     bridge.post({ type: 'setZvecGrep', enabled });
   };
 
-  const testConnection = (backendId: string): void => {
+  const testConnection = (
+    backendId: string,
+    draft?: { cliSource: 'local' | 'bundled'; path: string }
+  ): void => {
     dispatch({ type: 'connectionTestPending', backendId });
-    bridge.post({ type: 'testConnection', backendId });
+    bridge.post({
+      type: 'testConnection',
+      backendId,
+      ...(draft
+        ? {
+            cliSource: draft.cliSource,
+            path: draft.path
+          }
+        : {})
+    });
   };
 
   const validateCodexVersion = (): void => {
@@ -2088,6 +2108,8 @@ export function App(): JSX.Element {
         onSave={saveSettings}
         onSaveToken={saveOllamaToken}
         onClearToken={clearOllamaToken}
+        onSaveZenToken={saveOpencodeZenToken}
+        onClearZenToken={clearOpencodeZenToken}
         onTestConnection={testConnection}
         onValidateCodexVersion={validateCodexVersion}
         opencodeUpgrade={state.opencodeUpgrade}
@@ -2807,7 +2829,7 @@ function ModelPanel({
             <p className="empty-text">
               {providers.length > 0
                 ? 'Set up a provider below to list the models on your account.'
-                : 'Set an Ollama Cloud token, or install the Codex CLI and sign in.'}
+                : 'Set an Ollama Cloud token, install the OpenCode CLI under Settings → CLI, or install the Codex CLI and sign in.'}
             </p>
             {providers.length === 0 ? (
               <div className="model-empty__actions">
@@ -2983,7 +3005,14 @@ function ModelPanel({
                       key={`${activeGroup.backend.id}-${model.id}`}
                       onClick={() => select(activeGroup.backend.id, model.id)}
                     >
-                      <span className="model-option-name">{model.label}</span>
+                      <span className="model-option-name">
+                        {model.label}
+                        {model.free ? (
+                          <span className="model-free-chip" title="Free on OpenCode Zen">
+                            Free
+                          </span>
+                        ) : null}
+                      </span>
                       {selected ? <CheckIcon className="model-check" /> : null}
                     </button>
                   );

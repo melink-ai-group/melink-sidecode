@@ -6,3 +6,6 @@
  * output channels, log lines, or error text.
  */
 export const OLLAMA_TOKEN_SECRET_KEY = 'melink.ollama.token';
+
+/** OpenCode Zen API key (pay-as-you-go); free models work without it. */
+export const OPENCODE_ZEN_TOKEN_SECRET_KEY = 'melink.opencode.zenToken';

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { BackendRegistry } from './backends/registry';
 import { setDiagnosticSink } from './backends/diagnostics';
-import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
+import { OLLAMA_TOKEN_SECRET_KEY, OPENCODE_ZEN_TOKEN_SECRET_KEY } from './backends/secrets';
 import { VscodeProjectContext } from './context/vscodeHost';
 import { planStepMarkdownPlugin } from './planStepMarkdown';
 import { SidebarViewProvider } from './sidebarView';
@@ -48,7 +48,11 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
       if (event.affectsConfiguration('melink.context')) {
         provider.invalidateContextDelivery();
       }
-      if (event.affectsConfiguration('melink.skills.browser')) {
+      if (
+        event.affectsConfiguration('melink.skills.browser') ||
+        event.affectsConfiguration('melink.skills.browserCodex') ||
+        event.affectsConfiguration('melink.skills.browserOpencode')
+      ) {
         void syncBrowserSkill();
       }
     }),
@@ -76,6 +80,23 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
     }),
     vscode.commands.registerCommand('melink.clearOllamaToken', async () => {
       await context.secrets.delete(OLLAMA_TOKEN_SECRET_KEY);
+      await activeRegistry.refresh();
+    }),
+    vscode.commands.registerCommand('melink.setOpencodeZenToken', async () => {
+      const value = await vscode.window.showInputBox({
+        title: 'OpenCode Zen API key',
+        prompt: 'Stored in VS Code secret storage. Free models work without a key; paid models need this key.',
+        password: true,
+        ignoreFocusOut: true
+      });
+      if (value === undefined) {
+        return;
+      }
+      await context.secrets.store(OPENCODE_ZEN_TOKEN_SECRET_KEY, value);
+      await activeRegistry.refresh();
+    }),
+    vscode.commands.registerCommand('melink.clearOpencodeZenToken', async () => {
+      await context.secrets.delete(OPENCODE_ZEN_TOKEN_SECRET_KEY);
       await activeRegistry.refresh();
     }),
     vscode.commands.registerCommand('melink.refreshContext', () => provider.refreshProjectContext()),

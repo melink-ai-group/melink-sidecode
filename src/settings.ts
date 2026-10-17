@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
+import { OLLAMA_TOKEN_SECRET_KEY, OPENCODE_ZEN_TOKEN_SECRET_KEY } from './backends/secrets';
 import type { BackendRegistry } from './backends/registry';
 import type { BackendStatus, ConnectionTestResult, DefaultMode, PermissionLevel } from './backends/types';
 import { PERMISSION_LEVELS } from './backends/types';
@@ -10,6 +10,7 @@ import type { SettingsPatch, SettingsSnapshot } from './protocol';
 import { existsSync } from 'node:fs';
 import { installOpencodeRelease, type OpencodeInstallResult } from './backends/opencode/install';
 import {
+  bundledOpencodeExecutable,
   opencodeInstallDirFor,
   readOpencodeCliSource,
   resolveOpencodeExecutable,
@@ -18,13 +19,13 @@ import {
 import {
   opencodePathError,
   probeOpencode,
-  type OpencodeProbeResult,
   type OpencodeUpgradeResult
 } from './backends/opencode/status';
 import { applyZvecGrep, detectZvecGrep, type ZvecGrepApplyResult, type ZvecGrepStatus } from './backends/opencode/zvecGrep';
 import { browserLaunchError } from './browser/skill.ts';
 import { validateInstalledCodex, type CodexVersionCheckResult } from './backends/codex/versionCheckRun.ts';
-import { browserSkillEnabled } from './browser/policy.ts';
+import { browserSkillEnabledFor, configuredSettingValue } from './browser/policy.ts';
+import type { OpencodeCliProbe } from './protocol';
 import {
   CONTEXT_SECTION,
   DEFAULT_CONTEXT_SETTINGS,
@@ -45,6 +46,7 @@ import {
 
 const OLLAMA_SECTION = 'melink.ollama';
 const OLLAMA_OPENCODE_SECTION = 'melink.ollama.opencode';
+const OPENCODE_SECTION = 'melink.opencode';
 const CODEX_SECTION = 'melink.codex';
 const DEFAULTS_SECTION = 'melink.defaults';
 const SKILLS_SECTION = 'melink.skills';
@@ -84,11 +86,13 @@ export class SettingsService {
   /** The settings screen's read model. Async because the token check is. */
   async snapshot(): Promise<SettingsSnapshot> {
     const config = vscode.workspace.getConfiguration();
-    const [ollamaStatus, codexStatus] = await Promise.all([
+    const [ollamaStatus, opencodeStatus, codexStatus] = await Promise.all([
       this.statusOf('ollama'),
+      this.statusOf('opencode'),
       this.statusOf('codex')
     ]);
     const hasToken = Boolean(await this.readToken());
+    const hasZenToken = Boolean(await this.readZenToken());
     return {
       target: this.targetName,
       ollama: {
@@ -97,6 +101,12 @@ export class SettingsService {
         hasToken,
         status: ollamaStatus.status,
         detail: ollamaStatus.detail
+      },
+      opencodeZen: {
+        defaultModel: config.get<string>(`${OPENCODE_SECTION}.defaultModel`, ''),
+        hasToken: hasZenToken,
+        status: opencodeStatus.status,
+        detail: opencodeStatus.detail
       },
       codex: {
         path: config.get<string>(`${CODEX_SECTION}.path`, 'codex'),
@@ -114,10 +124,7 @@ export class SettingsService {
         dictationModel: config.get<string>(`${DEFAULTS_SECTION}.dictationModel`, '')
       },
       context: this.contextSnapshot(config),
-      skills: {
-        browser: browserSkillEnabled(config.get<unknown>(`${SKILLS_SECTION}.browser`, true)),
-        browserError: browserLaunchError()
-      },
+      skills: this.skillsSnapshot(config),
       models: {}
     };
   }
@@ -152,6 +159,14 @@ export class SettingsService {
       await config.update(
         `${OLLAMA_SECTION}.defaultModel`,
         patch.ollamaDefaultModel.trim(),
+        this.target
+      );
+    }
+
+    if (patch.opencodeDefaultModel !== undefined) {
+      await config.update(
+        `${OPENCODE_SECTION}.defaultModel`,
+        patch.opencodeDefaultModel.trim(),
         this.target
       );
     }
@@ -257,11 +272,29 @@ export class SettingsService {
       }
     }
 
-    if (patch.browser !== undefined) {
-      await config.update(`${SKILLS_SECTION}.browser`, patch.browser === true, this.target);
+    if (patch.browserCodex !== undefined) {
+      await config.update(`${SKILLS_SECTION}.browserCodex`, patch.browserCodex === true, this.target);
+    }
+
+    if (patch.browserOpencode !== undefined) {
+      await config.update(`${SKILLS_SECTION}.browserOpencode`, patch.browserOpencode === true, this.target);
     }
 
     return { ok: Object.keys(errors).length === 0, errors };
+  }
+
+  /** Skills read model. Per-provider browser flags fall back to the legacy key. */
+  private skillsSnapshot(config: vscode.WorkspaceConfiguration): SettingsSnapshot['skills'] {
+    const skillFlags = {
+      browser: configuredSettingValue(config.inspect(`${SKILLS_SECTION}.browser`)),
+      browserCodex: configuredSettingValue(config.inspect(`${SKILLS_SECTION}.browserCodex`)),
+      browserOpencode: configuredSettingValue(config.inspect(`${SKILLS_SECTION}.browserOpencode`))
+    };
+    return {
+      browserCodex: browserSkillEnabledFor('codex', skillFlags),
+      browserOpencode: browserSkillEnabledFor('opencode', skillFlags),
+      browserError: browserLaunchError()
+    };
   }
 
   /**
@@ -310,46 +343,49 @@ export class SettingsService {
     return readOpencodeCliSource(config.get<unknown>(`${OLLAMA_OPENCODE_SECTION}.cliSource`));
   }
 
-  private opencodeRoots(): { extensionPath: string } {
-    return { extensionPath: this.context.extensionPath };
-  }
-
-  /** Executable every opencode spawn and probe must use. */
-  private resolveOpencode(config: vscode.WorkspaceConfiguration): string {
-    return resolveOpencodeExecutable({
-      source: this.opencodeCliSource(config),
-      path: this.opencodePathSetting(config),
-      roots: this.opencodeRoots()
-    });
+  private opencodeRoots(): { extensionPath: string; globalStoragePath: string } {
+    return {
+      extensionPath: this.context.extensionPath,
+      globalStoragePath: this.context.globalStorageUri.fsPath
+    };
   }
 
   /**
-   * The runtime read model for the settings screen. The CLI is probed only when
-   * the setting is on: with it off no process is spawned, and `status` is a
-   * placeholder the screen ignores in favour of the `enabled` flag (which drives
-   * the disabled state). A probe never throws; a missing or unrunnable CLI is
-   * data, exactly like backend availability.
+   * The CLI read model for the settings screen. The binary is always probed so
+   * the CLI tab and OpenCode Zen can report status even when the Ollama nested
+   * runtime (`enabled`) is off. A probe never throws; a missing or unrunnable
+   * CLI is data, exactly like backend availability.
    */
   private async opencodeSnapshot(
     config: vscode.WorkspaceConfiguration
   ): Promise<SettingsSnapshot['opencode']> {
     const enabled = this.opencodeEnabled(config);
     const cliSource = this.opencodeCliSource(config);
-    const path = this.resolveOpencode(config);
-    if (!enabled) {
-      return {
-        enabled,
-        cliSource,
-        path,
-        status: 'missing',
-        zvecGrep: { enabled: false, cli: 'missing' }
-      };
-    }
-    const result: OpencodeProbeResult = await probeOpencode(path);
+    const localPath = this.opencodePathSetting(config);
+    const bundledPath = bundledOpencodeExecutable(this.opencodeRoots());
+    const [local, bundled] = await Promise.all([
+      this.probeCli(localPath),
+      this.probeCli(bundledPath)
+    ]);
+    const active = cliSource === 'bundled' ? bundled : local;
     const zvecGrep = await this.zvecGrepStatus();
+    return {
+      enabled,
+      cliSource,
+      path: active.path,
+      status: active.status,
+      ...(active.version ? { version: active.version } : {}),
+      local,
+      bundled,
+      zvecGrep
+    };
+  }
+
+  private async probeCli(executable: string): Promise<OpencodeCliProbe> {
+    const result = await probeOpencode(executable);
     return result.version !== undefined
-      ? { enabled, cliSource, path, status: result.status, version: result.version, zvecGrep }
-      : { enabled, cliSource, path, status: result.status, zvecGrep };
+      ? { path: executable, status: result.status, version: result.version }
+      : { path: executable, status: result.status };
   }
 
   /**
@@ -358,10 +394,6 @@ export class SettingsService {
    * uninstall an integration the user created outside the sidebar.
    */
   private async zvecGrepStatus(): Promise<ZvecGrepStatus> {
-    const config = vscode.workspace.getConfiguration();
-    if (!this.opencodeEnabled(config)) {
-      return { enabled: false, cli: 'missing' };
-    }
     return detectZvecGrep();
   }
 
@@ -371,12 +403,9 @@ export class SettingsService {
    * only after the CLI succeeds.
    */
   async setZvecGrep(enabled: boolean): Promise<ZvecGrepApplyResult> {
-    const config = vscode.workspace.getConfiguration();
-    if (!this.opencodeEnabled(config)) {
-      return { ok: false, enabled: false, cli: 'missing', message: 'Turn on opencode before using zvec-grep.' };
-    }
     const result = await applyZvecGrep(enabled);
     if (result.ok) {
+      const config = vscode.workspace.getConfiguration();
       await config.update(`${OLLAMA_OPENCODE_SECTION}.zvecGrep`, enabled, vscode.ConfigurationTarget.Global);
     }
     return result;
@@ -392,52 +421,60 @@ export class SettingsService {
     await this.context.secrets.delete(OLLAMA_TOKEN_SECRET_KEY);
   }
 
-  /**
-   * Download the official opencode release into the active install directory.
-   *
-   * Bundled writes under `vendor/opencode/bin`. Local writes beside an absolute
-   * path, or into `~/.opencode/bin` for a bare name. The CLI's own `upgrade`
-   * command is not used: it can report success without replacing the binary
-   * the path setting points at.
-   */
-  async installOpencode(): Promise<OpencodeInstallResult> {
-    const config = vscode.workspace.getConfiguration();
-    const enabled = this.opencodeEnabled(config);
-    if (!enabled) {
-      return { ok: false, message: 'Turn on opencode before installing it.' };
-    }
-    const source = this.opencodeCliSource(config);
-    const executable = this.resolveOpencode(config);
-    const probe = await probeOpencode(executable);
-    if (probe.status === 'detected') {
-      return { ok: true, message: 'opencode is already installed.' };
-    }
-    return this.downloadOpencodeRelease(config, source, 'installed');
+  /** Write the OpenCode Zen API key to secret storage only. */
+  async setOpencodeZenToken(value: string): Promise<void> {
+    await this.context.secrets.store(OPENCODE_ZEN_TOKEN_SECRET_KEY, value);
+  }
+
+  /** Remove the OpenCode Zen API key from secret storage only. */
+  async clearOpencodeZenToken(): Promise<void> {
+    await this.context.secrets.delete(OPENCODE_ZEN_TOKEN_SECRET_KEY);
   }
 
   /**
-   * Replace the active CLI with the latest GitHub release in place.
+   * Download the official opencode release into the active install directory.
    *
-   * Same download path as install. Does not spawn `opencode upgrade`, which
-   * often leaves a custom or non-npm install on the previous version.
+   * Bundled writes under extension global storage (`opencode/bin`). Local writes
+   * beside an absolute path, or into `~/.opencode/bin` for a bare name. The
+   * CLI's own `upgrade` command is not used: it can report success without
+   * replacing the binary the path setting points at.
+   *
+   * Optional draft overrides so Install/Update follow the settings dropdown
+   * before Save. When omitted, the saved configuration is used.
    */
-  async upgradeOpencode(): Promise<OpencodeUpgradeResult> {
+  async installOpencode(draft?: {
+    cliSource?: OpencodeCliSource;
+    path?: string;
+  }): Promise<OpencodeInstallResult> {
     const config = vscode.workspace.getConfiguration();
-    const enabled = this.opencodeEnabled(config);
-    if (!enabled) {
-      return { ok: false, message: 'Turn on opencode before updating it.' };
+    const target = this.opencodeActionTarget(config, draft);
+    const probe = await probeOpencode(target.executable);
+    if (probe.status === 'detected') {
+      return { ok: true, message: 'opencode is already installed.' };
     }
-    const source = this.opencodeCliSource(config);
-    const executable = this.resolveOpencode(config);
-    const before = await probeOpencode(executable);
+    return this.downloadOpencodeRelease(config, target, 'installed');
+  }
+
+  /**
+   * Replace the CLI for the draft (or saved) source with the latest GitHub release.
+   *
+   * Does not spawn `opencode upgrade`, which often leaves a custom install stale.
+   */
+  async upgradeOpencode(draft?: {
+    cliSource?: OpencodeCliSource;
+    path?: string;
+  }): Promise<OpencodeUpgradeResult> {
+    const config = vscode.workspace.getConfiguration();
+    const target = this.opencodeActionTarget(config, draft);
+    const before = await probeOpencode(target.executable);
     if (before.status !== 'detected') {
       return { ok: false, message: 'opencode is not connected. Check the path, then try again.' };
     }
-    const installed = await this.downloadOpencodeRelease(config, source, 'updated');
+    const installed = await this.downloadOpencodeRelease(config, target, 'updated');
     if (!installed.ok) {
       return { ok: false, message: installed.message };
     }
-    const after = await probeOpencode(installed.executablePath ?? executable);
+    const after = await probeOpencode(installed.executablePath ?? target.executable);
     if (after.status !== 'detected') {
       return {
         ok: false,
@@ -453,24 +490,43 @@ export class SettingsService {
     return { ok: true, message: installed.message };
   }
 
+  /** Resolve which CLI location Install/Update should write. */
+  private opencodeActionTarget(
+    config: vscode.WorkspaceConfiguration,
+    draft?: { cliSource?: OpencodeCliSource; path?: string }
+  ): { source: OpencodeCliSource; path: string; executable: string } {
+    const source = draft?.cliSource ?? this.opencodeCliSource(config);
+    const path =
+      draft?.path !== undefined && draft.path.trim().length > 0
+        ? draft.path.trim()
+        : this.opencodePathSetting(config);
+    const executable = resolveOpencodeExecutable({
+      source,
+      path,
+      roots: this.opencodeRoots()
+    });
+    return { source, path, executable };
+  }
+
   /**
    * Fetch the latest release into the directory for `source`, then point the
-   * local path setting at the binary when the source is local.
+   * local path setting at the binary when the source is local. Also persists
+   * the draft `cliSource` so the next turn uses what was just installed.
    */
   private async downloadOpencodeRelease(
     config: vscode.WorkspaceConfiguration,
-    source: OpencodeCliSource,
+    target: { source: OpencodeCliSource; path: string },
     verb: 'installed' | 'updated'
   ): Promise<OpencodeInstallResult> {
     const installDir = opencodeInstallDirFor({
-      source,
-      path: this.opencodePathSetting(config),
+      source: target.source,
+      path: target.path,
       roots: this.opencodeRoots()
     });
     const installed = await installOpencodeRelease({
       installDir,
       // Bundled stays inside the extension tree; do not rewrite the user PATH.
-      persistPath: source === 'local'
+      persistPath: target.source === 'local'
     });
     if (!installed.ok || !installed.executablePath) {
       return installed;
@@ -482,7 +538,8 @@ export class SettingsService {
         message: 'opencode was downloaded, but it did not start. Check the path, then try again.'
       };
     }
-    if (source === 'local') {
+    await config.update(`${OLLAMA_OPENCODE_SECTION}.cliSource`, target.source, this.target);
+    if (target.source === 'local') {
       await config.update(`${OLLAMA_OPENCODE_SECTION}.path`, installed.executablePath, this.target);
     }
     const version = after.version ? ` ${after.version}` : '';
@@ -518,7 +575,24 @@ export class SettingsService {
     }
   }
 
-  async testConnection(backendId: string): Promise<ConnectionTestResult> {
+  async testConnection(
+    backendId: string,
+    draft?: { cliSource?: OpencodeCliSource; path?: string }
+  ): Promise<ConnectionTestResult> {
+    // Persist draft CLI selection before probing OpenCode Zen so Check models
+    // uses the CLI tab choice (local vs bundled) even before Save settings.
+    if (backendId === 'opencode' && draft) {
+      const config = vscode.workspace.getConfiguration();
+      if (draft.cliSource === 'local' || draft.cliSource === 'bundled') {
+        await config.update(`${OLLAMA_OPENCODE_SECTION}.cliSource`, draft.cliSource, this.target);
+      }
+      if (draft.cliSource === 'local' && draft.path !== undefined && draft.path.trim()) {
+        const pathError = opencodePathError(draft.path, (candidate) => existsSync(candidate));
+        if (!pathError) {
+          await config.update(`${OLLAMA_OPENCODE_SECTION}.path`, draft.path.trim(), this.target);
+        }
+      }
+    }
     const backend = this.registry.get(backendId);
     if (!backend) {
       return {
@@ -551,6 +625,10 @@ export class SettingsService {
 
   private async readToken(): Promise<string | undefined> {
     return this.context.secrets.get(OLLAMA_TOKEN_SECRET_KEY);
+  }
+
+  private async readZenToken(): Promise<string | undefined> {
+    return this.context.secrets.get(OPENCODE_ZEN_TOKEN_SECRET_KEY);
   }
 
   private async statusOf(
