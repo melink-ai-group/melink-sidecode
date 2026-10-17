@@ -133,9 +133,10 @@ const UPGRADE_TIMEOUT_MS = 120_000;
 /**
  * Run `opencode upgrade` against the configured executable.
  *
- * Direct spawn, no shell. The CLI's own upgrade command installs the latest
- * release. Its log is reduced to one sentence so color codes and progress
- * bars never reach the settings screen.
+ * Prefer `installOpencodeRelease` from settings for Update: the CLI's own
+ * upgrade can exit 0 without replacing a custom or non-npm binary. Kept for
+ * direct probing of the CLI command itself. Direct spawn, no shell. Output is
+ * reduced to one sentence so color codes and progress bars stay out of the UI.
  */
 export function upgradeOpencode(
   executable: string,

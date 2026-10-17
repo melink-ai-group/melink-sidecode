@@ -39,6 +39,7 @@ import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './mod
 // imported inside the enabled branch only. `isFileTool` is a pure predicate
 // with no child-process dependency, so it is safe to import directly.
 import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
+import { readOpencodeCliSource, resolveOpencodeExecutable } from './opencode/resolve';
 import { ollamaContextUsed } from './contextUsage';
 import {
   COMPACTION_INSTRUCTIONS,
@@ -315,9 +316,17 @@ export class OllamaBackend implements AgentBackend {
     return vscode.workspace.getConfiguration('melink.ollama.opencode').get<boolean>('enabled', true) !== false;
   }
 
-  /** Executable path for the runtime; a bare name is resolved from `PATH`. */
+  /**
+   * Executable every opencode spawn uses. Bundled ignores the path setting so
+   * the machine PATH cannot slip into turns.
+   */
   private get opencodePath(): string {
-    return vscode.workspace.getConfiguration('melink.ollama.opencode').get<string>('path', 'opencode') || 'opencode';
+    const config = vscode.workspace.getConfiguration('melink.ollama.opencode');
+    return resolveOpencodeExecutable({
+      source: readOpencodeCliSource(config.get('cliSource')),
+      path: config.get<string>('path', 'opencode') || 'opencode',
+      roots: { extensionPath: this.context.extensionPath }
+    });
   }
 
   /** Working directory the runtime runs in, mirroring the Codex adapter. */

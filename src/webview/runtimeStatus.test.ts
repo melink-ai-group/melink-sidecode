@@ -7,6 +7,7 @@ const zvecOff = { enabled: false, cli: 'missing' as const };
 test('an off runtime reports the disabled tone, never a stale probe result', () => {
   const view = opencodeRuntimeView({
     enabled: false,
+    cliSource: 'local',
     path: 'opencode',
     status: 'detected',
     version: '1.1.65',
@@ -19,6 +20,7 @@ test('an off runtime reports the disabled tone, never a stale probe result', () 
 test('a detected runtime carries the version', () => {
   const view = opencodeRuntimeView({
     enabled: true,
+    cliSource: 'local',
     path: 'opencode',
     status: 'detected',
     version: '1.1.65',
@@ -30,11 +32,23 @@ test('a detected runtime carries the version', () => {
 
 test('missing and not-runnable are distinct from detected and disabled', () => {
   assert.equal(
-    opencodeRuntimeView({ enabled: true, path: 'opencode', status: 'missing', zvecGrep: zvecOff }).tone,
+    opencodeRuntimeView({
+      enabled: true,
+      cliSource: 'local',
+      path: 'opencode',
+      status: 'missing',
+      zvecGrep: zvecOff
+    }).tone,
     'missing'
   );
   assert.equal(
-    opencodeRuntimeView({ enabled: true, path: '/x', status: 'not-runnable', zvecGrep: zvecOff }).tone,
+    opencodeRuntimeView({
+      enabled: true,
+      cliSource: 'bundled',
+      path: '/x',
+      status: 'not-runnable',
+      zvecGrep: zvecOff
+    }).tone,
     'not-runnable'
   );
 });
