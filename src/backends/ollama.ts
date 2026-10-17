@@ -338,6 +338,17 @@ export class OllamaBackend implements AgentBackend {
     return folders && folders.length > 0 ? folders[0].uri.fsPath : process.cwd();
   }
 
+  private async skillMcpForTurn(): Promise<{
+    mcp?: Record<string, unknown>;
+    permissions: Record<string, 'allow'>;
+  }> {
+    const { skillMcpForOpencodeTurn } = await import('../skills/resolveForTurn.ts');
+    return skillMcpForOpencodeTurn({
+      extensionPath: this.context.extensionPath,
+      globalStoragePath: this.context.globalStorageUri.fsPath
+    });
+  }
+
   private get defaultModel(): string {
     return vscode.workspace.getConfiguration('melink.ollama').get<string>('defaultModel', '');
   }
@@ -925,6 +936,7 @@ export class OllamaBackend implements AgentBackend {
     const { runOpencodeTurn } = await import('./opencode/runtime.ts');
     const { browserCommand } = await import('../browser/skill.ts');
     const browser = await browserCommand('opencode');
+    const skills = await this.skillMcpForTurn();
 
     const built = buildOpencodeConfig({
       baseUrl: this.baseUrl,
@@ -934,7 +946,9 @@ export class OllamaBackend implements AgentBackend {
       capabilities,
       mode: request.mode ?? 'agent',
       permissionLevel,
-      ...(browser ? { browser } : {})
+      ...(browser ? { browser } : {}),
+      ...(skills.mcp ? { skillMcp: skills.mcp } : {}),
+      ...(Object.keys(skills.permissions).length > 0 ? { skillPermissions: skills.permissions } : {})
     });
     if (built.reasoningUnsupported) {
       this.events.fire({

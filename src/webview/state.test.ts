@@ -629,6 +629,21 @@ test('a model change drops the previous capability so values never carry over', 
   assert.equal(answer.modelCapabilityStatus, 'ready');
 });
 
+test('re-selecting the same model does not mark capabilities loading without a fetch', () => {
+  const base = {
+    ...initialState,
+    selectedBackendId: 'ollama',
+    selectedModel: 'llama',
+    modelCapabilityStatus: 'ready' as const
+  };
+  const again = reduce(base, { type: 'selectModel', model: 'llama' });
+  assert.equal(again.selectedModel, 'llama');
+  assert.equal(again.modelCapabilityStatus, 'ready');
+
+  const sameBackend = reduce(base, { type: 'selectBackend', backendId: 'ollama' });
+  assert.equal(sameBackend, base);
+});
+
 test('a capability read failure marks the panel and is cleared by a later success', () => {
   const base = { ...initialState, selectedBackendId: 'ollama', selectedModel: 'qwen' };
   const failed = reduce(base, {

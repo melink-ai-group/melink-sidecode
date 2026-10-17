@@ -43,6 +43,12 @@ test('a zvec-grep semantic search says what is being searched', () => {
   );
 });
 
+test('an ast-grep structural search names the pattern', () => {
+  assert.equal(targetForTool('ast_grep_search', { pattern: 'console.log($A)', lang: 'ts' }), 'console.log($A)');
+  assert.equal(friendlyToolTitle('ast_grep_search', 'console.log($A)'), 'Searching for console.log($A)');
+  assert.equal(friendlyToolTitle('ast_grep_replace', 'foo($A)'), 'Rewriting foo($A)');
+});
+
 test('a collapsed card relabels a raw tool id and hides a status detail', () => {
   assert.deepEqual(toolCardPresentation({ title: 'glob', detail: 'completed' }), {
     title: 'Finding files',

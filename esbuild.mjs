@@ -84,7 +84,18 @@ const browserMcpOptions = {
   target: 'node20'
 };
 
-const targets = [extensionOptions, webviewOptions, planPreviewOptions, browserMcpOptions];
+/** ast-grep MCP shim: stdio only. Shells out to the resolved ast-grep CLI. */
+/** @type {import('esbuild').BuildOptions} */
+const astGrepMcpOptions = {
+  ...shared,
+  entryPoints: ['src/astGrep/mcp.ts'],
+  outfile: 'dist/ast-grep-mcp.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node20'
+};
+
+const targets = [extensionOptions, webviewOptions, planPreviewOptions, browserMcpOptions, astGrepMcpOptions];
 
 if (watch) {
   await stageDictation();
@@ -94,5 +105,5 @@ if (watch) {
 } else {
   await Promise.all(targets.map((options) => build(options)));
   await stageDictation();
-  console.log(`[esbuild] built dist/extension.js, dist/webview.{js,css}, dist/planPreview.{js,css}, and dist/browser-mcp.js (${production ? 'production' : 'development'})`);
+  console.log(`[esbuild] built dist/extension.js, dist/webview.{js,css}, dist/planPreview.{js,css}, dist/browser-mcp.js, and dist/ast-grep-mcp.js (${production ? 'production' : 'development'})`);
 }

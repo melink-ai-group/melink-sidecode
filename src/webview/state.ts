@@ -205,6 +205,9 @@ export interface AppState {
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   /** Result of the last zvec-grep toggle, or a pending marker while it runs. */
   zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
+  astGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
+  astGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
+  zvecGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   /**
    * The project-context read model the composer renders. Built and pushed by the
    * host; the webview never recomputes it. `undefined` until the first push, so
@@ -358,6 +361,9 @@ export type Action =
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   | { type: 'opencodeInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   | { type: 'zvecGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
+  | { type: 'astGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
+  | { type: 'astGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
+  | { type: 'zvecGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   /** The host's project-context read model, pushed on every relevant change. */
   | {
       type: 'context';
@@ -557,6 +563,9 @@ export function reduce(state: AppState, action: Action): AppState {
     case 'threadsLoading':
       return { ...state, threadLoading: { ...state.threadLoading, [action.backendId]: action.value } };
     case 'selectBackend':
+      if (action.backendId === state.selectedBackendId) {
+        return state;
+      }
       return {
         ...state,
         selectedBackendId: action.backendId,
@@ -574,6 +583,9 @@ export function reduce(state: AppState, action: Action): AppState {
         modeOptions: undefined
       };
     case 'selectModel':
+      if (action.model === state.selectedModel) {
+        return state;
+      }
       return {
         ...state,
         selectedModel: action.model,
@@ -867,7 +879,10 @@ export function reduce(state: AppState, action: Action): AppState {
         codexVersionCheck: undefined,
         opencodeUpgrade: undefined,
         opencodeInstall: undefined,
-        zvecGrep: undefined
+        zvecGrep: undefined,
+        astGrep: undefined,
+        astGrepInstall: undefined,
+        zvecGrepInstall: undefined
       };
     case 'settings':
       return { ...state, settings: action.settings };
@@ -952,6 +967,36 @@ export function reduce(state: AppState, action: Action): AppState {
           requested: action.requested,
           ok: action.ok,
           message: action.message
+        }
+      };
+    case 'astGrep':
+      return {
+        ...state,
+        astGrep: {
+          pending: action.pending,
+          requested: action.requested,
+          ok: action.ok,
+          message: action.message
+        }
+      };
+    case 'astGrepInstall':
+      return {
+        ...state,
+        astGrepInstall: {
+          pending: action.pending,
+          ok: action.ok,
+          message: action.message,
+          path: action.path
+        }
+      };
+    case 'zvecGrepInstall':
+      return {
+        ...state,
+        zvecGrepInstall: {
+          pending: action.pending,
+          ok: action.ok,
+          message: action.message,
+          path: action.path
         }
       };
     case 'context':

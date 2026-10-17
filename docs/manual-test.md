@@ -178,14 +178,15 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       { "melink.ollama.opencode.enabled": true }
       ```
       Reload the window and open the sidebar.
-- [ ] 14a1. **zvec-grep.** Open settings with opencode on and, under **OpenCode Semantic Search**, turn **Use semantic search**
-      on. If `zg` is missing and Node.js is 22 or newer, the sidebar installs
-      `@zvec/zvec-grep`, then runs `zg install --target opencode --yes`.
-      Confirm the checkbox stays on and the user OpenCode config
-      (`opencode.jsonc` or `opencode.json`) contains a `zvec_grep` server.
-      Turn it off and confirm that server is removed, `zg` is still on `PATH`,
-      and no workspace index was deleted. A new chat session picks up the change.
-      Node.js older than 22 shows a refusal and does not install.
+- [ ] 14a1. **zvec-grep.** Open **Settings → Skills**. Choose local or bundled for
+      zvec-grep, install if needed, then turn **Use semantic search** on. Confirm
+      the user OpenCode config contains a `zvec_grep` MCP entry with an absolute
+      command path when bundled. Turn it off and confirm that entry is removed
+      and the CLI remains installed. A new chat session picks up the change.
+- [ ] 14a2. **ast-grep.** Under **Settings → Skills**, install bundled or local
+      ast-grep, then turn **Use structural search** on. Confirm `ast_grep` appears
+      in the user OpenCode config (command runs `node …/ast-grep-mcp.js` with
+      `AST_GREP_BIN`). Turn it off and confirm the entry is removed.
 - [ ] 14b. **Mode availability.** Open the mode picker. With the runtime on, it
       offers **Agent**, **Plan**, and **Ask** (the direct adapter offers Agent
       only). Open the permission picker: it offers **Read-only**, **Default**,

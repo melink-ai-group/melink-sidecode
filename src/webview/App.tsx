@@ -158,7 +158,7 @@ function BusyCorner({ busy, overlay = false }: { busy: boolean; overlay?: boolea
   );
 }
 
-const POPUP_PREFERRED_WIDTH = 320;
+const POPUP_PREFERRED_WIDTH = 440;
 
 /**
  * Place a composer popup on the side of its trigger that has room.
@@ -447,6 +447,33 @@ export function App(): JSX.Element {
             requested: message.requested,
             ok: message.ok,
             message: message.message
+          });
+          break;
+        case 'astGrep':
+          dispatch({
+            type: 'astGrep',
+            pending: message.pending,
+            requested: message.requested,
+            ok: message.ok,
+            message: message.message
+          });
+          break;
+        case 'astGrepInstall':
+          dispatch({
+            type: 'astGrepInstall',
+            pending: message.pending,
+            ok: message.ok,
+            message: message.message,
+            path: message.path
+          });
+          break;
+        case 'zvecGrepInstall':
+          dispatch({
+            type: 'zvecGrepInstall',
+            pending: message.pending,
+            ok: message.ok,
+            message: message.message,
+            path: message.path
           });
           break;
         case 'context':
@@ -1049,8 +1076,8 @@ export function App(): JSX.Element {
     dispatch({ type: 'closeSettings' });
   };
 
-  const saveSettings = (patch: SettingsPatch): void => {
-    bridge.post({ type: 'saveSettings', patch });
+  const saveSettings = (patch: SettingsPatch, target?: 'global' | 'workspace'): void => {
+    bridge.post({ type: 'saveSettings', patch, ...(target ? { target } : {}) });
   };
 
   const saveOllamaToken = (value: string): void => {
@@ -1079,9 +1106,43 @@ export function App(): JSX.Element {
     bridge.post({ type: 'installOpencode', cliSource: draft.cliSource, path: draft.path });
   };
 
-  const setZvecGrep = (enabled: boolean): void => {
+  const setZvecGrep = (
+    enabled: boolean,
+    draft?: { cliSource: 'local' | 'bundled'; path: string }
+  ): void => {
     dispatch({ type: 'zvecGrep', pending: true, requested: enabled });
-    bridge.post({ type: 'setZvecGrep', enabled });
+    bridge.post({
+      type: 'setZvecGrep',
+      enabled,
+      ...(draft ? { cliSource: draft.cliSource, path: draft.path } : {})
+    });
+  };
+
+  const setAstGrep = (
+    enabled: boolean,
+    draft?: { cliSource: 'local' | 'bundled'; path: string }
+  ): void => {
+    dispatch({ type: 'astGrep', pending: true, requested: enabled });
+    bridge.post({
+      type: 'setAstGrep',
+      enabled,
+      ...(draft ? { cliSource: draft.cliSource, path: draft.path } : {})
+    });
+  };
+
+  const installAstGrep = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
+    dispatch({ type: 'astGrepInstall', pending: true });
+    bridge.post({ type: 'installAstGrep', cliSource: draft.cliSource, path: draft.path });
+  };
+
+  const upgradeAstGrep = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
+    dispatch({ type: 'astGrepInstall', pending: true });
+    bridge.post({ type: 'upgradeAstGrep', cliSource: draft.cliSource, path: draft.path });
+  };
+
+  const installZvecGrep = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
+    dispatch({ type: 'zvecGrepInstall', pending: true });
+    bridge.post({ type: 'installZvecGrep', cliSource: draft.cliSource, path: draft.path });
   };
 
   const testConnection = (
@@ -2118,6 +2179,13 @@ export function App(): JSX.Element {
         onInstallOpencode={installOpencode}
         zvecGrep={state.zvecGrep}
         onSetZvecGrep={setZvecGrep}
+        astGrep={state.astGrep}
+        onSetAstGrep={setAstGrep}
+        astGrepInstall={state.astGrepInstall}
+        onInstallAstGrep={installAstGrep}
+        onUpgradeAstGrep={upgradeAstGrep}
+        zvecGrepInstall={state.zvecGrepInstall}
+        onInstallZvecGrep={installZvecGrep}
       />
       </div>
       <BusyCorner busy={backgroundBusy} overlay />
@@ -2790,9 +2858,15 @@ function ModelPanel({
   };
 
   const select = (backendId: string, model: string): void => {
-    dispatch({ type: 'selectBackend', backendId });
-    dispatch({ type: 'selectModel', model });
-    bridge.post({ type: 'selectModel', backendId, modelId: model });
+    const backendChanged = backendId !== selectedBackendId;
+    const modelChanged = model !== selectedModel;
+    if (backendChanged) {
+      dispatch({ type: 'selectBackend', backendId });
+    }
+    if (backendChanged || modelChanged) {
+      dispatch({ type: 'selectModel', model });
+      bridge.post({ type: 'selectModel', backendId, modelId: model });
+    }
     onClose();
   };
 

@@ -47,7 +47,7 @@ export interface SettingsScreenProps {
   settings?: SettingsSnapshot;
   connectionTest?: { backendId: string; pending: boolean; result?: ConnectionTestResult };
   onBack: () => void;
-  onSave: (patch: SettingsPatch) => void;
+  onSave: (patch: SettingsPatch, target?: 'global' | 'workspace') => void;
   onSaveToken: (value: string) => void;
   onClearToken: () => void;
   onSaveZenToken: (value: string) => void;
@@ -65,7 +65,14 @@ export interface SettingsScreenProps {
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   onInstallOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
   zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
-  onSetZvecGrep: (enabled: boolean) => void;
+  onSetZvecGrep: (enabled: boolean, draft?: { cliSource: 'local' | 'bundled'; path: string }) => void;
+  astGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
+  onSetAstGrep: (enabled: boolean, draft?: { cliSource: 'local' | 'bundled'; path: string }) => void;
+  astGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
+  onInstallAstGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
+  onUpgradeAstGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
+  zvecGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
+  onInstallZvecGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
 }
 
 /** Local draft state; the host snapshot is the source of truth on save. */
@@ -84,6 +91,10 @@ interface Draft {
   opencodePath: string;
   browserCodex: boolean;
   browserOpencode: boolean;
+  zvecGrepCliSource: 'local' | 'bundled';
+  zvecGrepPath: string;
+  astGrepCliSource: 'local' | 'bundled';
+  astGrepPath: string;
   contextIncludeInstructions: boolean;
   contextIncludeShape: boolean;
   contextIncludeEditorState: boolean;
@@ -111,6 +122,10 @@ function draftFrom(settings: SettingsSnapshot): Draft {
     opencodePath: settings.opencode.local.path,
     browserCodex: settings.skills.browserCodex,
     browserOpencode: settings.skills.browserOpencode,
+    zvecGrepCliSource: settings.skills.zvecGrep.cliSource,
+    zvecGrepPath: settings.skills.zvecGrep.local.path,
+    astGrepCliSource: settings.skills.astGrep.cliSource,
+    astGrepPath: settings.skills.astGrep.local.path,
     contextIncludeInstructions: settings.context.includeInstructions,
     contextIncludeShape: settings.context.includeShape,
     contextIncludeEditorState: settings.context.includeEditorState,
@@ -139,7 +154,14 @@ export function SettingsScreen({
   opencodeInstall,
   onInstallOpencode,
   zvecGrep,
-  onSetZvecGrep
+  onSetZvecGrep,
+  astGrep,
+  onSetAstGrep,
+  astGrepInstall,
+  onInstallAstGrep,
+  onUpgradeAstGrep,
+  zvecGrepInstall,
+  onInstallZvecGrep
 }: SettingsScreenProps): JSX.Element {
   const [draft, setDraft] = useState<Draft | undefined>(undefined);
   const [errors, setErrors] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
@@ -161,6 +183,7 @@ export function SettingsScreen({
   const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-opencode' | 'provider-codex'>(
     settingsProvider === 'codex' ? 'provider-codex' : 'provider-ollama'
   );
+  const [skillTab, setSkillTab] = useState<'skill-browser' | 'skill-ast-grep' | 'skill-zvec-grep'>('skill-browser');
   const backRef = useRef<HTMLButtonElement>(null);
   const lastSettingsRef = useRef<SettingsSnapshot | undefined>(undefined);
 
@@ -243,6 +266,10 @@ export function SettingsScreen({
       draft.opencodePath !== settings.opencode.local.path ||
       draft.browserCodex !== settings.skills.browserCodex ||
       draft.browserOpencode !== settings.skills.browserOpencode ||
+      draft.zvecGrepCliSource !== settings.skills.zvecGrep.cliSource ||
+      draft.zvecGrepPath !== settings.skills.zvecGrep.local.path ||
+      draft.astGrepCliSource !== settings.skills.astGrep.cliSource ||
+      draft.astGrepPath !== settings.skills.astGrep.local.path ||
       draft.contextIncludeInstructions !== settings.context.includeInstructions ||
       draft.contextIncludeShape !== settings.context.includeShape ||
       draft.contextIncludeEditorState !== settings.context.includeEditorState ||
@@ -278,8 +305,9 @@ export function SettingsScreen({
   };
 
   // Validate locally, then hand the host only valid fields. An invalid value is
-  // never sent, so it can never be persisted.
-  const save = (): void => {
+  // never sent, so it can never be persisted. Primary Save writes user settings;
+  // Save to workspace is offered only when workspace overrides already exist.
+  const save = (target: 'global' | 'workspace' = 'global'): void => {
     if (!draft) {
       return;
     }
@@ -308,31 +336,38 @@ export function SettingsScreen({
     if (Object.keys(nextErrors).length > 0) {
       return;
     }
-    onSave({
-      ollamaBaseUrl: draft.ollamaBaseUrl.trim(),
-      ollamaDefaultModel: draft.ollamaDefaultModel.trim(),
-      opencodeDefaultModel: draft.opencodeDefaultModel.trim(),
-      codexPath: draft.codexPath.trim(),
-      codexDefaultModel: draft.codexDefaultModel.trim(),
-      permissionLevel: draft.permissionLevel,
-      mode: draft.mode,
-      thinking: draft.thinking,
-      dictationModel: draft.dictationModel.trim(),
-      opencodeEnabled: draft.opencodeEnabled,
-      opencodeCliSource: draft.opencodeCliSource,
-      // Local path only: bundled ignores it for spawns, so a bundled selection
-      // must not write an empty path over a previously stored valid one.
-      ...(draft.opencodeCliSource === 'local' ? { opencodePath: draft.opencodePath.trim() } : {}),
-      browserCodex: draft.browserCodex,
-      browserOpencode: draft.browserOpencode,
-      contextIncludeInstructions: draft.contextIncludeInstructions,
-      contextIncludeShape: draft.contextIncludeShape,
-      contextIncludeEditorState: draft.contextIncludeEditorState,
-      contextIncludeSelection: draft.contextIncludeSelection,
-      contextIncludeChangedFiles: draft.contextIncludeChangedFiles,
-      contextMaxBytes: maxKb * 1024,
-      contextExclude: draft.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0)
-    });
+    onSave(
+      {
+        ollamaBaseUrl: draft.ollamaBaseUrl.trim(),
+        ollamaDefaultModel: draft.ollamaDefaultModel.trim(),
+        opencodeDefaultModel: draft.opencodeDefaultModel.trim(),
+        codexPath: draft.codexPath.trim(),
+        codexDefaultModel: draft.codexDefaultModel.trim(),
+        permissionLevel: draft.permissionLevel,
+        mode: draft.mode,
+        thinking: draft.thinking,
+        dictationModel: draft.dictationModel.trim(),
+        opencodeEnabled: draft.opencodeEnabled,
+        opencodeCliSource: draft.opencodeCliSource,
+        // Local path only: bundled ignores it for spawns, so a bundled selection
+        // must not write an empty path over a previously stored valid one.
+        ...(draft.opencodeCliSource === 'local' ? { opencodePath: draft.opencodePath.trim() } : {}),
+        browserCodex: draft.browserCodex,
+        browserOpencode: draft.browserOpencode,
+        zvecGrepCliSource: draft.zvecGrepCliSource,
+        ...(draft.zvecGrepCliSource === 'local' ? { zvecGrepPath: draft.zvecGrepPath.trim() } : {}),
+        astGrepCliSource: draft.astGrepCliSource,
+        ...(draft.astGrepCliSource === 'local' ? { astGrepPath: draft.astGrepPath.trim() } : {}),
+        contextIncludeInstructions: draft.contextIncludeInstructions,
+        contextIncludeShape: draft.contextIncludeShape,
+        contextIncludeEditorState: draft.contextIncludeEditorState,
+        contextIncludeSelection: draft.contextIncludeSelection,
+        contextIncludeChangedFiles: draft.contextIncludeChangedFiles,
+        contextMaxBytes: maxKb * 1024,
+        contextExclude: draft.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0)
+      },
+      target
+    );
   };
 
   const saveToken = (): void => {
@@ -390,16 +425,57 @@ export function SettingsScreen({
     draft.opencodeCliSource === 'bundled' ? settings.opencode.bundled : settings.opencode.local;
   const zvecChecked = zvecGrep?.pending
     ? zvecGrep.requested === true
-    : settings.opencode.zvecGrep.enabled;
+    : settings.skills.zvecGrep.connected;
   const zvecStatus = zvecGrep?.pending
     ? zvecGrep.requested
       ? 'Installing zvec-grep and connecting it to OpenCode.'
       : 'Disconnecting zvec-grep from OpenCode.'
-    : settings.opencode.zvecGrep.enabled
+    : settings.skills.zvecGrep.connected
       ? 'Connected. A new OpenCode session uses it.'
-      : settings.opencode.zvecGrep.cli === 'installed'
+      : settings.skills.zvecGrep.cli === 'installed'
         ? 'Installed. Turning this on connects it to OpenCode.'
         : 'Not installed. Turning this on installs it and connects it to OpenCode.';
+  const astChecked = astGrep?.pending
+    ? astGrep.requested === true
+    : settings.skills.astGrep.connected;
+  const astStatus = astGrep?.pending
+    ? astGrep.requested
+      ? 'Installing ast-grep and connecting it to OpenCode.'
+      : 'Disconnecting ast-grep from OpenCode.'
+    : settings.skills.astGrep.connected
+      ? 'Connected. A new OpenCode session uses it.'
+      : settings.skills.astGrep.cli === 'installed'
+        ? 'Installed. Turning this on connects it to OpenCode.'
+        : 'Not installed. Install the CLI, then turn this on.';
+  const zvecCliDraft = { cliSource: draft.zvecGrepCliSource, path: draft.zvecGrepPath };
+  const astCliDraft = { cliSource: draft.astGrepCliSource, path: draft.astGrepPath };
+  const zvecProbe =
+    draft.zvecGrepCliSource === 'bundled' ? settings.skills.zvecGrep.bundled : settings.skills.zvecGrep.local;
+  const astProbe =
+    draft.astGrepCliSource === 'bundled' ? settings.skills.astGrep.bundled : settings.skills.astGrep.local;
+  const browserSkillChip = settings.skills.browserError
+    ? 'Launch issue'
+    : draft.browserCodex || draft.browserOpencode
+      ? 'Enabled'
+      : 'Off';
+  const astSkillChip = astGrep?.pending
+    ? 'Working…'
+    : settings.skills.astGrep.connected
+      ? 'Connected'
+      : astProbe.status === 'detected'
+        ? 'Installed'
+        : astProbe.status === 'not-runnable'
+          ? 'Not runnable'
+          : 'Not installed';
+  const zvecSkillChip = zvecGrep?.pending
+    ? 'Working…'
+    : settings.skills.zvecGrep.connected
+      ? 'Connected'
+      : zvecProbe.status === 'detected'
+        ? 'Installed'
+        : zvecProbe.status === 'not-runnable'
+          ? 'Not runnable'
+          : 'Not installed';
   const tabs: readonly TabItem[] = [
     { id: 'cli', label: 'CLI' },
     { id: 'providers', label: 'Providers' },
@@ -1364,26 +1440,53 @@ export function SettingsScreen({
           <div className="panel__head" id="skills-title">
             <span>Skills</span>
             <span className="spacer" />
-            <span className="panel__note">What the agent can do besides edit the workspace</span>
+            <span className="panel__note">Extra tools the agent can use</span>
           </div>
-          <div className="panel__body">
+          <TabList
+            className="tablist--nested"
+            label="Skill"
+            tabs={[
+              { id: 'skill-browser', label: 'Browser' },
+              { id: 'skill-ast-grep', label: 'ast-grep' },
+              { id: 'skill-zvec-grep', label: 'zvec-grep' }
+            ]}
+            active={skillTab}
+            onChange={(id) => setSkillTab(id as typeof skillTab)}
+          />
+
+          <TabPanel id="skill-browser" active={skillTab} className="tabpanel--inline">
             <div className="field">
+              <div className="field__head">
+                <span className="provider-name">Browser control</span>
+                <span className="spacer" />
+                <span
+                  className={`chip ${
+                    settings.skills.browserError
+                      ? 'chip--missing'
+                      : draft.browserCodex || draft.browserOpencode
+                        ? 'chip--stored'
+                        : 'chip--missing'
+                  }`}
+                >
+                  {browserSkillChip}
+                </span>
+              </div>
               <p className="field-help">
-                Browser control can be on for Codex, OpenCode, or both. When it is off for a provider,
-                that provider does not get browser tools and no browser is started for it.
+                Turn on per provider. When off, that provider gets no browser tools and no browser is started.
+                Uses installed Edge or Chrome. On by default; a new conversation picks up the change.
               </p>
               <ul className="context-list">
                 <ContextCategory
                   id="skill-browser-codex"
-                  name="Browser control — Codex"
-                  description="When this is on, Codex can open the app in an editor tab and check layout. Uses the installed Edge or Chrome."
+                  name="Codex"
+                  description="Open the app in an editor tab and check layout."
                   checked={draft.browserCodex}
                   onChange={(value) => update('browserCodex', value)}
                 />
                 <ContextCategory
                   id="skill-browser-opencode"
-                  name="Browser control — OpenCode"
-                  description="When this is on, OpenCode (Ollama agentic runtime and OpenCode Zen) can open the app in an editor tab and check layout. Uses the installed Edge or Chrome."
+                  name="OpenCode"
+                  description="Same for Ollama agentic runtime and OpenCode Zen."
                   checked={draft.browserOpencode}
                   onChange={(value) => update('browserOpencode', value)}
                 />
@@ -1393,39 +1496,295 @@ export function SettingsScreen({
                   <AlertIcon />
                   <span>{settings.skills.browserError}</span>
                 </p>
+              ) : null}
+            </div>
+          </TabPanel>
+
+          <TabPanel id="skill-ast-grep" active={skillTab} className="tabpanel--inline">
+            <div className="field">
+              <div className="field__head">
+                <span className="provider-name">ast-grep</span>
+                <span className="spacer" />
+                <span
+                  className={`chip ${
+                    settings.skills.astGrep.connected
+                      ? 'chip--stored'
+                      : astProbe.status === 'detected'
+                        ? 'chip--signedin'
+                        : 'chip--missing'
+                  }`}
+                >
+                  {astSkillChip}
+                </span>
+                <FieldTip
+                  label="About ast-grep"
+                  text="Syntax-aware code search and rewrite, bundled with the app. Agents find and refactor by AST pattern instead of fragile text matching. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up."
+                />
+              </div>
+              <p className="field-help">
+                Structural search exposed as an MCP tool. Install or update the CLI, then connect it to OpenCode.
+              </p>
+
+              <label className="field-label" htmlFor="ast-grep-cli-source">
+                CLI source
+              </label>
+              <select
+                className="select"
+                id="ast-grep-cli-source"
+                value={draft.astGrepCliSource}
+                aria-describedby="ast-grep-cli-source-help"
+                onChange={(event) =>
+                  update('astGrepCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
+                }
+              >
+                <option value="local">Local machine</option>
+                <option value="bundled">Bundled (extension storage)</option>
+              </select>
+              <p className="field-help" id="ast-grep-cli-source-help">
+                {draft.astGrepCliSource === 'bundled'
+                  ? 'Install downloads into extension storage. Turns use that binary, not PATH.'
+                  : 'Use the path below or PATH. Install and Update use this selection immediately.'}
+              </p>
+
+              {draft.astGrepCliSource === 'local' ? (
+                <>
+                  <label className="field-label" htmlFor="ast-grep-path">
+                    ast-grep path
+                  </label>
+                  <input
+                    className="input"
+                    id="ast-grep-path"
+                    type="text"
+                    value={draft.astGrepPath}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(event) => update('astGrepPath', event.target.value)}
+                  />
+                </>
               ) : (
-                <p className="field-help">
-                  Saved to <code className="key">melink.skills.browserCodex</code> and{' '}
-                  <code className="key">melink.skills.browserOpencode</code>. On by default. A new
-                  conversation picks up the change for that provider.
+                <p className="field-help skill-path" title={settings.skills.astGrep.bundled.path}>
+                  Bundled path
+                  <FieldTip label="Bundled ast-grep path" text={settings.skills.astGrep.bundled.path} />
                 </p>
               )}
-            </div>
 
-            <div className="field">
-              <p className="field-label field-label--row">OpenCode Semantic Search</p>
-              <p className="field-help">
-                Indexes this workspace locally so OpenCode can search by meaning instead of reading files into
-                the prompt. That reduces token usage on each turn.
+              <p
+                className={`runtime-status runtime-status--${
+                  astProbe.status === 'detected'
+                    ? 'detected'
+                    : astProbe.status === 'not-runnable'
+                      ? 'not-runnable'
+                      : 'missing'
+                }`}
+                role="status"
+              >
+                <span className="runtime-dot" aria-hidden="true" />
+                <span>
+                  {astProbe.status === 'detected'
+                    ? 'Detected'
+                    : astProbe.status === 'not-runnable'
+                      ? 'Installed but not runnable'
+                      : 'Not installed'}
+                </span>
+                {astProbe.status === 'detected' && astProbe.version ? (
+                  <span className="runtime-version">{astProbe.version}</span>
+                ) : null}
               </p>
-              <label className="check" htmlFor="zvec-grep-enabled">
-                <input
-                  className="check-input"
-                  id="zvec-grep-enabled"
-                  type="checkbox"
-                  checked={zvecChecked}
-                  disabled={zvecGrep?.pending}
-                  aria-describedby="zvec-grep-status"
-                  onChange={(event) => onSetZvecGrep(event.target.checked)}
+
+              <div className="runtime-actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  disabled={astGrepInstall?.pending}
+                  onClick={() =>
+                    astProbe.status === 'detected'
+                      ? onUpgradeAstGrep(astCliDraft)
+                      : onInstallAstGrep(astCliDraft)
+                  }
+                >
+                  {astGrepInstall?.pending
+                    ? 'Working…'
+                    : astProbe.status === 'detected'
+                      ? draft.astGrepCliSource === 'bundled'
+                        ? 'Update bundled ast-grep'
+                        : 'Update ast-grep'
+                      : draft.astGrepCliSource === 'bundled'
+                        ? 'Install bundled ast-grep'
+                        : 'Install ast-grep'}
+                </button>
+                {astGrepInstall && !astGrepInstall.pending && astGrepInstall.message ? (
+                  <CliResult ok={astGrepInstall.ok} message={astGrepInstall.message} />
+                ) : null}
+              </div>
+
+              <div className="skill-check-row">
+                <label className="check" htmlFor="ast-grep-enabled">
+                  <input
+                    className="check-input"
+                    id="ast-grep-enabled"
+                    type="checkbox"
+                    checked={astChecked}
+                    disabled={astGrep?.pending}
+                    aria-describedby="ast-grep-status"
+                    onChange={(event) => onSetAstGrep(event.target.checked, astCliDraft)}
+                  />
+                  <span className="check-box" aria-hidden="true">
+                    <CheckIcon />
+                  </span>
+                  <span className="check-body">
+                    <span className="check-label">Use structural search</span>
+                  </span>
+                </label>
+                <FieldTip
+                  label="About structural search"
+                  text="Updates your user OpenCode config and SideCode turns. A new session picks it up."
                 />
-                <span className="check-box" aria-hidden="true">
-                  <CheckIcon />
+              </div>
+              <p className="field-help" id="ast-grep-status">
+                {astStatus}
+              </p>
+              {astGrep && !astGrep.pending && astGrep.message ? (
+                <CliResult ok={astGrep.ok} message={astGrep.message} />
+              ) : null}
+            </div>
+          </TabPanel>
+
+          <TabPanel id="skill-zvec-grep" active={skillTab} className="tabpanel--inline">
+            <div className="field">
+              <div className="field__head">
+                <span className="provider-name">zvec-grep</span>
+                <span className="spacer" />
+                <span
+                  className={`chip ${
+                    settings.skills.zvecGrep.connected
+                      ? 'chip--stored'
+                      : zvecProbe.status === 'detected'
+                        ? 'chip--signedin'
+                        : 'chip--missing'
+                  }`}
+                >
+                  {zvecSkillChip}
                 </span>
-                <span className="check-body">
-                  <span className="check-label">Use semantic search</span>
-                  <span className="check-text">Updates your user OpenCode config. A new session picks it up.</span>
-                </span>
+                <FieldTip
+                  label="About zvec-grep"
+                  text="Local semantic, keyword, and ripgrep search, bundled with the app and exposed as an MCP tool. Returns ranked, source-linked snippets so agents read fewer files. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up."
+                />
+              </div>
+              <p className="field-help">
+                Semantic search exposed as an MCP tool. Install or update the CLI, then connect it to OpenCode.
+              </p>
+
+              <label className="field-label" htmlFor="zvec-grep-cli-source">
+                CLI source
               </label>
+              <select
+                className="select"
+                id="zvec-grep-cli-source"
+                value={draft.zvecGrepCliSource}
+                aria-describedby="zvec-grep-cli-source-help"
+                onChange={(event) =>
+                  update('zvecGrepCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
+                }
+              >
+                <option value="local">Local machine</option>
+                <option value="bundled">Bundled (extension storage)</option>
+              </select>
+              <p className="field-help" id="zvec-grep-cli-source-help">
+                {draft.zvecGrepCliSource === 'bundled'
+                  ? 'Install downloads into extension storage. Turns use that binary, not PATH.'
+                  : 'Use the path below or PATH. Install and Update use this selection immediately.'}
+              </p>
+
+              {draft.zvecGrepCliSource === 'local' ? (
+                <>
+                  <label className="field-label" htmlFor="zvec-grep-path">
+                    zg path
+                  </label>
+                  <input
+                    className="input"
+                    id="zvec-grep-path"
+                    type="text"
+                    value={draft.zvecGrepPath}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(event) => update('zvecGrepPath', event.target.value)}
+                  />
+                </>
+              ) : (
+                <p className="field-help skill-path" title={settings.skills.zvecGrep.bundled.path}>
+                  Bundled path
+                  <FieldTip label="Bundled zvec-grep path" text={settings.skills.zvecGrep.bundled.path} />
+                </p>
+              )}
+
+              <p
+                className={`runtime-status runtime-status--${
+                  zvecProbe.status === 'detected'
+                    ? 'detected'
+                    : zvecProbe.status === 'not-runnable'
+                      ? 'not-runnable'
+                      : 'missing'
+                }`}
+                role="status"
+              >
+                <span className="runtime-dot" aria-hidden="true" />
+                <span>
+                  {zvecProbe.status === 'detected'
+                    ? 'Detected'
+                    : zvecProbe.status === 'not-runnable'
+                      ? 'Installed but not runnable'
+                      : 'Not installed'}
+                </span>
+                {zvecProbe.status === 'detected' && zvecProbe.version ? (
+                  <span className="runtime-version">{zvecProbe.version}</span>
+                ) : null}
+              </p>
+
+              <div className="runtime-actions">
+                <button
+                  className="btn btn--secondary"
+                  type="button"
+                  disabled={zvecGrepInstall?.pending}
+                  onClick={() => onInstallZvecGrep(zvecCliDraft)}
+                >
+                  {zvecGrepInstall?.pending
+                    ? 'Working…'
+                    : zvecProbe.status === 'detected'
+                      ? draft.zvecGrepCliSource === 'bundled'
+                        ? 'Update bundled zvec-grep'
+                        : 'Update zvec-grep'
+                      : draft.zvecGrepCliSource === 'bundled'
+                        ? 'Install bundled zvec-grep'
+                        : 'Install zvec-grep'}
+                </button>
+                {zvecGrepInstall && !zvecGrepInstall.pending && zvecGrepInstall.message ? (
+                  <CliResult ok={zvecGrepInstall.ok} message={zvecGrepInstall.message} />
+                ) : null}
+              </div>
+
+              <div className="skill-check-row">
+                <label className="check" htmlFor="zvec-grep-enabled">
+                  <input
+                    className="check-input"
+                    id="zvec-grep-enabled"
+                    type="checkbox"
+                    checked={zvecChecked}
+                    disabled={zvecGrep?.pending}
+                    aria-describedby="zvec-grep-status"
+                    onChange={(event) => onSetZvecGrep(event.target.checked, zvecCliDraft)}
+                  />
+                  <span className="check-box" aria-hidden="true">
+                    <CheckIcon />
+                  </span>
+                  <span className="check-body">
+                    <span className="check-label">Use semantic search</span>
+                  </span>
+                </label>
+                <FieldTip
+                  label="About semantic search"
+                  text="Updates your user OpenCode config and SideCode turns. A new session picks it up."
+                />
+              </div>
               <p className="field-help" id="zvec-grep-status">
                 {zvecStatus}
               </p>
@@ -1433,7 +1792,8 @@ export function SettingsScreen({
                 <CliResult ok={zvecGrep.ok} message={zvecGrep.message} />
               ) : null}
             </div>
-          </div>
+          </TabPanel>
+
           <p className="panel__foot">Unsaved changes apply to the next turn.</p>
         </section>
         </TabPanel>
@@ -1448,8 +1808,18 @@ export function SettingsScreen({
         <button className="btn" type="button" disabled={!dirty} onClick={resetDraft}>
           Reset
         </button>
-        <button className="btn btn--primary" type="button" disabled={!dirty} onClick={save}>
-          Save settings
+        {settings.target === 'workspace' ? (
+          <button
+            className="btn"
+            type="button"
+            disabled={!dirty}
+            onClick={() => save('workspace')}
+          >
+            Save to workspace
+          </button>
+        ) : null}
+        <button className="btn btn--primary" type="button" disabled={!dirty} onClick={() => save('global')}>
+          {settings.target === 'workspace' ? 'Save user settings' : 'Save settings'}
         </button>
       </footer>
     </main>
@@ -1509,6 +1879,15 @@ function ContextCategory({
         </span>
       </label>
     </li>
+  );
+}
+
+/** Compact info control: secondary detail lives in the native tooltip. */
+function FieldTip({ label, text }: { label: string; text: string }): JSX.Element {
+  return (
+    <button type="button" className="icon-btn field-tip" title={text} aria-label={label}>
+      <InfoIcon />
+    </button>
   );
 }
 

@@ -53,6 +53,17 @@ export function isZvecSemanticSearch(tool: string): boolean {
   return id === 'zvec_grep_search' || id.endsWith('_zvec_grep_search');
 }
 
+/** OpenCode names this `ast_grep_search` / `ast_grep_ast_grep_search`. */
+export function isAstGrepTool(tool: string): boolean {
+  const id = tool.trim().toLowerCase();
+  return id.includes('ast_grep') && (id.includes('search') || id.includes('replace'));
+}
+
+export function isAstGrepReplace(tool: string): boolean {
+  const id = tool.trim().toLowerCase();
+  return id.includes('ast_grep') && id.includes('replace');
+}
+
 function searchPhrase(input: Record<string, unknown> | undefined): string | undefined {
   const query = pick(input, ['query']);
   if (query) {
@@ -93,6 +104,9 @@ export function targetForTool(
   const id = tool.trim().toLowerCase();
   if (isZvecSemanticSearch(id)) {
     return searchPhrase(input) ?? searchPhrase(metadata);
+  }
+  if (isAstGrepTool(id)) {
+    return pick(input, ['pattern', 'rewrite']) ?? pick(metadata, ['pattern', 'rewrite']);
   }
   const file =
     pick(metadata, ['filepath', 'filePath', 'file_path', 'path']) ??
@@ -176,6 +190,12 @@ export function friendlyToolTitle(tool: string, target?: string): string {
   const id = tool.trim().toLowerCase();
   const name = cleanToolTarget(target);
   if (isZvecSemanticSearch(id)) {
+    return name ? `Searching for ${name}` : 'Searching';
+  }
+  if (isAstGrepTool(id)) {
+    if (isAstGrepReplace(id)) {
+      return name ? `Rewriting ${name}` : 'Rewriting';
+    }
     return name ? `Searching for ${name}` : 'Searching';
   }
   switch (id) {

@@ -2,16 +2,40 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, posix, win32 } from 'node:path';
+import { posix, win32 } from 'node:path';
+import {
+  createOpencodeUserConfigIO,
+  firstExisting,
+  opencodeConfigCandidates,
+  opencodeConfigHasMcpServer,
+  removeOpencodeMcpServer,
+  stripJsonComments,
+  upsertOpencodeMcpServer,
+  type OpencodeUserConfigIO
+} from './userConfig.ts';
+import { zvecGrepOpencodeServer, ZVEC_GREP_MCP_SERVER } from '../../skills/opencodeMcp.ts';
+import {
+  bundledZvecGrepExecutable,
+  bundledZvecGrepPrefix,
+  type ZvecGrepCliSource
+} from '../zvecGrep/resolve.ts';
+import type { SkillResolveRoots } from '../skillCli.ts';
 
 /**
- * Turn zvec-grep's official OpenCode integration on or off.
+ * Turn zvec-grep's OpenCode integration on or off.
  *
- * Enable installs `@zvec/zvec-grep` when `zg` is missing, then runs
- * `zg install --target opencode --yes`. Disable runs the matching uninstall
- * and leaves the npm package in place. This module never writes the OpenCode
- * config itself and never passes `--force`.
+ * Enable installs `@zvec/zvec-grep` when `zg` is missing (npm global for local,
+ * or npm `--prefix` under extension global storage for bundled), then writes an
+ * absolute-path `zvec_grep` MCP entry into the user OpenCode config. Disable
+ * removes that entry (and best-effort runs `zg uninstall` for AGENTS.md cleanup).
  */
+
+/** @deprecated Prefer opencodeConfigHasMcpServer(text, 'zvec_grep'). */
+export function opencodeConfigHasZvecGrep(text: string): boolean {
+  return opencodeConfigHasMcpServer(text, ZVEC_GREP_MCP_SERVER);
+}
+
+export { opencodeConfigCandidates, firstExisting, stripJsonComments };
 
 export const ZVEC_GREP_PACKAGE = '@zvec/zvec-grep';
 
@@ -90,6 +114,11 @@ export function npmGlobalInstallArgs(): readonly string[] {
   return ['install', '-g', ZVEC_GREP_PACKAGE];
 }
 
+/** Install into a SideCode-managed prefix (bundled). */
+export function npmPrefixInstallArgs(prefix: string): readonly string[] {
+  return ['install', '-g', '--prefix', prefix, ZVEC_GREP_PACKAGE];
+}
+
 /**
  * The `zg` shim npm writes for a global prefix.
  *
@@ -103,97 +132,6 @@ export function zgGlobalBin(prefix: string, platform: string): string {
     return win32.join(root, 'zg.cmd');
   }
   return posix.join(root, 'bin', 'zg');
-}
-
-/**
- * Config files `zg --install --target opencode` would read.
- *
- * `OPENCODE_CONFIG` is the exact file. Otherwise `opencode.jsonc` is preferred
- * over `opencode.json`. Windows uses `~/.config`; other platforms honor
- * `XDG_CONFIG_HOME`.
- */
-export function opencodeConfigCandidates(input: {
-  homedir: string;
-  platform: string;
-  xdgConfigHome?: string;
-  opencodeConfig?: string;
-}): string[] {
-  const selected = input.opencodeConfig?.trim();
-  if (selected) {
-    return [selected];
-  }
-  const root =
-    input.platform === 'win32'
-      ? join(input.homedir, '.config')
-      : input.xdgConfigHome?.trim() || join(input.homedir, '.config');
-  const dir = join(root, 'opencode');
-  return [join(dir, 'opencode.jsonc'), join(dir, 'opencode.json')];
-}
-
-export function firstExisting(
-  candidates: readonly string[],
-  exists: (path: string) => boolean
-): string | undefined {
-  return candidates.find((candidate) => exists(candidate));
-}
-
-/**
- * True when the config names a `zvec_grep` server.
- *
- * Comments are ignored so a commented example does not count. The search is
- * the server key, not a mention of the name in a string.
- */
-export function opencodeConfigHasZvecGrep(text: string): boolean {
-  return /(?:^|[{,])\s*["']zvec_grep["']\s*:/m.test(stripJsonComments(text));
-}
-
-/** Drop `//` and block comments, leaving string contents in place. */
-export function stripJsonComments(text: string): string {
-  let out = '';
-  let i = 0;
-  while (i < text.length) {
-    const current = text[i] ?? '';
-    const next = text[i + 1] ?? '';
-    if (current === '"' || current === "'") {
-      const quote = current;
-      out += current;
-      i += 1;
-      while (i < text.length) {
-        const ch = text[i] ?? '';
-        out += ch;
-        if (ch === '\\') {
-          const escaped = text[i + 1];
-          if (escaped !== undefined) {
-            out += escaped;
-          }
-          i += 2;
-          continue;
-        }
-        i += 1;
-        if (ch === quote) {
-          break;
-        }
-      }
-      continue;
-    }
-    if (current === '/' && next === '/') {
-      while (i < text.length && text[i] !== '\n') {
-        i += 1;
-      }
-      continue;
-    }
-    if (current === '/' && next === '*') {
-      i += 2;
-      while (i + 1 < text.length && !(text[i] === '*' && text[i + 1] === '/')) {
-        i += 1;
-      }
-      i = Math.min(text.length, i + 2);
-      continue;
-    }
-    out += current;
-    i += 1;
-  }
-  return out;
 }
 
 /**
@@ -315,8 +253,22 @@ export function createZvecGrepIO(): ZvecGrepIO {
   };
 }
 
-export async function detectZvecGrep(io: ZvecGrepIO = createZvecGrepIO()): Promise<ZvecGrepStatus> {
-  const [configured, cli] = await Promise.all([configHasZvecGrep(io), probeZg(io)]);
+export interface ZvecGrepApplyContext {
+  io?: ZvecGrepIO;
+  source?: ZvecGrepCliSource;
+  path?: string;
+  roots?: SkillResolveRoots;
+  userConfig?: OpencodeUserConfigIO;
+}
+
+export async function detectZvecGrep(
+  ioOrContext: ZvecGrepIO | ZvecGrepApplyContext = createZvecGrepIO()
+): Promise<ZvecGrepStatus> {
+  const ctx = normalizeContext(ioOrContext);
+  const [configured, cli] = await Promise.all([
+    configHasZvecGrep(ctx.io, ctx.userConfig),
+    probeZg(ctx)
+  ]);
   return { enabled: configured && cli === 'installed', cli };
 }
 
@@ -326,39 +278,74 @@ export async function detectZvecGrep(io: ZvecGrepIO = createZvecGrepIO()): Promi
  */
 export async function applyZvecGrep(
   enabled: boolean,
-  io: ZvecGrepIO = createZvecGrepIO()
+  ioOrContext: ZvecGrepIO | ZvecGrepApplyContext = createZvecGrepIO()
 ): Promise<ZvecGrepApplyResult> {
-  return enabled ? enableZvecGrep(io) : disableZvecGrep(io);
+  const ctx = normalizeContext(ioOrContext);
+  return enabled ? enableZvecGrep(ctx) : disableZvecGrep(ctx);
 }
 
-async function enableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
-  let command = await locateZg(io);
+function normalizeContext(ioOrContext: ZvecGrepIO | ZvecGrepApplyContext): Required<
+  Pick<ZvecGrepApplyContext, 'io' | 'source' | 'path' | 'userConfig'>
+> & { roots?: SkillResolveRoots } {
+  if (isZvecGrepIO(ioOrContext)) {
+    return {
+      io: ioOrContext,
+      source: 'local',
+      path: '',
+      userConfig: createOpencodeUserConfigIO(),
+      roots: undefined
+    };
+  }
+  return {
+    io: ioOrContext.io ?? createZvecGrepIO(),
+    source: ioOrContext.source ?? 'local',
+    path: ioOrContext.path ?? '',
+    roots: ioOrContext.roots,
+    userConfig: ioOrContext.userConfig ?? createOpencodeUserConfigIO()
+  };
+}
+
+function isZvecGrepIO(value: ZvecGrepIO | ZvecGrepApplyContext): value is ZvecGrepIO {
+  return typeof (value as ZvecGrepIO).run === 'function' && typeof (value as ZvecGrepIO).readConfig === 'function';
+}
+
+async function enableZvecGrep(
+  ctx: ReturnType<typeof normalizeContext>
+): Promise<ZvecGrepApplyResult> {
+  let command = await locateZg(ctx);
   if (!command) {
-    const ready = await ensureZgInstalled(io);
+    const ready = await ensureZgInstalled(ctx);
     if (!ready.ok) {
       return { ok: false, enabled: false, cli: 'missing', message: ready.message };
     }
-    command = await locateZg(io);
+    command = await locateZg(ctx);
     if (!command) {
       return {
         ok: false,
         enabled: false,
         cli: 'missing',
-        message: await missingZgMessage(io)
+        message: await missingZgMessage(ctx.io)
       };
     }
   }
 
-  const installed = await runIntegration(io, command, 'install');
-  const status = await detectZvecGrep(io);
-  if (installed.error || installed.code !== 0) {
+  // Official installer may write AGENTS.md and a bare-name MCP entry; we then
+  // overwrite the MCP entry with an absolute path so bundled/local installs work.
+  await runIntegration(ctx.io, command, 'install').catch(() => undefined);
+
+  const server = zvecGrepOpencodeServer(command);
+  try {
+    await upsertOpencodeMcpServer(ZVEC_GREP_MCP_SERVER, server, ctx.userConfig);
+  } catch {
     return {
       ok: false,
-      enabled: status.enabled,
-      cli: status.cli,
-      message: failureMessage(installed, 'zvec-grep could not be connected to OpenCode')
+      enabled: false,
+      cli: 'installed',
+      message: 'zvec-grep could not be connected to OpenCode. The OpenCode config could not be updated.'
     };
   }
+
+  const status = await detectZvecGrep(ctx);
   if (!status.enabled) {
     return {
       ok: false,
@@ -375,38 +362,34 @@ async function enableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
   };
 }
 
-async function disableZvecGrep(io: ZvecGrepIO): Promise<ZvecGrepApplyResult> {
-  const configured = await configHasZvecGrep(io);
-  const command = await locateZg(io);
+async function disableZvecGrep(
+  ctx: ReturnType<typeof normalizeContext>
+): Promise<ZvecGrepApplyResult> {
+  const configured = await configHasZvecGrep(ctx.io, ctx.userConfig);
+  const command = await locateZg(ctx);
   const cli: ZvecGrepCli = command ? 'installed' : 'missing';
   if (!configured) {
     return { ok: true, enabled: false, cli, message: 'zvec-grep is off.' };
   }
-  if (!command) {
-    return {
-      ok: false,
-      enabled: false,
-      cli: 'missing',
-      message: 'zvec-grep is listed in the OpenCode config, but zg was not found, so it could not be removed.'
-    };
+
+  await removeOpencodeMcpServer(ZVEC_GREP_MCP_SERVER, ctx.userConfig);
+  if (command) {
+    await runIntegration(ctx.io, command, 'uninstall').catch(() => undefined);
   }
 
-  const removed = await runIntegration(io, command, 'uninstall');
-  const stillConfigured = await configHasZvecGrep(io);
-  if (removed.error || removed.code !== 0 || stillConfigured) {
+  const stillConfigured = await configHasZvecGrep(ctx.io, ctx.userConfig);
+  if (stillConfigured) {
     return {
       ok: false,
-      enabled: stillConfigured,
+      enabled: true,
       cli,
-      message: stillConfigured && !removed.error && removed.code === 0
-        ? 'zvec-grep is still connected to OpenCode.'
-        : failureMessage(removed, 'zvec-grep could not be disconnected from OpenCode')
+      message: 'zvec-grep is still connected to OpenCode.'
     };
   }
   return {
     ok: true,
     enabled: false,
-    cli: 'installed',
+    cli: cli === 'installed' ? 'installed' : 'missing',
     message: 'zvec-grep is off. A new OpenCode session no longer uses it.'
   };
 }
@@ -424,7 +407,10 @@ async function runIntegration(
   return io.run(command, zgIntegrationArgs(action, 'flag'), INSTALL_TIMEOUT_MS);
 }
 
-async function ensureZgInstalled(io: ZvecGrepIO): Promise<{ ok: true } | { ok: false; message: string }> {
+async function ensureZgInstalled(
+  ctx: ReturnType<typeof normalizeContext>
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const io = ctx.io;
   const node = await io.run('node', ['--version'], PROBE_TIMEOUT_MS);
   if (node.error === 'missing') {
     return { ok: false, message: 'Node.js 22 or newer is required to install zvec-grep.' };
@@ -441,7 +427,11 @@ async function ensureZgInstalled(io: ZvecGrepIO): Promise<{ ok: true } | { ok: f
   }
 
   const npm = io.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const installed = await io.run(npm, npmGlobalInstallArgs(), NPM_TIMEOUT_MS);
+  const args =
+    ctx.source === 'bundled' && ctx.roots
+      ? npmPrefixInstallArgs(bundledZvecGrepPrefix(ctx.roots))
+      : npmGlobalInstallArgs();
+  const installed = await io.run(npm, args, NPM_TIMEOUT_MS);
   if (installed.error === 'missing' || commandNotFound(installed)) {
     return {
       ok: false,
@@ -455,17 +445,33 @@ async function ensureZgInstalled(io: ZvecGrepIO): Promise<{ ok: true } | { ok: f
   return { ok: true };
 }
 
-async function probeZg(io: ZvecGrepIO): Promise<ZvecGrepCli> {
-  return (await locateZg(io)) ? 'installed' : 'missing';
+async function probeZg(ctx: ReturnType<typeof normalizeContext>): Promise<ZvecGrepCli> {
+  return (await locateZg(ctx)) ? 'installed' : 'missing';
 }
 
 /**
- * Find `zg` on PATH, then in npm's global prefix.
+ * Find `zg` for the active source.
  *
- * A global install writes the shim even when that directory is absent from the
- * extension host's PATH. Opening a new terminal does not change this process.
+ * Bundled prefers the SideCode-managed prefix. Local uses the path setting,
+ * PATH, then npm's global prefix.
  */
-async function locateZg(io: ZvecGrepIO): Promise<string | undefined> {
+async function locateZg(ctx: ReturnType<typeof normalizeContext>): Promise<string | undefined> {
+  const io = ctx.io;
+  if (ctx.source === 'bundled' && ctx.roots) {
+    const bundled = bundledZvecGrepExecutable(ctx.roots, io.platform);
+    if (await zgRuns(io, bundled)) {
+      return bundled;
+    }
+    return undefined;
+  }
+
+  const trimmed = ctx.path.trim();
+  if (trimmed.length > 0) {
+    if (await zgRuns(io, trimmed)) {
+      return trimmed;
+    }
+  }
+
   const names = io.platform === 'win32' ? ['zg.cmd', 'zg'] : ['zg'];
   for (const name of names) {
     if (await zgRuns(io, name)) {
@@ -505,9 +511,33 @@ async function missingZgMessage(io: ZvecGrepIO): Promise<string> {
   return `zvec-grep was installed, but zg could not be started.${where} From a terminal, run: zg install --target opencode --yes.`;
 }
 
-async function configHasZvecGrep(io: ZvecGrepIO): Promise<boolean> {
+async function configHasZvecGrep(io: ZvecGrepIO, userConfig?: OpencodeUserConfigIO): Promise<boolean> {
+  // When SideCode owns the user-config IO, that file is authoritative (enable
+  // upserts / disable removes it). Fall back to the probe readConfig otherwise.
+  if (userConfig) {
+    try {
+      const path = await resolveConfigPath(userConfig);
+      if (!userConfig.exists(path)) {
+        return false;
+      }
+      const current = await userConfig.readFile(path);
+      return opencodeConfigHasZvecGrep(current);
+    } catch {
+      return false;
+    }
+  }
   const text = await io.readConfig();
   return text !== undefined && opencodeConfigHasZvecGrep(text);
+}
+
+async function resolveConfigPath(userConfig: OpencodeUserConfigIO): Promise<string> {
+  const candidates = opencodeConfigCandidates({
+    homedir: userConfig.homedir,
+    platform: userConfig.platform,
+    xdgConfigHome: userConfig.xdgConfigHome,
+    opencodeConfig: userConfig.opencodeConfig
+  });
+  return firstExisting(candidates, userConfig.exists) ?? candidates[candidates.length - 1]!;
 }
 
 async function readOpencodeConfig(): Promise<string | undefined> {
