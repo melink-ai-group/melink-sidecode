@@ -11,6 +11,7 @@ import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
 import { splitReplyClose } from './replyClose';
 import { plainRowText } from './plainRowText';
+import { shouldToggleReasoningBody } from './reasoningClick';
 import { visibleTranscriptText } from './visibleTranscript';
 import { historyEntries, historyLoading, type HistoryEntry } from './historyEntries';
 import { pinnedUserMessage, userMessagePinText, type UserMessageFrame } from './pinnedUserMessage';
@@ -3898,7 +3899,14 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
         </span>
       </button>
       {expanded && (text || item.status === 'streaming' || incomplete) ? (
-        <div className="turn-body md" onClick={toggle}>
+        <div
+          className="turn-body md"
+          onClick={(event) => {
+            const selectionText = window.getSelection()?.toString() ?? '';
+            const target = event.target instanceof Element ? event.target : null;
+            if (shouldToggleReasoningBody({ selectionText, target })) toggle();
+          }}
+        >
           {text ? (
             <Markdown text={item.text} />
           ) : item.status === 'streaming' ? (
