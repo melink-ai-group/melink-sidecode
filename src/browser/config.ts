@@ -24,7 +24,8 @@ export const BROWSER_TOOL_NAMES = [
   'browser_snapshot',
   'browser_click',
   'browser_type',
-  'browser_press'
+  'browser_press',
+  'browser_assert'
 ] as const;
 
 /**

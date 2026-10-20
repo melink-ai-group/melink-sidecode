@@ -123,6 +123,10 @@ npm run lint       # alias for typecheck
 npm test           # pure unit tests (node --experimental-strip-types)
 ```
 
+The browser tools (agent-driven page checks) are documented in
+[docs/browser.md](docs/browser.md): this repository has no dev server or base
+URL, so those tools need an external URL.
+
 ## Set up a provider
 
 Open the sidebar (Activity Bar → **SideCode**) once to activate the extension, then
