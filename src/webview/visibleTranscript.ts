@@ -29,8 +29,8 @@ const OPEN_BLOCK = /<(project-context|project-context-update|attached-file)>/;
 
 const PROVIDER_LINE = new Set<string>(PROVIDER_ONLY_LINES);
 
-/** Transcript text with injected instructions and context blocks removed. */
-export function visibleTranscriptText(text: string, options?: { hideQuestions?: boolean }): string {
+/** Transcript text with injected instructions, context blocks, and question payloads removed. */
+export function visibleTranscriptText(text: string): string {
   let next = takeAttachmentSection(text).text;
   next = next.replace(REVOKED_MODE, '');
   next = next.replace(SNAPSHOT_INTRO, '');
@@ -38,9 +38,7 @@ export function visibleTranscriptText(text: string, options?: { hideQuestions?: 
   next = next.replace(MODE_LINE, '');
   next = stripProviderLines(next);
   next = stripUnclosedPrompt(next);
-  if (options?.hideQuestions) {
-    next = hideQuestionFence(next);
-  }
+  next = hideQuestionFence(next);
   return next.replace(/\n{3,}/g, '\n\n').trim();
 }
 

@@ -103,7 +103,7 @@ import { deferHostClick, setHostBacklog, useHostActivity } from './hostActivity'
 import { createMessagePump, isUrgentHostMessage } from './messagePump';
 import type { Attachment, DefaultMode, PermissionLevel } from '../backends/types';
 import { modeDescriptor } from '../backends/modes.ts';
-import { formatQuestionAnswers } from '../questions';
+import { formatQuestionAnswers, questionRetryInstruction } from '../questions';
 import { QuestionCard } from './QuestionCard';
 
 /** How the mic button should look while a dictation status is current. */
@@ -366,6 +366,7 @@ export function App(): JSX.Element {
             replay: message.replay,
             pendingApproval: message.pendingApproval,
             pendingQuestion: message.pendingQuestion,
+            notice: message.notice,
             plan: message.plan,
             keepPendingUserMessage: message.keepPendingUserMessage,
             hasOlderHistory: message.hasOlderHistory
@@ -1419,9 +1420,35 @@ export function App(): JSX.Element {
     });
   };
 
-  const runNoticeAction = (action: 'setToken' | 'clearToken' | 'refresh' | 'retry', noticeText?: string): void => {
+  const retryQuestion = (noticeText: string): void => {
+    // Remove the warning even when an open card makes a new turn impossible:
+    // the card itself is the actionable surface in that case.
+    startTransition(() => dispatch({ type: 'dismissStatusNotice', text: noticeText }));
+    if (state.restoring || pending || state.pendingQuestion || state.modeSwitch) {
+      return;
+    }
+    const text = questionRetryInstruction();
+    followSentMessage();
+    setHistoryStale(true);
+    startTransition(() => dispatch({ type: 'localUserMessage', text }));
+    bridge.post({
+      type: 'retryQuestion',
+      backendId: state.selectedBackendId,
+      model: state.selectedModel,
+      permissionLevel: state.permissionLevel
+    });
+  };
+
+  const runNoticeAction = (
+    action: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion',
+    noticeText?: string
+  ): void => {
     if (action === 'retry') {
       retryLastTurn(noticeText ?? '');
+      return;
+    }
+    if (action === 'retryQuestion') {
+      retryQuestion(noticeText ?? '');
       return;
     }
     dispatch({ type: 'dismissNotice' });
@@ -2316,13 +2343,11 @@ export function App(): JSX.Element {
                     items={entry.items}
                     showSpeaker={speakers.has(entry.id)}
                     providerId={entry.message.backendId ?? active?.id ?? 'ollama'}
-                    hideQuestions={state.mode !== 'ask'}
                   />
                 ) : (
                   <TranscriptRow
                     item={entry.item}
                     showSpeaker={speakers.has(entry.item.id)}
-                    hideQuestions={state.mode !== 'ask'}
                     providerId={entry.item.backendId ?? active?.id ?? 'ollama'}
                     pendingId={pending?.id}
                     checkpoint={state.checkpoints?.find((checkpoint) => checkpoint.messageId === entry.item.id)}
@@ -3578,7 +3603,7 @@ function RestoreResultStrip({
   );
 }
 
-function noticeActionLabel(action: 'setToken' | 'clearToken' | 'refresh' | 'retry'): string {
+function noticeActionLabel(action: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion'): string {
   switch (action) {
     case 'setToken':
       return 'Set token';
@@ -3588,6 +3613,8 @@ function noticeActionLabel(action: 'setToken' | 'clearToken' | 'refresh' | 'retr
       return 'Refresh backends';
     case 'retry':
       return 'Retry';
+    case 'retryQuestion':
+      return 'Retry question';
   }
 }
 
@@ -3620,7 +3647,6 @@ const TranscriptRow = memo(function TranscriptRow({
   item,
   providerId,
   showSpeaker,
-  hideQuestions,
   pendingId,
   checkpoint,
   onDecide,
@@ -3633,8 +3659,6 @@ const TranscriptRow = memo(function TranscriptRow({
   providerId: string;
   /** The opening reply of a turn, and the closing one once that turn has settled. */
   showSpeaker?: boolean;
-  /** Plan and Agent hide a sidecode-question fence. Ask leaves it as text. */
-  hideQuestions?: boolean;
   pendingId?: string;
   /** The send-time snapshot for this message, when one was stored. */
   checkpoint?: CheckpointView;
@@ -3642,7 +3666,7 @@ const TranscriptRow = memo(function TranscriptRow({
   onOpenRules: () => void;
   onRestore: (messageId: string) => void;
   onViewImage: (images: ViewableImage[], index: number) => void;
-  onNoticeAction: (action: 'setToken' | 'clearToken' | 'refresh' | 'retry', noticeText?: string) => void;
+  onNoticeAction: (action: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion', noticeText?: string) => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
     const text = visibleTranscriptText(item.text);
@@ -3750,7 +3774,7 @@ const TranscriptRow = memo(function TranscriptRow({
   }
 
   // Assistant message: markdown output with a streaming caret.
-  const assistantText = visibleTranscriptText(item.text, { hideQuestions });
+  const assistantText = visibleTranscriptText(item.text);
   if (!assistantText && item.status !== 'failed') {
     return null;
   }
@@ -3812,7 +3836,6 @@ const TranscriptRow = memo(function TranscriptRow({
   prev.item === next.item &&
   prev.providerId === next.providerId &&
   prev.showSpeaker === next.showSpeaker &&
-  prev.hideQuestions === next.hideQuestions &&
   prev.pendingId === next.pendingId &&
   prev.checkpoint === next.checkpoint
 );
@@ -3920,17 +3943,15 @@ const NarrationRow = memo(function NarrationRow({
   message,
   items,
   showSpeaker,
-  providerId,
-  hideQuestions
+  providerId
 }: {
   message: TranscriptItemView;
   items: TranscriptItemView[];
   showSpeaker: boolean;
   providerId: string;
-  hideQuestions?: boolean;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const text = plainRowText(visibleTranscriptText(message.text, { hideQuestions }));
+  const text = plainRowText(visibleTranscriptText(message.text));
   const running = items.some((item) => item.status === 'streaming' || item.status === 'pending') || message.status === 'streaming';
   return (
     <article className={`narration${expanded ? ' narration--open' : ''}`}>
@@ -3978,7 +3999,6 @@ const NarrationRow = memo(function NarrationRow({
   prev.message === next.message &&
   prev.showSpeaker === next.showSpeaker &&
   prev.providerId === next.providerId &&
-  prev.hideQuestions === next.hideQuestions &&
   sameItems(prev.items, next.items)
 );
 

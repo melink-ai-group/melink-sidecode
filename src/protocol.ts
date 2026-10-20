@@ -369,6 +369,15 @@ export type HostToWebviewMessage =
        * the card above the composer instead of losing it.
        */
       pendingQuestion?: QuestionRequest;
+      /**
+       * A status notice that must be appended after the replayed transcript,
+       * e.g. a native question that could not survive a reload.
+       */
+      notice?: {
+        level: 'info' | 'warning' | 'error';
+        message: string;
+        action?: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion';
+      };
       /** The thread's plan, so a resumed thread reopens its plan surface. */
       plan?: PlanArtifact;
       /**
@@ -458,7 +467,7 @@ export type HostToWebviewMessage =
       level: 'info' | 'warning' | 'error';
       message: string;
       /** Optional one-click recovery affordance, e.g. re-entering a token. */
-      action?: 'setToken' | 'clearToken' | 'refresh';
+      action?: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion';
     }
   /**
    * The project-context read model for the composer strip and its inline
@@ -614,6 +623,17 @@ export type WebviewToHostMessage =
       updatePlan?: boolean;
     }
   | { type: 'steerTurn'; text: string }
+  /**
+   * Re-ask a question whose payload the model sent in a format the host could
+   * not read. The host starts a fresh turn with the re-ask instruction; this is
+   * never a continue of the stopped turn.
+   */
+  | {
+      type: 'retryQuestion';
+      backendId?: string;
+      model?: string;
+      permissionLevel?: PermissionLevel;
+    }
   /** Open the microphone. The host answers with status, then a cleaned or failed transcript. */
   | { type: 'startDictation'; requestId: string }
   /** Stop the microphone and transcribe what was recorded. */

@@ -30,13 +30,21 @@ import {
 import { permissionDescriptor } from './backends/permissions';
 import { modeDescriptor, supportedModes } from './backends/modes';
 import {
+  askModeQuestionNotice,
+  containsQuestionPayload,
   extractSidecodeQuestions,
   formatQuestionAnswers,
+  hideQuestionFence,
+  invalidQuestionNotice,
   planDecisionLines,
   planUpdateFromAnswers,
+  questionRetryInstruction,
   type QuestionAnswer,
   type QuestionRequest
 } from './questions';
+import { findFenceQuestionItem, shouldCaptureFenceQuestions } from './questionsCapture';
+import { restorePendingQuestion } from './questionRestore';
+import { QuestionStore, pendingQuestionKey, type PendingQuestion } from './questionStore';
 import { overridesFromResolved, resolveModelSettings, sanitizeOverrides } from './backends/capabilities';
 import { canCompactContext, contextUsagePercent } from './backends/contextUsage';
 import { compactionSource, fitCompactionSource } from './backends/compaction';
@@ -126,6 +134,9 @@ import {
   withPinnedDefaults
 } from './composerControls';
 
+/** A notice message without its discriminant, so a session can carry it. */
+type NoticeView = Omit<Extract<HostToWebviewMessage, { type: 'notice' }>, 'type'>;
+
 /**
  * One sidebar chat tab. Fields that used to live once on the provider move here
  * so two open conversations do not share a thread, a mode, or a pending prompt.
@@ -177,6 +188,8 @@ interface ChatSession {
   turnBusy: boolean;
   /** Notice that belongs to this tab and is shown again when the tab is reopened. */
   heldNotice?: { level: 'info' | 'warning' | 'error'; message: string };
+  /** A question notice held for a background tab until that tab is painted. */
+  questionNotice?: NoticeView;
   /**
    * The webview clears the composer as soon as Send is clicked. When that send
    * is refused, ignore the empty draft that is still in flight.
@@ -292,6 +305,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * only asks it for a snapshot/delta and hands the text to the backend seam.
    */
   private readonly contextDelivery: ContextDelivery;
+  /** Pending question cards, persisted so a window reload can restore them. */
+  private readonly questions: QuestionStore;
+  /** Native questions already reported as lost, so a repaint cannot repeat it. */
+  private readonly reportedLostQuestions = new Set<string>();
   /** Coalesces a burst of editor/selection events into one context read. */
   private contextViewTimer?: ReturnType<typeof setTimeout>;
   /** Serializes plan-file writes so a live status update cannot clobber another. */
@@ -319,6 +336,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       (text) => this.cleanupTranscript(text)
     );
     this.contextDelivery = new ContextDelivery({ reads: projectContext.context });
+    this.questions = new QuestionStore(context.workspaceState);
     // The change journal is bound to the real workspace fs and workspace-scoped
     // storage here; the tracker and watcher only ever talk to the host-free
     // core, so the turn wiring below stays a thin translation layer.
@@ -422,8 +440,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         event.threadId &&
         this.pendingQuestion.request.threadId === event.threadId
       ) {
-        this.pendingQuestion = undefined;
-        this.post({ type: 'question/cleared' });
+        this.clearPendingQuestion(event.backendId, event.threadId, true);
       }
       if (event.type === 'turn/completed' || event.type === 'turn/interrupted' || event.type === 'error') {
         // A finished, interrupted, or failed turn cannot still be blocked on a
@@ -481,9 +498,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           this.recordNativePlan(event.backendId, event.threadId, event.steps, event.explanation)
         );
       }
-      if (event.type === 'turn/completed' && event.threadId && (this.mode === 'plan' || this.mode === 'agent')) {
-        // Strip a question fence before the plan is read from the same reply.
-        this.captureFenceQuestions(event.backendId, event.threadId);
+      if (event.threadId && shouldCaptureFenceQuestions(event.type, this.mode)) {
+        this.captureFenceQuestions(
+          event.backendId,
+          event.threadId,
+          event.type === 'item/completed' ? event.itemId : undefined
+        );
+      } else if (
+        event.threadId &&
+        this.mode === 'ask' &&
+        (event.type === 'turn/completed' || event.type === 'turn/interrupted')
+      ) {
+        this.stripAskQuestionFence(event.backendId, event.threadId);
       }
       if (event.type === 'turn/completed' && this.mode === 'plan' && event.threadId) {
         // Derive the plan document from the reply. Native step updates that
@@ -1430,6 +1456,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       if (session.heldNotice && this.visible === session) {
         this.post({ type: 'notice', level: session.heldNotice.level, message: session.heldNotice.message });
       }
+      if (session.questionNotice && this.visible === session) {
+        const notice = session.questionNotice;
+        session.questionNotice = undefined;
+        this.post({ type: 'notice', ...notice });
+      }
       if (this.visible === session) {
         await this.offerSingleLoosePlan();
       }
@@ -1677,7 +1708,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!shared && this.session && this.visible && this.session !== this.visible) {
       return;
     }
-    void this.view.webview.postMessage(message);
+    let outgoing: HostToWebviewMessage = message;
+    // A held question notice rides with the repaint: a separate notice sent
+    // before the conversation would be replaced by that replay.
+    if (message.type === 'conversation' && this.session?.questionNotice) {
+      outgoing = { ...message, notice: this.session.questionNotice };
+      this.session.questionNotice = undefined;
+    }
+    void this.view.webview.postMessage(outgoing);
   }
 
   private async handle(message: WebviewToHostMessage): Promise<void> {
@@ -1794,6 +1832,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         break;
       case 'steerTurn':
         await this.steerTurn(message.text);
+        break;
+      case 'retryQuestion':
+        await this.sendTurn(
+          questionRetryInstruction(),
+          message.model,
+          message.permissionLevel,
+          undefined,
+          undefined,
+          message.backendId
+        );
         break;
       case 'startDictation':
         await this.dictation.start(message.requestId);
@@ -3634,8 +3682,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.pendingQuestion?.source === 'native' &&
       this.pendingQuestion.request.threadId === this.activeThread.threadId
     ) {
-      this.pendingQuestion = undefined;
-      this.post({ type: 'question/cleared' });
+      this.clearPendingQuestion(this.activeThread.backendId, this.activeThread.threadId, true);
     }
     this.registry.cancel(this.activeThread.backendId, this.activeThread.threadId);
   }
@@ -4644,57 +4691,128 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * action in the webview: there is no timer, no retry, and no reconnect path
    * that calls it. A rejected request is therefore never retried by us.
    */
-  /** The open question card when it belongs to this thread. */
+  /**
+   * The open question card when it belongs to this thread. A webview reload
+   * repaints from memory; a full window reload restores a fence question from
+   * `workspaceState`, while a native question can only be reported as lost.
+   */
   private pendingQuestionPayload(backendId: string, threadId?: string): QuestionRequest | undefined {
+    if (!threadId) {
+      return undefined;
+    }
+    if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
+      return undefined;
+    }
     const pending = this.pendingQuestion;
-    if (!pending || !threadId) {
+    if (pending) {
+      if (pending.request.backendId !== backendId || pending.request.threadId !== threadId) {
+        return undefined;
+      }
+      return pending.request;
+    }
+    const decision = restorePendingQuestion(this.questions.get(backendId, threadId));
+    if (!decision) {
       return undefined;
     }
-    if (pending.request.backendId !== backendId || pending.request.threadId !== threadId) {
-      return undefined;
+    if (decision.kind === 'restore') {
+      this.pendingQuestion = decision.pending;
+      this.syncStrippedQuestionText(backendId, threadId, decision.pending.request);
+      return decision.pending.request;
     }
-    return pending.request;
+    const key = pendingQuestionKey(backendId, threadId);
+    void this.questions.clear(backendId, threadId);
+    if (!this.reportedLostQuestions.has(key)) {
+      this.reportedLostQuestions.add(key);
+      if (this.session) {
+        this.session.questionNotice = { level: 'warning', message: decision.message };
+      } else {
+        this.post({ type: 'notice', level: 'warning', message: decision.message });
+      }
+    }
+    return undefined;
+  }
+
+  /** Post a question notice now when visible, or keep it for that tab's next paint. */
+  private postQuestionNotice(backendId: string, threadId: string, notice: NoticeView): void {
+    const owner = this.sessionForThread(backendId, threadId) ?? this.session;
+    if (owner && owner !== this.visible) {
+      owner.questionNotice = notice;
+      return;
+    }
+    this.post({ type: 'notice', ...notice });
+  }
+
+  /** Make a restored fence card's reply match the text that was captured. */
+  private syncStrippedQuestionText(backendId: string, threadId: string, request: QuestionRequest): void {
+    if (!request.itemId || request.strippedText === undefined) {
+      return;
+    }
+    const items = this.store.getTranscript(backendId, threadId);
+    if (!items.some((item) => item.id === request.itemId && item.text !== request.strippedText)) {
+      return;
+    }
+    this.store.setTranscript(
+      backendId,
+      threadId,
+      items.map((item) => (item.id === request.itemId ? { ...item, text: request.strippedText } : item))
+    );
+  }
+
+  /** Drop a pending card in memory and in storage. Optionally tell the webview. */
+  private clearPendingQuestion(backendId: string, threadId: string, notify: boolean): void {
+    const pending = this.pendingQuestion;
+    if (pending && pending.request.backendId === backendId && pending.request.threadId === threadId) {
+      this.pendingQuestion = undefined;
+      if (notify) {
+        this.post({ type: 'question/cleared' });
+      }
+    }
+    void this.questions.clear(backendId, threadId);
   }
 
   /** Show a native question on the active thread and remember it for a reload. */
   private holdNativeQuestion(request: QuestionRequest): void {
-    this.pendingQuestion = { source: 'native', request };
+    const pending: PendingQuestion = { source: 'native', request };
+    this.pendingQuestion = pending;
+    this.reportedLostQuestions.delete(pendingQuestionKey(request.backendId, request.threadId));
+    void this.questions.set(request.backendId, request.threadId, pending);
     if (this.activeThread?.backendId === request.backendId && this.activeThread.threadId === request.threadId) {
       this.post({ type: 'question/asked', request });
     }
   }
 
   /**
-   * If the latest assistant reply ended with a question fence, remove it from
-   * the stored transcript and open the card. Ask mode never calls this.
+   * If an assistant reply ended with one or more question payloads, remove all
+   * of them from the stored transcript and open one card with every question.
+   * A malformed payload is removed and reported instead. Ask mode never calls
+   * this. An `item/completed` capture also survives a later interruption.
    */
-  private captureFenceQuestions(backendId: string, threadId: string): void {
-    if (this.pendingQuestion) {
-      return;
-    }
+  private captureFenceQuestions(backendId: string, threadId: string, itemId?: string): void {
     const items = this.store.getTranscript(backendId, threadId);
-    let index = -1;
-    for (let cursor = items.length - 1; cursor >= 0; cursor -= 1) {
-      const item = items[cursor];
-      if (item?.kind === 'message' && item.role === 'assistant') {
-        index = cursor;
-        break;
-      }
-    }
-    if (index < 0) {
+    const item = findFenceQuestionItem(items, itemId);
+    if (!item || item.kind !== 'message' || item.role !== 'assistant') {
       return;
     }
-    const item = items[index];
-    if (!item) {
+    const original = item.text ?? '';
+    if (!containsQuestionPayload(original)) {
       return;
     }
-    const extracted = extractSidecodeQuestions(item.text ?? '');
-    if (!extracted.questions || extracted.questions.length === 0) {
+    const extracted = extractSidecodeQuestions(original);
+    if (extracted.text !== original) {
+      this.store.setTranscript(
+        backendId,
+        threadId,
+        items.map((entry) => (entry.id === item.id ? { ...entry, text: extracted.text } : entry))
+      );
+    }
+    if (extracted.invalid) {
+      // A valid card from the same reply is already the actionable surface, so
+      // its warning never offers a retry that would start a second turn.
+      this.postQuestionNotice(backendId, threadId, invalidQuestionNotice((extracted.questions?.length ?? 0) === 0));
+    }
+    if (!extracted.questions || extracted.questions.length === 0 || this.pendingQuestion) {
       return;
     }
-    const next = items.slice();
-    next[index] = { ...item, text: extracted.text };
-    this.store.setTranscript(backendId, threadId, next);
     const request: QuestionRequest = {
       id: `fence_${item.id}`,
       backendId,
@@ -4703,8 +4821,37 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       strippedText: extracted.text,
       questions: extracted.questions
     };
-    this.pendingQuestion = { source: 'fence', request };
+    const pending: PendingQuestion = { source: 'fence', request };
+    this.pendingQuestion = pending;
+    this.reportedLostQuestions.delete(pendingQuestionKey(backendId, threadId));
+    void this.questions.set(backendId, threadId, pending);
     this.post({ type: 'question/asked', request });
+  }
+
+  /**
+   * Ask mode never opens a card. Remove a question payload from the stored
+   * reply and explain, without blocking, that Agent or Plan can ask.
+   */
+  private stripAskQuestionFence(backendId: string, threadId: string): void {
+    const items = this.store.getTranscript(backendId, threadId);
+    const item = findFenceQuestionItem(items);
+    if (!item || item.kind !== 'message' || item.role !== 'assistant') {
+      return;
+    }
+    const original = item.text ?? '';
+    if (!containsQuestionPayload(original)) {
+      return;
+    }
+    const stripped = hideQuestionFence(original);
+    if (stripped !== original) {
+      this.store.setTranscript(
+        backendId,
+        threadId,
+        items.map((entry) => (entry.id === item.id ? { ...entry, text: stripped } : entry))
+      );
+    }
+    void this.questions.clear(backendId, threadId);
+    this.postQuestionNotice(backendId, threadId, askModeQuestionNotice());
   }
 
   /**
@@ -4718,6 +4865,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     this.pendingQuestion = undefined;
+    await this.questions.clear(pending.request.backendId, pending.request.threadId);
     const text = formatQuestionAnswers(pending.request.questions, answers);
     const revisingPlan = this.mode === 'plan';
     if (revisingPlan) {

@@ -93,6 +93,40 @@ test('older history is prepended and a short page can still report more', () => 
   assert.equal(older.hasOlderHistory, true);
 });
 
+test('a conversation notice is appended after the replayed transcript', () => {
+  const state = reduce(initialState, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 'thread_1',
+    replay: [{ id: 'a1', kind: 'message', role: 'assistant', text: 'Earlier reply.', status: 'completed' }],
+    notice: {
+      level: 'warning',
+      message: 'A question from the AI provider could not be restored after the window reloaded.',
+      action: 'retryQuestion'
+    }
+  });
+  assert.equal(state.transcript.length, 2);
+  assert.equal(state.transcript[0]?.id, 'a1');
+  const notice = state.transcript.at(-1);
+  assert.equal(notice?.kind, 'notice');
+  assert.match(notice?.text ?? '', /could not be restored/);
+  assert.equal(notice?.noticeLevel, 'warning');
+  assert.equal(notice?.noticeAction, 'retryQuestion');
+});
+
+test('a conversation notice survives an empty replay', () => {
+  const state = reduce(initialState, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 'thread_1',
+    replay: [],
+    notice: { level: 'warning', message: 'The question could not be restored.', action: 'retryQuestion' }
+  });
+  assert.equal(state.transcript.length, 1);
+  assert.equal(state.transcript[0]?.kind, 'notice');
+  assert.equal(state.transcript[0]?.noticeAction, 'retryQuestion');
+});
+
 test('a settled approval collapses to a decided card and clears the pending request', () => {
   const open = request({ id: 'req_live' });
   const requested: AppState = reduce(initialState, {
