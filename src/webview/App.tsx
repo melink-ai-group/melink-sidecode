@@ -71,6 +71,7 @@ import {
   pendingApproval,
   reduce,
   requestMessage,
+  skillToggleAction,
   visibleModeSnapshot,
   type Action,
   type AppState,
@@ -441,22 +442,10 @@ export function App(): JSX.Element {
           });
           break;
         case 'zvecGrep':
-          dispatch({
-            type: 'zvecGrep',
-            pending: message.pending,
-            requested: message.requested,
-            ok: message.ok,
-            message: message.message
-          });
+          dispatch(skillToggleAction(message));
           break;
         case 'astGrep':
-          dispatch({
-            type: 'astGrep',
-            pending: message.pending,
-            requested: message.requested,
-            ok: message.ok,
-            message: message.message
-          });
+          dispatch(skillToggleAction(message));
           break;
         case 'astGrepInstall':
           dispatch({

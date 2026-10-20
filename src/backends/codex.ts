@@ -43,6 +43,7 @@ import {
 import { questionRequestFromToolParams, SKIPPED_ANSWER, type QuestionAnswer } from '../questions';
 import { todoStepsFromNative } from './plan';
 import { readDefaultMode, readDefaultPermissionLevel } from './defaults';
+import { readTrustedCodexExecutable } from '../config/settings.ts';
 import { DICTATION_INSTRUCTIONS, dictationText } from '../dictation/prompt';
 import {
   COMPACTION_INSTRUCTIONS,
@@ -295,8 +296,16 @@ export class CodexBackend implements AgentBackend {
   }
 
 
+  /**
+   * The Codex CLI the app-server child is spawned from.
+   *
+   * Read from the user's own settings only, so a workspace cannot choose the
+   * binary that runs. A relative path with a separator — or a Windows
+   * drive-relative path — is refused: it would resolve against the workspace
+   * working directory.
+   */
   private get executable(): string {
-    return vscode.workspace.getConfiguration('melink.codex').get<string>('path', 'codex') || 'codex';
+    return readTrustedCodexExecutable();
   }
 
   private get defaultModel(): string {

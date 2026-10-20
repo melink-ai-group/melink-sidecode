@@ -341,6 +341,29 @@ test('a global zg outside PATH is used after install', async () => {
   assert.match(result.message, /connected to OpenCode/);
 });
 
+test('a relative zg path with a separator is never run', async () => {
+  // The child would run with the workspace as its working directory, so a
+  // relative path would name a file inside the repository.
+  const commands: string[] = [];
+  const store = memoryConfig();
+  const result = await detectZvecGrep({
+    source: 'local',
+    path: './evil',
+    roots: { extensionPath: 'C:\\ext' },
+    io: io(
+      'linux',
+      async (command, args) => {
+        commands.push(`${command} ${args.join(' ')}`);
+        return missing();
+      },
+      async () => store.text
+    ),
+    userConfig: store.io
+  });
+  assert.equal(commands.some((command) => command.includes('evil')), false);
+  assert.deepEqual(result, { enabled: false, cli: 'missing' });
+});
+
 test('Windows EINVAL on the cmd shim still installs zg', async () => {
   let packageInstalled = false;
   const store = memoryConfig();

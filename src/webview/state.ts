@@ -204,8 +204,24 @@ export interface AppState {
   /** Result of the last opencode install, or a pending marker while it downloads. */
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   /** Result of the last zvec-grep toggle, or a pending marker while it runs. */
-  zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
-  astGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
+  zvecGrep?: {
+    pending: boolean;
+    requested?: boolean;
+    ok?: boolean;
+    message?: string;
+    /** The field a refused path belongs to, when the host refused one. */
+    field?: 'zvecGrepPath' | 'astGrepPath';
+    fieldMessage?: string;
+  };
+  astGrep?: {
+    pending: boolean;
+    requested?: boolean;
+    ok?: boolean;
+    message?: string;
+    /** The field a refused path belongs to, when the host refused one. */
+    field?: 'zvecGrepPath' | 'astGrepPath';
+    fieldMessage?: string;
+  };
   astGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   zvecGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   /**
@@ -360,8 +376,24 @@ export type Action =
   | { type: 'codexVersionCheck'; pending: boolean; ok?: boolean; message?: string }
   | { type: 'opencodeUpgrade'; pending: boolean; ok?: boolean; message?: string }
   | { type: 'opencodeInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
-  | { type: 'zvecGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
-  | { type: 'astGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
+  | {
+      type: 'zvecGrep';
+      pending: boolean;
+      requested?: boolean;
+      ok?: boolean;
+      message?: string;
+      field?: 'zvecGrepPath' | 'astGrepPath';
+      fieldMessage?: string;
+    }
+  | {
+      type: 'astGrep';
+      pending: boolean;
+      requested?: boolean;
+      ok?: boolean;
+      message?: string;
+      field?: 'zvecGrepPath' | 'astGrepPath';
+      fieldMessage?: string;
+    }
   | { type: 'astGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   | { type: 'zvecGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   /** The host's project-context read model, pushed on every relevant change. */
@@ -490,6 +522,32 @@ function upsertTurnChange(turns: readonly TurnChange[], next: TurnChange): TurnC
   const copy = turns.slice();
   copy[index] = next;
   return copy;
+}
+
+/**
+ * The action for a skill-toggle message from the host.
+ *
+ * The host reports a refused CLI path as `field` / `fieldMessage`, so the
+ * screen can show the refusal on the path field itself. The bridge forwards
+ * the message through this one helper, so a field can never be dropped
+ * between the host and the reducer — the mistake that silently left the
+ * refusal invisible.
+ *
+ * Pure and exported, so the forwarding is unit-tested rather than inferred
+ * from a source grep.
+ */
+export function skillToggleAction(
+  message: Extract<HostToWebviewMessage, { type: 'zvecGrep' | 'astGrep' }>
+): Extract<Action, { type: 'zvecGrep' | 'astGrep' }> {
+  return {
+    type: message.type,
+    pending: message.pending,
+    requested: message.requested,
+    ok: message.ok,
+    message: message.message,
+    field: message.field,
+    fieldMessage: message.fieldMessage
+  };
 }
 
 export function reduce(state: AppState, action: Action): AppState {
@@ -966,7 +1024,9 @@ export function reduce(state: AppState, action: Action): AppState {
           pending: action.pending,
           requested: action.requested,
           ok: action.ok,
-          message: action.message
+          message: action.message,
+          field: action.field,
+          fieldMessage: action.fieldMessage
         }
       };
     case 'astGrep':
@@ -976,7 +1036,9 @@ export function reduce(state: AppState, action: Action): AppState {
           pending: action.pending,
           requested: action.requested,
           ok: action.ok,
-          message: action.message
+          message: action.message,
+          field: action.field,
+          fieldMessage: action.fieldMessage
         }
       };
     case 'astGrepInstall':
