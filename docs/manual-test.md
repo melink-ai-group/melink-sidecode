@@ -1,6 +1,6 @@
-# Manual test script — SideCode v0.1
+# Manual test script — SideCode v0.2
 
-Runnable checklist for signing off v0.1. Work top to bottom; tick `[x]` for pass,
+Runnable checklist for signing off v0.2. Work top to bottom; tick `[x]` for pass,
 leave `[ ]` and record the failure (or promote it to a known limitation) for a miss.
 
 Run every step in both hosts (see [Per-host pass](#5-per-host-pass)) unless a step
@@ -16,7 +16,7 @@ names a single host.
 
 ## Release acceptance criteria → step map
 
-v0.1 ships only when all six criteria pass in both hosts.
+v0.2 ships only when all six criteria pass in both hosts.
 | # | Release acceptance criterion | Proven by |
 |---|---|---|
 | RC-1 | **Provider isolation.** A provider that cannot be used (CLI missing, no credential, rejected credential) degrades only itself: it produces no error noise in, and never blocks, the other provider. | Steps 1–14 |
@@ -38,6 +38,9 @@ reload mid-review, approval interaction, and journal pruning, on both providers.
 - [ ] 0.1 Install the build: `npm run build`, then install the produced `.vsix` in
       each host (`code -n --install-extension ./melink-sidecode-0.2.0.vsix` for
       VS Code; for Cursor use the Extensions view → `...` → *Install from VSIX*).
+- [ ] 0.1b. Release runs use the asset matching this machine's OS/architecture,
+      e.g. `melink-sidecode-0.2.0-win32-x64.vsix` on Windows x64 or
+      `melink-sidecode-0.2.0-linux-x64.vsix` on Linux x64 (see section 4d).
 - [ ] 0.2 Restart the host so `deactivate`/`activate` run against a clean state.
 - [ ] 0.3 Record the Codex CLI version: `codex --version`
       (expected baseline: `codex-cli 0.156.1`; the supported protocol window is
@@ -914,6 +917,73 @@ Where the journal lives:
       reset the journal itself, delete its blobs under the storage root and the
       `melink.changeJournal` key from `state.vscdb` (optional; a clean scratch
       workspace for the next run also does this).
+
+---
+
+## 4d. Dictation by platform (Windows x64 / Linux x64)
+
+Run this pass on a real desktop with a microphone. The release VSIX must contain
+the dictation binaries for the platform named in its filename; install the wrong
+one and dictation fails without affecting the rest of the sidebar.
+
+### Shared preparation
+
+- [ ] D1. Install the matching release asset:
+      - Windows x64: `code --install-extension .\melink-sidecode-0.2.0-win32-x64.vsix`
+      - Linux x64: `code --install-extension ./melink-sidecode-0.2.0-linux-x64.vsix`
+      (or Extensions view -> `...` -> *Install from VSIX...*), then reload the window.
+- [ ] D2. Confirm the packaged binaries are present in the installed extension:
+      `dist/bin/ffmpeg.exe` on Windows, `dist/bin/ffmpeg` on Linux, and
+      `dist/dictation-runtime/node_modules/onnxruntime-node/bin/napi-v3/<platform>/x64/`
+      containing both `onnxruntime_binding.node` and the platform runtime
+      (`onnxruntime.dll` on Windows, `libonnxruntime*.so*` on Linux,
+      `libonnxruntime*.dylib` on macOS). `napi-v3/` must contain only the host
+      platform directory, and `dist/bin/` only the host ffmpeg and its license.
+- [ ] D3. Connect the provider whose model will clean the transcript (Ollama token
+      set, or the Codex CLI installed and signed in).
+- [ ] D4. Open the gear (**Settings**) and set **Dictation model** to an Ollama or
+      Codex model. Choose **None** only to disable the microphone.
+- [ ] D5. Return to the chat. With the composer empty and no turn running, the
+      microphone button is visible. Its tooltip reads *Click to dictate, or hold
+      to talk*.
+
+### Windows x64
+
+- [ ] D6. Grant microphone access: **Settings -> Privacy & security -> Microphone**
+      -> enable **Microphone access** and **Let desktop apps access your
+      microphone**. If the host has its own permission prompt, allow it.
+- [ ] D7. Click the microphone once (latched mode) and say: *Open the README and
+      summarize the install steps.* The status changes from *Starting the
+      microphone...* to *Listening...*.
+- [ ] D8. Click the microphone again to stop. Status moves through *Finishing the
+      recording...*, *Preparing speech recognition...*, *Transcribing...*, and
+      *Cleaning transcript...*. The first run may also show *Downloading the
+      speech model...* once; that is the cached Whisper model, not a missing
+      platform binary.
+- [ ] D9. **Expected:** a cleaned sentence appears in the composer (not an empty
+      draft), no microphone or ONNX error appears, and the transcript is the
+      spoken request rather than filler words. Send it or clear it.
+- [ ] D10. Repeat in push-to-talk mode: press and hold the microphone, speak,
+      release. The recording stops on release and the same status/transcript
+      sequence appears.
+- [ ] D11. **Negative check:** install the `linux-x64` VSIX on Windows instead and
+      try one dictation. **Expected:** the rest of the sidebar works, dictation
+      reports a missing-recorder error, and nothing downloads an ffmpeg/ONNX
+      binary to recover. Reinstall `win32-x64` afterwards.
+
+### Linux x64
+
+- [ ] D12. Install `pulseaudio-utils` if `pactl` is missing, confirm the default
+      source with `pactl info | grep 'Default Source'`, and make sure the desktop
+      user can access it (PipeWire/PulseAudio).
+- [ ] D13. Repeat D7-D10 with the `linux-x64` VSIX: latched click, speak, click to
+      stop; then press-and-hold, speak, release.
+- [ ] D14. **Expected:** the same status sequence and a cleaned transcript in the
+      composer; `dist/bin/ffmpeg` is executable (`test -x`), and no *recorder is
+      missing* or ONNX *binding* error appears.
+- [ ] D15. **Negative check:** install the `win32-x64` VSIX on Linux and try one
+      dictation. **Expected:** the sidebar still loads, dictation fails with a
+      missing-recorder error, and no ffmpeg/ONNX binary is fetched at runtime.
 
 ---
 

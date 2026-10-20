@@ -3,9 +3,18 @@
  * extension can run them without node_modules. Platform binaries match the
  * machine that builds the extension.
  */
-import { cpSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  describeHost,
+  ffmpegLicenseFileName,
+  hostFfmpegPath,
+  hostOnnxBinaryDir,
+  onnxDirectoryProblems,
+  stagedFfmpegPath,
+  stagedOnnxBinaryDir
+} from './dictation-artifacts.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const modules = path.join(root, 'node_modules');
@@ -25,17 +34,21 @@ function copyPackage(name, extra) {
   });
 }
 
-const ffmpegName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-const ffmpegFrom = path.join(modules, 'ffmpeg-static', ffmpegName);
-if (!existsSync(ffmpegFrom)) {
-  throw new Error(`Missing ${ffmpegFrom}. Run npm install before building.`);
+const host = describeHost();
+const ffmpegFrom = hostFfmpegPath(modules);
+if (!existsSync(ffmpegFrom) || statSync(ffmpegFrom).size === 0) {
+  throw new Error(
+    `Cannot package dictation for ${host}: ${ffmpegFrom} is missing or empty. ` +
+      `The build host must install ffmpeg-static for ${host}; SideCode will not package another platform's ffmpeg binary.`
+  );
 }
 const binDir = path.join(root, 'dist', 'bin');
+rmSync(binDir, { recursive: true, force: true });
 mkdirSync(binDir, { recursive: true });
-cpSync(ffmpegFrom, path.join(binDir, ffmpegName));
-const license = path.join(modules, 'ffmpeg-static', `${ffmpegName}.LICENSE`);
+cpSync(ffmpegFrom, stagedFfmpegPath(root));
+const license = path.join(modules, 'ffmpeg-static', ffmpegLicenseFileName());
 if (existsSync(license)) {
-  cpSync(license, path.join(binDir, `${ffmpegName}.LICENSE`));
+  cpSync(license, path.join(binDir, ffmpegLicenseFileName()));
 }
 
 mkdirSync(runtimeModules, { recursive: true });
@@ -50,14 +63,27 @@ copyPackage('onnxruntime-common');
 
 const onnxFrom = path.join(modules, 'onnxruntime-node');
 const onnxTo = path.join(runtimeModules, 'onnxruntime-node');
+const platformBin = hostOnnxBinaryDir(modules);
+const platformTo = stagedOnnxBinaryDir(root);
+if (!existsSync(platformBin) || statSync(platformBin).isDirectory() === false) {
+  throw new Error(
+    `Cannot package dictation for ${host}: missing ONNX runtime directory ${platformBin}. ` +
+      `The build host must install onnxruntime-node for ${host}; SideCode will not package another platform's ONNX binary.`
+  );
+}
+const hostOnnxProblems = onnxDirectoryProblems(platformBin);
+if (hostOnnxProblems.length > 0) {
+  throw new Error(
+    `Cannot package dictation for ${host}: ONNX runtime directory ${platformBin} is incomplete ` +
+      `(${hostOnnxProblems.join('; ')}). The build host must install onnxruntime-node for ${host}; ` +
+      `SideCode will not package another platform's ONNX binary.`
+  );
+}
+rmSync(onnxTo, { recursive: true, force: true });
 mkdirSync(onnxTo, { recursive: true });
 cpSync(path.join(onnxFrom, 'package.json'), path.join(onnxTo, 'package.json'));
 cpSync(path.join(onnxFrom, 'dist'), path.join(onnxTo, 'dist'), { recursive: true });
-const platformBin = path.join(onnxFrom, 'bin', 'napi-v3', process.platform, process.arch);
-const platformTo = path.join(onnxTo, 'bin', 'napi-v3', process.platform, process.arch);
-if (!existsSync(platformBin)) {
-  throw new Error(`No ONNX runtime binary for ${process.platform}-${process.arch}.`);
-}
+mkdirSync(path.dirname(platformTo), { recursive: true });
 cpSync(platformBin, platformTo, { recursive: true });
 
 function stub(name, body) {
@@ -83,4 +109,4 @@ stub(
   ].join('\n')
 );
 
-console.log(`[dictation] staged recorder and speech runtime for ${process.platform}-${process.arch}`);
+console.log(`[dictation] staged recorder and speech runtime for ${host}`);
