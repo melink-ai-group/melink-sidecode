@@ -1,8 +1,21 @@
 import assert from 'node:assert/strict';
-import { createServer, Agent, type RequestOptions } from 'node:http';
+import { createServer, Agent, type ClientRequestArgs } from 'node:http';
 import http from 'node:http';
+import type { Duplex } from 'node:stream';
 import test from 'node:test';
 import { serverFetch } from './interactive.ts';
+
+class SpyAgent extends Agent {
+  proxied = false;
+
+  override createConnection(
+    options: ClientRequestArgs,
+    callback?: (err: Error | null, stream: Duplex) => void
+  ): Duplex | null | undefined {
+    this.proxied = true;
+    return super.createConnection(options, callback);
+  }
+}
 
 test('loopback requests bypass the proxy agent and send the server password', async () => {
   const seen: { authorization?: string; directory?: string | string[] } = {};
@@ -18,11 +31,7 @@ test('loopback requests bypass the proxy agent and send the server password', as
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
   const previous = http.globalAgent;
-  let proxied = false;
-  const proxy = new Agent();
-  proxy.addRequest = ((_req: unknown, _options: RequestOptions) => {
-    proxied = true;
-  }) as Agent['addRequest'];
+  const proxy = new SpyAgent();
   http.globalAgent = proxy;
   try {
     const response = await serverFetch(
@@ -39,7 +48,7 @@ test('loopback requests bypass the proxy agent and send the server password', as
     assert.deepEqual(await response.json(), { ok: true });
     assert.equal(seen.authorization, `Basic ${Buffer.from('opencode:secret', 'utf8').toString('base64')}`);
     assert.equal(seen.directory, undefined);
-    assert.equal(proxied, false);
+    assert.equal(proxy.proxied, false);
   } finally {
     http.globalAgent = previous;
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
