@@ -11,10 +11,12 @@ import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
 import { splitReplyClose } from './replyClose';
 import { plainRowText } from './plainRowText';
+import { shouldToggleReasoningBody } from './reasoningClick';
 import { visibleTranscriptText } from './visibleTranscript';
 import { historyEntries, historyLoading, type HistoryEntry } from './historyEntries';
 import { pinnedUserMessage, userMessagePinText, type UserMessageFrame } from './pinnedUserMessage';
 import { defaultProviderTab, sortModels } from './modelList';
+import { isSubmitEnter } from './keys';
 import { acceptComposerRestore, hostAttachments, switchComposerDraft, type ComposerDraft } from './composerDraft';
 import {
   AlertIcon,
@@ -2485,7 +2487,7 @@ export function App(): JSX.Element {
             }}
             onPaste={onComposerPaste}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (isSubmitEnter(event)) {
                 event.preventDefault();
                 send();
               }
@@ -3368,7 +3370,7 @@ function HistoryPanel({
           autoFocus
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && visible[0]) {
+            if (isSubmitEnter(event) && visible[0]) {
               event.preventDefault();
               onSelect(visible[0].backendId, visible[0].threadId);
             }
@@ -3898,7 +3900,14 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
         </span>
       </button>
       {expanded && (text || item.status === 'streaming' || incomplete) ? (
-        <div className="turn-body md" onClick={toggle}>
+        <div
+          className="turn-body md"
+          onClick={(event) => {
+            const selectionText = window.getSelection()?.toString() ?? '';
+            const target = event.target instanceof Element ? event.target : null;
+            if (shouldToggleReasoningBody({ selectionText, target })) toggle();
+          }}
+        >
           {text ? (
             <Markdown text={item.text} />
           ) : item.status === 'streaming' ? (
@@ -5264,7 +5273,7 @@ function ModeSwitchModal({
       }
       // Enter on a dialog button activates that button. Enter from the composer
       // would otherwise insert a newline under the dialog, so it confirms instead.
-      if (event.key === 'Enter' && !(event.target instanceof HTMLButtonElement)) {
+      if (isSubmitEnter(event) && !(event.target instanceof HTMLButtonElement)) {
         event.preventDefault();
         event.stopPropagation();
         acceptRef.current();

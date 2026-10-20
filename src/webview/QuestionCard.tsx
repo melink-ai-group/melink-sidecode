@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { CUSTOM_OPTION_LABEL, SKIPPED_ANSWER, type QuestionAnswer, type QuestionRequest } from '../questions';
+import { isSubmitEnter } from './keys';
 
 /**
  * One clarifying question at a time, above the composer.
@@ -76,7 +77,7 @@ export function QuestionCard({
       }
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (isSubmitEnter(event)) {
       event.preventDefault();
       confirm();
     }
