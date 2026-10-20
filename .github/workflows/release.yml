@@ -15,9 +15,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  package-and-release:
-    name: Build, package, and publish
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          # macos-13 is retired; macos-15-intel is the current standard x64 macOS runner.
+          - os: macos-15-intel
+            target: darwin-x64
+          # ffmpeg-static 5.3.0 publishes ffmpeg-darwin-arm64 and onnxruntime-node
+          # 1.14.0 ships bin/napi-v3/darwin/arm64, so this target can be staged.
+          - os: macos-14
+            target: darwin-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,8 +51,40 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Package extension
-        run: npm run package
+      - name: Verify dictation binaries for this platform
+        run: node scripts/verify-dictation.mjs
+
+      - name: Package platform VSIX
+        run: npm run package-platform -- --target ${{ matrix.target }}
+
+      - name: Upload platform VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: melink-sidecode-*-${{ matrix.target }}.vsix
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download platform VSIXes
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: '*'
+          merge-multiple: true
 
       - name: Write release notes
         id: notes
@@ -53,7 +100,16 @@ jobs:
           {
             echo "## SideCode ${version}"
             echo
-            echo "Install the attached \`.vsix\`: Extensions view → \`...\` → **Install from VSIX…**."
+            echo "Download the VSIX that matches your OS and architecture:"
+            echo
+            echo "| VSIX | Platform |"
+            echo "|---|---|"
+            echo "| \`melink-sidecode-${version}-win32-x64.vsix\` | Windows x64 |"
+            echo "| \`melink-sidecode-${version}-linux-x64.vsix\` | Linux x64 |"
+            echo "| \`melink-sidecode-${version}-darwin-x64.vsix\` | macOS Intel (x64) |"
+            echo "| \`melink-sidecode-${version}-darwin-arm64.vsix\` | macOS Apple Silicon (arm64) |"
+            echo
+            echo "Install the matching file: Extensions view → \`...\` → **Install from VSIX…**. Dictation binaries are included for the platform named in the filename."
             echo
             echo "### Changes"
             echo
@@ -75,5 +131,5 @@ jobs:
           tag_name: ${{ steps.notes.outputs.tag }}
           name: ${{ steps.notes.outputs.name }}
           body_path: release-notes.md
-          files: melink-sidecode-*.vsix
+          files: release-assets/melink-sidecode-*-*.vsix
           make_latest: true

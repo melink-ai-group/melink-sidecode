@@ -319,6 +319,8 @@
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "schemas:generate": "codex app-server generate-ts --out ./schemas",
     "vscode:prepublish": "npm run build",
+    "verify:dictation": "node scripts/verify-dictation.mjs",
+    "package-platform": "node scripts/package-platform.mjs",
     "package": "vsce package"
   },
   "dependencies": {
