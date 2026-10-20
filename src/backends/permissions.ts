@@ -23,10 +23,11 @@ import type { AbsolutePathBuf } from '../../schemas/AbsolutePathBuf';
  * | `default`      | `workspace-write`   | granular auto-allow |
  * | `unrestricted` | `danger-full-access`| `never`        |
  *
- * `default` auto-allows ordinary sandboxed work and still asks before leaving
- * the sandbox. `on-request` stays on `read-only`. The deprecated `untrusted`
- * policy is not used. `never` is intentional only for `unrestricted`, which is
- * gated behind the labelled confirmation in the UI.
+ * `default` auto-allows ordinary sandboxed work, keeps network access blocked,
+ * and still asks before leaving the sandbox. `on-request` stays on `read-only`.
+ * The deprecated `untrusted` policy is not used. `never` is intentional only
+ * for `unrestricted`, which is gated behind the labelled confirmation in the
+ * UI.
  */
 export interface CodexPermissionMapping {
   sandbox: SandboxMode;
@@ -79,7 +80,7 @@ export function codexSandboxPolicy(level: PermissionLevel, root: string): Sandbo
       return {
         type: 'workspaceWrite',
         writableRoots: [root as AbsolutePathBuf],
-        networkAccess: true,
+        networkAccess: false,
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false
       };
@@ -109,7 +110,7 @@ export const PERMISSION_LEVEL_DESCRIPTORS: readonly PermissionLevelDescriptor[] 
   {
     level: 'default',
     label: 'Default',
-    description: 'Workspace writes and sandboxed commands run on their own. Anything outside the sandbox is requested.',
+    description: 'Writes stay inside the workspace and network access is blocked. Anything outside the sandbox is requested.',
     requiresConfirmation: false
   },
   {

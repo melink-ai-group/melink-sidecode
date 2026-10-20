@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type {
   DefaultMode,
   ModelCapabilities,
@@ -11,13 +12,15 @@ import type { BrowserCommand } from '../../browser/config.ts';
 import { browserPermissionKeys, mergeOpencodeMcp } from '../../browser/config.ts';
 
 /**
- * The one pure home for the generated opencode config.
+ * The one home for the generated opencode config.
  *
- * Everything here is deterministic and free of `vscode`, `node:child_process`
- * and the filesystem, so the mapping from our settings onto opencode's own
- * vocabulary is unit-testable and never writes anything.
+ * Everything here is free of `vscode`, `node:child_process` and the filesystem,
+ * so the mapping from our settings onto opencode's own vocabulary is
+ * unit-testable and never writes anything. The one exception to determinism is
+ * the per-turn agent nonce: it is random so a workspace cannot predefine,
+ * disable, or replace the agent the turn runs under.
  *
- * ## Facts this module is built on (verified against opencode 1.1.65)
+ * ## Facts this module is built on (verified against opencode 1.19.x)
  *
  * - models.dev does define an `ollama-cloud` provider (OpenAI AI SDK adapter
  *   `@ai-sdk/openai-compatible`, `https://ollama.com/v1`, env `OLLAMA_API_KEY`).
@@ -57,8 +60,34 @@ export const OPENCODE_API_KEY_ENV = 'OLLAMA_API_KEY';
 /** The inline runtime override variable carrying the generated config. */
 export const OPENCODE_CONFIG_ENV = 'OPENCODE_CONFIG_CONTENT';
 
+/**
+ * The custom agent name prefixes.
+ *
+ * Agent and Plan intentionally do not use opencode's built-in `build` agent: a
+ * workspace `opencode.json` can set `agent.build.permission` and would otherwise
+ * widen our permission block. Each turn appends a random nonce, so a workspace
+ * cannot predefine the name, mark it `disable: true`, or attach a permissive
+ * prompt to it.
+ */
+export const OPENCODE_AGENT_AGENT = 'melink-agent';
+export const OPENCODE_PLAN_AGENT = 'melink-plan';
 /** The read-only answer-only agent defined for Ask mode. */
 export const OPENCODE_ASK_AGENT = 'melink-ask';
+
+/** A random per-turn suffix; unpredictable and unique enough for one child. */
+export function opencodeAgentNonce(): string {
+  return randomBytes(8).toString('hex');
+}
+
+/**
+ * The validated per-turn suffix. A supplied nonce is trimmed and must be
+ * filename-safe; an empty or malformed one is replaced by a fresh random value,
+ * exactly once, so the config key and `built.agent` can never diverge.
+ */
+export function opencodeAgentSuffix(nonce?: string): string {
+  const trimmed = nonce?.trim();
+  return trimmed && /^[A-Za-z0-9_-]+$/.test(trimmed) ? trimmed : opencodeAgentNonce();
+}
 
 /** A per-turn opencode config, plus what was actually applied. */
 export interface OpencodeConfigResult {
@@ -106,6 +135,8 @@ export interface OpencodeConfigInput {
   skillMcp?: Record<string, unknown>;
   /** Permission allows for enabled skill MCP servers/tools. */
   skillPermissions?: Record<string, 'allow'>;
+  /** Test seam only; production generates a fresh random nonce per turn. */
+  agentNonce?: string;
 }
 
 /**
@@ -164,68 +195,161 @@ export function opencodeReasoningEffort(level: ThinkingLevel): string | undefine
   }
 }
 
-/** The opencode agent a mode maps onto. */
-export function opencodeAgentForMode(mode: DefaultMode): string {
-  if (mode === 'plan') {
-    // The native plan agent is read-only. Plan mode instead uses the selected
-    // permission level, so use the build agent and let the permission block
-    // below enforce that level.
-    return 'build';
+/** The opencode agent a mode maps onto, with a fresh unpredictable suffix. */
+export function opencodeAgentForMode(mode: DefaultMode, nonce?: string): string {
+  const base =
+    mode === 'plan' ? OPENCODE_PLAN_AGENT : mode === 'ask' ? OPENCODE_ASK_AGENT : OPENCODE_AGENT_AGENT;
+  return `${base}-${opencodeAgentSuffix(nonce)}`;
+}
+
+/** The fixed, prompt-overriding instruction each generated agent carries. */
+function agentPrompt(mode: DefaultMode): string {
+  switch (mode) {
+    case 'ask':
+      return 'Answer questions only. Do not change the workspace, run commands, or fetch the web.';
+    case 'plan':
+      return 'Investigate and write a plan. Do not implement it. Never bypass the permission rules or delegate to another agent.';
+    default:
+      return 'Act on the workspace using only the actions the permission rules allow. Never bypass them or delegate to another agent.';
   }
-  if (mode === 'ask') {
-    return OPENCODE_ASK_AGENT;
-  }
-  return 'build';
 }
 
 /**
  * The opencode `permission` block for a level after mode enforcement.
  *
- * Ask forces read-only and denies edit/write/patch/bash outright, whatever
- * level was selected: the mode narrows and can never widen.
- * This is a second gate, not a replacement for the mode's own agent restriction.
+ * Ask forces read-only and denies edit/write/patch/bash, external directories,
+ * webfetch, websearch, and subagent delegation outright, whatever level was
+ * selected: the mode narrows and can never widen. This is a second gate, not a
+ * replacement for the mode's own agent restriction.
  *
- * The pinned opencode version (`1.1.65`) has no `--auto` flag — `opencode run
- * --help` does not list it and passing it exits with the help text — so the
- * permission config is the mechanism, not `--auto`. `ask` is a real prompt:
- * the runtime drives `opencode serve` and waits for the user's decision.
- * `opencode run` would auto-reject that prompt, so it is not used for `ask`.
+ * `default` asks before every edit, write, patch, shell command, webfetch, and
+ * websearch, and before leaving the project directory. Unlike Codex, opencode
+ * has no OS sandbox it can apply to a process, so silently allowing bash or web
+ * access would open the network; the prompt is the only gate. Only
+ * `unrestricted` auto-allows these tools and `external_directory`.
+ *
+ * `task` (subagent delegation) is denied at every level except `unrestricted`:
+ * a workspace `opencode.json` can define a subagent with its own permissive
+ * rules, and older opencode releases do not inherit the parent turn's rules, so
+ * leaving delegation open would bypass the selected level entirely.
+ *
+ * The generated permission block is the mechanism, not `--auto` (which the
+ * bundled 1.19.x CLI does expose, but which would widen rather than narrow a
+ * turn). `ask` is a real prompt: the runtime drives `opencode serve` and waits
+ * for the user's decision when the backend has an approval channel.
  */
 export function opencodePermission(
   level: PermissionLevel,
   mode: DefaultMode
 ): Record<string, 'allow' | 'ask' | 'deny'> {
   if (modeForcesReadOnly(mode)) {
-    return { edit: 'deny', write: 'deny', patch: 'deny', bash: 'deny' };
+    return { ...READ_ONLY_PERMISSION };
   }
   switch (level) {
     case 'read-only':
-      return { edit: 'deny', write: 'deny', patch: 'deny', bash: 'deny' };
+      return { ...READ_ONLY_PERMISSION };
     case 'unrestricted':
-      return { edit: 'allow', write: 'allow', patch: 'allow', bash: 'allow', external_directory: 'allow' };
+      return { ...UNRESTRICTED_PERMISSION };
     case 'default':
     default:
-      // Ordinary workspace work is allowed. Leaving the project directory still
-      // asks. Only `unrestricted` also allows `external_directory`.
-      return { edit: 'allow', write: 'allow', patch: 'allow', bash: 'allow', external_directory: 'ask' };
+      // No silent edits, commands, or outbound web requests: opencode cannot
+      // sandbox a process, so the safe default is to surface each one as an
+      // approval instead of running it.
+      return { ...DEFAULT_PERMISSION };
   }
 }
+
+const READ_ONLY_PERMISSION: Readonly<Record<string, 'allow' | 'ask' | 'deny'>> = {
+  edit: 'deny',
+  write: 'deny',
+  patch: 'deny',
+  bash: 'deny',
+  external_directory: 'deny',
+  webfetch: 'deny',
+  websearch: 'deny',
+  task: 'deny'
+};
+
+const DEFAULT_PERMISSION: Readonly<Record<string, 'allow' | 'ask' | 'deny'>> = {
+  edit: 'ask',
+  write: 'ask',
+  patch: 'ask',
+  bash: 'ask',
+  external_directory: 'ask',
+  webfetch: 'ask',
+  websearch: 'ask',
+  // A workspace can define its own subagent with permissive rules. Delegation
+  // is denied outright so Read-only, Default, and Ask cannot be bypassed that
+  // way; unrestricted is the only level that may spawn a subagent.
+  task: 'deny'
+};
+
+const UNRESTRICTED_PERMISSION: Readonly<Record<string, 'allow' | 'ask' | 'deny'>> = {
+  edit: 'allow',
+  write: 'allow',
+  patch: 'allow',
+  bash: 'allow',
+  external_directory: 'allow',
+  webfetch: 'allow',
+  websearch: 'allow',
+  task: 'allow'
+};
 
 /** True when this level still has an `ask` the user must answer before a tool runs. */
 export function opencodeRequiresApproval(level: PermissionLevel, mode: DefaultMode): boolean {
   return Object.values(opencodePermission(level, mode)).includes('ask');
 }
 
-/** The custom Ask agent: it may read and answer, and cannot change the workspace. */
-function askAgent(permission: Record<string, 'allow' | 'ask' | 'deny'>): Record<string, unknown> {
-  return {
-    [OPENCODE_ASK_AGENT]: {
-      description: 'Answers questions without changing the workspace.',
-      mode: 'primary',
-      tools: { write: false, edit: false, patch: false, bash: false },
-      permission
-    }
-  };
+/**
+ * The custom agent definition for a mode.
+ *
+ * Each turn uses an unpredictable name and sets `disable: false` and an
+ * explicit `prompt`, so a workspace cannot disable the agent, fall back to its
+ * `build` agent, or replace the prompt. `tools.task` stays off so a workspace
+ * cannot route the turn through a permissive subagent. Ask additionally
+ * disables every mutating tool.
+ */
+export function opencodeAgentConfig(
+  mode: DefaultMode,
+  permission: Record<string, 'allow' | 'ask' | 'deny'>,
+  nonce?: string
+): Record<string, unknown> {
+  const name = opencodeAgentForMode(mode, nonce);
+  switch (mode) {
+    case 'ask':
+      return {
+        [name]: {
+          disable: false,
+          description: 'Answers questions without changing the workspace.',
+          mode: 'primary',
+          prompt: agentPrompt(mode),
+          tools: { write: false, edit: false, patch: false, bash: false, task: false },
+          permission
+        }
+      };
+    case 'plan':
+      return {
+        [name]: {
+          disable: false,
+          description: 'Investigates and writes a plan at the selected permission level.',
+          mode: 'primary',
+          prompt: agentPrompt(mode),
+          tools: { task: false },
+          permission
+        }
+      };
+    default:
+      return {
+        [name]: {
+          disable: false,
+          description: 'Acts on the workspace at the selected permission level.',
+          mode: 'primary',
+          prompt: agentPrompt(mode),
+          tools: { task: false },
+          permission
+        }
+      };
+  }
 }
 
 /**
@@ -236,6 +360,7 @@ function askAgent(permission: Record<string, 'allow' | 'ask' | 'deny'>): Record<
 export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigResult {
   const { baseUrl, modelIds, modelId, settings, capabilities, mode, permissionLevel, browser } = input;
   const resolvedMode: DefaultMode = isDefaultMode(mode) ? mode : 'agent';
+  const nonce = opencodeAgentSuffix(input.agentNonce);
 
   const models: Record<string, unknown> = {};
   for (const id of modelIds) {
@@ -307,16 +432,19 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
   if (mcp) {
     config.mcp = mcp;
   }
-  if (resolvedMode === 'ask') {
-    config.agent = askAgent(config.permission as Record<string, 'allow' | 'ask' | 'deny'>);
-  }
+  config.agent = opencodeAgentConfig(
+    resolvedMode,
+    config.permission as Record<string, 'allow' | 'ask' | 'deny'>,
+    nonce
+  );
 
   return {
     config,
     modelRef: `${OPENCODE_PROVIDER_ID}/${modelId}`,
-    agent: opencodeAgentForMode(resolvedMode),
+    agent: opencodeAgentForMode(resolvedMode, nonce),
     contextApplied,
     reasoningApplied,
     reasoningUnsupported
   };
 }
+
