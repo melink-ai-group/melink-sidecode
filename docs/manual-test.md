@@ -230,6 +230,14 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       Select a model that reports **no** reasoning control, set a thinking level,
       and confirm a notice says that control is unsupported instead of a value
       being sent.
+- [ ] 14i-b. **IME-safe Enter.** Switch the OS input method to Japanese (e.g.
+      Microsoft IME) or Chinese. In the composer, start typing a reading so the
+      candidate list is open, then press Enter.
+      - **Expected:** the candidate is committed into the draft and **no turn is
+        sent**.
+      - Press Enter again after the composition has ended: the turn sends
+        **once**.
+      - Press Shift+Enter: a newline is added to the draft.
 - [ ] 14j. **Cancel.** Start a long turn and press **Stop**. Confirm the
       transcript keeps the partial output, shows *Stopped* (not an error), the
       input is usable again, and no `opencode` process survives (`tasklist /FI
