@@ -120,8 +120,25 @@ to launch an Extension Development Host. Other scripts:
 ```sh
 npm run typecheck  # tsc --noEmit
 npm run lint       # alias for typecheck
-npm test           # pure unit tests (node --experimental-strip-types)
+npm test           # node unit suite, then the jsdom/RTL webview suite
+npm run test:node  # node --experimental-strip-types --test "src/**/*.test.ts"
+npm run test:dom   # vitest run (src/webview/**/*.dom.test.tsx)
 ```
+
+`npm test` runs both suites and exits non-zero if either one fails. The DOM
+suite mounts the real webview `App` in jsdom with Testing Library; it covers
+the composer, the replayed reasoning panel, select-to-collapse, and IME-safe
+Enter. It is host-free: `acquireVsCodeApi`, `ResizeObserver`,
+`window.getSelection`, scrolling, and `matchMedia` are stubbed in
+`src/webview/domSetup.ts`. jsdom has no editor host, layout, clipboard, or real
+IME, so these tests do not replace the manual VS Code pass in
+`docs/manual-test.md`.
+
+On this pre-T70 branch `npm test` exits 1 today because of the 2 known Node
+failures (appserver connection credential-env scrub and Codex
+native-instructions context), even though the DOM suite still runs and passes;
+after the T70 rebase `npm test` is green. Run `npm run test:dom` to check only
+the DOM suite.
 
 ## Set up a provider
 
