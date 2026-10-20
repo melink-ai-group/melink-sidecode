@@ -1,4 +1,5 @@
 import { navigationDecision, navigationOrigin } from './policy.ts';
+import type { NavigationResult } from './session.ts';
 
 /** One MCP tool result. An image is a base64 PNG the model can look at. */
 export interface ToolContent {
@@ -13,14 +14,28 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+/** The shape `browser_assert` accepts and `BrowserActions.assert` receives. */
+export interface AssertInput {
+  selector?: string;
+  text?: string;
+  url?: string;
+  status?: number;
+}
+
+export interface AssertResult {
+  ok: boolean;
+  message: string;
+}
+
 /** The page operations a tool call can perform. Tests supply a fake. */
 export interface BrowserActions {
-  navigate(url: string): Promise<{ url: string; title: string }>;
+  navigate(url: string): Promise<NavigationResult>;
   resize(width: number, height: number): Promise<{ width: number; height: number }>;
-  snapshot(): Promise<{ text: string; pngBase64: string }>;
+  snapshot(): Promise<{ text: string; pngBase64: string; path?: string; url?: string; title?: string }>;
   click(input: { selector?: string; text?: string; x?: number; y?: number }): Promise<string>;
   type(text: string, selector?: string): Promise<void>;
   press(key: string): Promise<void>;
+  assert(input: AssertInput): Promise<AssertResult>;
 }
 
 export interface BrowserTool {
@@ -43,7 +58,7 @@ export const BROWSER_TOOLS: readonly BrowserTool[] = [
   {
     name: 'browser_navigate',
     description:
-      'Open a URL in the editor browser tab the user is watching. Use the running app, usually localhost. Other sites ask the user before opening.',
+      'Open a URL the user provides in the editor browser tab. Localhost works only if the app is already running. Other sites ask the user before opening.',
     inputSchema: {
       type: 'object',
       properties: { url: { type: 'string', description: 'Absolute http or https URL.' } },
@@ -101,6 +116,22 @@ export const BROWSER_TOOLS: readonly BrowserTool[] = [
       required: ['key'],
       additionalProperties: false
     }
+  },
+  {
+    name: 'browser_assert',
+    description:
+      'Check the open page within about 2 seconds. Assert that a CSS selector exists, visible text exists, the URL matches, or the last HTTP status matches. Does not navigate.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector that must exist.' },
+        text: { type: 'string', description: 'Visible text that must exist.' },
+        url: { type: 'string', description: 'Exact URL the page must show.' },
+        status: { type: 'number', description: 'Last HTTP status from the navigation.' }
+      },
+      anyOf: [{ required: ['selector'] }, { required: ['text'] }, { required: ['url'] }, { required: ['status'] }],
+      additionalProperties: false
+    }
   }
 ];
 
@@ -136,6 +167,8 @@ export async function runBrowserTool(
         return await typeText(actions, args);
       case 'browser_press':
         return await press(actions, args);
+      case 'browser_assert':
+        return await assertPage(actions, args);
       default:
         return textResult(`Unknown browser tool "${name}".`, true);
     }
@@ -170,6 +203,9 @@ async function navigate(
     }
   }
   const page = await actions.navigate(url);
+  if (!page.ok) {
+    return textResult(`${page.url} is not reachable: ${page.reason}`, true);
+  }
   return textResult(`Opened ${page.url}${page.title ? ` (${page.title})` : ''}.`);
 }
 
@@ -185,12 +221,52 @@ async function resize(actions: BrowserActions, args: Record<string, unknown>): P
 
 async function snapshot(actions: BrowserActions): Promise<ToolResult> {
   const shot = await actions.snapshot();
+  const lines = [shot.text || 'The page has no accessibility tree.'];
+  const location = [shot.url, shot.title].filter((part): part is string => !!part).join(' - ');
+  if (shot.path) {
+    lines.push(`Screenshot saved to ${shot.path}${location ? ` (${location})` : ''}.`);
+  } else if (location) {
+    lines.push(location);
+  }
   return {
     content: [
-      { type: 'text', text: shot.text || 'The page has no accessibility tree.' },
+      { type: 'text', text: lines.join('\n') },
       { type: 'image', data: shot.pngBase64, mimeType: 'image/png' }
     ]
   };
+}
+
+async function assertPage(actions: BrowserActions, args: Record<string, unknown>): Promise<ToolResult> {
+  const input = assertInput(args);
+  if (!input) {
+    return textResult('Provide a selector, text, url, or status to assert.', true);
+  }
+  const result = await actions.assert(input);
+  return textResult(result.message, !result.ok);
+}
+
+function assertInput(args: Record<string, unknown>): AssertInput | undefined {
+  const selector = typeof args.selector === 'string' ? args.selector : undefined;
+  const text = typeof args.text === 'string' ? args.text : undefined;
+  const url = typeof args.url === 'string' ? args.url : undefined;
+  const status = typeof args.status === 'number' && Number.isFinite(args.status) ? args.status : undefined;
+  if (selector === undefined && text === undefined && url === undefined && status === undefined) {
+    return undefined;
+  }
+  const input: AssertInput = {};
+  if (selector !== undefined) {
+    input.selector = selector;
+  }
+  if (text !== undefined) {
+    input.text = text;
+  }
+  if (url !== undefined) {
+    input.url = url;
+  }
+  if (status !== undefined) {
+    input.status = status;
+  }
+  return input;
 }
 
 function clickInput(args: Record<string, unknown>): { selector?: string; text?: string; x?: number; y?: number } {
