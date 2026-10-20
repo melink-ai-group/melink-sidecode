@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_MODES, isDefaultMode, modeDescriptor, modeInstructions } from './modes.ts';
+import { DEFAULT_MODES, GIT_SAFETY, isDefaultMode, modeDescriptor, modeInstructions } from './modes.ts';
 import {
   backendSupportsMode,
   effectivePermissionLevel,
@@ -47,6 +47,57 @@ test('every mode carries the shared plan-document contract', () => {
     assert.match(text, /never name a plan after a thread id or uuid/);
   }
   assert.equal(ask.includes('.melink/plans/'), false);
+});
+
+test('agent and plan carry the one shared git-safety rule', () => {
+  const agent = modeInstructions('agent') ?? '';
+  const plan = modeInstructions('plan') ?? '';
+  const ask = modeInstructions('ask') ?? '';
+
+  assert.ok(GIT_SAFETY.trim().length > 0);
+  // The rule is interpolated once, not copy-pasted per mode.
+  assert.equal(agent.split(GIT_SAFETY).length - 1, 1);
+  assert.equal(plan.split(GIT_SAFETY).length - 1, 1);
+  assert.equal(ask.includes(GIT_SAFETY), false);
+
+  for (const text of [agent, plan]) {
+    for (const verb of ['git commit', 'git push', 'git reset', 'git clean']) {
+      assert.ok(text.includes(verb), `${verb} must be forbidden`);
+    }
+    assert.match(text, /explicitly requested that exact action in this conversation/i);
+    assert.match(text, /general request such as "fix the bug" or "clean this up" is not permission/i);
+
+    assert.match(text, /ANY git write/i);
+    for (const write of [
+      'git add',
+      'git checkout -f',
+      'git rebase',
+      'git tag',
+      'git branch -D',
+      'git stash drop',
+      'force push'
+    ]) {
+      assert.ok(text.includes(write), `${write} must require approval`);
+    }
+    assert.ok(text.includes('state the exact command and ask for the user\u2019s approval'));
+
+    for (const read of ['git status', 'git diff', 'git log', 'git show']) {
+      assert.ok(text.includes(read), `${read} must be allowed`);
+    }
+    assert.match(text, /Read-only git/i);
+    assert.match(text, /needs no extra approval/i);
+
+    assert.match(text, /Never use git to undo or bypass/i);
+    assert.match(text, /Keep, Reject, or checkpoint/i);
+  }
+});
+
+test('ask does not carry git-safety instructions', () => {
+  const ask = modeInstructions('ask') ?? '';
+  assert.match(ask, /Do not run commands/);
+  assert.equal(ask.includes('Git safety'), false);
+  assert.equal(ask.includes('git commit'), false);
+  assert.equal(ask.includes('git push'), false);
 });
 
 test('an unknown mode degrades to the agent default', () => {
