@@ -50,6 +50,7 @@ import type { OpencodeEvent } from './opencode/events';
 import { quietTurnMessage, watchOpencodeQuiet } from './opencode/quiet';
 import type { OpencodeOutcome } from './opencode/runtime';
 import { fetchZenCatalog } from './opencode/zenCatalog';
+import { ProviderTimeoutError } from './probeTimeout';
 import { ZEN_API_KEY_ENV, ZEN_BASE_URL } from './opencode/zenConfig';
 import { opencodeRequiresApproval } from './opencode/config';
 
@@ -238,6 +239,13 @@ export class OpencodeBackend implements AgentBackend {
           : `OpenCode ready (${models.length} free models). Add a Zen API key for paid models.`
       };
     } catch (error) {
+      if (error instanceof ProviderTimeoutError) {
+        return {
+          backendId: this.id,
+          outcome: 'unavailable',
+          message: error.message
+        };
+      }
       return {
         backendId: this.id,
         outcome: 'network',

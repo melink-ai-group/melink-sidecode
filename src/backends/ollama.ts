@@ -1,20 +1,20 @@
 import * as vscode from 'vscode';
 import { createId, Emitter } from './base';
 import { OLLAMA_TOKEN_SECRET_KEY } from './secrets';
-import { ThreadStore } from './threadStore';
+import type { ThreadStore } from './threadStore';
 import { describeApproval, ruleFor, ruleScopeFor } from './approvals';
-import { ApprovalStore } from './approvalStore';
+import type { ApprovalStore } from './approvalStore';
 import { APPROVAL_TIMEOUT_REASON, awaitUserDecision } from './approvalWait';
 import { approvalFromOpencode, opencodeReplyFor, type OpencodePermissionAsk } from './opencode/approval';
 import type { OpencodeQuestionAsk } from './opencode/runtime';
 import { SKIPPED_ANSWER, type QuestionAnswer, type QuestionRequest } from '../questions';
-import {
+import { BackendError } from './types';
+import type {
   AgentBackend,
   AgentEvent,
   ApprovalDecision,
   ApprovalRequest,
   ApprovalRule,
-  BackendError,
   BackendModel,
   CompactRequest,
   CompactResult,
@@ -32,6 +32,14 @@ import {
   ThreadSummary
 } from './types';
 import { ollamaCapabilities, ollamaNativeRequest } from './capabilities';
+import {
+  PROVIDER_PROBE_TIMEOUT_MS,
+  isProbeTimeoutError,
+  probeOllamaConnection,
+  probeSignal as createProbeSignal,
+  readProbeJson,
+  requestWithProbeTimeout
+} from './probeTimeout';
 import { buildContextMessages } from './contextMessages';
 import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './modes';
 // Type-only imports are erased at compile time, so the off path loads neither
@@ -79,9 +87,12 @@ interface CategorizedError {
 
 /** Thrown by the streaming loop; carries provider-neutral wording, never a raw stack. */
 class StreamError extends Error implements CategorizedError {
-  constructor(readonly code: ErrorEventCode, message: string, cause?: unknown) {
+  readonly code: ErrorEventCode;
+
+  constructor(code: ErrorEventCode, message: string, cause?: unknown) {
     super(message);
     this.name = 'StreamError';
+    this.code = code;
     if (cause !== undefined) {
       (this as { cause?: unknown }).cause = cause;
     }
@@ -90,16 +101,6 @@ class StreamError extends Error implements CategorizedError {
 
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '');
-}
-
-/** A base URL must be a full http(s) address, or the request never leaves. */
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -158,44 +159,6 @@ function steerContext(context?: ContextPayload): ContextPayload | undefined {
     return undefined;
   }
   return { snapshot: context.snapshot, notice: context.notice };
-}
-
-/**
- * Whether a transport failure names the host (DNS failure, connection refused)
- * rather than the network (offline, timed out).
- *
- * Node's undici wraps the real failure in `error.cause`, so the code lives at
- * `error.cause.code`. A bare `'fetch failed'` message is deliberately NOT
- * treated as host: it is what undici reports for every transport failure, so
- * matching it would mislabel a no-network failure as a bad host. Only the
- * explicit host codes — plus a getaddrinfo message from a pre-undici stack —
- * count as host; everything else is a network problem.
- */
-function isDnsOrRefused(error: unknown): boolean {
-  const code = causeCode(error);
-  if (code) {
-    // Only a name-resolution or connection-refused failure indicts the host.
-    // A timeout, an unreachable network, a reset, or an offline stack is a
-    // network problem, so those codes fall through to `false`.
-    return code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'EAI_AGAIN';
-  }
-  // A pre-undici stack may only expose the message; match the DNS wording, not
-  // the generic `fetch failed` that undici uses for every transport failure.
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return message.includes('getaddrinfo') || message.includes('enotfound');
-}
-
-/** The `code` on a transport error's cause chain, when one is present. */
-function causeCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null) {
-    return undefined;
-  }
-  const cause = (error as { cause?: unknown }).cause;
-  if (typeof cause !== 'object' || cause === null) {
-    return undefined;
-  }
-  const code = (cause as { code?: unknown }).code;
-  return typeof code === 'string' ? code.toUpperCase() : undefined;
 }
 
 /**
@@ -301,11 +264,15 @@ export class OllamaBackend implements AgentBackend {
   /** Compaction and other work that is not a chat turn. */
   private sideFlight?: AbortController;
 
-  constructor(
-    private readonly context: vscode.ExtensionContext,
-    private readonly store?: ThreadStore,
-    private readonly approvals?: ApprovalStore
-  ) {}
+  private readonly context: vscode.ExtensionContext;
+  private readonly store?: ThreadStore;
+  private readonly approvals?: ApprovalStore;
+
+  constructor(context: vscode.ExtensionContext, store?: ThreadStore, approvals?: ApprovalStore) {
+    this.context = context;
+    this.store = store;
+    this.approvals = approvals;
+  }
 
   private get baseUrl(): string {
     return normalizeBaseUrl(vscode.workspace.getConfiguration('melink.ollama').get<string>('baseUrl', 'https://ollama.com'));
@@ -363,7 +330,7 @@ export class OllamaBackend implements AgentBackend {
       return false;
     }
     try {
-      await this.request('/api/tags', token);
+      await this.request('/api/tags', token, undefined, PROVIDER_PROBE_TIMEOUT_MS);
       return true;
     } catch (error) {
       if (error instanceof BackendError && error.code === 'unauthenticated') {
@@ -375,87 +342,64 @@ export class OllamaBackend implements AgentBackend {
 
   /**
    * Real authenticated call for the settings screen's Test connection action.
-   * Never throws: a rejected key, an unreachable host, and a network failure
-   * each become a distinct plain-language outcome, and the token never appears.
+   * Never throws: a rejected key, an unreachable host, a network failure, and a
+   * timed-out probe each become a distinct plain-language outcome, and the token
+   * never appears in the message.
+   *
+   * `timeoutMs` is injectable so a test can use a millisecond deadline.
    */
-  async testConnection(): Promise<ConnectionTestResult> {
-    if (!isHttpUrl(this.baseUrl)) {
-      return {
-        backendId: this.id,
-        outcome: 'host',
-        message: 'The base URL is not a full http or https address. Fix it, then test again.'
-      };
-    }
-    const token = await this.token();
-    if (!token) {
-      return {
-        backendId: this.id,
-        outcome: 'invalid-key',
-        message: 'No key is stored. Add a key, then test again.'
-      };
-    }
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}/api/tags`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-    } catch (error) {
-      // A transport failure is the only place the network and the host differ.
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      if (offline) {
-        return {
-          backendId: this.id,
-          outcome: 'network',
-          message: 'This device appears to be offline. Reconnect, then test again.'
-        };
-      }
-      if (isDnsOrRefused(error)) {
-        return {
-          backendId: this.id,
-          outcome: 'host',
-          message: `Could not reach ${this.baseUrl}. Check the base URL, then test again.`
-        };
-      }
-      return {
-        backendId: this.id,
-        outcome: 'network',
-        message: 'The request did not complete. Check your network connection, then test again.'
-      };
-    }
-    if (response.status === 401 || response.status === 403) {
-      return {
-        backendId: this.id,
-        outcome: 'invalid-key',
-        message: 'The host answered but rejected this key. Check the key, or confirm the base URL points at the host that issued it.'
-      };
-    }
-    if (!response.ok) {
-      return {
-        backendId: this.id,
-        outcome: 'provider',
-        message: `The host answered with ${response.status}. The key was accepted, so this is a host-side problem.`
-      };
-    }
-    return {
-      backendId: this.id,
-      outcome: 'ok',
-      message: `Connected to ${this.baseUrl}. The key was accepted.`
-    };
+  async testConnection(timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS): Promise<ConnectionTestResult> {
+    return probeOllamaConnection({
+      baseUrl: this.baseUrl,
+      token: await this.token(),
+      timeoutMs
+    });
   }
 
-  /** Reject a credential without ever echoing it back to the caller. */
-  private async request(path: string, token: string, init?: RequestInit): Promise<Response> {
+  /**
+   * Reject a credential without ever echoing it back to the caller.
+   *
+   * A probe or model-list call passes `timeoutMs`, which puts it on the shared
+   * deadline and reports a timeout as `unavailable`. Ordinary turns pass no
+   * timeout: they keep their turn signal, and a caller cancel stays `canceled`
+   * rather than being folded into a timeout.
+   */
+  private async request(
+    path: string,
+    token: string,
+    init?: RequestInit,
+    timeoutMs?: number,
+    probeSignal?: AbortSignal
+  ): Promise<Response> {
+    const timed = timeoutMs !== undefined || probeSignal !== undefined;
+    const deadlineMs = timeoutMs ?? PROVIDER_PROBE_TIMEOUT_MS;
+    const requestInit: RequestInit = {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {})
+      }
+    };
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...(init?.headers ?? {})
-        }
-      });
+      response = timed
+        ? await requestWithProbeTimeout({
+            url: `${this.baseUrl}${path}`,
+            init: requestInit,
+            provider: 'Ollama Cloud',
+            timeoutMs: deadlineMs,
+            probeSignal
+          })
+        : await fetch(`${this.baseUrl}${path}`, requestInit);
     } catch (cause) {
+      // A caller cancel wins over the probe deadline, so Stop is still Stop.
+      if (init?.signal?.aborted) {
+        throw new StreamError('canceled', 'Turn canceled.', cause);
+      }
+      if (cause instanceof BackendError) {
+        throw cause;
+      }
       if (isAbortError(cause)) {
         throw new StreamError('canceled', 'Turn canceled.', cause);
       }
@@ -470,22 +414,26 @@ export class OllamaBackend implements AgentBackend {
     return response;
   }
 
-  async listModels(): Promise<BackendModel[]> {
+  async listModels(timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS): Promise<BackendModel[]> {
     const token = await this.token();
     if (!token) {
       throw new BackendError('unauthenticated', 'Set an Ollama Cloud token to list models.');
     }
-    const response = await this.request('/api/tags', token);
-    const body = (await response.json()) as OllamaTagsResponse;
+    // One deadline covers the tag list and every per-model capability read, so
+    // a stalled `/api/show` cannot leave the picker half-loaded past the probe.
+    const signal = createProbeSignal(timeoutMs);
+    const response = await this.request('/api/tags', token, undefined, timeoutMs, signal);
+    const body = await readProbeJson<OllamaTagsResponse>(response, 'Ollama Cloud', timeoutMs, signal);
     // No hardcoded array and no fallback list: the picker is exactly what the
     // live server reports, so removing a model server-side removes it here.
     const names = this.tagNamesFromBody(body);
     // Each model's descriptor is read from `/api/show`, in parallel. A model
     // whose `/api/show` fails still appears, with an all-unknown descriptor, so
-    // a single metadata failure cannot hide a usable model.
+    // a single metadata failure cannot hide a usable model. A timeout is not
+    // just another metadata failure: it rejects the list so the UI can retry.
     return Promise.all(
       names.map(async (name) => {
-        const capabilities = await this.modelCapabilities(name);
+        const capabilities = await this.modelCapabilities(name, timeoutMs, signal);
         return {
           id: name,
           label: name,
@@ -519,21 +467,44 @@ export class OllamaBackend implements AgentBackend {
    * model's `capabilities` list, which drive context, thinking and tool support.
    * A model the server no longer knows, or whose show call fails, yields
    * `undefined` so the caller degrades to all-unknown rather than guessing.
+   *
+   * `timeoutMs`/`probeSignal` are supplied only by `listModels`, so every
+   * capability read shares that list's single deadline. The turn path calls
+   * this without them and stays untimed, as before.
    */
-  async modelCapabilities(modelId: string): Promise<ModelCapabilities | undefined> {
+  async modelCapabilities(
+    modelId: string,
+    timeoutMs?: number,
+    probeSignal?: AbortSignal
+  ): Promise<ModelCapabilities | undefined> {
     const token = await this.token();
     if (!token) {
       return undefined;
     }
+    const timed = timeoutMs !== undefined || probeSignal !== undefined;
+    const deadlineMs = timeoutMs ?? PROVIDER_PROBE_TIMEOUT_MS;
+    const deadline = timed ? probeSignal ?? createProbeSignal(deadlineMs) : undefined;
     let show: unknown;
     try {
-      const response = await this.request('/api/show', token, {
-        method: 'POST',
-        body: JSON.stringify({ model: modelId })
-      });
-      show = await response.json();
-    } catch {
+      const response = await this.request(
+        '/api/show',
+        token,
+        {
+          method: 'POST',
+          body: JSON.stringify({ model: modelId })
+        },
+        timed ? deadlineMs : undefined,
+        deadline
+      );
+      show = deadline
+        ? await readProbeJson<unknown>(response, 'Ollama Cloud', deadlineMs, deadline)
+        : await response.json();
+    } catch (error) {
       // A metadata failure is not a list failure: the model is simply unknown.
+      // A probe timeout, however, must reach listModels so the UI can retry.
+      if (isProbeTimeoutError(error)) {
+        throw error;
+      }
       return undefined;
     }
     return ollamaCapabilities(show, this.modes);
