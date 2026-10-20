@@ -353,6 +353,8 @@ order:
 | **Instruction documents** | `AGENTS.md` at the root and in nested packages up to a bounded depth, `README.md`, and `.github/copilot-instructions.md`, each as a bounded excerpt. When none exist the category says **none found** rather than being silently omitted. |
 | **Editor state** | The active file's absolute and workspace-relative path, its language id, and the current selection range with the selected text when there is one; the visible/open editors; dirty files; and the active terminal's cwd when one is open. This is what "current page" means, and it is the cheapest category to refresh. |
 
+When project shape is on, a compact **conventions** block is derived from repository config and manifest metadata: formatter, linter, test runner and test-file pattern, plus indentation, quotes, semicolons and file/component naming only when at least 70% of a bounded sample agrees (at most eight source files, 800 bytes each). Only evidenced facts are named, each with its source path; raw sample bodies are never included. Turning `melink.context.includeShape` off skips both the config reads and the samples.
+
 Every capped category carries a visible marker of the form
 `… truncated (N of M entries)`, so the model is told it is seeing a partial view
 rather than assuming completeness. An overall cap can trim the open-editor list,

@@ -234,6 +234,13 @@ is sent to a provider.
 
 - **One renderer, every backend.** `src/context/render.ts` turns the snapshot (or
   a delta) into a text block, so the wording and the byte budget are defined once.
+- **Conventions are derived, not assumed.** When project shape is on, a bounded
+  detector reads repo config (Prettier/ESLint/EditorConfig/ruff/Cargo/go.mod) and
+  at most eight source files to report the formatter, linter, test runner,
+  test-file pattern and dominant indentation/quotes/semicolons/naming. Only
+  evidenced facts with a strong majority are reported, each with its source path;
+  sample bodies are never included. With `melink.context.includeShape` off,
+  neither config nor samples are read.
 - **Snapshot once, delta after.** The full snapshot is sent at session start (new
   or resumed); afterwards only a compact per-turn delta (active file, language,
   selection, changed-file notice). The stable prefix stays cacheable and per-turn
