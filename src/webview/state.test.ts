@@ -1018,6 +1018,66 @@ test('a review snapshot for the active thread replaces the visible one', () => {
   assert.equal(withReview.turnChanges[0]?.review?.turnId, 'turn_1');
 });
 
+test('a review snapshot keeps its attached check view across later updates', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
+  const checks = {
+    status: 'failed' as const,
+    summary: 'Checks: 1 failed · 1 passed',
+    results: [
+      {
+        name: 'typecheck',
+        command: 'npm run typecheck',
+        status: 'passed' as const,
+        durationMs: 1000
+      },
+      {
+        name: 'test',
+        command: 'npm run test',
+        status: 'failed' as const,
+        durationMs: 2000,
+        output: 'AssertionError'
+      }
+    ],
+    startedAt: 1,
+    finishedAt: 3
+  };
+  const review = {
+    backendId: 'codex',
+    threadId: 't1',
+    turnId: 'turn_1',
+    files: [
+      {
+        absPath: '/w/a.ts',
+        path: 'a.ts',
+        status: 'modified' as const,
+        source: 'reported' as const,
+        binary: false,
+        diffable: true,
+        additions: 3,
+        deletions: 1,
+        decision: 'pending' as const,
+        hunks: []
+      }
+    ],
+    additions: 3,
+    deletions: 1,
+    fullyDecided: false,
+    checks
+  };
+  const withReview = reduce(active, { type: 'changeReview', review });
+  assert.equal(withReview.turnChanges[0]?.review?.checks?.status, 'failed');
+
+  const withHunks = reduce(withReview, {
+    type: 'changeHunks',
+    turnId: 'turn_1',
+    path: 'a.ts',
+    hunks: [],
+    truncated: false
+  });
+  assert.equal(withHunks.turnChanges[0]?.review?.checks?.status, 'failed');
+  assert.equal(withHunks.turnChanges[0]?.review?.checks?.results.length, 2);
+});
+
 test('a background thread review never replaces the visible one', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
   const background = reduce(active, {

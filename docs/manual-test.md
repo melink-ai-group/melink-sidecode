@@ -598,6 +598,55 @@ provider says so explicitly.
 - [ ] 47c. **Cleanup:** `git checkout -- scratch.txt` (a no-op after a correct
       reject) and confirm `git status --porcelain` is empty.
 
+### Pass 1b - post-turn checks
+
+*Applies to: Codex and opencode (both).* The host records a `running` check view,
+then replaces it with the final view through the existing review snapshot. The
+ChangesReview header stays collapsed to one line and always shows the check
+summary; expanding it lists one row per check. These steps verify the stored
+state, the panel text, and the Keep gate.
+
+- [ ] 47d. **Passing checks.** In the scratch `package.json`, add:
+      ```json
+      "scripts": { "typecheck": "node -e \"process.exit(0)\"", "test": "node -e \"process.exit(0)\"" }
+      ```
+      Ask for a one-file edit and wait for the turn.
+      - **Expected:** while the child runs, the collapsed header shows a spinner
+        and `Checks running…`; **Keep** and **Keep all** are disabled (their
+        title says to wait), while **Undo** stays available. Once it settles the
+        header reads `Checks: 2 passed`; expanding shows one row per check with
+        the word **Passed** and a duration. No provider/model call is made and
+        Keep works as before.
+- [ ] 47e. **Failing checks and the Keep gate.** Change the `test` script to
+      `node -e "process.exit(1)"`, run another one-file turn, and wait.
+      - **Expected:** the collapsed header reads `Checks: 1 failed · 1 passed`
+        with an alert icon; expanding shows the failed row with its bounded
+        output excerpt and the passing row. **Keep** and **Keep all** stay
+        disabled while `running`. After the failure, clicking either one opens
+        an inline confirmation that names the failed check and says the failed
+        check will be bypassed. Cancel records nothing. **Keep anyway** sends
+        `overrideChecks: true` and only then accepts the still-failed turn.
+        **Undo**/**Reject** still work with no override and no confirmation
+        beyond the existing named-path reject prompt. Opening the failed-check
+        confirmation dismisses an open reject confirmation (and the reverse), so
+        only one is visible.
+- [ ] 47f. **Trust.** Open the workspace in **Restricted Mode**, run a one-file
+      turn, and wait.
+      - **Expected:** the collapsed header reads
+        `Checks skipped: workspace is untrusted.`; expanding shows one **Skipped**
+        row with that reason. No `npm`/`node` child is spawned (check the process
+        list), and Keep is not blocked by checks.
+- [ ] 47g. **Reload mid-run.** Use a `test` script that sleeps (for example
+      `node -e "setTimeout(() => {}, 60000)"`), run a turn, then reload the
+      window while the check view reads `running`.
+      - **Expected:** the reloaded header reads
+        `Checks: interrupted when the window reloaded`; expanding shows the
+        result reason *"Checks were interrupted when the window reloaded."*; no
+        spinner remains and no late child output overwrites it.
+- [ ] 47h. **Cleanup:** remove the temporary `scripts` entry and run
+      `git status --porcelain`; restore the scratch files.
+
+
 ### Pass 2 — multi-file turn, counts, and bulk decisions
 
 *Applies to: Codex and opencode (both).*
