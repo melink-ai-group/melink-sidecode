@@ -292,6 +292,8 @@ export function buildEnv(options: OpencodeRunOptions): NodeJS.ProcessEnv {
   const apiKeyEnv = options.apiKeyEnv?.trim() || DEFAULT_OPENCODE_API_KEY_ENV;
   return {
     ...process.env,
+    // The generated config wins on overlapping keys, so a workspace cannot
+    // disable the active agent or widen its permission block.
     [OPENCODE_CONFIG_ENV]: JSON.stringify(options.config),
     [apiKeyEnv]: options.token
   };

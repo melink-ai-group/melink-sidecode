@@ -75,21 +75,30 @@ which can leave a custom install on an old version).
 - **Models are the same list.** The runtime is pointed at exactly the models
   `GET /api/tags` returns, against the configured `melink.ollama.baseUrl`.
 - **Streaming is the same experience.** Events are parsed as they arrive into
-  the same transcript. (The pinned opencode version emits whole message parts
+  the same transcript. (The installed opencode version emits whole message parts
   rather than token deltas, so a part appears when it completes.)
 - **Sessions resume.** A second message in the same conversation continues the
   same opencode session. If that session is gone, a fresh one starts and a
   notice says so.
 - **Modes and permissions.** With the runtime on, all three modes and all three
-  permission levels become available. `plan` uses the build agent and honors
-  the selected permission level; `ask` uses a read-only agent that cannot run
-  commands or write. A read-only permission level denies edits and commands.
-  `default` asks for every
-  edit and command; `unrestricted` (which the UI gates behind a labelled
-  confirmation) allows them. opencode's own enforcement backs ours; it never
-  replaces it. The pinned opencode has no interactive prompt in headless `run`
-  mode, so a `default` turn's `ask` is auto-rejected rather than silently
-  allowed — the in-chat approval surface is a separate ticket.
+  permission levels become available. Each turn defines a freshly named,
+  generated opencode agent with `disable: false`, the `task` tool off, and the
+  selected permission as an agent property. A workspace `opencode.json` is still
+  loaded for its MCP servers, skills, and other project settings, but the inline
+  definition wins on overlapping keys: a workspace cannot disable our agent or
+  fall back to `build` and `agent.build.permission` cannot widen the turn. A
+  workspace-defined subagent is not callable because `task` is denied. Project
+  plugins and remote `instructions` URLs are a separate, pre-existing concern and
+  are not isolated by this fix. `plan` still honors the selected level; `ask`
+  uses a read-only agent that cannot run commands, write, fetch the web, or
+  delegate. Read-only and Ask deny edits, commands, external directories,
+  webfetch, websearch, and subagent delegation. `default` asks before every edit,
+  write, patch, command, external directory, webfetch, and websearch, and denies
+  delegation; `unrestricted` (which the UI gates behind a labelled confirmation)
+  allows them. opencode's own enforcement backs ours; it never replaces it. When
+  a `default` turn hits an `ask`, the sidebar pauses and shows its approval card
+  until you decide; a rejection is reported back to the agent instead of being
+  silently auto-allowed.
 - **Turn it off to fall back.** With the setting off, the direct `/api/chat`
   adapter is used unchanged and no opencode process is started.
 
@@ -377,7 +386,7 @@ per-turn cost stays flat.
 |---|---|---|
 | **Ollama Cloud (direct)** | A `system`-role message before the first user turn. | A `system`-role message immediately before the new user turn. |
 | **Codex app-server** | The native `developerInstructions` field on `thread/start` and `thread/resume`. Codex is also started with the workspace root as its `cwd`, so its own file access and `AGENTS.md` discovery work from the right place. | Codex's own file access (the pinned app-server has no per-turn instructions field on `turn/start`). |
-| **opencode runtime** (Ollama, `melink.ollama.opencode.enabled`) | Primed into the turn text. opencode's pinned `run` command exposes no system/instructions flag, so this is a deliberate prompt-priming fallback, not an oversight; the child is still spawned in the workspace root. | Only the delta is primed on later turns. |
+| **opencode runtime** (Ollama, `melink.ollama.opencode.enabled`) | Primed into the turn text. opencode's `run` command exposes no system/instructions flag, so this is a deliberate prompt-priming fallback, not an oversight; the child is still spawned in the workspace root. | Only the delta is primed on later turns. |
 
 Two rules hold on every path:
 
@@ -427,15 +436,31 @@ channels, telemetry, or error text.
 
 ## Permission levels and approvals
 
-The permission level governs **when Codex asks you**; the sandbox Codex enforces
-separately is what actually limits the files and commands it can touch. Approval
-is not the sandbox.
+The permission level governs **when the active backend asks you**; the sandbox
+Codex enforces separately is what actually limits the files and commands it can
+touch. Approval is not the sandbox.
 
-| Level | What Codex may do | Asks you when |
+| Level | What may happen | Asks you when |
 |---|---|---|
-| **Read-only** | Read only; a sandbox blocks writes. | Anything that would write. |
-| **Default** | Write inside the workspace. | Anything outside that sandbox. |
-| **Unrestricted** | No sandbox at all. | Never. |
+| **Read-only** | Read only; a sandbox blocks writes, network access, external directories, and subagent delegation. | Anything that would write or fetch. |
+| **Default** | Write inside the workspace; Codex network access is blocked. | Anything outside that sandbox, or an opencode edit, command, webfetch, or websearch. |
+| **Unrestricted** | No sandbox and no network block. | Never. |
+
+At **Default**, Codex uses `workspaceWrite` with `networkAccess: false`: sandboxed
+commands run without a prompt, but a command that needs the network fails rather
+than quietly opening it. The opencode runtime has no OS sandbox for a child
+process or its HTTP tools, so it instead asks before every edit, shell command,
+webfetch, and websearch at **Default**, and before an external directory.
+Read-only and Ask deny edits, commands, external directories, webfetch, and
+websearch outright; **Unrestricted** allows them all. At Read-only, Default, and
+Ask, opencode also denies the `task` tool, so a workspace-defined subagent cannot
+be used to escape the selected level; only **Unrestricted** may delegate. A
+workspace `opencode.json` is still loaded for its MCP servers, skills, and other
+project settings, but the generated agent's `disable: false` and its own
+permission block win on overlapping keys, so the project cannot disable the
+active agent, switch the turn to `build`, or widen these rules. Project plugins
+and remote `instructions` URLs are a pre-existing concern tracked separately;
+they are not isolated by this permission fix.
 
 Select the level from the picker in the title bar. Choosing **Unrestricted** needs
 an explicit, labelled confirmation first, because it removes the safety net rather
@@ -459,8 +484,9 @@ what it permits (the command prefix or path root) and where it came from, with a
 conversation` rules are scoped to the thread and survive a window reload without
 either re-asking or silently escalating.
 
-Ollama Cloud has no approval channel: it reports a single level and never emits an
-approval request.
+The direct Ollama Cloud adapter has no approval channel: it reports a single level
+and never emits an approval request. The opencode runtime behind Ollama Cloud does
+use the approval card above for its `ask` decisions.
 
 ## Reviewing changes
 

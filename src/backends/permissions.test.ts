@@ -63,7 +63,31 @@ test('the sandbox policy mirrors the level so a mid-turn change cannot drift', (
   assert.equal(workspace.type, 'workspaceWrite');
   if (workspace.type === 'workspaceWrite') {
     assert.deepEqual(workspace.writableRoots, ['/work']);
+    // Default stays inside the workspace and denies the network, matching the
+    // documented sandbox rather than silently opening it.
+    assert.equal(workspace.networkAccess, false);
   }
+});
+
+test('default denies network access while unrestricted keeps full access', () => {
+  // Assert each policy in full: a short-circuited `type === ... && network`
+  // check would pass even if the sandbox type were wrong.
+  assert.deepEqual(codexSandboxPolicy('read-only', '/work'), {
+    type: 'readOnly',
+    networkAccess: false
+  });
+  assert.deepEqual(codexSandboxPolicy('default', '/work'), {
+    type: 'workspaceWrite',
+    writableRoots: ['/work'],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false
+  });
+  assert.deepEqual(codexSandboxPolicy('unrestricted', '/work'), {
+    type: 'dangerFullAccess'
+  });
+  assert.deepEqual(codexPermissionMapping('default').sandbox, 'workspace-write');
+  assert.deepEqual(codexPermissionMapping('unrestricted').approvalPolicy, 'never');
 });
 
 test('only unrestricted is flagged as requiring confirmation', () => {
