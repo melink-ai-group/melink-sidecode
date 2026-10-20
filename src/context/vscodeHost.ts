@@ -14,6 +14,7 @@ import {
   CONTEXT_SECTION,
   type ContextSettings
 } from './contextSettings';
+import { DEFAULT_REPO_MAP_CAPS } from './repoMap';
 
 /**
  * The one binding from the real VS Code API to the host-free
@@ -78,9 +79,24 @@ export class VscodeProjectContextHost implements ProjectContextHost {
       const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path));
       return Buffer.from(bytes).toString('utf8');
     } catch {
-      // A missing or unreadable file contributes nothing; it is never an error
-      // surfaced to the user or written anywhere.
+      // Snapshot reads tolerate a per-file failure: one unreadable ancillary
+      // file contributes nothing and must not fail the whole picture.
       return undefined;
+    }
+  }
+
+  async readFileStrict(path: string): Promise<string | undefined> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path));
+      return Buffer.from(bytes).toString('utf8');
+    } catch (error) {
+      // The repo map uses this seam: a genuinely missing file contributes
+      // nothing, but an unreadable file is rethrown so the map reports failed
+      // instead of presenting a partial index as complete.
+      if (isMissingFile(error)) {
+        return undefined;
+      }
+      throw error;
     }
   }
 
@@ -201,7 +217,24 @@ export class VscodeProjectContextHost implements ProjectContextHost {
       includeSelection: section.get<boolean>('includeSelection', DEFAULT_CONTEXT_SETTINGS.includeSelection) === true,
       includeChangedFiles: section.get<boolean>('includeChangedFiles', DEFAULT_CONTEXT_SETTINGS.includeChangedFiles) === true,
       maxBytes: clampMaxBytes(section.get<unknown>('maxBytes', DEFAULT_CONTEXT_SETTINGS.maxBytes)),
-      exclude: readStringArray(section.get<unknown>('exclude', DEFAULT_CONTEXT_SETTINGS.exclude))
+      exclude: readStringArray(section.get<unknown>('exclude', DEFAULT_CONTEXT_SETTINGS.exclude)),
+      repoMap: section.get<boolean>('repoMap') === true,
+      repoMapMaxFiles: clampCount(
+        section.get<unknown>('repoMapMaxFiles'),
+        DEFAULT_REPO_MAP_CAPS.maxFiles
+      ),
+      repoMapMaxBytes: clampCount(
+        section.get<unknown>('repoMapMaxBytes'),
+        DEFAULT_REPO_MAP_CAPS.maxBytes
+      ),
+      repoMapBuildMs: clampCount(
+        section.get<unknown>('repoMapBuildMs'),
+        DEFAULT_REPO_MAP_CAPS.maxBuildMs
+      ),
+      repoMapMaxChars: clampCount(
+        section.get<unknown>('repoMapMaxChars'),
+        DEFAULT_REPO_MAP_CAPS.maxChars
+      )
     };
   }
 
@@ -267,11 +300,34 @@ function readGlobs(section: string): string[] {
 }
 
 /** A finite byte cap inside the documented range, or the default otherwise. */
+/** A genuinely absent file, as opposed to an unreadable one. */
+function isMissingFile(error: unknown): boolean {
+  if (error instanceof vscode.FileSystemError) {
+    if (error.code === 'FileNotFound') {
+      return true;
+    }
+  }
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'FileNotFound' || code === 'ENOENT') {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /file not found|no such file or directory/i.test(message);
+}
+
 function clampMaxBytes(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_CONTEXT_SETTINGS.maxBytes;
   }
   return Math.min(MAX_CONTEXT_BYTES, Math.max(MIN_CONTEXT_BYTES, Math.floor(value)));
+}
+
+/** A positive whole-number setting, or the documented default when unusable. */
+function clampCount(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    return fallback;
+  }
+  return Math.floor(value);
 }
 
 /** The string entries of a configured array, ignoring anything else. */

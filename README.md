@@ -244,6 +244,15 @@ is sent to a provider.
   budget, becomes a plain-language notice and never blocks a turn.
 - **Manual refresh.** A header button requests a fresh snapshot, so a turn sent
   after a workspace change reflects it without a reload.
+- **Optional repo map.** With `melink.context.repoMap` on, `src/context/repoMap.ts`
+  builds a bounded symbol/import index over the files the snapshot already
+  accepted and ranks definitions, importers and dirty files against each
+  message. It is host-free, capped by files (`repoMapMaxFiles`, 200), bytes
+  (`repoMapMaxBytes`, 131072), build time (`repoMapBuildMs`, 750) and rendered
+  characters (`repoMapMaxChars`, 1200), and it times out a slow read. Off,
+  unavailable, failed or over-budget all render a one-line marker instead of
+  blocking a turn. `zvec-grep` is unchanged and remains a separate optional
+  retrieval path, not a dependency of this map.
 
 How each provider receives it:
 

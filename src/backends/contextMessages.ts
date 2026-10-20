@@ -57,6 +57,11 @@ export function buildContextMessages(
     messages.push({ role: 'system', content: context.delta });
   }
 
+  // The bounded symbol/import map is per-turn too, alongside the delta.
+  if (context?.repoMap) {
+    messages.push({ role: 'system', content: context.repoMap });
+  }
+
   // The viewed file is also per-turn. It is never folded into the user text,
   // so the transcript does not persist it.
   if (context?.attachedFile) {

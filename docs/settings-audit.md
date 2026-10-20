@@ -21,6 +21,11 @@ what actually consumes it (so no control is inert).
 | `melink.context.includeSelection` | boolean, `true` | **Added by this ticket** — Context → Selection | `contextSettings()` → `ProjectContext.buildEditor`; off never reads the selected text |
 | `melink.context.includeChangedFiles` | boolean, `true` | **Added by this ticket** — Context → Included by default | `contextSettings()` → `ProjectContext.getDelta`; off omits the changed-files notice |
 | `melink.context.maxBytes` | number, `20480` | **Added by this ticket** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
+| `melink.context.repoMap` | boolean, `false` | **Added by T84** — off by default; no map is built until enabled | `contextSettings()` → `ContextDelivery.repoMapForTurn`; on builds a bounded map over `shape.files`, off sends the explicit disabled marker |
+| `melink.context.repoMapMaxFiles` | number, `200` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxFiles`; stops the build deterministically |
+| `melink.context.repoMapMaxBytes` | number, `131072` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBytes`; stops the build deterministically |
+| `melink.context.repoMapBuildMs` | number, `750` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBuildMs`; per-read timeout also bounds a never-resolving read |
+| `melink.context.repoMapMaxChars` | number, `1200` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxChars`; bounds the rendered per-turn block |
 | `melink.context.exclude` | array, *(empty)* | **Added by this ticket** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
 
 ## Credentials

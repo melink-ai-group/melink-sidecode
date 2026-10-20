@@ -142,7 +142,7 @@ function opencodePrompt(
       : summary
         ? compactionPreface(summary)
         : undefined;
-  const parts = [instructions, preface, block, context?.attachedFile, request.text].filter(
+  const parts = [instructions, preface, block, context?.repoMap, context?.attachedFile, request.text].filter(
     (part): part is string => Boolean(part && part.trim().length > 0)
   );
   return parts.join('\n\n');
