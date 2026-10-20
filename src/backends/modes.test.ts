@@ -32,6 +32,11 @@ test('every mode carries the shared plan-document contract', () => {
   assert.match(ask, /write or revise the plan/i);
   assert.match(agent, /sidecode-question/);
   assert.match(plan, /sidecode-question/);
+  assert.match(agent, /answer is skipped or omitted/i);
+  assert.match(plan, /do not assume an answer/i);
+  assert.match(agent, /least-destructive option/i);
+  assert.match(plan, /state the assumption/i);
+  assert.equal(ask.includes('least-destructive'), false);
   assert.match(plan, /do not write the plan yet/i);
   assert.match(ask, /do not emit a sidecode-question/i);
   for (const text of [agent, plan, ask]) {
