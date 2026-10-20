@@ -2,8 +2,12 @@ name: Release
 
 # GitHub runs a push workflow from the branch that received the push.
 # This file must stay on main so a push to main packages and publishes.
+# Pull requests only run the verify job; the release job is guarded below.
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
 
@@ -15,8 +19,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # T70's `quality` job is not present on this branch. When it lands, add
+  # `npm run verify` there instead of keeping this standalone job.
+  verify:
+    name: Verify docs match the tree
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify documentation drift
+        run: npm run verify
+
   package-and-release:
     name: Build, package, and publish
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
