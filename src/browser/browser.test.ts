@@ -5,9 +5,11 @@ import {
   browserSkillEnabled,
   browserSkillEnabledFor,
   configuredSettingValue,
-  navigationDecision
+  navigationDecision,
+  originApprovalCopy,
+  SessionOrigins
 } from './policy.ts';
-import { runBrowserTool, type BrowserActions } from './tools.ts';
+import { runBrowserTool, type BrowserActions, type OriginApproval, type ToolResult } from './tools.ts';
 import { buildOpencodeConfig } from '../backends/opencode/config.ts';
 
 const command: BrowserCommand = {
@@ -36,41 +38,153 @@ test('configuredSettingValue ignores package defaults', () => {
   assert.equal(configuredSettingValue({ workspaceValue: true, globalValue: false }), true);
 });
 
-test('navigation allows localhost and asks before any other origin', () => {
-  const allowed = new Set<string>();
-  assert.equal(navigationDecision('http://localhost:3000/app', allowed), 'allow');
-  assert.equal(navigationDecision('http://127.0.0.1:5173/', allowed), 'allow');
-  assert.equal(navigationDecision('http://[::1]/', allowed), 'allow');
-  assert.equal(navigationDecision('https://example.com/page', allowed), 'ask');
-  assert.equal(navigationDecision('file:///C:/secret.html', allowed), 'invalid');
-  allowed.add('https://example.com');
-  assert.equal(navigationDecision('https://example.com/other', allowed), 'allow');
+test('navigation asks for localhost too until that exact origin is granted', () => {
+  const granted = new SessionOrigins();
+  assert.equal(navigationDecision('http://localhost:3000/app', granted), 'ask');
+  assert.equal(navigationDecision('http://127.0.0.1:5173/', granted), 'ask');
+  assert.equal(navigationDecision('http://[::1]/', granted), 'ask');
+  assert.equal(navigationDecision('https://example.com/page', granted), 'ask');
+
+  granted.add('http://localhost:3000');
+  assert.equal(navigationDecision('http://localhost:3000/other', granted), 'allow');
+  assert.equal(navigationDecision('http://localhost:5173/', granted), 'ask');
+  assert.equal(navigationDecision('http://127.0.0.1:3000/', granted), 'ask');
+  assert.equal(navigationDecision('http://[::1]:3000/', granted), 'ask');
+  assert.equal(navigationDecision('https://localhost:3000/', granted), 'ask');
+  assert.equal(navigationDecision('https://example.com/page', granted), 'ask');
 });
 
-test('a denied external address is not opened, and an allowed one is', async () => {
+test('a grant covers only the same scheme, host alias and port', () => {
+  const granted = new SessionOrigins().add('https://example.com');
+  assert.equal(navigationDecision('https://example.com/other', granted), 'allow');
+  assert.equal(navigationDecision('http://example.com/', granted), 'ask');
+  assert.equal(navigationDecision('https://example.com:8443/', granted), 'ask');
+  assert.equal(navigationDecision('https://www.example.com/', granted), 'ask');
+});
+
+test('only http and https addresses are valid', () => {
+  const granted = new SessionOrigins();
+  for (const url of [
+    'file:///C:/secret.html',
+    'javascript:alert(1)',
+    'ftp://example.com/file',
+    'about:blank',
+    'data:text/html,hi',
+    'not a url'
+  ]) {
+    assert.equal(navigationDecision(url, granted), 'invalid', url);
+  }
+});
+
+test('allow once opens one navigation and asks again on the next call', async () => {
   const opened: string[] = [];
   const actions = fakeActions(opened);
-  const denied = await runBrowserTool(actions, 'browser_navigate', { url: 'https://example.com' }, async () => false, new Set());
-  assert.equal(denied.isError, true);
-  assert.deepEqual(opened, []);
+  const granted = new SessionOrigins();
+  const asked: string[] = [];
+  const allow = async (origin: string): Promise<OriginApproval> => {
+    asked.push(origin);
+    return 'once';
+  };
 
-  const allowed = new Set<string>();
-  const accepted = await runBrowserTool(
+  const first = await runBrowserTool(actions, 'browser_navigate', { url: 'http://localhost:3000/' }, allow, granted);
+  const second = await runBrowserTool(actions, 'browser_navigate', { url: 'http://localhost:3000/next' }, allow, granted);
+
+  assert.equal(first.isError, undefined);
+  assert.equal(second.isError, undefined);
+  assert.deepEqual(opened, ['http://localhost:3000/', 'http://localhost:3000/next']);
+  assert.deepEqual(asked, ['http://localhost:3000', 'http://localhost:3000']);
+  assert.equal(granted.has('http://localhost:3000'), false);
+});
+
+test('allow for this session grants the exact origin and stops asking until cleared', async () => {
+  const opened: string[] = [];
+  const actions = fakeActions(opened);
+  const granted = new SessionOrigins();
+  let asked = 0;
+  const allow = async (origin: string): Promise<OriginApproval> => {
+    asked += 1;
+    granted.add(origin);
+    return 'session';
+  };
+
+  await runBrowserTool(actions, 'browser_navigate', { url: 'http://localhost:3000/a' }, allow, granted);
+  await runBrowserTool(actions, 'browser_navigate', { url: 'http://localhost:3000/b' }, allow, granted);
+  assert.equal(asked, 1);
+  assert.equal(granted.has('http://localhost:3000'), true);
+
+  const other = await runBrowserTool(
     actions,
     'browser_navigate',
-    { url: 'https://example.com/docs' },
+    { url: 'http://localhost:5173/' },
     async (origin) => {
-      allowed.add(origin);
-      return true;
+      asked += 1;
+      granted.add(origin);
+      return 'session';
     },
-    allowed
+    granted
   );
-  assert.equal(accepted.isError, undefined);
-  assert.deepEqual(opened, ['https://example.com/docs']);
+  assert.equal(other.isError, undefined);
+  assert.equal(asked, 2);
 
-  const local = await runBrowserTool(actions, 'browser_navigate', { url: 'http://localhost:3000' }, async () => false, new Set());
-  assert.equal(local.isError, undefined);
-  assert.deepEqual(opened, ['https://example.com/docs', 'http://localhost:3000']);
+  granted.clear();
+  assert.equal(granted.has('http://localhost:3000'), false);
+  assert.equal(granted.has('http://localhost:5173'), false);
+  assert.equal(navigationDecision('http://localhost:3000/', granted), 'ask');
+});
+
+test('the tool reports the choice without granting the origin itself', async () => {
+  const opened: string[] = [];
+  const granted = new SessionOrigins();
+  const result = await runBrowserTool(
+    fakeActions(opened),
+    'browser_navigate',
+    { url: 'https://example.com/docs' },
+    async () => 'session',
+    granted
+  );
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(opened, ['https://example.com/docs']);
+  assert.equal(granted.has('https://example.com'), false);
+});
+
+test('a denied origin is not opened and the error says it was denied', async () => {
+  const opened: string[] = [];
+  const actions = fakeActions(opened);
+  const denied = await runBrowserTool(
+    actions,
+    'browser_navigate',
+    { url: 'https://example.com' },
+    async () => 'deny',
+    new SessionOrigins()
+  );
+  assert.equal(denied.isError, true);
+  assert.match(resultText(denied), /Navigation to https:\/\/example\.com was denied\./);
+  assert.deepEqual(opened, []);
+
+  const local = await runBrowserTool(
+    actions,
+    'browser_navigate',
+    { url: 'http://localhost:3000' },
+    async () => 'deny',
+    new SessionOrigins()
+  );
+  assert.equal(local.isError, true);
+  assert.match(resultText(local), /denied/);
+  assert.deepEqual(opened, []);
+});
+
+test('origin approval copy names the ungated actions and both allow choices', () => {
+  const copy = originApprovalCopy('http://localhost:3000');
+  assert.match(copy, /http:\/\/localhost:3000/);
+  for (const action of ['browser_click', 'browser_type', 'browser_press', 'browser_snapshot']) {
+    assert.match(copy, new RegExp(action));
+  }
+  assert.match(copy, /Allow once/);
+  assert.match(copy, /Allow for this session/);
+  assert.match(copy, /one navigation/);
+  assert.match(copy, /until the browser is stopped/);
+  assert.match(copy, /browser tab you are watching/);
+  assert.match(copy, /[Rr]edirects and in-page link or form navigation are not re-prompted/);
 });
 
 test('codex thread config includes the browser server only when the skill is on', () => {
@@ -127,6 +241,10 @@ test('browser permission keys allow the server and each tool', () => {
   assert.equal(keys.browser_navigate, 'allow');
   assert.equal(keys.browser_click, 'allow');
 });
+
+function resultText(result: ToolResult): string {
+  return result.content.map((part) => part.text ?? '').join('\n');
+}
 
 function fakeActions(opened: string[]): BrowserActions {
   return {
