@@ -323,6 +323,7 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.defaults.permissionLevel` | `default` | Defaults → Default permission level |
 | `melink.defaults.mode` | `agent` | Defaults → Default mode |
 | `melink.defaults.thinking` | *(empty)* | Defaults → Default thinking level |
+| `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
 | `melink.ollama.token` (secret, not a setting) | *(none)* | Providers → Ollama Cloud → API key (Save / Clear) |
 
 Codex has no stored credential of its own: it signs in through its own CLI, and
@@ -470,6 +471,28 @@ changed file with its status chip (**Created**, **Deleted**, **Renamed**, or
 **Modified**), per-file `+`/`-` stats, a total, and the decision state of each
 row (**No decision yet**, **Kept**, or **Rejected**). Open a row's chevron to
 read its inline diff. A turn that changed nothing shows no panel at all.
+
+### Opt-in diff review
+
+`melink.review.diffReview` is **off by default**. When you enable it, a live
+turn that changed files gets one additional advisory pass before the review
+panel is repainted. It is read-only: it never edits files, runs shell commands,
+asks for approvals, or keeps/rejects changes. **Keep** and **Reject** remain the
+only actions, and they are unchanged.
+
+The default first pass is local and deterministic. It reads the request that
+opened the turn and the changed paths, and reports explicit paths the request
+named but the turn did not change. It does **not** detect semantic regressions,
+incomplete edits inside a file it did change, or paths mentioned only indirectly.
+The prompt and runner seam is in place for a future model reviewer, but this
+release runs only the local pass and never calls a model; adding one will not
+change the advisory contract.
+
+A review is stored per turn and restored on reload; **no reviewer runs again on
+reload**. If the pass throws or misses its 15-second deadline, the section shows
+a visible, non-blocking notice and the change decisions stay available. The
+setting is **application-scoped**, so only your user setting can enable it; a
+workspace setting cannot.
 
 The panel owns a decision per file (and, from the row's actions, per hunk); it
 never decides anything for you. A decision is only made when you click:

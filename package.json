@@ -253,6 +253,12 @@
           "default": [],
           "markdownDescription": "Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. An excluded path is never read, and a selection inside one is reported as excluded rather than quoted."
         },
+        "melink.review.diffReview": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Run an opt-in, read-only **diff review** after a turn changes files. It is advisory only: it never edits files, runs shell commands, asks for approvals, or keeps/rejects changes. The first pass is local and deterministic (it flags explicit paths the request named but the turn did not change); a prompt/runner seam is ready for a future model reviewer."
+        },
         "melink.skills.browserCodex": {
           "type": "boolean",
           "default": true,

@@ -1018,6 +1018,31 @@ test('a review snapshot for the active thread replaces the visible one', () => {
   assert.equal(withReview.turnChanges[0]?.review?.turnId, 'turn_1');
 });
 
+test('a changes/review carrying a diffReview survives the reducer intact', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
+  const diffReview = {
+    status: 'reviewed' as const,
+    findings: [
+      { path: 'src/b.ts', line: 1, severity: 'warning' as const, message: 'The request mentions src/b.ts, but the turn did not change it.' }
+    ]
+  };
+  const reviewed = reduce(active, {
+    type: 'changeReview',
+    review: {
+      backendId: 'codex',
+      threadId: 't1',
+      turnId: 'turn_1',
+      files: [],
+      additions: 0,
+      deletions: 0,
+      fullyDecided: false,
+      diffReview
+    }
+  });
+
+  assert.deepEqual(reviewed.turnChanges[0]?.review?.diffReview, diffReview);
+});
+
 test('a background thread review never replaces the visible one', () => {
   const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
   const background = reduce(active, {

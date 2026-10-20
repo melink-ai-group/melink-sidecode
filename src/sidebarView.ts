@@ -87,8 +87,15 @@ import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from
 import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
 import { anyCategoryEnabled } from './context/contextView';
-import type { ChangeHunkView } from './changes/changeStore';
 import type { CheckpointPlanRecord, CheckpointPlanState } from './changes/journal';
+import { REVIEW_HUNK_LINE_LIMIT, capReviewLines } from './changes/reviewLines.ts';
+import { ReviewStore } from './review/reviewStore.ts';
+import {
+  DIFF_REVIEW_TIMEOUT_MS,
+  runTurnDiffReview,
+  shouldRunDiffReview,
+  turnRequestText
+} from './review/turnReview.ts';
 import { VscodeChangeJournal } from './changes/vscodeJournal';
 import { VscodeChangeStore } from './changes/vscodeChangeStore';
 import { VscodeCheckpointStore } from './changes/vscodeCheckpoint';
@@ -263,6 +270,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private readonly changeStore: VscodeChangeStore;
   /**
+   * The opt-in advisory review result for a finished turn. It is workspace
+   * scoped and bounded, and is read only when the review snapshot is composed;
+   * a reload never runs the reviewer again.
+   */
+  private readonly reviewStore: ReviewStore;
+  /**
    * Per-message checkpoints over the journal's send-time snapshots. The store
    * reverts files. This view rewinds the transcript and the plans, and keeps
    * the undo point that puts them back.
@@ -329,6 +342,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // The decision store annotates the journal's recorded bytes; it shares the
     // journal instance so a view read and a decision read agree on content.
     this.changeStore = new VscodeChangeStore(context, { artifacts: this.changeJournal });
+    this.reviewStore = new ReviewStore(context.workspaceState);
     // Checkpoints share the same journal and the decision store, so a restore
     // can invalidate a superseded decision and use the recorded before/after
     // bytes the review path already reads.
@@ -696,16 +710,50 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!set) {
       return;
     }
+    const shouldReview = shouldRunDiffReview(this.diffReviewEnabled(), set.entries);
     // Only the active conversation's own turn is pushed: a background thread's
-    // change set must not replace what the visible surface is showing.
+    // change set must not replace what the visible surface is showing. Its
+    // review is still stored, so switching to that chat restores the findings.
     if (this.activeThread?.backendId !== set.backendId || this.activeThread?.threadId !== set.threadId) {
+      if (shouldReview) {
+        await this.reviewFinishedTurn(set);
+      }
       return;
     }
     this.postTurnChanged(set);
+    if (shouldReview) {
+      await this.reviewFinishedTurn(set);
+    }
     await this.postChangeReview(set.backendId, set.threadId, set.turnId);
     // A turn that just touched files makes its opening message a checkpoint, so
     // the per-message entry point offers it without waiting for a reload.
     await this.postCheckpoints(set.backendId, set.threadId);
+  }
+
+  /** True when the user opted into the advisory second-pass diff review. */
+  private diffReviewEnabled(): boolean {
+    return vscode.workspace.getConfiguration('melink.review').get<boolean>('diffReview', false);
+  }
+
+  /**
+   * Run and persist the opt-in review once, at live turn finish. A reload reads
+   * the stored result through `postChangeReview` and never calls this.
+   */
+  private async reviewFinishedTurn(set: TurnChangeSet): Promise<void> {
+    const view = await this.changeStore.view(set.backendId, set.threadId, set.turnId);
+    if (!view) {
+      return;
+    }
+    const request = turnRequestText(
+      this.store.getTranscript(set.backendId, set.threadId),
+      set.messageId
+    );
+    await runTurnDiffReview({
+      view,
+      ...(request === undefined ? {} : { request }),
+      store: this.reviewStore,
+      timeoutMs: DIFF_REVIEW_TIMEOUT_MS
+    });
   }
 
   /**
@@ -756,10 +804,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!review) {
       return;
     }
+    const diffReview = this.diffReviewEnabled()
+      ? this.reviewStore.get(backendId, threadId, turnId)
+      : undefined;
     this.post({
       type: 'changes/review',
       review: {
         ...review,
+        ...(diffReview === undefined ? {} : { diffReview }),
         files: review.files.map((file) =>
           file.hunks.length === 0
             ? file
@@ -780,7 +832,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!review || !file) {
       return;
     }
-    const capped = capReviewLines(file.hunks, 120);
+    const capped = capReviewLines(file.hunks, REVIEW_HUNK_LINE_LIMIT);
     this.post({ type: 'changes/hunks', turnId: review.turnId, path, hunks: capped.hunks, truncated: capped.truncated });
   }
 
@@ -4975,26 +5027,6 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ps1: 'text/x-powershell',
   sql: 'text/x-sql'
 };
-
-/** Keep the inline review to the first lines of an expanded file. */
-function capReviewLines(hunks: ChangeHunkView[], limit: number): { hunks: ChangeHunkView[]; truncated: boolean } {
-  let remaining = limit;
-  let truncated = false;
-  const capped: ChangeHunkView[] = [];
-  for (const hunk of hunks) {
-    if (remaining <= 0) {
-      truncated = true;
-      break;
-    }
-    const lines = hunk.lines.slice(0, remaining);
-    if (lines.length < hunk.lines.length) {
-      truncated = true;
-    }
-    remaining -= lines.length;
-    capped.push({ ...hunk, lines });
-  }
-  return { hunks: capped, truncated };
-}
 
 /** Provider-neutral mime for a filename; `application/octet-stream` when unknown. */
 function mimeForName(name: string): string {
