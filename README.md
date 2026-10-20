@@ -269,6 +269,11 @@ opencode and Codex paths were verified against the versions pinned below.
   system/instructions flag, so the snapshot is delivered by priming the turn text.
   This is a deliberate fallback, not an oversight.
 
+The bundled opencode and ast-grep installers download these exact tags and
+verify each archive's SHA-256 before writing. See
+[docs/cli-pins.md](docs/cli-pins.md) for the pinned digests and the bump
+procedure.
+
 Both providers are also spawned with the workspace root as their working
 directory, so their own project discovery reads the real `AGENTS.md` even when the
 rendered snapshot is the only thing the model is explicitly handed.
