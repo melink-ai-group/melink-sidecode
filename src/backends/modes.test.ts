@@ -49,6 +49,34 @@ test('every mode carries the shared plan-document contract', () => {
   assert.equal(ask.includes('.melink/plans/'), false);
 });
 
+test('Agent and Plan append the frontend checklist for a detected stack', () => {
+  for (const stack of ['react', 'next', 'vue'] as const) {
+    for (const mode of ['agent', 'plan'] as const) {
+      const base = modeDescriptor(mode).developerInstructions ?? '';
+      const text = modeInstructions(mode, stack) ?? '';
+      assert.ok(text.startsWith(base), `${mode}/${stack} must keep the base text intact`);
+      assert.match(text, /Frontend checklist/);
+      assert.ok(text.length > base.length);
+    }
+  }
+  assert.match(modeInstructions('agent', 'next')!, /hydration/i);
+  assert.match(modeInstructions('plan', 'vue')!, /v-for/i);
+});
+
+test('Ask never receives the frontend checklist, even for a frontend stack', () => {
+  const base = modeDescriptor('ask').developerInstructions;
+  assert.equal(modeInstructions('ask', 'react'), base);
+  assert.equal(modeInstructions('ask', 'next'), base);
+  assert.doesNotMatch(modeInstructions('ask', 'react') ?? '', /Frontend checklist/);
+});
+
+test('a non-frontend project leaves the base instructions unchanged', () => {
+  for (const mode of DEFAULT_MODES) {
+    assert.equal(modeInstructions(mode, 'none'), modeDescriptor(mode).developerInstructions);
+  }
+  assert.equal(modeInstructions('agent'), modeDescriptor('agent').developerInstructions);
+});
+
 test('an unknown mode degrades to the agent default', () => {
   assert.equal(isDefaultMode('not-a-mode'), false);
   assert.equal(modeDescriptor('not-a-mode' as never).mode, 'agent');

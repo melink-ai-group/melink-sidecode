@@ -36,6 +36,7 @@ import type {
   ProjectSnapshot
 } from './projectContext.ts';
 import { applyContextExclusions, buildContextView, snapshotForDelivery, type ContextView } from './contextView.ts';
+import { detectFrontendStack } from './frontendStack.ts';
 
 export interface ContextDeliveryOptions {
   /** The reads the snapshot service exposes. Never a workspace-root getter. */
@@ -190,6 +191,9 @@ export class ContextDelivery {
   async snapshot(input: GetSnapshotInput = {}): Promise<PrimedSnapshot> {
     try {
       const snapshot = await this.reads.getSnapshot(input);
+      // Detected from the raw picture, before any per-turn rendering or
+      // exclusion filtering, so the thread's stack is stable and honest.
+      const frontendStack = detectFrontendStack(snapshot);
       const filtered = snapshotForDelivery(
         applyContextExclusions(snapshot, this.exclusions),
         this.includeViewedFile
@@ -198,9 +202,12 @@ export class ContextDelivery {
       const workspaceRoot = filtered.workspace.roots[0];
       const attachedFile = await this.viewedFileTurnBlock();
       if (!rendered.ok) {
-        return { payload: { notice: rendered.notice, priming: true, workspaceRoot, attachedFile } };
+        return { payload: { notice: rendered.notice, priming: true, workspaceRoot, attachedFile, frontendStack } };
       }
-      return { payload: { snapshot: rendered.text, priming: true, workspaceRoot, attachedFile }, snapshot };
+      return {
+        payload: { snapshot: rendered.text, priming: true, workspaceRoot, attachedFile, frontendStack },
+        snapshot
+      };
     } catch {
       return { payload: { notice: CONTEXT_UNAVAILABLE_NOTICE, priming: true } };
     }
@@ -233,11 +240,17 @@ export class ContextDelivery {
     const priming = state.needPrime;
     state.needPrime = false;
     this.states.set(threadKey, state);
+    // `buildDelta` has stored the current raw picture, so the stack travels on
+    // every payload (snapshot, delta or notice) for this thread. No snapshot at
+    // all means no detection, which is different from a non-frontend project's
+    // explicit `none`.
+    const frontendStack = state.last ? detectFrontendStack(state.last) : undefined;
     return {
       ...(state.snapshotText ? { snapshot: state.snapshotText } : {}),
       ...(delta ? { delta } : {}),
       ...(!state.snapshotText && state.notice ? { notice: state.notice } : {}),
       ...(state.last ? { workspaceRoot: state.last.workspace.roots[0] } : {}),
+      ...(frontendStack ? { frontendStack } : {}),
       attachedFile: await this.viewedFileTurnBlock(),
       priming
     };

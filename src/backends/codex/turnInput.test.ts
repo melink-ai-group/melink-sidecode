@@ -115,3 +115,38 @@ test('a picked image is a localImage part and a clipboard image is an image url'
   assert.deepEqual(input[2], { type: 'image', url: 'data:image/png;base64,aaaa' });
   assert.equal(input.length, 3);
 });
+
+test('an acting turn carries the frontend checklist for its detected stack', () => {
+  for (const mode of ['agent', 'plan'] as const) {
+    const [text] = buildCodexTurnInput({
+      mode,
+      text: 'build the page',
+      frontendStack: 'react'
+    });
+    assert.equal(text.type, 'text');
+    if (text.type === 'text') {
+      assert.match(text.text, /Frontend checklist/);
+      assert.match(text.text, /state and effects/i);
+      assert.match(text.text, /build the page/);
+    }
+  }
+});
+
+test('Ask and a non-frontend turn keep the base instructions only', () => {
+  const [ask] = buildCodexTurnInput({
+    mode: 'ask',
+    text: 'what does this do',
+    frontendStack: 'next'
+  });
+  const [none] = buildCodexTurnInput({
+    mode: 'agent',
+    text: 'refactor the parser',
+    frontendStack: 'none'
+  });
+  for (const text of [ask, none]) {
+    assert.equal(text.type, 'text');
+    if (text.type === 'text') {
+      assert.equal(text.text.includes('Frontend checklist'), false);
+    }
+  }
+});

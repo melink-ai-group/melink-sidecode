@@ -850,6 +850,7 @@ export class CodexBackend implements AgentBackend {
     const input = buildCodexTurnInput({
       mode,
       text: request.text,
+      frontendStack: request.context?.frontendStack,
       context: request.context,
       attachments: request.attachments,
       bakedMode,
