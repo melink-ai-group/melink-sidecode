@@ -44,6 +44,20 @@ effects, and the storage/pruning behaviour are documented in
 [docs/usage.md](docs/usage.md#checkpoints), and the comparison table at
 [docs/usage.md](docs/usage.md#approvals-vs-review-vs-checkpoints).
 
+### Opt-in diff review
+
+`melink.review.diffReview` (default **off**, application scope) adds an advisory
+second pass to the **Changes this turn** panel. It is strictly read-only: it
+never edits files, runs shell commands, requests approvals, or keeps/rejects
+anything, and **Keep** / **Reject** behave exactly as before. The first pass is
+local and deterministic: it flags explicit paths the request named but the turn
+did not change. It does not claim to find semantic regressions. The prompt/runner
+seam is ready for a future model reviewer, but this release runs only the local
+pass and never calls a model. Turn reviews are stored per turn and
+restored on reload; a failed or timed-out pass is a visible, non-blocking notice.
+Because the setting is application-scoped, only a user setting can enable it;
+a workspace setting cannot turn it on.
+
 ## Requirements
 
 - VS Code **1.93.0** or newer, or an Open VSX host (Cursor, VSCodium, …).
@@ -148,6 +162,7 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 | `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
+| `melink.review.diffReview` | `false` | Opt-in, read-only advisory diff review after a turn changes files. Never edits, runs commands, asks for approvals, or keeps/rejects. Application scope, so only a user setting can enable it. |
 | `melink.skills.browserCodex` | `true` | Let Codex open a browser tab in the editor. |
 | `melink.skills.browserOpencode` | `true` | Let OpenCode open a browser tab in the editor. |
 | `melink.skills.zvecGrep` | `false` | Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode (semantic + keyword + ripgrep MCP). |
