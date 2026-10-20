@@ -229,7 +229,9 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       thinking level and a max context and confirm the turn still completes.
       Select a model that reports **no** reasoning control, set a thinking level,
       and confirm a notice says that control is unsupported instead of a value
-      being sent.
+      being sent. In an expanded reasoning card, select body text and release
+      the mouse: the card stays open. Click a link, button, or inline code: the
+      card stays open; click plain body text: it collapses.
 - [ ] 14j. **Cancel.** Start a long turn and press **Stop**. Confirm the
       transcript keeps the partial output, shows *Stopped* (not an error), the
       input is usable again, and no `opencode` process survives (`tasklist /FI
