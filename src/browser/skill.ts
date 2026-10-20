@@ -166,7 +166,8 @@ export class BrowserSkill {
       snapshot: () => page.snapshot(),
       click: (input) => page.click(input),
       type: (text, selector) => page.type(text, selector),
-      press: (key) => page.press(key)
+      press: (key) => page.press(key),
+      console: async () => page.consoleText()
     };
   }
 
