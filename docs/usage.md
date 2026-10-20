@@ -425,6 +425,33 @@ any pattern you add to `melink.context.exclude`, is honored.
 No project-derived content from the picture is written to disk, logs, output
 channels, telemetry, or error text.
 
+## Browser origin approvals
+
+Browser tools open a tab in the editor that you watch. Nothing is opened without
+your decision, and **localhost is not auto-allowed**.
+
+The first navigation to any `http(s)` origin asks you once. The comparison is
+exact: scheme, host and port. Granting `http://localhost:3000` does **not** grant
+`http://localhost:5173`, `http://127.0.0.1:3000`, `http://[::1]:3000`, or
+`https://localhost:3000`. Non-http(s) addresses are rejected without a prompt.
+
+| Choice | Effect |
+|---|---|
+| **Allow once** | Opens this one navigation. Nothing is remembered, so the next navigation to the same origin asks again. |
+| **Allow for this session** | Opens this navigation and remembers this exact origin for later navigations until the browser is stopped. Session grants are cleared when the browser skill is stopped — both providers off or extension deactivate — not merely when switching providers. |
+| **Deny** | Does not open the address; the agent gets a clear "navigation was denied" error. |
+
+Approval is for the URL passed to `browser_navigate`. Redirects and in-page link
+or form navigation are **not** re-prompted, so the tab can reach another page
+without a new decision. Because approving an origin also permits the actions
+below, the agent can act on a page reached that way. Navigate explicitly if you
+want a fresh approval.
+
+Approving an origin approves the whole tab session for that origin: the agent
+may also use `browser_click`, `browser_type`, `browser_press`, and
+`browser_snapshot` there while you watch. There is no separate prompt for each
+of those actions.
+
 ## Permission levels and approvals
 
 The permission level governs **when Codex asks you**; the sandbox Codex enforces
