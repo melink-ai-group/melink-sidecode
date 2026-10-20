@@ -47,7 +47,9 @@ effects, and the storage/pruning behaviour are documented in
 ## Requirements
 
 - VS Code **1.93.0** or newer, or an Open VSX host (Cursor, VSCodium, …).
-- **Node.js 20+** only if you build from source.
+- **Node.js 20+** to build from source. Tests and typecheck need **Node.js 22.6+
+  (22.x)** because `npm test` runs with `--experimental-strip-types`; CI uses
+  Node **22.12**.
 - At least one provider:
   - **Ollama Cloud:** an API token from <https://ollama.com>.
   - **Codex CLI:** install the `codex` CLI and sign in (`codex login`). The
