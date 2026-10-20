@@ -1918,7 +1918,8 @@ export function App(): JSX.Element {
     turnId: string,
     target: { kind: 'file'; path: string } | { kind: 'all' },
     decision: 'accepted' | 'rejected',
-    conflictResolution?: ConflictResolution
+    conflictResolution?: ConflictResolution,
+    overrideChecks?: boolean
   ): void => {
     const threadId = activeThreadIdRef.current;
     const backendId = selectedBackendIdRef.current;
@@ -1936,7 +1937,8 @@ export function App(): JSX.Element {
             threadId,
             turnId,
             decision,
-            ...(conflictResolution !== undefined ? { conflictResolution } : {})
+            ...(conflictResolution !== undefined ? { conflictResolution } : {}),
+            ...(overrideChecks !== undefined ? { overrideChecks } : {})
           }
         : {
             type: 'changes/decide' as const,
@@ -1945,7 +1947,8 @@ export function App(): JSX.Element {
             turnId,
             path: target.path,
             decision,
-            ...(conflictResolution !== undefined ? { conflictResolution } : {})
+            ...(conflictResolution !== undefined ? { conflictResolution } : {}),
+            ...(overrideChecks !== undefined ? { overrideChecks } : {})
           };
     runHostClick('decide', () => {
       startTransition(() => dispatch({ type: 'changeDeciding', value: true }));
@@ -1953,8 +1956,8 @@ export function App(): JSX.Element {
     });
   };
 
-  const keepChange = (turnId: string, path: string): void => {
-    postChangeDecision(turnId, { kind: 'file', path }, 'accepted');
+  const keepChange = (turnId: string, path: string, overrideChecks?: boolean): void => {
+    postChangeDecision(turnId, { kind: 'file', path }, 'accepted', undefined, overrideChecks);
   };
 
   const resolveConflict = (turnId: string, path: string, resolution: ConflictResolution): void => {
@@ -1963,8 +1966,8 @@ export function App(): JSX.Element {
     postChangeDecision(turnId, { kind: 'file', path }, 'rejected', resolution);
   };
 
-  const keepAll = (turnId: string): void => {
-    postChangeDecision(turnId, { kind: 'all' }, 'accepted');
+  const keepAll = (turnId: string, overrideChecks?: boolean): void => {
+    postChangeDecision(turnId, { kind: 'all' }, 'accepted', undefined, overrideChecks);
   };
 
   const loadChangeHunks = (turnId: string, path: string): void => {
@@ -2231,13 +2234,13 @@ export function App(): JSX.Element {
           onOpenDiff={(path) => openChangeDiff(review.turnId, path)}
           onOpenAllInEditor={() => openChangeView(review.turnId)}
           onRevealInSourceControl={revealChangeInSourceControl}
-          onKeep={(path) => keepChange(review.turnId, path)}
+          onKeep={(path, overrideChecks) => keepChange(review.turnId, path, overrideChecks)}
           onRequestReject={(scope, paths) =>
             dispatch({ type: 'requestChangeRejectConfirmation', turnId: review.turnId, scope, paths })
           }
           onCancelReject={() => dispatch({ type: 'cancelChangeRejectConfirmation' })}
           onConfirmReject={confirmChangeReject}
-          onKeepAll={() => keepAll(review.turnId)}
+          onKeepAll={(overrideChecks) => keepAll(review.turnId, overrideChecks)}
           onResolveConflict={(path, resolution) => resolveConflict(review.turnId, path, resolution)}
           onLoadHunks={(path) => loadChangeHunks(review.turnId, path)}
         />

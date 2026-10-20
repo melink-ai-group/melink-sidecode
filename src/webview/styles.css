@@ -6196,6 +6196,126 @@ button.context-meter:hover {
   color: var(--vscode-descriptionForeground);
 }
 
+/* The check summary stays in the collapsed header; the word states the outcome. */
+.changes-review__checks-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__checks-summary--failed {
+  color: var(--vscode-errorForeground);
+  font-weight: 600;
+}
+
+.changes-review__checks-summary .spinner {
+  width: 11px;
+  height: 11px;
+}
+
+.changes-review__checks-summary .ico {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.changes-review__checks {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.changes-review__checks-head {
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.check-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.check-row {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, max-content) minmax(0, 1fr) max-content;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.check-row__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.check-row--failed .check-row__status {
+  color: var(--vscode-errorForeground);
+}
+
+.check-row--running .check-row__status {
+  color: var(--vscode-descriptionForeground);
+}
+
+.check-row__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-foreground);
+}
+
+.check-row__duration {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-descriptionForeground);
+}
+
+.check-row__detail {
+  grid-column: 2 / -1;
+  max-height: 5.5em;
+  margin: 0;
+  padding: 3px 5px;
+  overflow: auto;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-textCodeBlock-background);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--vscode-foreground);
+}
+
+.check-row__reason {
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.changes-review__confirm--checks > .ico {
+  color: var(--vscode-editorWarning-foreground);
+}
+
 .changes-review__list {
   list-style: none;
   margin: 0;

@@ -1,4 +1,5 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
+import type { CheckRunView } from '../review/checks.ts';
 import { filterListedFiles, listedForReview, reviewSources, workspaceRootOf } from './ignore.ts';
 import { relPathKey, type JournalFileEntry, type JournalStorage, type JournalTurn } from './journal.ts';
 import { applyRejectedHunks, diffLines, type DiffLine } from './diff.ts';
@@ -98,6 +99,8 @@ export interface ChangeView {
   deletions: number;
   /** True when every file and hunk has a non-`pending` decision. */
   fullyDecided: boolean;
+  /** The post-turn check run attached by the host, when one exists. */
+  checks?: CheckRunView;
 }
 
 /** A decision request for one file, or one hunk when `hunkId` is set. */

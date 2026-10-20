@@ -785,6 +785,8 @@ export type WebviewToHostMessage =
       hunkId?: string;
       decision: 'accepted' | 'rejected';
       conflictResolution?: ConflictResolution;
+      /** Explicit user confirmation to keep despite failed post-turn checks. */
+      overrideChecks?: boolean;
     }
   /**
    * Decide every file in a turn. All files are attempted and every outcome is
@@ -798,6 +800,8 @@ export type WebviewToHostMessage =
       turnId: string;
       decision: 'accepted' | 'rejected';
       conflictResolution?: ConflictResolution;
+      /** Explicit user confirmation to keep despite failed post-turn checks. */
+      overrideChecks?: boolean;
     }
   /**
    * Read the per-message checkpoints for a thread. Every sent user message is

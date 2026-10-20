@@ -22,6 +22,15 @@ what actually consumes it (so no control is inert).
 | `melink.context.includeChangedFiles` | boolean, `true` | **Added by this ticket** — Context → Included by default | `contextSettings()` → `ProjectContext.getDelta`; off omits the changed-files notice |
 | `melink.context.maxBytes` | number, `20480` | **Added by this ticket** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
 | `melink.context.exclude` | array, *(empty)* | **Added by this ticket** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
+| `melink.review.checks.enabled` | boolean, `true` | **Pending UI pass** - read directly by `CheckHost`; the review panel will show the state | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
+| `melink.review.checks.commands` | array, *(empty)* | **Pending UI pass** - read directly by `CheckHost` | `readCheckSettingsFrom()` -> `detectDefaultChecks` when unset, explicit `[]` means run nothing |
+| `melink.review.checks.timeoutSeconds` | number, `120` | **Pending UI pass** - read directly by `CheckHost` | `clampCheckTimeoutSeconds()` -> `runChecks` per-check timeout, 5-600 |
+
+## Post-turn check state (`src/review/checkStore.ts`)
+
+| Key | Scope | Purpose |
+|---|---|---|
+| `melink.review.checks` | workspace | Newest 50 check runs, keyed `backendId:threadId:turnId`; a stored `running` run is read back as `skipped` after a reload. This is state, not a setting, and it shares the name with the configuration section only by design. |
 
 ## Credentials
 

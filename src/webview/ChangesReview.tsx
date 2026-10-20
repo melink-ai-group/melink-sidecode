@@ -21,6 +21,7 @@ import {
   SearchIcon,
   TrashIcon
 } from './Icons';
+import { checkRows, checkSummary, keepGate, type CheckRowView } from './checkReviewView';
 import { prettyPath } from './prettyPath.ts';
 
 /**
@@ -63,13 +64,14 @@ export interface ChangesReviewProps {
   onOpenAllInEditor: () => void;
   /** Fallback: reveal a changed file / open the Source Control view. */
   onRevealInSourceControl: (absPath?: string) => void;
-  onKeep: (path: string) => void;
+  /** `overrideChecks` is true only after the user confirmed the failed-check bypass. */
+  onKeep: (path: string, overrideChecks?: boolean) => void;
   /** Open the destructive reject confirmation for one file or the whole turn. */
   onRequestReject: (scope: 'file' | 'all', paths: string[]) => void;
   onCancelReject: () => void;
   /** Confirm the pending reject; the host decides the scope from the request. */
   onConfirmReject: () => void;
-  onKeepAll: () => void;
+  onKeepAll: (overrideChecks?: boolean) => void;
   /** Resolve a conflict with an explicit choice; nothing overwrites silently. */
   onResolveConflict: (path: string, resolution: ConflictResolution) => void;
   /** Load hunk lines for one expanded file. The snapshot omits them until then. */
@@ -104,10 +106,34 @@ function ChangesReviewView({
    */
   const [outcomeMemory, setOutcomeMemory] = useState<Map<string, ChangeDecisionResult>>(() => new Map());
   const outcomeTurnRef = useRef<string | undefined>(undefined);
+  /** The keep awaiting confirmation because the post-turn checks failed. */
+  const [keepConfirm, setKeepConfirm] = useState<{ scope: 'file' | 'all'; path?: string } | undefined>(
+    undefined
+  );
+  const checks = review.checks;
+  const gate = keepGate(checks);
+  const summary = checkSummary(checks);
+  const rows = checkRows(checks);
+  const failedNames = rows.filter((row) => row.failed).map((row) => row.name);
   useEffect(() => {
     setVisibleFileCount(24);
     setExpanded(false);
+    setKeepConfirm(undefined);
   }, [review.turnId]);
+
+  useEffect(() => {
+    // A fresh check view that no longer needs an override closes a stale dialog.
+    if (gate !== 'needs-override') {
+      setKeepConfirm(undefined);
+    }
+  }, [gate]);
+
+  useEffect(() => {
+    // Only one destructive-style confirmation may be on screen at a time.
+    if (rejectConfirm) {
+      setKeepConfirm(undefined);
+    }
+  }, [rejectConfirm]);
 
   useEffect(() => {
     setOutcomeMemory((current) => {
@@ -142,7 +168,44 @@ function ChangesReviewView({
   const countLabel = fileCountLabel(review.files);
 
   const locked = busy || deciding;
+  const keepBlocked = gate === 'blocked-running';
   const allKept = review.files.length > 0 && review.files.every((file) => file.decision === 'accepted');
+
+  const requestKeep = (target: { scope: 'file' | 'all'; path?: string }): void => {
+    if (keepBlocked) {
+      return;
+    }
+    if (gate === 'needs-override') {
+      if (rejectConfirm) {
+        onCancelReject();
+      }
+      setKeepConfirm(target);
+      return;
+    }
+    if (target.scope === 'all') {
+      onKeepAll();
+    } else if (target.path) {
+      onKeep(target.path);
+    }
+  };
+
+  const confirmKeep = (): void => {
+    const pending = keepConfirm;
+    if (!pending) {
+      return;
+    }
+    setKeepConfirm(undefined);
+    if (pending.scope === 'all') {
+      onKeepAll(true);
+    } else if (pending.path) {
+      onKeep(pending.path, true);
+    }
+  };
+
+  const requestReject = (scope: 'file' | 'all', paths: string[]): void => {
+    setKeepConfirm(undefined);
+    onRequestReject(scope, paths);
+  };
 
   const rejectPaths =
     rejectConfirm?.scope === 'all'
@@ -174,6 +237,21 @@ function ChangesReviewView({
           ) : countLabel ? (
             <span className="changes-review__counts">{countLabel}</span>
           ) : null}
+          {summary ? (
+            <span
+              className={`changes-review__checks-summary${
+                gate === 'needs-override' ? ' changes-review__checks-summary--failed' : ''
+              }`}
+              role="status"
+            >
+              {checks?.status === 'running' ? (
+                <span className="spinner" aria-hidden="true" />
+              ) : gate === 'needs-override' ? (
+                <AlertIcon className="ico ico--xs" />
+              ) : null}
+              {summary}
+            </span>
+          ) : null}
         </button>
         <span className="spacer" />
         {allKept ? null : (
@@ -184,17 +262,23 @@ function ChangesReviewView({
               disabled={locked || review.files.length === 0}
               aria-label="Undo this turn"
               title="Undo this turn's file changes. Restoring the chat to this message stays available."
-              onClick={() => onRequestReject('all', review.files.map((file) => file.path))}
+              onClick={() => requestReject('all', review.files.map((file) => file.path))}
             >
               <RestoreIcon className="ico ico--xs" />
             </button>
             <button
               className="btn btn--primary changes-review__icon-btn"
               type="button"
-              disabled={locked || review.files.length === 0}
+              disabled={locked || keepBlocked || review.files.length === 0}
               aria-label="Keep this turn"
-              title="Keep this turn's file changes."
-              onClick={onKeepAll}
+              title={
+                keepBlocked
+                  ? 'Keep is disabled until the checks finish.'
+                  : gate === 'needs-override'
+                    ? 'Checks failed. Confirm to keep anyway.'
+                    : "Keep this turn's file changes."
+              }
+              onClick={() => requestKeep({ scope: 'all' })}
             >
               <CheckIcon className="ico ico--xs" />
             </button>
@@ -222,6 +306,8 @@ function ChangesReviewView({
             </div>
           ) : null}
 
+          {rows.length > 0 ? <CheckRows rows={rows} /> : null}
+
           <ul className="changes-review__list" aria-label="Changed files">
             {visibleFiles.map((file) => (
               <ChangeRow
@@ -229,12 +315,13 @@ function ChangesReviewView({
                 file={file}
                 outcome={outcomes.get(file.path)}
                 locked={locked}
+                keepBlocked={keepBlocked}
                 busy={busy}
                 onOpenFile={() => onOpenFile(file.absPath)}
                 onOpenDiff={() => onOpenDiff(file.path)}
                 onReveal={() => onRevealInSourceControl(file.absPath)}
-                onKeep={() => onKeep(file.path)}
-                onReject={() => onRequestReject('file', [file.path])}
+                onKeep={() => requestKeep({ scope: 'file', path: file.path })}
+                onReject={() => requestReject('file', [file.path])}
                 onResolveConflict={(resolution) => onResolveConflict(file.path, resolution)}
               />
             ))}
@@ -249,6 +336,33 @@ function ChangesReviewView({
               Show {Math.min(24, review.files.length - visibleFileCount)} more files
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {keepConfirm ? (
+        <div
+          className="changes-review__confirm changes-review__confirm--checks"
+          role="alertdialog"
+          aria-label="Confirm keeping despite failed checks"
+        >
+          <AlertIcon className="ico ico--xs" />
+          <div className="changes-review__confirm-body">
+            <span>
+              {keepConfirm.scope === 'all'
+                ? 'Keep all changes in this turn anyway? '
+                : `Keep the change to ${keepConfirm.path} anyway? `}
+              Checks failed
+              {failedNames.length > 0 ? ` (${failedNames.join(', ')})` : ''}. The failed check will be bypassed.
+            </span>
+          </div>
+          <span className="changes-review__confirm-actions">
+            <button className="btn" type="button" onClick={() => setKeepConfirm(undefined)}>
+              Cancel
+            </button>
+            <button className="btn btn--danger" type="button" onClick={confirmKeep}>
+              {keepConfirm.scope === 'all' ? 'Keep all anyway' : 'Keep anyway'}
+            </button>
+          </span>
         </div>
       ) : null}
 
@@ -300,11 +414,44 @@ function sameChangesReview(prev: ChangesReviewProps, next: ChangesReviewProps): 
 /** Skip a re-render unless the snapshot the row shows actually changed. */
 export const ChangesReview = memo(ChangesReviewView, sameChangesReview);
 
+/** The post-turn check rows, one per check, each with a word for its state. */
+function CheckRows({ rows }: { rows: CheckRowView[] }): JSX.Element {
+  return (
+    <div className="changes-review__checks" role="group" aria-label="Post-turn checks">
+      <div className="changes-review__checks-head">Post-turn checks</div>
+      <ul className="check-rows">
+        {rows.map((row, index) => (
+          <li
+            key={`${row.name}-${index}`}
+            className={`check-row${row.failed ? ' check-row--failed' : ''}${
+              row.status === 'running' ? ' check-row--running' : ''
+            }`}
+          >
+            <span className="check-row__status">
+              {row.status === 'running' ? <span className="spinner" aria-hidden="true" /> : null}
+              <span className="check-row__status-word">{row.statusLabel}</span>
+            </span>
+            <span className="check-row__name" title={row.command ?? row.name}>
+              {row.name}
+            </span>
+            {row.durationLabel ? <span className="check-row__duration">{row.durationLabel}</span> : null}
+            {row.excerpt ? <pre className="check-row__detail">{row.excerpt}</pre> : null}
+            {row.reason ? (
+              <span className="check-row__reason">{row.failed ? `Reason: ${row.reason}` : row.reason}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** One changed file, as a single compact full-width row. The diff opens in the editor. */
 function ChangeRow({
   file,
   outcome,
   locked,
+  keepBlocked,
   busy,
   onOpenFile,
   onOpenDiff,
@@ -316,6 +463,8 @@ function ChangeRow({
   file: ChangeFileView;
   outcome?: ChangeDecisionResult;
   locked: boolean;
+  /** True only while checks run; Reject stays available in that state. */
+  keepBlocked: boolean;
   busy: boolean;
   onOpenFile: () => void;
   onOpenDiff: () => void;
@@ -402,9 +551,9 @@ function ChangeRow({
                 <button
                   className="btn btn--link change-row__icon-btn"
                   type="button"
-                  disabled={locked}
+                  disabled={locked || keepBlocked}
                   aria-label={`Keep changes to ${file.path}`}
-                  title="Keep changes to this file."
+                  title={keepBlocked ? 'Keep is disabled until the checks finish.' : 'Keep changes to this file.'}
                   onClick={onKeep}
                 >
                   <CheckIcon className="ico ico--xs" />
