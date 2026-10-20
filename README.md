@@ -121,7 +121,15 @@ to launch an Extension Development Host. Other scripts:
 npm run typecheck  # tsc --noEmit
 npm run lint       # alias for typecheck
 npm test           # pure unit tests (node --experimental-strip-types)
+npm run verify     # docs/manual-test.md version/counts vs the tree (no test run)
 ```
+
+`npm run verify` checks the documented version, node test-file/test counts, and
+the `styles.css` hex-literal count against the working tree; it does not run the
+known-red typecheck or test suite. `npm test` and `npm run typecheck` still show
+the known baseline recorded in [docs/manual-test.md](docs/manual-test.md#current-verification-baseline).
+There is no runnable webview outside VS Code, so the UI is verified by unit tests
+and the manual checklist, not by a local web server.
 
 ## Set up a provider
 

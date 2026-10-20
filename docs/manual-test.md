@@ -1,6 +1,6 @@
-# Manual test script — SideCode v0.1
+# Manual test script — SideCode v0.2.0
 
-Runnable checklist for signing off v0.1. Work top to bottom; tick `[x]` for pass,
+Runnable checklist for signing off v0.2.0. Work top to bottom; tick `[x]` for pass,
 leave `[ ]` and record the failure (or promote it to a known limitation) for a miss.
 
 Run every step in both hosts (see [Per-host pass](#5-per-host-pass)) unless a step
@@ -16,7 +16,7 @@ names a single host.
 
 ## Release acceptance criteria → step map
 
-v0.1 ships only when all six criteria pass in both hosts.
+v0.2.0 ships only when all six criteria pass in both hosts.
 | # | Release acceptance criterion | Proven by |
 |---|---|---|
 | RC-1 | **Provider isolation.** A provider that cannot be used (CLI missing, no credential, rejected credential) degrades only itself: it produces no error noise in, and never blocks, the other provider. | Steps 1–14 |
@@ -958,8 +958,9 @@ fails is either fixed (recorded in the headless section) or listed under §7.
 
 - Environment validated in: `Windows 11 (10.0.26200), Cursor 3.21.18 (Open VSX), codex-cli 0.156.1`
 - Executed by: authoring run on 2026-09-24 (headless checks only)
-- Result summary: headless checks pass; app-server adapter exercised against the
-  live CLI; GUI matrix outstanding
+- Result summary: the build passes; typecheck and the node suite carry the known
+  baseline below (tracked separately, not claimed green); app-server adapter
+  exercised against the live CLI; GUI matrix outstanding
 - Defects found and fixed during validation:
   - orphaned Codex process on dispose — tree-kill teardown in
     `src/backends/appserver/connection.ts`
@@ -969,14 +970,39 @@ fails is either fixed (recorded in the headless section) or listed under §7.
     `src/backends/codex.ts`
 - Failures recorded as known limitations: plain-VS-Code and GUI-only checks (see §7)
 
+### Current verification baseline
+
+Measured on this commit (2026-10-20), so the numbers stay truthful before sign-off:
+
+- **Package version:** 0.2.0 (`package.json`)
+- **Node test files:** 88 (`src/**/*.test.ts`)
+- **Node tests:** 832 declarations: 830 pass, 2 known failures —
+  `the spawned child env has inherited credentials scrubbed and keeps auth.json discoverable`
+  (`src/backends/appserver/connection.test.ts`, PATH casing) and
+  `the codex adapter delivers context through native instructions, not a synthetic turn`
+  (`src/context/hygiene.test.ts`, stale `developerInstructions` regex). Tracked by
+  T64 item A; this is not a green suite.
+- **Typecheck:** 5 known errors (`npm run typecheck` / `npm run lint`), tracked by
+  T64 item A; not green.
+- **Hex colour literals:** 19 occurrences across 17 lines in
+  `src/webview/styles.css`, tracked by T64 item 23.
+- **DOM suite (T79 / PR #13):** if the jsdom/RTL suite is present, `npm test` adds
+  its 7 DOM tests on top of the node count above. This document and
+  `npm run verify` keep the node-suite claim separate, so both stay truthful
+  before and after that merge.
+
+`npm run verify` checks the version, file/test counts, and hex count above against
+the tree. It deliberately does not run `npm test` or `tsc`, so the known baseline
+above stays visible instead of blocking on it.
+
 ### Executed headlessly (host-independent checks)
 
 These were run from the repo during authoring, without a GUI host:
 
-- [x] **Build & typecheck & tests:** `npm run lint`, `npm run build`, and
-      `npm test` all pass (192 pure unit tests cover JSON-RPC framing, the
-      backoff schedule, item translation, project-context rendering/delivery,
-      and the system-message order).
+- [x] **Build (green):** `npm run build` passes.
+- [x] **Baseline measured, not green:** `npm run typecheck` reports 5 known errors
+      and `npm test` reports 830/832 (2 known failures) — see the baseline above;
+      both are tracked by T64 item A.
 - [x] **Handshake against the live CLI.** Spawned `codex app-server`
       0.156.1, completed `initialize` (with `experimentalApi: true`) + `initialized`,
       and read `userAgent`, `getAuthStatus`, and `model/list`.
