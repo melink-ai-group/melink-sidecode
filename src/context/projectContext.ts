@@ -2,6 +2,7 @@ import {
   DEFAULT_CONTEXT_SETTINGS,
   type ContextSettings
 } from './contextSettings.ts';
+import { detectConventions, type ConventionSummary } from './conventions.ts';
 
 /**
  * The single source of project awareness.
@@ -267,6 +268,34 @@ export const LOCKFILES: readonly string[] = [
   'gemfile.lock'
 ];
 
+/**
+ * Root-level convention config files that are plain text rather than secrets.
+ * They are dotfiles, but they are not dot-*directories*; naming them here keeps
+ * the generic dot-directory rule (`.git`, `.cache`, ...) intact while letting
+ * the snapshot list the formatter/linter/test config the conventions detector
+ * is allowed to read.
+ */
+const CONVENTION_CONFIG_FILES: readonly string[] = [
+  '.editorconfig',
+  '.prettierrc',
+  '.eslintrc',
+  '.pytest.ini',
+  '.mocharc',
+  '.rustfmt.toml',
+  '.dprint.json',
+  '.dprint.jsonc',
+  '.ruff.toml'
+];
+
+function isConventionConfigFile(name: string): boolean {
+  return (
+    CONVENTION_CONFIG_FILES.includes(name) ||
+    name.startsWith('.prettierrc.') ||
+    name.startsWith('.eslintrc.') ||
+    name.startsWith('.mocharc.')
+  );
+}
+
 /** Extensions treated as binaries, never read for excerpts. */
 const BINARY_EXTENSIONS: readonly string[] = [
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.tiff',
@@ -382,6 +411,12 @@ export interface ProjectSnapshot {
   shape: ProjectShape;
   instructions: InstructionDocs;
   editor: EditorState;
+  /**
+   * Evidenced coding conventions derived from repo config and a bounded sample
+   * of source files. Present only when project shape is included, and absent
+   * when nothing was evidenced.
+   */
+  conventions?: ConventionSummary;
   /** The default exclusion list in effect, for the model's benefit. */
   exclusions: {
     directories: string[];
@@ -571,7 +606,11 @@ export function classifyPath(path: string, options: GlobOptions): { excluded: bo
     return { excluded: true, reason: 'vcs' };
   }
   // Any other dot-directory except `.github`, which holds instruction files.
-  if (segments.some((segment) => segment.startsWith('.') && segment.toLowerCase() !== '.github')) {
+  // A known convention config file is a dotfile at the root, not a directory,
+  // so it falls through to the normal checks below. Nested dot-directories stay
+  // excluded: only `segments.length === 1` earns the allowance.
+  const rootConventionConfig = segments.length === 1 && isConventionConfigFile(name);
+  if (!rootConventionConfig && segments.some((segment) => segment.startsWith('.') && segment.toLowerCase() !== '.github')) {
     return { excluded: true, reason: 'excluded' };
   }
   // Build output by directory name, then by a few build extensions.
@@ -922,6 +961,15 @@ export class ProjectContext implements ProjectContextReads {
     const shape = settings.includeShape
       ? await this.buildShape(roots, globOptions, excludedPaths, input.changedPaths ?? [])
       : emptyShape(roots);
+    const cappedShape = this.capShape(shape);
+    let conventions: ConventionSummary | undefined;
+    if (settings.includeShape && cappedShape.files.length > 0) {
+      conventions = await detectConventions({
+        files: cappedShape.files,
+        manifests: cappedShape.manifests,
+        readFile: (relative) => this.readSnapshotFile(relative, roots)
+      });
+    }
     const instructions = settings.includeInstructions
       ? await this.buildInstructions(roots, globOptions)
       : [];
@@ -933,9 +981,10 @@ export class ProjectContext implements ProjectContextReads {
     const snapshot: ProjectSnapshot = {
       timestamp: this.host.now(),
       workspace: this.capIdentity(workspace),
-      shape: this.capShape(shape),
+      shape: cappedShape,
       instructions: this.capInstructions(instructions),
       editor: this.capEditor(editor.state),
+      ...(conventions ? { conventions } : {}),
       exclusions: {
         directories: [...IGNORED_DIRECTORIES],
         patterns,
@@ -1358,6 +1407,21 @@ export class ProjectContext implements ProjectContextReads {
     };
   }
 
+  /**
+   * Read a snapshot-relative path through the host. The detector only passes
+   * paths that came from `shape.files`, so this cannot widen the read set; the
+   * loop only resolves which workspace root the path belongs to.
+   */
+  private async readSnapshotFile(relative: string, roots: readonly string[]): Promise<string | undefined> {
+    for (const root of roots) {
+      const text = await this.host.readFile(joinPath(root, ...relative.split('/')));
+      if (text !== undefined) {
+        return text;
+      }
+    }
+    return undefined;
+  }
+
   /** Classify a path against the workspace root it actually belongs to. */
   private classify(
     path: string,
@@ -1599,6 +1663,12 @@ export class ProjectContext implements ProjectContextReads {
     while (jsonBytes(result) > this.budget.overall && result.excludedPaths.length > 0) {
       result = { ...result, excludedPaths: result.excludedPaths.slice(0, Math.floor(result.excludedPaths.length / 2)) };
       mark(truncationMarker(0, snapshot.excludedPaths.length));
+    }
+    // Conventions are derived, not core identity: drop them before the final
+    // fallback empties the picture, and mark the snapshot as truncated.
+    if (jsonBytes(result) > this.budget.overall && result.conventions) {
+      mark(truncationMarker(0, 1));
+      result = { ...result, conventions: undefined };
     }
     if (jsonBytes(result) > this.budget.overall) {
       mark(truncationMarker(0, 1));

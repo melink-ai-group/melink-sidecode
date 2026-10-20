@@ -658,3 +658,73 @@ test('an attached file reads the viewed path and refuses a secret', async () => 
   assert.equal(secret?.text, undefined);
   assert.equal(host.readPaths.includes('/work/app/.env'), false);
 });
+
+/* -------------------------------------------------------------------------- */
+/* Conventions                                                                */
+/* -------------------------------------------------------------------------- */
+
+function conventionsFixture(): FakeHost {
+  const host = new FakeHost(['/work/app']);
+  host.addFile('/work/app/.editorconfig', '[*]\nindent_style = space\nindent_size = 2\n');
+  host.addFile('/work/app/.prettierrc', '{"singleQuote": true}');
+  host.addFile('/work/app/src/api-client.ts', "export const client = 'a';\n");
+  host.addFile('/work/app/src/user-store.ts', "export const store = 'b';\n");
+  host.addFile('/work/app/src/render-view.ts', "export const view = 'c';\n");
+  return host;
+}
+
+test('conventions are derived from config and bounded samples when shape is on', async () => {
+  const host = conventionsFixture();
+  const snapshot = await new ProjectContext({ host }).getSnapshot();
+  assert.ok(snapshot.conventions);
+  assert.equal(snapshot.conventions.facts.some((entry) => entry.label === 'Formatter'), true);
+  assert.equal(snapshot.conventions.samplesRead, 3);
+  assert.ok(host.readPaths.includes('/work/app/.prettierrc'));
+  assert.ok(host.readPaths.includes('/work/app/src/api-client.ts'));
+  assert.equal(JSON.stringify(snapshot).includes("export const client = 'a';"), false);
+});
+
+test('conventions read only files present in the bounded shape', async () => {
+  const host = conventionsFixture();
+  const snapshot = await new ProjectContext({ host, budget: { ...DEFAULT_BUDGET, fileEntries: 1 } }).getSnapshot();
+  assert.ok(snapshot.conventions);
+  // Sorted shape.files is capped to `.editorconfig`; no source sample was read.
+  assert.ok(host.readPaths.includes('/work/app/.editorconfig'));
+  assert.equal(host.readPaths.includes('/work/app/src/api-client.ts'), false);
+  assert.equal(snapshot.conventions.samplesRead, 0);
+});
+
+test('user-excluded and nested dot configs are never read', async () => {
+  const host = conventionsFixture();
+  host.userPatterns = ['.prettierrc'];
+  host.addFile('/work/app/.cache/.prettierrc', '{}');
+  const snapshot = await new ProjectContext({ host }).getSnapshot();
+  assert.ok(snapshot.conventions);
+  assert.equal(host.readPaths.includes('/work/app/.prettierrc'), false);
+  assert.equal(host.readPaths.includes('/work/app/.cache/.prettierrc'), false);
+  assert.equal(snapshot.shape.files.includes('.prettierrc'), false);
+  assert.equal(snapshot.shape.files.some((path) => path.startsWith('.cache/')), false);
+  assert.equal(snapshot.conventions.facts.some((entry) => entry.label === 'Formatter'), false);
+});
+
+test('with project shape off no config or sample is read and no conventions block exists', async () => {
+  const host = conventionsFixture();
+  host.settings = {
+    includeInstructions: false,
+    includeShape: false,
+    includeEditorState: false,
+    includeSelection: false,
+    includeChangedFiles: true,
+    maxBytes: 20_480,
+    exclude: []
+  };
+  const snapshot = await new ProjectContext({ host }).getSnapshot();
+  assert.equal(snapshot.conventions, undefined);
+  assert.deepEqual(host.readPaths, []);
+});
+
+test('an empty shape yields no conventions block', async () => {
+  const host = new FakeHost(['/work/empty']);
+  const snapshot = await new ProjectContext({ host }).getSnapshot();
+  assert.equal(snapshot.conventions, undefined);
+});

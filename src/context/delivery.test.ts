@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ContextDelivery } from './delivery.ts';
+import { categoryExclusionKey } from './contextView.ts';
+import type { ConventionSummary } from './conventions.ts';
 import type {
   GetSnapshotInput,
   ProjectContextReads,
@@ -285,4 +287,31 @@ test('invalidateAll re-arms every thread and is safe when no thread is open', as
   assert.equal(b.priming, true);
   assert.doesNotMatch(a.snapshot!, /const secret = 1;/);
   assert.doesNotMatch(b.snapshot!, /const secret = 1;/);
+});
+
+function conventions(): ConventionSummary {
+  const text = 'Conventions:\n- Formatter: Prettier (.prettierrc)';
+  return {
+    text,
+    facts: [{ label: 'Formatter', value: 'Prettier', source: '.prettierrc' }],
+    truncated: false,
+    bytes: Buffer.byteLength(text, 'utf8'),
+    samplesRead: 1
+  };
+}
+
+class ConventionsReads extends FakeReads {
+  override async getSnapshot(input?: GetSnapshotInput): Promise<ProjectSnapshot> {
+    return { ...(await super.getSnapshot(input)), conventions: conventions() };
+  }
+}
+
+test('excluding the shape category removes the conventions block from delivery', async () => {
+  const delivery = new ContextDelivery({ reads: new ConventionsReads() });
+  const plain = await delivery.snapshot();
+  assert.match(plain.payload.snapshot!, /Conventions:/);
+
+  delivery.setExclusions([categoryExclusionKey('shape')]);
+  const excluded = await delivery.snapshot();
+  assert.doesNotMatch(excluded.payload.snapshot!, /Conventions:/);
 });
