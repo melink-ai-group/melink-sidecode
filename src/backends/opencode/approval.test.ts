@@ -9,6 +9,7 @@ import {
   opencodeReplyFor,
   permissionAskFromBus
 } from './approval.ts';
+import { ruleFor } from '../approvals.ts';
 
 test('every sidebar decision maps onto an opencode reply', () => {
   assert.equal(opencodeReplyFor('allow-once'), 'once');
@@ -32,8 +33,30 @@ test('a bash permission becomes a command approval the user can answer', () => {
   const request = approvalFromOpencode(ask, 'C:\\work');
   assert.equal(request.kind, 'command');
   assert.equal(request.command, 'git status');
-  assert.deepEqual(request.execPolicyAmendment, ['git']);
+  // opencode offers no native exec-policy amendment, and none is invented:
+  // a synthetic first-token prefix would be broader than the command shown.
+  assert.equal(request.execPolicyAmendment, undefined);
   assert.equal(request.id, 'per_1');
+});
+
+test('the rule built from an opencode command ask covers only that command family', () => {
+  const ask = permissionAskFromBus({
+    type: 'permission.asked',
+    properties: {
+      id: 'per_1',
+      sessionID: 'ses_1',
+      permission: 'bash',
+      patterns: ['git status*'],
+      metadata: { command: 'git status' }
+    }
+  });
+  assert.ok(ask);
+  const rule = ruleFor(approvalFromOpencode(ask, 'C:\\work'), 'opencode', 1000);
+
+  assert.deepEqual(rule.commandFamily, ['git', 'status']);
+  assert.equal(rule.gitWrite, false);
+  assert.equal(rule.commandExact, false);
+  assert.equal(rule.execPolicyAmendment, undefined);
 });
 
 test('an edit permission becomes a file-change approval', () => {

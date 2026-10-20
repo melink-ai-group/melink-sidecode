@@ -1,7 +1,7 @@
 // Type-only: the store touches `globalState`/`workspaceState`, never the
 // `vscode` runtime module, so its rule-set behaviour is unit-testable.
 import type * as vscode from 'vscode';
-import { ruleMatchesRequest, sessionKey } from './approvals.ts';
+import { migrateApprovalRules, ruleMatchesRequest, sessionKey } from './approvals.ts';
 import type { ApprovalRequest, ApprovalRule } from './types';
 
 const GLOBAL_RULES_KEY = 'melink.approval.globalRules';
@@ -18,9 +18,13 @@ const SESSION_RULES_KEY = 'melink.approval.sessionRules';
  * - Session rules are cleared when the thread ends, which is what makes the
  *   scope honest: `session` means this conversation, and nothing more.
  *
- * Only structure is stored — a kind, a command prefix or path root, an origin,
+ * Only structure is stored — a kind, a command family or path root, an origin,
  * and the native proposed amendment. No command output, no file contents, and
  * never a credential.
+ *
+ * Rules persisted before command families existed are migrated on load: a
+ * command rule that stored only the executable name is dropped, so it cannot
+ * keep allowing every subcommand of that program.
  */
 export class ApprovalStore implements vscode.Disposable {
   private globalCache?: ApprovalRule[];
@@ -122,14 +126,22 @@ export class ApprovalStore implements vscode.Disposable {
 
   private loadGlobal(): ApprovalRule[] {
     if (!this.globalCache) {
-      this.globalCache = this.context.globalState.get<ApprovalRule[]>(GLOBAL_RULES_KEY) ?? [];
+      this.globalCache = migrateApprovalRules(
+        this.context.globalState.get<ApprovalRule[]>(GLOBAL_RULES_KEY) ?? []
+      );
     }
     return this.globalCache;
   }
 
   private loadSessions(): Record<string, ApprovalRule[]> {
     if (!this.sessionCache) {
-      this.sessionCache = this.context.workspaceState.get<Record<string, ApprovalRule[]>>(SESSION_RULES_KEY) ?? {};
+      const stored = this.context.workspaceState.get<Record<string, ApprovalRule[]>>(SESSION_RULES_KEY) ?? {};
+      // Rules persisted before command families existed stored only the
+      // executable name, which would allow every subcommand of that program.
+      // They are dropped on load instead of keeping their old, broader meaning.
+      this.sessionCache = Object.fromEntries(
+        Object.entries(stored).map(([key, rules]) => [key, migrateApprovalRules(rules ?? [])])
+      );
     }
     return this.sessionCache;
   }

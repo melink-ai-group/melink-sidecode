@@ -454,7 +454,7 @@ reconnect. You choose:
 | **Reject** | Denied, and the agent is told so it can adapt rather than stall. |
 
 Stored **Always allow** rules are listed under the header, each showing exactly
-what it permits (the command prefix or path root) and where it came from, with a
+what it permits (the command family or path root) and where it came from, with a
 **Revoke** action. `Always allow` rules live in global state; `Allow for this
 conversation` rules are scoped to the thread and survive a window reload without
 either re-asking or silently escalating.
