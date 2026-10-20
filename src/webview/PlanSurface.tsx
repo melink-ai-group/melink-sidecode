@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
 import { Markdown } from './Markdown';
 import { prettyPath } from './prettyPath.ts';
+import { isSubmitEnter } from './keys';
 import {
   AlertIcon,
   CheckIcon,
@@ -197,7 +198,7 @@ function PlanCard({
             disabled={revising}
             onChange={(event) => setRevision(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (isSubmitEnter(event)) {
                 event.preventDefault();
                 sendRevision();
               }
