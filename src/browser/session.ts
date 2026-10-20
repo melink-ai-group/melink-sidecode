@@ -3,6 +3,8 @@
  * second window. Edge is tried first, then Chrome. Nothing is downloaded.
  */
 
+import { ConsoleBuffer, attachPageDiagnostics, navigatePage } from './consoleBuffer.ts';
+
 const CHANNELS = ['msedge', 'chrome'] as const;
 
 interface ScreencastFrame {
@@ -16,7 +18,9 @@ interface CdpSession {
   detach(): Promise<void>;
 }
 
-interface PlaywrightPage {
+export interface PlaywrightPage {
+  on(event: 'console' | 'pageerror' | 'requestfailed' | 'response', handler: (value: unknown) => void): void;
+  off?(event: 'console' | 'pageerror' | 'requestfailed' | 'response', handler: (value: unknown) => void): void;
   goto(url: string, options: { waitUntil: 'domcontentloaded'; timeout: number }): Promise<unknown>;
   url(): string;
   title(): Promise<string>;
@@ -33,12 +37,12 @@ interface PlaywrightPage {
   context(): { newCDPSession(page: PlaywrightPage): Promise<CdpSession> };
 }
 
-interface PlaywrightBrowser {
+export interface PlaywrightBrowser {
   newPage(): Promise<PlaywrightPage>;
   close(): Promise<void>;
 }
 
-interface PlaywrightModule {
+export interface PlaywrightModule {
   chromium: {
     launch(options: { channel: string; headless: boolean }): Promise<PlaywrightBrowser>;
   };
@@ -50,13 +54,21 @@ export class BrowserPage {
   private cdp?: CdpSession;
   private width = 1280;
   private height = 800;
+  private readonly diagnostics = new ConsoleBuffer();
+  private readonly playwright?: PlaywrightModule;
+  private detachDiagnostics?: () => void;
+
+  /** `playwright` is a test seam; production leaves it undefined and loads the module on open. */
+  constructor(playwright?: PlaywrightModule) {
+    this.playwright = playwright;
+  }
 
   /** Launch Edge, then Chrome. Throws a plain message when neither starts. */
   async open(onFrame: (jpegBase64: string) => void): Promise<void> {
     if (this.page) {
       return;
     }
-    const playwright = (await import('playwright-core')) as PlaywrightModule;
+    const playwright = this.playwright ?? ((await import('playwright-core')) as PlaywrightModule);
     let last: unknown;
     for (const channel of CHANNELS) {
       try {
@@ -77,14 +89,17 @@ export class BrowserPage {
     }
     this.page = await this.browser.newPage();
     await this.page.setViewportSize({ width: this.width, height: this.height });
+    this.detachDiagnostics = attachPageDiagnostics(this.page, this.diagnostics);
     await this.startScreencast(onFrame);
   }
 
   async navigate(url: string): Promise<{ url: string; title: string }> {
-    const page = this.requirePage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
-    const title = await page.title().catch(() => '');
-    return { url: page.url(), title };
+    return navigatePage(this.requirePage(), this.diagnostics, url);
+  }
+
+  /** Buffered console, page-error and network diagnostics since the last navigation. */
+  consoleText(): string {
+    return this.diagnostics.format();
   }
 
   async resize(width: number, height: number): Promise<{ width: number; height: number }> {
@@ -175,6 +190,9 @@ export class BrowserPage {
     if (cdp) {
       await cdp.detach().catch(() => undefined);
     }
+    this.detachDiagnostics?.();
+    this.detachDiagnostics = undefined;
+    this.diagnostics.clear();
     const browser = this.browser;
     this.page = undefined;
     this.browser = undefined;
