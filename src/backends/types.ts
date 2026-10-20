@@ -205,6 +205,11 @@ export interface ContextPayload {
   /** A rendered delta block for this turn, when the workspace changed. */
   delta?: string;
   /**
+   * The bounded per-turn symbol/import map, or a one-line marker when the map
+   * is off, unavailable, failed or over budget. Never provider-specific.
+   */
+  repoMap?: string;
+  /**
    * The file the user is viewing, recomputed every turn. Present even when they
    * have not attached it, as a short notice, so a stale session prefix cannot
    * name a different file.

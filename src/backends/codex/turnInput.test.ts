@@ -33,6 +33,28 @@ test('a later turn carries the workspace delta and the viewed file, and keeps th
   assert.equal(text.text.includes('old'), false);
 });
 
+test('a later turn carries the repo map next to the delta', () => {
+  const [text] = buildCodexTurnInput({
+    mode: 'agent',
+    text: 'fix login',
+    bakedMode: 'agent',
+    context: {
+      delta: '<project-context-update>tree changed</project-context-update>',
+      repoMap: 'Repo map: src/auth.ts: login, logout'
+    }
+  });
+  assert.equal(text.type, 'text');
+  if (text.type !== 'text') {
+    return;
+  }
+  assert.match(text.text, /project-context-update/);
+  assert.match(text.text, /Repo map: src\/auth\.ts: login, logout/);
+  assert.ok(
+    text.text.indexOf('project-context-update') < text.text.indexOf('Repo map:'),
+    'the repo map follows the delta'
+  );
+});
+
 test('a re-primed turn sends the new snapshot as a replacement', () => {
   const [text] = buildCodexTurnInput({
     mode: 'agent',

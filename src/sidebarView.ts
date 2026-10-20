@@ -3380,7 +3380,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // read before the user message is appended so it never touches the stored
     // transcript, and a failed snapshot degrades to a notice rather than
     // blocking the turn.
-    const context = await this.turnContext(activeBackendId, threadId);
+    const context = await this.turnContext(activeBackendId, threadId, text);
     // The exclusions shaped the snapshot this turn carries, so they are cleared
     // now: the next turn defaults back to the full set unless the user excludes
     // again, and nothing is re-added on its own mid-turn.
@@ -3647,11 +3647,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private async turnContext(
     backendId: string,
-    threadId: string
+    threadId: string,
+    requestText = ''
   ): Promise<import('./backends/types').ContextPayload> {
     const key = ContextDelivery.key(backendId, threadId);
     try {
-      return await this.contextDelivery.forTurn(key);
+      return await this.contextDelivery.forTurn(key, {}, requestText);
     } catch {
       return {
         notice: 'Project context is not available right now. Continue without it; do not block the turn.'

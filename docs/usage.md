@@ -249,6 +249,11 @@ settings (**SideCode: Open settings**).
 | `melink.context.includeChangedFiles` | `true` | Include the changed-files notice in the per-turn delta. |
 | `melink.context.maxBytes` | `20480` | Overall byte cap for a rendered snapshot. When it is reached, categories truncate in order: open editors, then instruction documents, then the tree. |
 | `melink.context.exclude` | *(empty)* | Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. |
+| `melink.context.repoMap` | `false` (off) | Include a bounded per-turn symbol/import map built from the files the snapshot already accepted. Off sends only an explicit disabled marker. |
+| `melink.context.repoMapMaxFiles` | `200` | Maximum source files the repository map may read in one build. |
+| `melink.context.repoMapMaxBytes` | `131072` | Maximum bytes the repository map may read in one build. |
+| `melink.context.repoMapBuildMs` | `750` | Wall-clock budget for one repository-map build; a slow read times out. |
+| `melink.context.repoMapMaxChars` | `1200` | Character cap for the rendered per-turn repository-map block. |
 
 The same settings are reachable from the in-product **settings screen**
 (gear icon in the title bar), which opens inline in the sidebar rather than as a
