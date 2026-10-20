@@ -1957,7 +1957,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           type: 'zvecGrep',
           pending: false,
           ok: applied.ok,
-          message: applied.message
+          message: applied.message,
+          ...(applied.fieldError
+            ? { field: applied.fieldError.field, fieldMessage: applied.fieldError.message }
+            : {})
         });
         break;
       }
@@ -1972,7 +1975,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           type: 'astGrep',
           pending: false,
           ok: applied.ok,
-          message: applied.message
+          message: applied.message,
+          ...(applied.fieldError
+            ? { field: applied.fieldError.field, fieldMessage: applied.fieldError.message }
+            : {})
         });
         break;
       }
@@ -2346,6 +2352,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const snapshot = await this.settingsSnapshot();
     if (!result.ok) {
       snapshot.saveErrors = result.errors;
+    }
+    // A field that was persisted somewhere other than the requested scope (a
+    // trust-sensitive setting saved to the user's own settings during a
+    // workspace save) carries a notice, not an error.
+    if (result.notices && Object.keys(result.notices).length > 0) {
+      snapshot.saveNotices = result.notices;
     }
     if (patch.permissionLevel && result.errors.permissionLevel === undefined) {
       const backendId = this.activeThread?.backendId ?? this.defaultBackendId();

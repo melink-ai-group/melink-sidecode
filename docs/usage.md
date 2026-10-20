@@ -257,6 +257,53 @@ Save/Clear, Codex CLI path and login state) above **Defaults** (default model,
 permission level, mode), and offers **Test connection** per provider. A value
 that fails validation shows an inline message and is not saved.
 
+### Which settings a workspace may set
+
+A repository can ship a `.vscode/settings.json`, and VS Code merges it over
+your own settings. SideCode does not let a repository decide the three things
+that would make opening a folder a security problem, so those settings are
+**read from your user settings only** and are declared
+`"scope": "application"`:
+
+| Setting | Why it is user-scope only |
+|---|---|
+| `melink.ollama.baseUrl` | The Ollama Cloud bearer token is sent to this host. A workspace must not be able to redirect it. |
+| `melink.ollama.opencode.path`, `melink.ollama.opencode.cliSource` | The binary a turn spawns. The child runs with the workspace as its working directory. |
+| `melink.codex.path` | The Codex CLI binary a turn spawns. |
+| `melink.skills.zvecGrep.path`, `melink.skills.zvecGrep.cliSource` | The `zg` binary the search skill spawns. |
+| `melink.skills.astGrep.path`, `melink.skills.astGrep.cliSource` | The `ast-grep` binary the search skill spawns. |
+| `melink.defaults.permissionLevel` | The permission a new conversation starts with. A workspace must not be able to raise it to `unrestricted`. |
+
+A workspace value for one of these is ignored even if it was written before
+this restriction, and the **Save to workspace** action writes these to your
+user settings instead, with a short note on the field. Every one of the nine
+fields shows that note. Every other SideCode setting (model names, context
+toggles, skill flags) keeps its normal workspace-scope behaviour.
+
+Two further rules apply to the CLI paths, because they name the binary that
+runs: a **relative path** is refused — it would resolve inside the workspace —
+and a **bare command name** (`codex`, `opencode`) is resolved from `PATH`.
+
+"Relative" covers both shapes:
+
+- a relative path with a separator (`./evil`, `..\evil`, `bin/codex`); and
+- the Windows **drive-relative** form (`C:evil.exe`, `C:`, `C:..\evil`). It
+  carries no separator, so a separator-only rule would let it through — but
+  Windows resolves it against the current directory *of that drive*, which is
+  the workspace for a child spawned with it as the working directory. So
+  `C:evil.exe` would run `workspace\evil.exe`.
+
+A true absolute path (`C:\Tools\codex.exe`, `C:/Tools/codex.exe`,
+`\\server\share\codex.exe`) is used as-is. The same rule applies to the
+settings screen's status probes, so a refused value is never launched by the
+probe either.
+
+The extension also declares `capabilities.untrustedWorkspaces` as `limited`, so
+VS Code can mark a workspace as untrusted and warn before a repository's
+settings reach an extension at all. The same nine keys are listed in
+`restrictedConfigurations`, so an untrusted workspace does not hand VS Code a
+workspace-defined value for them at all.
+
 ## The settings screen
 
 Open it from the gear in the title bar (or **SideCode: Open settings**). It opens
@@ -299,6 +346,12 @@ can narrow them for a single turn; no per-turn action widens them.
 Validation is on demand: a value that fails (for example a base URL without a
 scheme) shows an inline message and is **not** persisted. Unsaved changes are
 never applied to a turn already in progress.
+
+**Save to workspace** writes to this repository's `.vscode/settings.json`. The
+trust-sensitive settings (the credential host, the CLI paths and the permission
+default) are always written to your **user** settings instead, and the field
+carries a short note saying so — the value is persisted, just in the scope that
+is actually read.
 
 **Context** settings apply from the **next turn** of the current conversation:
 saving any of them (or changing a `melink.context` value outside the screen)

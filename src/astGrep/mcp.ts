@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { AST_GREP_TOOLS } from './tools.ts';
 import { AST_GREP_BIN_ENV } from '../skills/opencodeMcp.ts';
 import { buildReplaceArgs, buildSearchArgs } from './args.ts';
+import { resolveAstGrepBinValue } from './bin.ts';
 
 interface RpcMessage {
   jsonrpc?: string;
@@ -128,7 +129,11 @@ async function runAstGrep(args: string[]): Promise<string> {
 }
 
 async function resolveAstGrepBin(): Promise<string> {
-  const fromEnv = process.env[AST_GREP_BIN_ENV]?.trim();
+  // The env value is the configured CLI path. A relative value (with or
+  // without a separator, including a Windows drive-relative one) would run a
+  // file from the shim's working directory, so it is refused and the PATH
+  // lookup below is used instead.
+  const fromEnv = resolveAstGrepBinValue(process.env[AST_GREP_BIN_ENV]);
   if (fromEnv) {
     return fromEnv;
   }

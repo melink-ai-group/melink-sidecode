@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { PERMISSION_LEVELS, type DefaultMode, type PermissionLevel, type ThinkingLevel } from './types';
+import { type DefaultMode, type PermissionLevel, type ThinkingLevel } from './types';
 import { isDefaultMode } from './modes';
 import { isThinkingLevel } from './capabilities';
+import { resolveDefaultPermissionLevel } from '../config/permissionDefault.ts';
 
 /**
  * The single reader for the app-level defaults the settings screen writes.
@@ -9,16 +10,27 @@ import { isThinkingLevel } from './capabilities';
  * `sidebarView` seeds a new conversation from these and `CodexBackend` falls
  * back to them when no explicit level is supplied, so a saved default is never
  * inert: it changes the next conversation's permission policy and mode.
+ *
+ * ## Trust boundary
+ *
+ * The permission level is read through `inspect()` and only the user's own
+ * value (`globalValue`) or the contributed default is used. A workspace
+ * `.vscode/settings.json` cannot raise the default to `unrestricted`: opening
+ * a repository must not be enough to remove the sandbox and the prompts.
+ * The explicit, labelled confirmation the UI requires before `unrestricted`
+ * is applied is unchanged — this only decides where the *default* comes from.
+ *
+ * The mode and the thinking level are ordinary preferences and keep their
+ * normal (workspace-overridable) behaviour.
  */
 
 const DEFAULTS_SECTION = 'melink.defaults';
 
 /** The stored default permission level, degraded to `default` when unreadable. */
 export function readDefaultPermissionLevel(): PermissionLevel {
-  const value = vscode.workspace.getConfiguration(DEFAULTS_SECTION).get<string>('permissionLevel', 'default');
-  return (PERMISSION_LEVELS as readonly string[]).includes(value)
-    ? (value as PermissionLevel)
-    : 'default';
+  return resolveDefaultPermissionLevel(
+    vscode.workspace.getConfiguration().inspect<string>(`${DEFAULTS_SECTION}.permissionLevel`)
+  );
 }
 
 /** The stored default mode, degraded to `agent` when unreadable. */

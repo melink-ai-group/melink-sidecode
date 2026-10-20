@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { isAbsoluteExecutable, resolveExecutableCommand } from '../executables.ts';
 
 /**
  * Where the opencode CLI comes from for SideCode turns.
@@ -86,7 +87,14 @@ export function readOpencodeCliSource(value: unknown): OpencodeCliSource {
  * The executable every opencode spawn must use.
  *
  * When `bundled`, the path setting is ignored so a machine PATH entry cannot
- * leak into turns. When `local`, a bare name is left for PATH resolution.
+ * leak into turns. When `local`, a bare name is left for PATH resolution and
+ * an absolute path is used as-is.
+ *
+ * A relative path is refused: it would resolve against the workspace working
+ * directory, so the bare default is used instead. That covers a relative
+ * path with a separator (`./evil`, `..\evil`) and the Windows drive-relative
+ * form (`C:evil.exe`), which carries no separator but resolves against the
+ * current directory of that drive — the workspace for a spawned child.
  */
 export function resolveOpencodeExecutable(options: {
   source: OpencodeCliSource;
@@ -96,8 +104,8 @@ export function resolveOpencodeExecutable(options: {
   if (options.source === 'bundled') {
     return bundledOpencodeExecutable(options.roots);
   }
-  const trimmed = options.path.trim();
-  return trimmed.length > 0 ? trimmed : 'opencode';
+  const resolved = resolveExecutableCommand(options.path, 'opencode');
+  return resolved.ok ? resolved.command : 'opencode';
 }
 
 /**
@@ -116,17 +124,10 @@ export function opencodeInstallDirFor(options: {
     return bundledOpencodeInstallDir(options.roots);
   }
   const trimmed = options.path.trim();
-  if (trimmed.length > 0 && looksLikeAbsoluteExecutable(trimmed)) {
+  if (trimmed.length > 0 && isAbsoluteExecutable(trimmed)) {
     return dirname(trimmed);
   }
   return managedOpencodeInstallDir();
-}
-
-function looksLikeAbsoluteExecutable(value: string): boolean {
-  if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith('/') || value.startsWith('\\\\')) {
-    return true;
-  }
-  return false;
 }
 
 /** Whether the bundled binary is present on disk. */
