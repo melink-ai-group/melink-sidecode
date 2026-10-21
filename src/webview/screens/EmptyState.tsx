@@ -91,7 +91,7 @@ export function EmptyState({
   return (
     <div className="empty-state empty-state--welcome">
       <img className="empty-logo" src={logoUrl} alt="" />
-      <p className="empty-title empty-title--brand">meLink SideCode</p>
+      <p className="empty-title empty-title--brand">SideCode</p>
       <p className="empty-text">
         On your side. Plan, Edit, or Ask anything.
       </p>

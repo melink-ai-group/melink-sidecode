@@ -29,7 +29,8 @@ v0.2.0 ships only when all six criteria pass in both hosts.
 Steps 40–43 repeat the rendering/reload/teardown checks per host.
 Steps 44–46 repeat the project-awareness pass for the opencode off/on paths.
 Steps 47–58 (§4c) cover change review, conflict handling, checkpoint restore,
-reload mid-review, approval interaction, and journal pruning, on both providers.
+reload mid-review, approval interaction, and journal pruning, on Codex and on the
+opencode runtime.
 
 ### Browser tools (optional skill)
 
@@ -126,6 +127,10 @@ through opencode and streams, F that the setting off uses the direct `/api/chat`
 adapter and spawns no opencode process. Run them after the main matrix, against
 the same workspace.
 
+If the shared `opencode` CLI is installed, **OpenCode Zen** is also available with
+its free models even when no Zen key is stored. The expected group counts below
+include a Zen group in that case; without the CLI, Zen is absent.
+
 ### Pass A — Ollama only
 
 - [ ] 1. Make the Codex CLI unresolvable with Method A (leave the Codex login in
@@ -136,14 +141,16 @@ the same workspace.
 - [ ] 3. Command Palette → **Developer: Reload Window**.
 - [ ] 4. Open the sidebar (Activity Bar → **SideCode**).
 - [ ] 5. **Expected sidebar state:** transcript reaches the empty state
-      the meLink mark and the name *“meLink SideCode”*, with no suggestion buttons
-      and a tall composer;
+      with the SideCode logo and the name *“SideCode”*, with no suggestion
+      buttons and a tall composer;
       composer placeholder reads `Ask the agent...` and is enabled (input not
       disabled) after restore completes.
 - [ ] 6. **Expected switcher:** open the **Model** trigger.
       - Trigger shows a live Ollama model label with the blue Ollama dot.
-      - Panel lists exactly one group: **Ollama Cloud**, with the models returned
-        live by `GET /api/tags` (no hardcoded fallback list).
+      - Panel lists one group per available provider: **Ollama Cloud**, with the
+        models returned live by `GET /api/tags` (no hardcoded fallback list), and
+        **OpenCode Zen** (free models) when the shared `opencode` CLI is
+        installed.
       - **No Codex group appears**, and no Codex error text appears anywhere.
       - Footer note reads *“Providers without a usable integration are hidden until
         they are installed.”*
@@ -155,11 +162,13 @@ the same workspace.
 - [ ] 8. **SideCode: Clear Ollama Cloud token**, then reload the window.
 - [ ] 9. Ensure the CLI is resolvable again (step 0.5 restored) and signed in.
 - [ ] 10. Open the sidebar, open the **Model** trigger.
-      - **Expected sidebar state:** empty state with the meLink mark and the name
-        *“meLink SideCode”*; composer enabled with placeholder `Ask the agent...`.
-      - **Expected switcher:** exactly one group, **OpenAI Codex CLI**, listing
-        `gpt-5-codex` and `gpt-5`. The **Ollama Cloud group does not appear** (an
-        unauthenticated provider is not diluted in while a provider is available).
+      - **Expected sidebar state:** empty state with the SideCode logo and the name
+        *“SideCode”*; composer enabled with placeholder `Ask the agent...`.
+      - **Expected switcher:** the **OpenAI Codex CLI** group, listing
+        `gpt-5-codex` and `gpt-5`, plus an **OpenCode Zen** group (free models)
+        when the shared `opencode` CLI is installed. The **Ollama Cloud group
+        does not appear** (an unauthenticated provider is not diluted in while a
+        provider is available).
       - Trigger shows `gpt-5-codex` (default) with the neutral Codex dot.
 
 ### Pass C — both authenticated
@@ -167,7 +176,8 @@ the same workspace.
 - [ ] 11. Set the Ollama token again (step 2), sign in Codex, reload.
       - **Expected sidebar state:** empty state as above; composer enabled.
       - **Expected switcher:** two groups, **Ollama Cloud** (live models) and
-        **OpenAI Codex CLI** (`gpt-5-codex`, `gpt-5`).
+        **OpenAI Codex CLI** (`gpt-5-codex`, `gpt-5`), or three when the shared
+        `opencode` CLI is installed and **OpenCode Zen** free models are listed.
       - Trigger dot matches the selected provider; selecting a model in the other
         group moves the check mark and updates the trigger label.
 - [ ] 12. Send one short turn on each provider in turn. Confirm each streams in the
@@ -181,11 +191,16 @@ the same workspace.
       - **Expected sidebar state:** empty state with title *“No backend is ready”*
         and text *“Ollama Cloud needs a token before you can chat.”*, with
         **Set token** and **Retry** buttons. Composer placeholder reads
-        `No backend available` and the input is disabled.
-      - **Expected switcher:** the panel shows the empty state *“No provider is
-        ready”* with *“Set up a provider below to list the models on your
-        account.”*, followed by one disabled **Ollama Cloud — Not signed in** group
-        with a **Set token** button.
+        `No backend available` and the input is disabled. This empty state
+        assumes the shared `opencode` CLI is not installed; with it installed,
+        **OpenCode Zen** free models are available and the sidebar is not empty.
+      - **Expected switcher:** when no provider is available (the shared
+        `opencode` CLI is absent), the panel shows the empty state *“No provider
+        is ready”* with *“Set up a provider below to list the models on your
+        account.”*, followed by one disabled **Ollama Cloud — Not signed in**
+        group with a **Set token** button. When the shared CLI is installed,
+        **OpenCode Zen** free models are listed instead of that empty state, and
+        the disabled Ollama group remains.
       - **No Codex group and no Codex error text appears** (an unavailable provider
         is omitted, never rendered as broken).
 - [ ] 14. **Restore** the CLI (Method A/B restore) and set the Ollama token again
@@ -212,11 +227,12 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
       ast-grep, then turn **Use structural search** on. Confirm `ast_grep` appears
       in the user OpenCode config (command runs `node …/ast-grep-mcp.js` with
       `AST_GREP_BIN`). Turn it off and confirm the entry is removed.
-- [ ] 14b. **Mode availability.** Open the mode picker. With the runtime on, it
-      offers **Agent**, **Plan**, and **Ask** (the direct adapter offers Agent
-      only). Open the permission picker: it offers **Read-only**, **Default**,
-      and **Unrestricted**. The provider badge/dot is still the single Ollama one
-      — no new provider, badge, or dot appears.
+- [ ] 14b. **Mode availability.** Open the mode picker. It offers **Agent**,
+      **Plan**, and **Ask**. The direct adapter advertises the same three modes,
+      but applies them as per-turn instructions and cannot edit files. Open the
+      permission picker: it offers **Read-only**, **Default**, and
+      **Unrestricted**. The provider badge/dot is still the single Ollama one
+      — no extra provider, badge, or dot appears.
 - [ ] 14c. **Streaming turn.** Select an Ollama model and send a short turn and
       wait for completion. **Expected:** the reply streams into the transcript
       incrementally (a text item opens and completes) rather than the whole thing
@@ -288,8 +304,9 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
       and open the sidebar.
 - [ ] 14n. Send a turn and wait for completion. **Expected:** the direct
       `/api/chat` adapter streams the reply. The mode picker still offers
-      **Agent**, **Plan**, and **Ask**. The permission picker stays hidden,
-      because the direct adapter has no approval channel.
+      **Agent**, **Plan**, and **Ask**, applied as per-turn instructions. The
+      permission picker stays hidden, because the direct adapter reports only the
+      single `default` level and never raises an approval card.
 - [ ] 14o. **No child process on the off path.** Immediately after sending the
       turn (and again after it completes), run the listing command:
       ```powershell
