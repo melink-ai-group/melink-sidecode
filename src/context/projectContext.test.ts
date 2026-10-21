@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_BUDGET,
+  MAX_MANIFEST_SCRIPTS,
+  MAX_SCRIPT_VALUE_BYTES,
   ProjectContext,
   classifyPath,
   cutToBytes,
@@ -9,11 +11,13 @@ import {
   matchesGlob,
   ownerRepo,
   readManifestFields,
+  readmeExcerptOf,
   remoteUrl,
   truncationMarker,
   type DirectoryEntry,
   type ProjectContextHost
 } from './projectContext.ts';
+import { renderSnapshot } from './render.ts';
 
 /* -------------------------------------------------------------------------- */
 /* A fake, host-free workspace                                                */
@@ -225,9 +229,39 @@ test('a manifest contributes only small structured fields, never its body', () =
   const fields = readManifestFields('package.json', JSON.stringify({ name: 'app', version: '2.0.0', scripts: { a: 1, b: 2 } }));
   assert.equal(fields.name, 'app');
   assert.equal(fields.version, '2.0.0');
-  assert.equal(fields.scripts, 'a, b');
+  assert.equal(fields['scripts.a'], undefined);
+  assert.equal(fields['scripts.b'], undefined);
   // A malformed manifest yields nothing rather than leaking raw text.
   assert.deepEqual(readManifestFields('package.json', '{ not json'), {});
+});
+
+test('package scripts carry bounded command values, not just names', () => {
+  const fields = readManifestFields(
+    'package.json',
+    JSON.stringify({
+      scripts: {
+        build: 'node esbuild.mjs --production',
+        test: 'node --experimental-strip-types --test "src/**/*.test.ts"'
+      }
+    })
+  );
+  assert.equal(fields['scripts.build'], 'node esbuild.mjs --production');
+  assert.equal(fields['scripts.test'], 'node --experimental-strip-types --test "src/**/*.test.ts"');
+  assert.equal(fields.scripts, undefined);
+});
+
+test('package script values are capped in count and per-script length', () => {
+  const scripts: Record<string, string> = {};
+  for (let i = 0; i < MAX_MANIFEST_SCRIPTS + 3; i += 1) {
+    scripts[`s${i}`] = i === 0 ? 'x'.repeat(MAX_SCRIPT_VALUE_BYTES * 2) : `echo ${i}`;
+  }
+  const fields = readManifestFields('package.json', JSON.stringify({ scripts }));
+  const names = Object.keys(fields).filter((key) => key.startsWith('scripts.') && key !== 'scripts');
+
+  assert.equal(names.length, MAX_MANIFEST_SCRIPTS);
+  assert.ok(Buffer.byteLength(fields['scripts.s0'], 'utf8') <= MAX_SCRIPT_VALUE_BYTES);
+  assert.equal(fields['scripts.s0'].endsWith('…'), true);
+  assert.equal(fields.scripts, '… 3 more scripts not shown');
 });
 
 test('byte truncation never splits a multi-byte character', () => {
@@ -403,6 +437,45 @@ test('every category respects its byte cap and carries a truncation marker', asy
   assert.ok(Buffer.byteLength(JSON.stringify(snapshot), 'utf8') <= budget.overall);
 });
 
+test('a large project keeps the package scripts when the shape budget forces truncation', async () => {
+  const host = new FakeHost(['/work/repo']);
+  for (let directory = 0; directory < 50; directory += 1) {
+    for (let file = 0; file < 20; file += 1) {
+      host.addFile(`/work/repo/src/area-${directory}/file-${file}.ts`, `export const value = ${file};`);
+    }
+  }
+  const testCommand = 'node --experimental-strip-types --test "src/**/*.test.ts"';
+  host.addFile(
+    '/work/repo/package.json',
+    JSON.stringify({
+      name: 'repo',
+      scripts: {
+        build: 'node esbuild.mjs --production',
+        test: testCommand
+      }
+    })
+  );
+  host.addFile('/work/repo/tsconfig.json', JSON.stringify({ extends: './base.json' }));
+  host.addFile(
+    '/work/repo/pyproject.toml',
+    '[project]\nname = "repo"\nversion = "1.0.0"\nrequires-python = ">=3.11"\n'
+  );
+  host.addFile('/work/repo/Cargo.toml', '[package]\nname = "repo"\nversion = "0.1.0"\nedition = "2021"\n');
+  host.addFile('/work/repo/go.mod', 'module example.com/repo\n\ngo 1.22\n');
+  const context = new ProjectContext({ host });
+
+  const snapshot = await context.getSnapshot();
+  assert.ok(snapshot.shape.files.length < DEFAULT_BUDGET.fileEntries);
+  assert.ok(snapshot.shape.manifests.some((hit) => hit.kind === 'package.json'));
+
+  const packageManifest = snapshot.shape.manifests.find((hit) => hit.kind === 'package.json');
+  assert.ok(packageManifest);
+  assert.equal(packageManifest.fields?.['scripts.test'], testCommand);
+
+  const text = renderSnapshot(snapshot);
+  assert.ok(text.includes(`scripts.test: ${testCommand}`));
+});
+
 test('an instruction document excerpt is cut to the excerpt cap and marked', async () => {
   const host = new FakeHost(['/work/docs']);
   host.addFile('/work/docs/AGENTS.md', 'x'.repeat(5_000));
@@ -415,6 +488,89 @@ test('an instruction document excerpt is cut to the excerpt cap and marked', asy
   assert.ok(agents);
   assert.ok(Buffer.byteLength(agents.excerpt, 'utf8') <= 100);
   assert.equal(agents.truncated, true);
+});
+
+function readmeWithDevSection(): string {
+  const filler = Array.from(
+    { length: 30 },
+    (_, index) => `Paragraph ${index}: ${'detail '.repeat(12)}`
+  ).join('\n\n');
+  return [
+    '# Dev App',
+    '',
+    'A small app for testing project context.',
+    '',
+    '## Overview',
+    '',
+    filler,
+    '',
+    '## Development',
+    '',
+    '### Commands',
+    '',
+    '```sh',
+    'npm install',
+    'npm run build',
+    'npm test',
+    '```',
+    '',
+    '`npm test` needs Node 22.6+ because it uses --experimental-strip-types.',
+    ''
+  ].join('\n');
+}
+
+test('a large README excerpt selects the development section beyond the first KiB', () => {
+  const readme = readmeWithDevSection();
+  assert.ok(Buffer.byteLength(readme, 'utf8') > 2_048);
+
+  const excerpt = readmeExcerptOf(readme, 1_024);
+  assert.equal(excerpt.truncated, true);
+  assert.ok(Buffer.byteLength(excerpt.text, 'utf8') <= 1_024);
+  assert.match(excerpt.text, /npm install/);
+  assert.match(excerpt.text, /npm run build/);
+  assert.match(excerpt.text, /npm test/);
+  assert.match(excerpt.text, /Node 22\.6\+/);
+});
+
+test('a large README with no development heading still yields a bounded head and tail', () => {
+  const readme = ['# Notes', '', 'Intro.', '', `## History\n\n${'old '.repeat(1_000)}`, '', '## Latest', '', 'The end.'].join('\n');
+  const excerpt = readmeExcerptOf(readme, 512);
+
+  assert.equal(excerpt.truncated, true);
+  assert.ok(Buffer.byteLength(excerpt.text, 'utf8') <= 512);
+  assert.match(excerpt.text, /^# Notes/);
+  assert.match(excerpt.text, /The end\./);
+});
+
+test('the assembled project context carries real script values and the README commands', async () => {
+  const host = new FakeHost(['/work/dev']);
+  host.addFile('/work/dev/README.md', readmeWithDevSection());
+  host.addFile(
+    '/work/dev/package.json',
+    JSON.stringify({
+      name: 'dev-app',
+      scripts: {
+        build: 'node esbuild.mjs --production',
+        test: 'node --experimental-strip-types --test "src/**/*.test.ts"'
+      }
+    })
+  );
+  host.addFile('/work/dev/src/index.ts', 'export const value = 1;');
+  const context = new ProjectContext({ host });
+
+  const snapshot = await context.getSnapshot();
+  const readme = snapshot.instructions.documents.find((doc) => doc.kind === 'readme');
+  assert.ok(readme);
+  assert.equal(readme.truncated, true);
+  assert.match(readme.excerpt, /npm install/);
+  assert.match(readme.excerpt, /npm test/);
+  assert.match(readme.excerpt, /Node 22\.6\+/);
+
+  const text = renderSnapshot(snapshot);
+  assert.match(text, /scripts\.build: node esbuild\.mjs --production/);
+  assert.match(text, /scripts\.test: node --experimental-strip-types --test "src\/\*\*\/\*\.test\.ts"/);
+  assert.match(text, /npm test/);
+  assert.match(text, /Node 22\.6\+/);
 });
 
 test('an overall cap drop is marked and still under the over cap', async () => {
