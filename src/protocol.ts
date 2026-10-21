@@ -99,6 +99,16 @@ export interface SettingsSnapshot {
     status: BackendStatus;
     detail?: string;
   };
+  /**
+   * A local Ollama server. No credential is stored or sent; the server is
+   * addressed only through the user-scoped base URL.
+   */
+  ollamaLocal: {
+    baseUrl: string;
+    defaultModel: string;
+    status: BackendStatus;
+    detail?: string;
+  };
   codex: {
     path: string;
     defaultModel: string;
@@ -114,7 +124,7 @@ export interface SettingsSnapshot {
   };
   /**
    * OpenCode Zen as a model provider (free + paid). Distinct from `opencode`,
-   * which is the optional agentic runtime nested under Ollama.
+   * which reports the shared agentic runtime CLI.
    */
   opencodeZen: {
     defaultModel: string;
@@ -123,13 +133,11 @@ export interface SettingsSnapshot {
     detail?: string;
   };
   /**
-   * The optional opencode agentic runtime for Ollama. Reported separately from
-   * `ollama.status`: the token can be valid while the CLI is absent, and the
-   * setting can be off while the CLI is present, so the three states the screen
-   * shows are not a single backend availability.
+   * The shared opencode agentic runtime CLI used by every Ollama Cloud, Ollama
+   * Local and OpenCode Zen turn. Reported separately from `ollama.status`: the
+   * token can be valid while the CLI is absent.
    */
   opencode: {
-    enabled: boolean;
     /**
      * Where the CLI comes from. `bundled` uses the SideCode download under
      * extension global storage; `local` uses `path` / PATH.
@@ -166,6 +174,19 @@ export interface SettingsSnapshot {
    * the snapshot and injection paths read, so a control is never inert.
    */
   context: ContextSettingsSnapshot;
+  /**
+   * Effective per-turn orchestration policy (nearest explicit scope wins) plus
+   * the source flags the screen uses to explain a legacy fallback.
+   */
+  orchestration: {
+    testing: boolean;
+    reviewing: boolean;
+    doubleCheck: boolean;
+    quickTask: boolean;
+    planning: boolean;
+    legacyTesting: boolean;
+    legacyReviewing: boolean;
+  };
   /**
    * Optional agent skills. Browser control is per provider so Codex and
    * OpenCode can differ. `browserError` is set only after a launch failed.
@@ -234,6 +255,8 @@ export interface ContextSettingsSnapshot {
 export interface SettingsPatch {
   ollamaBaseUrl?: string;
   ollamaDefaultModel?: string;
+  ollamaLocalBaseUrl?: string;
+  ollamaLocalDefaultModel?: string;
   opencodeDefaultModel?: string;
   codexPath?: string;
   codexDefaultModel?: string;
@@ -242,10 +265,14 @@ export interface SettingsPatch {
   thinking?: ThinkingLevel | '';
   /** Ollama model id for dictation cleanup. Empty clears the choice. */
   dictationModel?: string;
-  opencodeEnabled?: boolean;
   /** `local` uses the path field; `bundled` uses the SideCode-managed download. */
   opencodeCliSource?: 'local' | 'bundled';
   opencodePath?: string;
+  orchestrationTesting?: boolean;
+  orchestrationReviewing?: boolean;
+  orchestrationDoubleCheck?: boolean;
+  orchestrationQuickTask?: boolean;
+  orchestrationPlanning?: boolean;
   contextIncludeInstructions?: boolean;
   contextIncludeShape?: boolean;
   contextIncludeEditorState?: boolean;
@@ -312,6 +339,12 @@ export interface ModeSnapshot {
 }
 
 /**
+ * A provider page the settings screen can open directly, so a failure action
+ * lands on the provider that failed rather than on Cloud.
+ */
+export type SettingsSection = 'codex' | 'ollama-local';
+
+/**
  * Result of an on-demand authenticated call. `outcome` lets the UI name the
  * failure precisely instead of showing a raw stack or status code.
  */
@@ -347,6 +380,15 @@ export interface ChatTabView {
   active: boolean;
   backendId?: string;
   threadId?: string;
+}
+
+/** One queued user turn as rendered above the composer. No paths or bytes. */
+export interface QueuedTurnEntryView {
+  id: string;
+  textPreview: string;
+  attachmentCount: number;
+  /** Basenames only, safe to show. Omitted when the turn has no attachments. */
+  attachmentNames?: string[];
 }
 
 export type HostToWebviewMessage =
@@ -415,12 +457,32 @@ export type HostToWebviewMessage =
    * the chip can preview a file the host just re-read.
    */
   | { type: 'composerDraft'; tabId: string; text: string; attachments: Attachment[] }
+  /**
+   * Queued user turns for the visible chat, oldest first. Posted on enqueue,
+   * cancel, dispatch, clear, and tab switch so a chip never outlives its turn.
+   */
+  | { type: 'queuedTurns'; entries: QueuedTurnEntryView[] }
+  /**
+   * A user message the host sent on the user's behalf: a queued turn that just
+   * started dispatching. The webview appends it to the open transcript, so the
+   * message appears now rather than on the next repaint. It carries the stored
+   * id, so a later replay replaces it instead of adding a second copy.
+   */
+  | {
+      type: 'userMessageSent';
+      backendId: string;
+      threadId: string;
+      messageId: string;
+      text: string;
+      attachments?: Attachment[];
+      sentAt?: number;
+    }
   | { type: 'settings'; settings: SettingsSnapshot }
   /**
    * Open the inline settings screen. Sent from the view-title gear.
-   * `section: 'codex'` opens the Codex provider page, used by the protocol warning.
+   * `section` selects a provider page (used by protocol/failure actions).
    */
-  | { type: 'showSettings'; section?: 'codex' }
+  | { type: 'showSettings'; section?: SettingsSection }
   | { type: 'permissions'; permissions: PermissionSnapshot }
   | { type: 'modes'; modes: ModeSnapshot }
   /** The active conversation's plan, whenever it is created or revised. */
@@ -613,8 +675,8 @@ export type WebviewToHostMessage =
   /** Open a context file in the editor (the active file named in the strip). */
   | { type: 'openContextFile'; path: string }
   | { type: 'openSettings' }
-  /** Open the sidebar's own settings screen. `section: 'codex'` selects the Codex provider. */
-  | { type: 'showAppSettings'; section?: 'codex' }
+  /** Open the sidebar's own settings screen. `section` selects a provider page. */
+  | { type: 'showAppSettings'; section?: SettingsSection }
   | { type: 'setToken'; backendId: string }
   | { type: 'clearToken'; backendId: string }
   | { type: 'listModels'; backendId: string }
@@ -648,8 +710,16 @@ export type WebviewToHostMessage =
        * the host as well.
        */
       updatePlan?: boolean;
+      /**
+       * Queue the turn until the chat's current turn finishes instead of
+       * steering or refusing it. The host also queues automatically when a
+       * busy send carries attachments, because steer is text-only.
+       */
+      queue?: boolean;
     }
   | { type: 'steerTurn'; text: string }
+  /** Remove one queued turn. Ignored once it has started dispatching. */
+  | { type: 'cancelQueuedTurn'; id: string }
   /**
    * Re-ask a question whose payload the model sent in a format the host could
    * not read. The host starts a fresh turn with the re-ask instruction; this is

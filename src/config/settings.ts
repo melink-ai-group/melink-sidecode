@@ -27,6 +27,7 @@ import { resolveTrustedExecutable } from '../backends/executables.ts';
 /** The setting keys this module owns, named once so no call site can drift. */
 export const TRUSTED_KEYS = {
   ollamaBaseUrl: 'melink.ollama.baseUrl',
+  ollamaLocalBaseUrl: 'melink.ollamaLocal.baseUrl',
   opencodePath: 'melink.ollama.opencode.path',
   opencodeCliSource: 'melink.ollama.opencode.cliSource',
   codexPath: 'melink.codex.path',
@@ -73,6 +74,14 @@ export function readTrustedOptional<T>(key: string): T | undefined {
  */
 export function readTrustedBaseUrl(fallback = 'https://ollama.com'): string {
   return readTrustedString(TRUSTED_KEYS.ollamaBaseUrl, fallback);
+}
+
+/**
+ * The local Ollama server address. Read from the user's own settings only, so
+ * a workspace cannot redirect local prompts to another host.
+ */
+export function readTrustedOllamaLocalBaseUrl(fallback = 'http://localhost:11434'): string {
+  return readTrustedString(TRUSTED_KEYS.ollamaLocalBaseUrl, fallback);
 }
 
 /** The Codex CLI executable the app-server is spawned from. */

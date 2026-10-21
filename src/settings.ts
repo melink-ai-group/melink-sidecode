@@ -51,11 +51,13 @@ import {
   readTrustedBaseUrl,
   readTrustedCodexExecutable,
   readTrustedCodexPath,
+  readTrustedOllamaLocalBaseUrl,
   readTrustedOpencodeCliSource,
   readTrustedOpencodePath,
   readTrustedZvecGrepCliSource,
   readTrustedZvecGrepPath
 } from './config/settings.ts';
+import { resolveOrchestrationSettings } from './orchestration/settings';
 import {
   CONTEXT_SECTION,
   DEFAULT_CONTEXT_SETTINGS,
@@ -85,10 +87,14 @@ import {
  */
 
 const OLLAMA_SECTION = 'melink.ollama';
+const OLLAMA_LOCAL_SECTION = 'melink.ollamaLocal';
 const OLLAMA_OPENCODE_SECTION = 'melink.ollama.opencode';
 const OPENCODE_SECTION = 'melink.opencode';
 const CODEX_SECTION = 'melink.codex';
 const DEFAULTS_SECTION = 'melink.defaults';
+const ORCHESTRATION_SECTION = 'melink.orchestration';
+const LEGACY_TESTING_KEY = 'melink.review.checks.enabled';
+const LEGACY_REVIEWING_KEY = 'melink.review.diffReview';
 
 /**
  * Keys the settings screen reads and writes. Used to detect whether a workspace
@@ -97,8 +103,9 @@ const DEFAULTS_SECTION = 'melink.defaults';
 const SETTINGS_KEYS: readonly string[] = [
   `${OLLAMA_SECTION}.baseUrl`,
   `${OLLAMA_SECTION}.defaultModel`,
+  `${OLLAMA_LOCAL_SECTION}.baseUrl`,
+  `${OLLAMA_LOCAL_SECTION}.defaultModel`,
   `${OPENCODE_SECTION}.defaultModel`,
-  `${OLLAMA_OPENCODE_SECTION}.enabled`,
   `${OLLAMA_OPENCODE_SECTION}.path`,
   `${OLLAMA_OPENCODE_SECTION}.cliSource`,
   `${OLLAMA_OPENCODE_SECTION}.zvecGrep`,
@@ -108,6 +115,11 @@ const SETTINGS_KEYS: readonly string[] = [
   `${DEFAULTS_SECTION}.mode`,
   `${DEFAULTS_SECTION}.thinking`,
   `${DEFAULTS_SECTION}.dictationModel`,
+  `${ORCHESTRATION_SECTION}.testing`,
+  `${ORCHESTRATION_SECTION}.reviewing`,
+  `${ORCHESTRATION_SECTION}.doubleCheck`,
+  `${ORCHESTRATION_SECTION}.quickTask`,
+  `${ORCHESTRATION_SECTION}.planning`,
   `${CONTEXT_SECTION}.includeInstructions`,
   `${CONTEXT_SECTION}.includeShape`,
   `${CONTEXT_SECTION}.includeEditorState`,
@@ -234,8 +246,9 @@ export class SettingsService {
   /** The settings screen's read model. Async because the token check is. */
   async snapshot(): Promise<SettingsSnapshot> {
     const config = vscode.workspace.getConfiguration();
-    const [ollamaStatus, opencodeStatus, codexStatus] = await Promise.all([
+    const [ollamaStatus, ollamaLocalStatus, opencodeStatus, codexStatus] = await Promise.all([
       this.statusOf('ollama'),
+      this.statusOf('ollama-local'),
       this.statusOf('opencode'),
       this.statusOf('codex')
     ]);
@@ -252,6 +265,13 @@ export class SettingsService {
         status: ollamaStatus.status,
         detail: ollamaStatus.detail
       },
+      ollamaLocal: {
+        // No credential is sent, but the destination is still user-scoped.
+        baseUrl: readTrustedOllamaLocalBaseUrl(),
+        defaultModel: config.get<string>(`${OLLAMA_LOCAL_SECTION}.defaultModel`, ''),
+        status: ollamaLocalStatus.status,
+        detail: ollamaLocalStatus.detail
+      },
       opencodeZen: {
         defaultModel: config.get<string>(`${OPENCODE_SECTION}.defaultModel`, ''),
         hasToken: hasZenToken,
@@ -267,7 +287,7 @@ export class SettingsService {
         version: codexStatus.version,
         authMode: codexStatus.authMode
       },
-      opencode: await this.opencodeSnapshot(config),
+      opencode: await this.opencodeSnapshot(),
       defaults: {
         permissionLevel: this.readPermissionLevel(),
         mode: this.readMode(),
@@ -275,6 +295,7 @@ export class SettingsService {
         dictationModel: config.get<string>(`${DEFAULTS_SECTION}.dictationModel`, '')
       },
       context: this.contextSnapshot(config),
+      orchestration: this.orchestrationSnapshot(config),
       skills: await this.skillsSnapshot(config),
       models: {}
     };
@@ -309,6 +330,29 @@ export class SettingsService {
         );
         this.noticeForScope('ollamaBaseUrl', `${OLLAMA_SECTION}.baseUrl`, scope, notices);
       }
+    }
+
+    if (patch.ollamaLocalBaseUrl !== undefined) {
+      const value = patch.ollamaLocalBaseUrl.trim();
+      if (!isHttpUrl(value)) {
+        errors.ollamaLocalBaseUrl =
+          'Enter a full URL, like http://localhost:11434. This value was not saved.';
+      } else {
+        await config.update(
+          `${OLLAMA_LOCAL_SECTION}.baseUrl`,
+          value,
+          this.targetForKey(`${OLLAMA_LOCAL_SECTION}.baseUrl`, scope)
+        );
+        this.noticeForScope('ollamaLocalBaseUrl', `${OLLAMA_LOCAL_SECTION}.baseUrl`, scope, notices);
+      }
+    }
+
+    if (patch.ollamaLocalDefaultModel !== undefined) {
+      await config.update(
+        `${OLLAMA_LOCAL_SECTION}.defaultModel`,
+        patch.ollamaLocalDefaultModel.trim(),
+        target
+      );
     }
 
     if (patch.codexPath !== undefined) {
@@ -383,8 +427,19 @@ export class SettingsService {
       await config.update(`${DEFAULTS_SECTION}.dictationModel`, patch.dictationModel.trim(), target);
     }
 
-    if (patch.opencodeEnabled !== undefined) {
-      await config.update(`${OLLAMA_OPENCODE_SECTION}.enabled`, patch.opencodeEnabled, target);
+    // Orchestration is ordinary policy, not a trust boundary: the nearest
+    // explicit scope wins on read, and a save writes the requested scope.
+    const orchestration: Array<[string, boolean | undefined]> = [
+      [`${ORCHESTRATION_SECTION}.testing`, patch.orchestrationTesting],
+      [`${ORCHESTRATION_SECTION}.reviewing`, patch.orchestrationReviewing],
+      [`${ORCHESTRATION_SECTION}.doubleCheck`, patch.orchestrationDoubleCheck],
+      [`${ORCHESTRATION_SECTION}.quickTask`, patch.orchestrationQuickTask],
+      [`${ORCHESTRATION_SECTION}.planning`, patch.orchestrationPlanning]
+    ];
+    for (const [key, value] of orchestration) {
+      if (value !== undefined) {
+        await config.update(key, value, target);
+      }
     }
 
     if (patch.opencodeCliSource !== undefined) {
@@ -571,9 +626,28 @@ export class SettingsService {
     };
   }
 
-  /** Whether the opencode agentic runtime is enabled. Default on. */
-  private opencodeEnabled(config: vscode.WorkspaceConfiguration): boolean {
-    return config.get<boolean>(`${OLLAMA_OPENCODE_SECTION}.enabled`, true) !== false;
+  /**
+   * The effective per-turn orchestration policy.
+   *
+   * The new `melink.orchestration.*` key wins at the nearest explicit scope;
+   * when it is unset, the pre-T106 review key is the fallback (so an existing
+   * `melink.review.checks.enabled` / `melink.review.diffReview` choice is not
+   * silently discarded). The source flags drive the screen's explanation.
+   */
+  private orchestrationSnapshot(
+    config: vscode.WorkspaceConfiguration
+  ): SettingsSnapshot['orchestration'] {
+    const inspect = (key: string): ReturnType<vscode.WorkspaceConfiguration['inspect']> =>
+      config.inspect<boolean>(key);
+    return resolveOrchestrationSettings({
+      testing: inspect(`${ORCHESTRATION_SECTION}.testing`),
+      reviewing: inspect(`${ORCHESTRATION_SECTION}.reviewing`),
+      doubleCheck: inspect(`${ORCHESTRATION_SECTION}.doubleCheck`),
+      quickTask: inspect(`${ORCHESTRATION_SECTION}.quickTask`),
+      planning: inspect(`${ORCHESTRATION_SECTION}.planning`),
+      legacyTesting: inspect(LEGACY_TESTING_KEY),
+      legacyReviewing: inspect(LEGACY_REVIEWING_KEY)
+    });
   }
 
   /** Stored local path; ignored for spawns when `cliSource` is bundled. */
@@ -594,14 +668,10 @@ export class SettingsService {
 
   /**
    * The CLI read model for the settings screen. The binary is always probed so
-   * the CLI tab and OpenCode Zen can report status even when the Ollama nested
-   * runtime (`enabled`) is off. A probe never throws; a missing or unrunnable
-   * CLI is data, exactly like backend availability.
+   * the CLI tab and OpenCode Zen can report status. A probe never throws; a
+   * missing or unrunnable CLI is data, exactly like backend availability.
    */
-  private async opencodeSnapshot(
-    config: vscode.WorkspaceConfiguration
-  ): Promise<SettingsSnapshot['opencode']> {
-    const enabled = this.opencodeEnabled(config);
+  private async opencodeSnapshot(): Promise<SettingsSnapshot['opencode']> {
     const cliSource = this.opencodeCliSource();
     const localPath = this.opencodePathSetting();
     const bundledPath = bundledOpencodeExecutable(this.opencodeRoots());
@@ -612,7 +682,6 @@ export class SettingsService {
     const active = cliSource === 'bundled' ? bundled : local;
     const zvecGrep = await this.zvecGrepStatus();
     return {
-      enabled,
       cliSource,
       path: active.path,
       status: active.status,

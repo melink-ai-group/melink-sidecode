@@ -1,7 +1,7 @@
 {
   "name": "melink-sidecode",
   "displayName": "SideCode",
-  "description": "SideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, the OpenAI Codex CLI, and OpenCode Zen.",
+  "description": "SideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.",
   "version": "0.2.0",
   "publisher": "melink",
   "icon": "media/melink-logo.png",
@@ -30,9 +30,10 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "SideCode works in an untrusted workspace, but the settings that decide where a credential is sent, which binary is spawned, and what the permission default is are read from your user settings only. These settings are ignored when they come from a workspace: melink.ollama.baseUrl, melink.ollama.opencode.path, melink.ollama.opencode.cliSource, melink.codex.path, melink.skills.zvecGrep.path, melink.skills.zvecGrep.cliSource, melink.skills.astGrep.path, melink.skills.astGrep.cliSource, melink.defaults.permissionLevel. The application scope of these settings is enforced by SideCode itself, so a workspace value never reaches them, trusted or not. Open the workspace in Restricted Mode to keep the workspace from changing anything at all.",
+      "description": "SideCode works in an untrusted workspace, but the settings that decide where a credential is sent, which binary is spawned, and what the permission default is are read from your user settings only. These settings are ignored when they come from a workspace: melink.ollama.baseUrl, melink.ollamaLocal.baseUrl, melink.ollama.opencode.path, melink.ollama.opencode.cliSource, melink.codex.path, melink.skills.zvecGrep.path, melink.skills.zvecGrep.cliSource, melink.skills.astGrep.path, melink.skills.astGrep.cliSource, melink.defaults.permissionLevel. The application scope of these settings is enforced by SideCode itself, so a workspace value never reaches them, trusted or not. Open the workspace in Restricted Mode to keep the workspace from changing anything at all.",
       "restrictedConfigurations": [
         "melink.ollama.baseUrl",
+        "melink.ollamaLocal.baseUrl",
         "melink.ollama.opencode.path",
         "melink.ollama.opencode.cliSource",
         "melink.codex.path",
@@ -137,21 +138,27 @@
           "default": "",
           "description": "Default Ollama Cloud model. Empty means the first model reported by the backend is used."
         },
+        "melink.ollamaLocal.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "scope": "application",
+          "markdownDescription": "Base URL for a local Ollama server. No credential is sent. This setting is read from your user settings only, so a workspace cannot redirect local prompts to another host."
+        },
+        "melink.ollamaLocal.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Default Ollama Local model. Empty means the first model the local server reports is used."
+        },
         "melink.opencode.defaultModel": {
           "type": "string",
           "default": "",
           "description": "Default OpenCode Zen model. Empty means the first model the app's catalog shows is used: the free list without a Zen API key, or the full live list with one. Free models work without a key; paid models require SideCode: Set OpenCode Zen API key."
         },
-        "melink.ollama.opencode.enabled": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Run Ollama Cloud turns through the **opencode** agentic runtime (tool execution, file edits, session resume) instead of the direct `/api/chat` streaming adapter. On by default. Turn it off to use the direct adapter and spawn no opencode process."
-        },
         "melink.ollama.opencode.path": {
           "type": "string",
           "default": "opencode",
           "scope": "application",
-          "description": "Path to the opencode CLI executable used when melink.ollama.opencode.enabled is on and melink.ollama.opencode.cliSource is local. Resolved from PATH when it is a bare name. A relative path is refused, including the Windows drive-relative form (C:evil.exe), because it would run a file from the workspace. Ignored when cliSource is bundled. Read from your user settings only, so a workspace cannot choose the binary that runs."
+          "description": "Path to the opencode CLI executable used when melink.ollama.opencode.cliSource is local. Resolved from PATH when it is a bare name. A relative path is refused, including the Windows drive-relative form (C:evil.exe), because it would run a file from the workspace. Ignored when cliSource is bundled. Read from your user settings only, so a workspace cannot choose the binary that runs."
         },
         "melink.ollama.opencode.cliSource": {
           "type": "string",
@@ -343,6 +350,31 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Run post-turn checks after a turn that changed files, before the changes are kept. Checks never run in an untrusted workspace."
+        },
+        "melink.orchestration.testing": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run typecheck or lint and the tests after a turn that changes files. Used as the fallback for `melink.review.checks.enabled`."
+        },
+        "melink.orchestration.reviewing": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Run a read-only diff review after a turn that changes files. Advisory only; it never edits files or blocks Keep. Used as the fallback for `melink.review.diffReview`."
+        },
+        "melink.orchestration.doubleCheck": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Sweep the files a turn changed for VS Code errors after the reply. No second model call."
+        },
+        "melink.orchestration.quickTask": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Skip post-turn testing, review, and double-check for short single-question turns in Agent mode. The reply, tools, permissions, and mode are unchanged."
+        },
+        "melink.orchestration.planning": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Continue a built plan step by step after a clean turn. Agent mode only."
         },
         "melink.review.checks.commands": {
           "type": "array",

@@ -10,8 +10,11 @@ import { isSubmitEnter } from './keys';
 import { noticeForField } from '../config/fieldNotices.ts';
 import { TabList, TabPanel, type TabItem } from './Tabs';
 import { CONTEXT_BUILTIN_PATTERNS } from './settings/constants';
-import type { SettingsScreenProps } from './settings/types';
-import { draftFrom, type Draft } from './settings/draft';
+import type { ProviderTab, SettingsScreenProps } from './settings/types';
+import { providerTabForSection } from './settings/types';
+import { draftFrom, normalizedQuickTask, type Draft } from './settings/draft';
+import { OrchestrationFields } from './settings/OrchestrationFields';
+import type { OrchestrationFieldKey } from './settings/orchestrationCopy';
 import {
   codexAuthDetail,
   codexAuthLabel,
@@ -83,12 +86,11 @@ export function SettingsScreen({
   const [permissionConfirm, setPermissionConfirm] = useState(false);
   // The visible settings section. Switching tabs never touches the draft, so an
   // unsaved edit in another section survives.
-  const [tab, setTab] = useState<'cli' | 'providers' | 'defaults' | 'context' | 'skills'>('cli');
-  // Ollama, OpenCode Zen, and Codex are separate pages inside Providers. The
-  // choice is view state only; it does not touch the draft.
-  const [providerTab, setProviderTab] = useState<'provider-ollama' | 'provider-opencode' | 'provider-codex'>(
-    settingsProvider === 'codex' ? 'provider-codex' : 'provider-ollama'
-  );
+  const [tab, setTab] = useState<'cli' | 'providers' | 'defaults' | 'orchestration' | 'context' | 'skills'>('cli');
+  // Ollama Cloud, Ollama Local, OpenCode Zen, and Codex are separate pages
+  // inside Providers. The choice is view state only; it does not touch the
+  // draft.
+  const [providerTab, setProviderTab] = useState<ProviderTab>(() => providerTabForSection(settingsProvider));
   const [skillTab, setSkillTab] = useState<'skill-browser' | 'skill-ast-grep' | 'skill-zvec-grep'>('skill-browser');
   const backRef = useRef<HTMLButtonElement>(null);
   const lastSettingsRef = useRef<SettingsSnapshot | undefined>(undefined);
@@ -126,8 +128,8 @@ export function SettingsScreen({
   }, []);
 
   useEffect(() => {
-    if (settingsProvider === 'codex') {
-      setProviderTab('provider-codex');
+    if (settingsProvider) {
+      setProviderTab(providerTabForSection(settingsProvider));
     }
   }, [settingsProvider]);
 
@@ -161,6 +163,8 @@ export function SettingsScreen({
     return (
       draft.ollamaBaseUrl !== settings.ollama.baseUrl ||
       draft.ollamaDefaultModel !== settings.ollama.defaultModel ||
+      draft.ollamaLocalBaseUrl !== settings.ollamaLocal.baseUrl ||
+      draft.ollamaLocalDefaultModel !== settings.ollamaLocal.defaultModel ||
       draft.opencodeDefaultModel !== settings.opencodeZen.defaultModel ||
       draft.codexPath !== settings.codex.path ||
       draft.codexDefaultModel !== settings.codex.defaultModel ||
@@ -168,7 +172,11 @@ export function SettingsScreen({
       draft.mode !== settings.defaults.mode ||
       draft.thinking !== (settings.defaults.thinking ?? '') ||
       draft.dictationModel !== formatDictationTarget(settings.defaults.dictationModel) ||
-      draft.opencodeEnabled !== settings.opencode.enabled ||
+      draft.orchestrationTesting !== settings.orchestration.testing ||
+      draft.orchestrationReviewing !== settings.orchestration.reviewing ||
+      draft.orchestrationDoubleCheck !== settings.orchestration.doubleCheck ||
+      draft.orchestrationQuickTask !== normalizedQuickTask(settings.orchestration) ||
+      draft.orchestrationPlanning !== settings.orchestration.planning ||
       draft.opencodeCliSource !== settings.opencode.cliSource ||
       draft.opencodePath !== settings.opencode.local.path ||
       draft.browserCodex !== settings.skills.browserCodex ||
@@ -223,6 +231,10 @@ export function SettingsScreen({
     if (!isHttpUrl(draft.ollamaBaseUrl)) {
       nextErrors.ollamaBaseUrl = 'Enter a full URL, like https://ollama.com. This value was not saved.';
     }
+    if (!isHttpUrl(draft.ollamaLocalBaseUrl)) {
+      nextErrors.ollamaLocalBaseUrl =
+        'Enter a full URL, like http://localhost:11434. This value was not saved.';
+    }
     if (!draft.codexPath.trim()) {
       nextErrors.codexPath = 'Enter the CLI path or name. This value was not saved.';
     } else {
@@ -274,6 +286,8 @@ export function SettingsScreen({
       {
         ollamaBaseUrl: draft.ollamaBaseUrl.trim(),
         ollamaDefaultModel: draft.ollamaDefaultModel.trim(),
+        ollamaLocalBaseUrl: draft.ollamaLocalBaseUrl.trim(),
+        ollamaLocalDefaultModel: draft.ollamaLocalDefaultModel.trim(),
         opencodeDefaultModel: draft.opencodeDefaultModel.trim(),
         codexPath: draft.codexPath.trim(),
         codexDefaultModel: draft.codexDefaultModel.trim(),
@@ -281,7 +295,11 @@ export function SettingsScreen({
         mode: draft.mode,
         thinking: draft.thinking,
         dictationModel: draft.dictationModel.trim(),
-        opencodeEnabled: draft.opencodeEnabled,
+        orchestrationTesting: draft.orchestrationTesting,
+        orchestrationReviewing: draft.orchestrationReviewing,
+        orchestrationDoubleCheck: draft.orchestrationDoubleCheck,
+        orchestrationQuickTask: draft.orchestrationQuickTask,
+        orchestrationPlanning: draft.orchestrationPlanning,
         opencodeCliSource: draft.opencodeCliSource,
         // Local path only: bundled ignores it for spawns, so a bundled selection
         // must not write an empty path over a previously stored valid one.
@@ -344,6 +362,7 @@ export function SettingsScreen({
   }
 
   const ollamaStatus = connectionTest?.backendId === 'ollama' ? connectionTest : undefined;
+  const localStatus = connectionTest?.backendId === 'ollama-local' ? connectionTest : undefined;
   const opencodeStatus = connectionTest?.backendId === 'opencode' ? connectionTest : undefined;
   const codexStatus = connectionTest?.backendId === 'codex' ? connectionTest : undefined;
   // The host's notice map, read through one accessor. The host is the
@@ -352,7 +371,6 @@ export function SettingsScreen({
   const noticeFor = (field: keyof SettingsPatch): string | undefined => noticeForField(field, notices);
   const modelOptions = flattenModels(settings.models);
   const runtimeView = opencodeRuntimeView(settings.opencode, {
-    enabled: draft.opencodeEnabled,
     source: draft.opencodeCliSource
   });
   const draftCliAction = {
@@ -425,9 +443,27 @@ export function SettingsScreen({
     { id: 'cli', label: 'CLI' },
     { id: 'providers', label: 'Providers' },
     { id: 'defaults', label: 'Defaults' },
+    { id: 'orchestration', label: 'Orchestration' },
     { id: 'context', label: 'Context' },
     { id: 'skills', label: 'Skills' }
   ];
+
+  const orchestrationDraftKeys: Record<OrchestrationFieldKey, keyof Draft> = {
+    testing: 'orchestrationTesting',
+    reviewing: 'orchestrationReviewing',
+    doubleCheck: 'orchestrationDoubleCheck',
+    quickTask: 'orchestrationQuickTask',
+    planning: 'orchestrationPlanning'
+  };
+  const changeOrchestration = (key: OrchestrationFieldKey, value: boolean): void => {
+    const draftKey = orchestrationDraftKeys[key] as
+      | 'orchestrationTesting'
+      | 'orchestrationReviewing'
+      | 'orchestrationDoubleCheck'
+      | 'orchestrationQuickTask'
+      | 'orchestrationPlanning';
+    update(draftKey, value);
+  };
 
   return (
     <main className="app">
@@ -456,32 +492,15 @@ export function SettingsScreen({
           <div className="panel__head" id="cli-title">
             <span>CLI</span>
             <span className="spacer" />
-            <span className="panel__note">Shared OpenCode binary for Ollama turns and OpenCode Zen</span>
+            <span className="panel__note">Shared OpenCode binary for every Ollama and OpenCode Zen turn</span>
           </div>
           <div className="panel__body">
             <div className="field">
               <p className="field-help">
-                OpenCode Zen and the optional Ollama agentic runtime both use this CLI. Choose local or
-                bundled, then install or update. The selection is what Test connection and model refresh use.
+                Ollama Cloud, Ollama Local, and OpenCode Zen all send turns through this CLI. Choose local
+                or bundled, then install or update. The selection is what Test connection and model refresh
+                use.
               </p>
-              <label className="check" htmlFor="opencode-enabled">
-                <input
-                  className="check-input"
-                  id="opencode-enabled"
-                  type="checkbox"
-                  checked={draft.opencodeEnabled}
-                  onChange={(event) => update('opencodeEnabled', event.target.checked)}
-                />
-                <span className="check-box" aria-hidden="true">
-                  <CheckIcon />
-                </span>
-                <span className="check-body">
-                  <span className="check-label">Use opencode for Ollama turns</span>
-                  <span className="check-text">
-                    Applies from the next turn. OpenCode Zen still uses this CLI when the box is off.
-                  </span>
-                </span>
-              </label>
 
               <label className="field-label" htmlFor="opencode-cli-source">
                 opencode CLI source
@@ -613,12 +632,15 @@ export function SettingsScreen({
             label="Provider"
             tabs={[
               { id: 'provider-ollama', label: 'Ollama' },
+              { id: 'provider-local', label: 'Ollama Local' },
               { id: 'provider-opencode', label: 'OpenCode' },
               { id: 'provider-codex', label: 'Codex' }
             ]}
             active={providerTab}
             onChange={(id) =>
-              setProviderTab(id as 'provider-ollama' | 'provider-opencode' | 'provider-codex')
+              setProviderTab(
+                id as 'provider-ollama' | 'provider-local' | 'provider-opencode' | 'provider-codex'
+              )
             }
           />
           <TabPanel id="provider-ollama" active={providerTab} className="tabpanel--inline">
@@ -761,6 +783,110 @@ export function SettingsScreen({
               </p>
 
               {ollamaStatus ? <TestResult backendLabel="Ollama Cloud" test={ollamaStatus} onRetry={() => onTestConnection('ollama')} /> : null}
+            </div>
+          </TabPanel>
+
+          <TabPanel id="provider-local" active={providerTab} className="tabpanel--inline">
+            {/* Ollama Local */}
+            <div className="field">
+              <div className="field__head">
+                <span className="provider-badge">
+                  <span className="provider-dot provider-dot--ollama-local" aria-hidden="true" />
+                  <span className="provider-name">Ollama Local</span>
+                </span>
+                <span className="spacer" />
+                <span
+                  className={`chip ${
+                    settings.ollamaLocal.status === 'available' ? 'chip--stored' : 'chip--missing'
+                  }`}
+                >
+                  {settings.ollamaLocal.status === 'available' ? 'Running' : 'Not reachable'}
+                </span>
+              </div>
+              <p className="field-help">
+                A local Ollama server. No API key is used; turns run through the shared OpenCode binary.
+              </p>
+
+              <label className="field-label" htmlFor="ollama-local-base-url">
+                Base URL
+              </label>
+              <input
+                className="input"
+                id="ollama-local-base-url"
+                type="url"
+                value={draft.ollamaLocalBaseUrl}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={errors.ollamaLocalBaseUrl ? true : undefined}
+                aria-describedby={
+                  errors.ollamaLocalBaseUrl ? 'ollama-local-base-url-error' : 'ollama-local-base-url-help'
+                }
+                onChange={(event) => update('ollamaLocalBaseUrl', event.target.value)}
+              />
+              {errors.ollamaLocalBaseUrl ? (
+                <p className="field-msg field-msg--error" id="ollama-local-base-url-error">
+                  <AlertIcon />
+                  <span>{errors.ollamaLocalBaseUrl}</span>
+                </p>
+              ) : noticeFor('ollamaLocalBaseUrl') ? (
+                <p className="field-msg field-msg--notice" id="ollama-local-base-url-notice" role="status">
+                  <InfoIcon />
+                  <span>{noticeFor('ollamaLocalBaseUrl')}</span>
+                </p>
+              ) : (
+                <p className="field-help" id="ollama-local-base-url-help">
+                  Where local requests are sent. This setting is read from your user settings only, so a
+                  workspace cannot redirect local prompts.
+                </p>
+              )}
+
+              <label className="field-label" htmlFor="ollama-local-default-model">
+                Default model
+              </label>
+              <select
+                className="select"
+                id="ollama-local-default-model"
+                value={draft.ollamaLocalDefaultModel}
+                onChange={(event) => update('ollamaLocalDefaultModel', event.target.value)}
+              >
+                <option value="">First model reported by the provider</option>
+                {modelOptions
+                  .filter((option) => option.backendId === 'ollama-local')
+                  .map((option) => (
+                    <option value={option.id} key={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+              </select>
+              <p className="field-help">
+                Used for a new conversation. Switching the model in the header overrides it for that conversation.
+              </p>
+
+              <div className="field-row">
+                <span className="spacer" />
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={connectionTest?.backendId === 'ollama-local' && connectionTest.pending}
+                  onClick={() => onTestConnection('ollama-local')}
+                >
+                  <RefreshIconInline />
+                  {connectionTest?.backendId === 'ollama-local' && connectionTest.pending
+                    ? 'Testing...'
+                    : 'Test connection'}
+                </button>
+              </div>
+              {settings.ollamaLocal.detail ? (
+                <p className="field-help">{settings.ollamaLocal.detail}</p>
+              ) : null}
+
+              {localStatus ? (
+                <TestResult
+                  backendLabel="Ollama Local"
+                  test={localStatus}
+                  onRetry={() => onTestConnection('ollama-local')}
+                />
+              ) : null}
             </div>
           </TabPanel>
 
@@ -1165,6 +1291,31 @@ export function SettingsScreen({
                 This model only cleans dictated text. It does not answer. Choose an Ollama or Codex model. None disables the microphone.
               </p>
             </div>
+          </div>
+        </section>
+        </TabPanel>
+
+        {/* ---------- Orchestration ---------- */}
+        <TabPanel id="orchestration" active={tab}>
+        <section className="panel" aria-labelledby="orchestration-title">
+          <div className="panel__head" id="orchestration-title">
+            <span>Orchestration</span>
+            <span className="spacer" />
+            <span className="panel__note">Per-turn helpers that run after the agent replies</span>
+          </div>
+          <div className="panel__body">
+            <OrchestrationFields
+              values={{
+                testing: draft.orchestrationTesting,
+                reviewing: draft.orchestrationReviewing,
+                doubleCheck: draft.orchestrationDoubleCheck,
+                quickTask: draft.orchestrationQuickTask,
+                planning: draft.orchestrationPlanning
+              }}
+              legacyTesting={settings.orchestration.legacyTesting}
+              legacyReviewing={settings.orchestration.legacyReviewing}
+              onChange={changeOrchestration}
+            />
           </div>
         </section>
         </TabPanel>
@@ -1828,9 +1979,9 @@ export function SettingsScreen({
 /**
  * The scope notice for a trust-sensitive field.
  *
- * Nine fields are read from the user's own settings only, so a "Save to
+ * Ten fields are read from the user's own settings only, so a "Save to
  * workspace" writes them there instead. The value is persisted, so the
- * message is a notice -- but it must be shown on every one of the nine, or the
+ * message is a notice -- but it must be shown on every one of the ten, or the
  * screen would claim a workspace save that never happened.
  */
 function ScopeNotice({ id, notice }: { id: string; notice?: string }): JSX.Element | null {

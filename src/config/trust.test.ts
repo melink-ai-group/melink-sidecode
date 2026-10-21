@@ -78,8 +78,10 @@ test('the boolean read keeps an explicit false and ignores a workspace true', ()
 });
 
 test('the trust-scoped key list covers the three sensitive decisions', () => {
-  // Where the bearer token goes.
+  // Where the Ollama Cloud bearer token goes.
   assert.equal(TRUST_SCOPED_KEYS.includes('melink.ollama.baseUrl'), true);
+  // Where local prompts go.
+  assert.equal(TRUST_SCOPED_KEYS.includes('melink.ollamaLocal.baseUrl'), true);
   // Which binary is spawned.
   assert.equal(TRUST_SCOPED_KEYS.includes('melink.ollama.opencode.path'), true);
   assert.equal(TRUST_SCOPED_KEYS.includes('melink.codex.path'), true);

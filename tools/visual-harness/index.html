@@ -12,5 +12,25 @@
     <div id="root"></div>
     <script src="./mock-vscode.js"></script>
     <script src="/dist/webview.js"></script>
+    <script type="module">
+      // Optional manual inspection aid: `?screen=<slug>` seeds the same host
+      // messages the capture runner posts. `npm run visual` never uses this; it
+      // keeps its explicit, per-screen seeding so its output stays deterministic.
+      const slug = new URLSearchParams(location.search).get('screen');
+      if (slug) {
+        const { screenMessages } = await import('./fixtures.mjs');
+        const messages = screenMessages(slug);
+        const seed = () => {
+          if (window.__visualReady !== true) {
+            setTimeout(seed, 50);
+            return;
+          }
+          for (const message of messages) {
+            window.postMessage(message, '*');
+          }
+        };
+        seed();
+      }
+    </script>
   </body>
 </html>

@@ -13,7 +13,7 @@ export const SCREENS = Object.freeze([
   Object.freeze({
     slug: 'chat-idle',
     title: 'Composer / chat idle',
-    expectText: 'meLink SideCode',
+    expectText: 'SideCode',
     waitFor: '.app--chat-empty'
   }),
   Object.freeze({
@@ -51,6 +51,28 @@ export const SCREENS = Object.freeze([
     waitFor: '.settings',
     clickTab: 'Defaults',
     afterClickText: 'Default permission level'
+  }),
+  Object.freeze({
+    slug: 'settings-orchestration',
+    title: 'Settings / Orchestration',
+    expectText: 'Effective policy',
+    waitFor: '.settings',
+    clickTab: 'Orchestration',
+    afterClickText: 'Effective policy'
+  }),
+  Object.freeze({
+    slug: 'settings-provider-local',
+    title: 'Settings / Ollama Local',
+    expectText: 'Ollama Local',
+    waitFor: '.settings',
+    clickTabs: Object.freeze(['Providers', 'Ollama Local']),
+    afterClickText: 'No API key is used'
+  }),
+  Object.freeze({
+    slug: 'chat-queued',
+    title: 'Composer / busy with queued turns',
+    expectText: '2 queued',
+    waitFor: '.composer-queue'
   })
 ]);
 

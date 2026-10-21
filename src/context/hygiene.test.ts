@@ -42,11 +42,12 @@ test('the message builder is host-free and provider-neutral', async () => {
   assert.match(text, /import type \{ ContextPayload \}/);
 });
 
-test('the ollama adapter reads the transcript for context but never writes it', async () => {
+test('the ollama adapter delivers context through opencode and never writes it', async () => {
   const text = await source('backends/ollama.ts');
-  // The adapter builds the request messages from the stored transcript and the
-  // per-turn context; it never writes context back to the store.
-  assert.match(text, /buildContextMessages\(history, text, context\)/);
+  // The adapter hands the per-turn context to the OpenCode prompt builder and
+  // never writes context back to the store.
+  assert.match(text, /opencodePrompt\(/);
+  assert.equal(/buildContextMessages\(/.test(text), false);
   assert.equal(/\bsetTranscript\b/.test(text), false);
   assert.equal(/\bappendUserMessage\b/.test(text), false);
 });
@@ -79,14 +80,16 @@ test('the snapshot service owns the workspace root; adapters prefer it over the 
   assert.match(ollama, /request\.context\?\.workspaceRoot \?\? this\.cwd/);
 });
 
-test('the direct ollama path is unchanged when the opencode setting is off', async () => {
+test('every ollama turn uses the opencode runtime and nothing gates it', async () => {
   const text = await source('backends/ollama.ts');
-  // The setting gates the branch, and the runtime/config modules are imported
-  // only inside it, so the off path loads neither and spawns no child.
-  assert.match(text, /if \(this\.opencodeEnabled\) \{/);
-  assert.match(text, /await import\('\.\/opencode\/config\.ts'\)/);
-  assert.match(text, /await import\('\.\/opencode\/runtime\.ts'\)/);
-  // No static value import of the runtime means the off path cannot spawn it.
+  assert.equal(text.includes('opencodeEnabled'), false);
+  assert.match(text, /await this\.sendOpencodeTurn\(handle, request, token\);/);
+  // The direct `/api/chat` API survives only for compaction and dictation.
+  const directChatCalls = text.match(/'\/api\/chat'/g) ?? [];
+  assert.equal(directChatCalls.length, 2, 'direct /api/chat must be compaction + dictation only');
+  assert.match(text, /async summarize\(/);
+  assert.match(text, /async cleanDictation\(/);
+  // No static value import of the runtime: the module is loaded per turn.
   assert.equal(/import\s+[^;]*runOpencodeTurn[^;]*from\s+['"]\.\/opencode\/runtime['"]/.test(text), false);
 });
 

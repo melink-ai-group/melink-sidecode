@@ -57,14 +57,15 @@ test('the empty state renders the SideCode brand', async () => {
   assert.equal(/meLink/.test(app), false);
 });
 
-test('the docs describe all three providers and the OpenCode Zen key command', async () => {
+test('the docs describe all four providers and the OpenCode Zen key command', async () => {
   const readme = await read('README.md');
   const usage = await read('docs/usage.md');
   for (const [name, text] of [
     ['README.md', readme],
     ['docs/usage.md', usage]
   ] as const) {
-    assert.match(text, /three providers/i, `${name} must name three providers`);
+    assert.match(text, /four providers/i, `${name} must name four providers`);
+    assert.match(text, /Ollama Local/, `${name} must name Ollama Local`);
     assert.match(text, /OpenCode Zen/, `${name} must name OpenCode Zen`);
     assert.match(text, /melink\.setOpencodeZenToken/, `${name} must document the Zen token command`);
     assert.match(text, /melink\.opencode\.zenToken/, `${name} must document the Zen secret key`);
@@ -74,9 +75,10 @@ test('the docs describe all three providers and the OpenCode Zen key command', a
   // unauthenticated provider in the picker.
 });
 
-test('the marketplace description names all three providers', async () => {
+test('the marketplace description names all four providers', async () => {
   const packageJson = JSON.parse(await read('package.json')) as { description?: string };
   assert.match(packageJson.description ?? '', /Ollama Cloud/);
+  assert.match(packageJson.description ?? '', /Ollama Local/);
   assert.match(packageJson.description ?? '', /OpenAI Codex CLI/);
   assert.match(packageJson.description ?? '', /OpenCode Zen/);
 });
@@ -85,7 +87,7 @@ test('OpenCode Zen stays available without a key and exposes the approval channe
   const usage = await read('docs/usage.md');
   assert.match(usage, /missing OpenCode Zen key does not make Zen unauthenticated/i);
   assert.match(usage, /only blocks paid models per turn/i);
-  assert.match(usage, /picker is shown for every backend that exposes an approval channel: Codex,\s+OpenCode Zen/i);
+  assert.match(usage, /picker is shown for every backend that exposes an approval channel: Codex,\s+OpenCode Zen, Ollama Cloud, and Ollama Local/i);
 });
 
 test('the docs state the mode, approval-channel, and timeout behaviour truthfully', async () => {

@@ -86,6 +86,7 @@
 }
 
 .provider-dot--ollama,
+.provider-dot--ollama-local,
 .provider-dot--opencode,
 .provider-dot--codex {
   background: var(--melink-shell);

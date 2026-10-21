@@ -129,6 +129,36 @@ test('the restricted configurations are the trust-scoped keys', async () => {
   assert.deepEqual([...restricted].sort(), [...TRUST_SCOPED_KEYS].sort());
 });
 
+test('the local Ollama base URL is application-scoped and restricted', async () => {
+  const pkg = await manifest();
+  const property = pkg.contributes?.configuration?.properties?.['melink.ollamaLocal.baseUrl'];
+  assert.ok(property, 'melink.ollamaLocal.baseUrl is not contributed');
+  assert.equal(property.scope, 'application');
+  assert.equal(property.default, 'http://localhost:11434');
+  const restricted = pkg.capabilities?.untrustedWorkspaces?.restrictedConfigurations ?? [];
+  assert.equal(restricted.includes('melink.ollamaLocal.baseUrl'), true);
+});
+
+test('the orchestration keys are window-scoped with the designed defaults', async () => {
+  const pkg = await manifest();
+  const properties = pkg.contributes?.configuration?.properties ?? {};
+  const expected: Array<[string, boolean]> = [
+    ['melink.orchestration.testing', true],
+    ['melink.orchestration.reviewing', false],
+    ['melink.orchestration.doubleCheck', true],
+    ['melink.orchestration.quickTask', true],
+    ['melink.orchestration.planning', true]
+  ];
+  for (const [key, value] of expected) {
+    const property = properties[key];
+    assert.ok(property, `${key} is not contributed`);
+    assert.equal(property.type, 'boolean');
+    assert.equal(property.default, value);
+    // No explicit scope means VS Code's window scope, matching the review keys.
+    assert.equal(property.scope === undefined || property.scope === 'window', true, `${key} is not window-scoped`);
+  }
+});
+
 test('the capability description states that the application scope is enforced', async () => {
   const pkg = await manifest();
   const description = pkg.capabilities?.untrustedWorkspaces?.description ?? '';

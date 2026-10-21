@@ -1503,3 +1503,18 @@ test('a warning with a recovery action is a transcript line, not a pinned banner
   assert.equal(warned.transcript.at(-1)?.noticeAction, 'setToken');
   assert.equal(warned.transcript.at(-1)?.text, 'Ollama needs a token before you can chat.');
 });
+
+test('a conversation repaint keeps queued chips for the same chat and clears them on a switch', () => {
+  const open = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 'thread_1', replay: [] });
+  const queued = reduce(open, {
+    type: 'queuedTurns',
+    entries: [{ id: 'q1', textPreview: 'first queued', attachmentCount: 1, attachmentNames: ['guard.png'] }]
+  });
+  assert.equal(queued.queuedTurns.length, 1);
+
+  const repaint = reduce(queued, { type: 'conversation', backendId: 'codex', threadId: 'thread_1', replay: [] });
+  assert.deepEqual(repaint.queuedTurns, queued.queuedTurns);
+
+  const switched = reduce(repaint, { type: 'conversation', backendId: 'codex', threadId: 'thread_2', replay: [] });
+  assert.deepEqual(switched.queuedTurns, []);
+});

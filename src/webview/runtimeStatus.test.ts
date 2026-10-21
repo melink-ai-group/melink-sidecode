@@ -11,9 +11,8 @@ const localDetected = {
 };
 const bundledMissing = { path: '/storage/opencode/bin/opencode', status: 'missing' as const };
 
-test('an off Ollama runtime still reports a detected CLI for Zen and the CLI tab', () => {
+test('a detected runtime carries the version and no disabled state', () => {
   const view = opencodeRuntimeView({
-    enabled: false,
     cliSource: 'local',
     path: 'opencode',
     status: 'detected',
@@ -24,27 +23,12 @@ test('an off Ollama runtime still reports a detected CLI for Zen and the CLI tab
   });
   assert.equal(view.tone, 'detected');
   assert.equal(view.version, '1.1.65');
-  assert.match(view.label, /direct adapter/i);
-});
-
-test('a detected runtime carries the version', () => {
-  const view = opencodeRuntimeView({
-    enabled: true,
-    cliSource: 'local',
-    path: 'opencode',
-    status: 'detected',
-    version: '1.1.65',
-    local: localDetected,
-    bundled: bundledMissing,
-    zvecGrep: zvecOff
-  });
-  assert.equal(view.tone, 'detected');
-  assert.equal(view.version, '1.1.65');
+  assert.equal(/direct adapter/i.test(view.label), false);
+  assert.equal(/disabled/i.test(view.label), false);
 });
 
 test('the draft source picks the matching probe without waiting for save', () => {
   const opencode = {
-    enabled: true,
     cliSource: 'local' as const,
     path: 'opencode',
     status: 'detected' as const,
@@ -60,7 +44,6 @@ test('the draft source picks the matching probe without waiting for save', () =>
 test('missing and not-runnable are distinct from detected', () => {
   assert.equal(
     opencodeRuntimeView({
-      enabled: true,
       cliSource: 'local',
       path: 'opencode',
       status: 'missing',
@@ -72,7 +55,6 @@ test('missing and not-runnable are distinct from detected', () => {
   );
   assert.equal(
     opencodeRuntimeView({
-      enabled: true,
       cliSource: 'bundled',
       path: '/x',
       status: 'not-runnable',

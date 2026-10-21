@@ -79,6 +79,15 @@ export function EmptyState({
           </div>
         ) : unavailable.length > 0 ? (
           <div className="banner-actions">
+            {unavailable.some((backend) => backend.id === 'ollama-local') ? (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => bridge.post({ type: 'showAppSettings', section: 'ollama-local' })}
+              >
+                Open settings
+              </button>
+            ) : null}
             <button className="btn" type="button" onClick={() => bridge.post({ type: 'refresh' })}>
               Retry
             </button>

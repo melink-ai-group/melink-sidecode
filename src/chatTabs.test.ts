@@ -50,6 +50,19 @@ test('restored tab state resumes a thread and treats anything else as blank', ()
   });
 });
 
+test('restored tab state keeps its stable id so a persisted queue can find it', () => {
+  assert.deepEqual(
+    parseChatTabState({ tabId: 'tab_7', blank: false, backendId: 'codex', threadId: 'thread_a' }),
+    {
+      tabId: 'tab_7',
+      blank: false,
+      backendId: 'codex',
+      threadId: 'thread_a'
+    }
+  );
+  assert.equal('tabId' in parseChatTabState({ tabId: '', blank: true }), false);
+});
+
 test('restored tab state keeps the composer choices for that chat', () => {
   assert.deepEqual(
     parseChatTabState({

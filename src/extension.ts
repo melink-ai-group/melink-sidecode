@@ -10,6 +10,9 @@ import { SKILLS_SECTION } from './settingsKeys';
 import { MODE_PROMPT_VERSION } from './backends/modes';
 import { createFailureLogHost } from './telemetry/failureLogHost';
 import {
+  cleanLegacyOpencodeEnabled
+} from './config/legacySettings.ts';
+import {
   FAILURE_LOG_ISSUE_CLASSES,
   recordFailureEntry,
   type FailureIssueClass
@@ -34,8 +37,26 @@ const FAILURE_LOG_OFF_MESSAGE =
  * leave no orphaned `codex` process behind.
  */
 let registry: BackendRegistry | undefined;
+/**
+ * Kept for `deactivate` so the queued-turn lease release can be awaited before
+ * the extension host exits; a fire-and-forget workspace-state write can be
+ * lost and leave the next window waiting for the full lease.
+ */
+let sidebarProvider: SidebarViewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(md: MarkdownItLike): MarkdownItLike } {
+  // T106 removed the "use opencode for Ollama turns" toggle: every Ollama turn
+  // uses OpenCode now. Remove a stale *global* value once, silently. Workspace
+  // and folder values are deliberately never touched (they belong to the
+  // repository), and the rule is idempotent.
+  void (async () => {
+    const configuration = vscode.workspace.getConfiguration();
+    await cleanLegacyOpencodeEnabled(configuration, vscode.ConfigurationTarget.Global);
+  })().catch(() => {
+    // A failed cleanup (for example a read-only user settings file) is not
+    // worth interrupting activation; the removed key has no runtime effect.
+  });
+
   // Diagnostics only, and never a credential: this records which spawn form
   // started so an argument drift is visible instead of falling silently into
   // `unavailable`. Installed once, before any backend can spawn a child.
@@ -53,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
   // view, which delivers them to each backend through the AgentBackend seam.
   const projectContext = new VscodeProjectContext();
   const provider = new SidebarViewProvider(context.extensionUri, context, activeRegistry, projectContext);
+  sidebarProvider = provider;
   skill.setLaunchErrorListener(() => {
     void provider.publishSettings();
   });
@@ -213,7 +235,10 @@ interface MarkdownItLike {
 export async function deactivate(): Promise<void> {
   // VS Code disposes `context.subscriptions` and then calls this. Awaiting the
   // registry's teardown is what guarantees the Codex child process is gone
-  // before the extension host exits. The browser tab and its page go with it.
+  // before the extension host exits. The browser tab and its page goes with it.
+  // The queued-turn lease release is awaited too: it is a workspace-state write,
+  // and a lost write would make the next window wait out the stale lease.
+  await sidebarProvider?.shutdownQueue();
   await stopBrowserSkill();
   await registry?.dispose();
 }

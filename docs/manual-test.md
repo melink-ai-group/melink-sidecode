@@ -27,7 +27,7 @@ v0.2.0 ships only when all six criteria pass in both hosts.
 | RC-6 | **Change review & checkpoint safety.** A turn that edits files is reviewable: Keep writes nothing, Reject restores the exact pre-turn bytes, a conflict is never silently clobbered, a checkpoint restore reverts files only and is itself undoable, pending decisions survive a reload, and the recorded blob store stays bounded. | §4c (steps S1–S3, 47–58) |
 
 Steps 40–43 repeat the rendering/reload/teardown checks per host.
-Steps 44–46 repeat the project-awareness pass for the opencode off/on paths.
+Steps 44–46 repeat the project-awareness pass for Ollama Cloud and Ollama Local.
 Steps 47–58 (§4c) cover change review, conflict handling, checkpoint restore,
 reload mid-review, approval interaction, and journal pruning, on Codex and on the
 opencode runtime.
@@ -107,25 +107,26 @@ Use **one** method per pass and always restore it before the next pass.
 
 ---
 
-## 1. Provider matrix — four passes
+## 1. Provider matrix — passes A–G
 
 The matrix is the core of RC-1. For each pass: set the credentials, reload the
 window, open the sidebar, and compare the sidebar state and switcher contents
 against the expected column.
 
-| Pass | Ollama token | Codex CLI | Use |
-|---|---|---|---|
-| A | set | unresolvable (Method A/B) | Ollama only |
-| B | clear | installed + signed in | Codex only |
-| C | set | installed + signed in | Both authenticated |
-| D | clear | unresolvable (Method A/B) | Neither |
-| E | set | either | Ollama with the opencode runtime **enabled** |
-| F | set | either | Ollama fallback (opencode runtime **disabled**, the default) |
+| Pass | Ollama token | Codex CLI | Local Ollama | Use |
+|---|---|---|---|---|
+| A | set | unresolvable (Method A/B) | not required | Ollama Cloud only |
+| B | clear | installed + signed in | not required | Codex only |
+| C | set | installed + signed in | not required | Both authenticated |
+| D | clear | unresolvable (Method A/B) | not running | Neither |
+| E | set | either | not required | Ollama Cloud through the shared OpenCode runtime |
+| F | clear | either | running | Ollama Local through the shared OpenCode runtime |
+| G | clear | either | not running | Ollama Local unreachable (actionable failure) |
 
-Passes E and F verify the optional opencode runtime: E that a turn executes
-through opencode and streams, F that the setting off uses the direct `/api/chat`
-adapter and spawns no opencode process. Run them after the main matrix, against
-the same workspace.
+Passes E–G verify the always-on OpenCode runtime and the local provider: every
+Ollama turn spawns opencode, and a local turn is tokenless. The direct
+`/api/chat` API is no longer a turn path; it remains only for compaction and
+dictation.
 
 If the shared `opencode` CLI is installed, **OpenCode Zen** is also available with
 its free models even when no Zen key is stored. The expected group counts below
@@ -206,18 +207,16 @@ include a Zen group in that case; without the CLI, Zen is absent.
 - [ ] 14. **Restore** the CLI (Method A/B restore) and set the Ollama token again
       before continuing.
 
-### Pass E — Ollama with the opencode runtime enabled
+### Pass E — Ollama Cloud through the shared OpenCode runtime
 
 Record the installed CLI first: `opencode --version` (the T69 regression used
 1.19.x; the installer tracks `releases/latest`). Ensure `opencode` resolves on
 `PATH`, or set
 `melink.ollama.opencode.path` to its full path.
 
-- [ ] 14a. Set the Ollama token (step 2). In **Workspace Settings (JSON)** add:
-      ```json
-      { "melink.ollama.opencode.enabled": true }
-      ```
-      Reload the window and open the sidebar.
+- [ ] 14a. Set the Ollama token (step 2). Reload the window and open the sidebar.
+      The CLI tab has no "use opencode" switch: every Ollama turn uses the
+      shared runtime.
 - [ ] 14a1. **zvec-grep.** Open **Settings → Skills**. Choose local or bundled for
       zvec-grep, install if needed, then turn **Use semantic search** on. Confirm
       the user OpenCode config contains a `zvec_grep` MCP entry with an absolute
@@ -228,11 +227,9 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
       in the user OpenCode config (command runs `node …/ast-grep-mcp.js` with
       `AST_GREP_BIN`). Turn it off and confirm the entry is removed.
 - [ ] 14b. **Mode availability.** Open the mode picker. It offers **Agent**,
-      **Plan**, and **Ask**. The direct adapter advertises the same three modes,
-      but applies them as per-turn instructions and cannot edit files. Open the
-      permission picker: it offers **Read-only**, **Default**, and
-      **Unrestricted**. The provider badge/dot is still the single Ollama one
-      — no extra provider, badge, or dot appears.
+      **Plan**, and **Ask**. Open the permission picker: it offers **Read-only**,
+      **Default**, and **Unrestricted**. Ollama Cloud and Ollama Local each keep
+      their own provider badge and dot; no extra badge or dot appears.
 - [ ] 14c. **Streaming turn.** Select an Ollama model and send a short turn and
       wait for completion. **Expected:** the reply streams into the transcript
       incrementally (a text item opens and completes) rather than the whole thing
@@ -291,33 +288,58 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
       transcript keeps the partial output, shows *Stopped* (not an error), the
       input is usable again, and no `opencode` process survives (`tasklist /FI
       "IMAGENAME eq opencode.exe"`, or `pgrep -fl opencode`).
+- [ ] 14j-b. **Busy queue, cancel and order.** Start a long Codex turn, attach an
+      image, type *queued one*, and press Enter. **Expected:** the action reads
+      **Queue message**; the draft and chip stay until **1 queued** appears;
+      the mode, permission, model and provider controls are disabled. Queue a
+      second message the same way, confirm the list shows both in order, and
+      remove the first with **Remove**. Wait for the running turn to finish:
+      the remaining message sends automatically as a normal user bubble, and
+      the controls unlock once the queue is empty. Repeat once and press
+      **Stop**: the queued messages are discarded with the turn, while the
+      composer draft is untouched.
 - [ ] 14k. **Failure states.** Make the CLI unresolvable (Method A/B) and send a
       turn → a distinct *CLI missing* notice, not a crash. Restore it. Set
       `melink.ollama.baseUrl` to an endpoint returning 401 and send a turn → a
       distinct *token rejected* notice with a **Set token** action. Restart.
-- [ ] 14l. Set `melink.ollama.opencode.enabled` to `false` before the next
-      pass. The setting defaults to on, so removing the key leaves opencode on.
+- [ ] 14l. **Old setting stays gone.** Search user and workspace settings for the
+      removed "use opencode for Ollama turns" toggle. A stale *global* value is
+      removed once at activation; a workspace value is left untouched and has no
+      effect.
 
-### Pass F — Ollama fallback (runtime disabled)
+### Pass F — Ollama Local through the shared OpenCode runtime
 
-- [ ] 14m. Confirm `melink.ollama.opencode.enabled` is `false`. Reload
-      and open the sidebar.
-- [ ] 14n. Send a turn and wait for completion. **Expected:** the direct
-      `/api/chat` adapter streams the reply. The mode picker still offers
-      **Agent**, **Plan**, and **Ask**, applied as per-turn instructions. The
-      permission picker stays hidden, because the direct adapter reports only the
-      single `default` level and never raises an approval card.
-- [ ] 14o. **No child process on the off path.** Immediately after sending the
-      turn (and again after it completes), run the listing command:
-      ```powershell
-      Get-CimInstance Win32_Process -Filter "name='opencode.exe'" |
-        Select-Object ProcessId, ParentProcessId, CommandLine
-      ```
-      ```sh
-      pgrep -fl opencode   # macOS / Linux
-      ```
-      **Expected:** no `opencode` process is spawned at any point. (This is the
-      acceptance check that the fallback is exact.)
+Start a local server and pull at least one model:
+
+```sh
+ollama serve
+ollama pull qwen2.5-coder:7b
+```
+
+- [ ] 14m. Open **Settings → Providers → Ollama Local**. Keep
+      `http://localhost:11434`, press **Test connection**, and confirm the chip
+      reads **Running**. There is no API-key field on this page.
+- [ ] 14n. Select an Ollama Local model in the Model picker and send a turn.
+      **Expected:** the reply streams, the permission picker offers all three
+      levels, and no `Authorization` header or user secret is involved.
+- [ ] 14o. **Tokenless child.** Confirm the turn spawned `opencode`
+      (`Get-CimInstance Win32_Process -Filter "name='opencode.exe'"` or
+      `pgrep -fl opencode`) and that the generated config uses
+      `melink-ollama-local` / `OLLAMA_LOCAL_API_KEY` with the fixed
+      `local-no-key` placeholder, not a stored secret.
+
+### Pass G — Ollama Local failure states
+
+- [ ] 14p. Stop the server (`ollama serve` terminated), press **Test
+      connection**, and confirm **Not reachable** with the actionable copy
+      "Start Ollama (`ollama serve`)…". The picker never says
+      "No usable credential" for this provider.
+- [ ] 14q. With the server running but an Ollama build that has no
+      OpenAI-compatible `/v1` (or a non-Ollama server on the port), confirm the
+      distinct message *Ollama is running but `/v1` is missing* / *did not
+      answer like Ollama*.
+- [ ] 14r. Point the base URL at a host requiring a key: confirm the message says
+      Ollama Local does not support keys and to use Ollama Cloud.
 
 ---
 
@@ -567,17 +589,10 @@ what you typed and not from a web search. Do not paste any project fact.
 
 ### What is sent by default (for the tester's reference)
 
-- **Ollama Cloud, direct path:** the snapshot as a `system` message before the
-  first user turn; a compact delta as a `system` message before later turns. No
-  context is ever persisted as transcript content.
-- **Codex:** the snapshot in the native `developerInstructions` field on
-  `thread/start` and `thread/resume`; the thread `cwd` is the workspace root, so
-  Codex reads project files and `AGENTS.md` from the right place.
-- **opencode (when `melink.ollama.opencode.enabled` is on):** the snapshot is
-  primed into the turn text, because the pinned `opencode run` exposes no
-  system/instructions flag; the child is spawned in the workspace root. With the
-  setting **off**, the direct `/api/chat` body is unchanged apart from the context
-  messages and **no** `opencode` child is spawned.
+- **Ollama Cloud and Ollama Local (OpenCode):** the snapshot is primed into the
+  turn text, because the pinned `opencode run` exposes no system/instructions
+  flag; the child is spawned in the workspace root. There is no direct
+  `/api/chat` turn path.
 
 ---
 
@@ -595,14 +610,14 @@ must pass on both; a defect in one is not masked by the other.
 - **Codex** reports every path an `apply_patch` touched through a structured
   `fileChanges` notification (`item/fileChange/patchUpdated`, `item/completed`),
   so those files get a **reported** before/after side.
-- **opencode** (Ollama with `melink.ollama.opencode.enabled` on) reports file
+- **opencode** (Ollama Cloud or Ollama Local) reports file
   tool edits as **reported** too. A shell-driven write (a formatter, codegen,
   `git apply`) emits no structured event on either provider and is caught by the
   **watcher** fallback instead, which usually only has an after side.
 
 Unless a pass says otherwise, run it once with Codex selected and once with
-Ollama selected (opencode runtime on), and tick both. A pass that names a single
-provider says so explicitly.
+Ollama Cloud (and, when a local server is available, Ollama Local), and tick
+both. A pass that names a single provider says so explicitly.
 
 ### Setup shared by every pass
 
@@ -1153,9 +1168,10 @@ The view lifecycle and child-process lifetime can differ between hosts.
 - [ ] 40. Repeat the full provider matrix (Passes A–D) in **plain VS Code** (stable)
       and in **one Open VSX consumer** (e.g. Cursor, VSCodium).
 - [ ] 41. Repeat the reload test (§2) and the teardown test (§3) in both hosts.
-- [ ] 41b. Repeat Passes E (opencode-enabled) and F (fallback) in both hosts, and
-      in each host confirm the off path spawns no `opencode` process
-      (step 14o).
+- [ ] 41b. Repeat Passes E (always-on OpenCode, Ollama Cloud) and F (Ollama
+      Local through the same runtime) in both hosts. In each host confirm every
+      Ollama turn spawns an `opencode` child (steps 14j and 14o); there is no
+      off/fallback path left to test.
 - [ ] 42. Repeat the rendering checks in both hosts:
       - transcript streaming caret and provider dot;
       - tool card and file-change/diff card render with host theme colors;
@@ -1165,17 +1181,16 @@ The view lifecycle and child-process lifetime can differ between hosts.
         composer without resizing it, and the transcript still scrolls;
       - light and dark workbench themes both leave the sidebar legible.
 - [ ] 43. Record both host versions in the header of this document.
-- [ ] 44. Repeat the project-awareness pass (§4b) on the **direct Ollama path**
-      (opencode off) in both hosts. Confirm the §4b "what is sent by default"
-      notes hold: the snapshot is a `system` message, no synthetic message appears
-      in the transcript, and the next turn reflects the change.
-- [ ] 45. Repeat the project-awareness pass (§4b) with the **opencode runtime
-      enabled**. Confirm the snapshot is primed into the turn text and the child
-      runs in the workspace root (ask it to name the root; it should match).
-- [ ] 46. Repeat the project-awareness pass (§4b) with the **opencode runtime
-      disabled** and confirm the fallback is exact: the request payload is
-      unchanged apart from the context messages and **no** `opencode` child is
-      spawned (step 14o).
+- [ ] 44. Repeat the project-awareness pass (§4b) on **Ollama Cloud**. Confirm
+      the §4b "what is sent by default" notes hold: the snapshot is primed into
+      the turn text, no synthetic message appears in the transcript, and the next
+      turn reflects the change.
+- [ ] 45. Repeat the project-awareness pass (§4b) with **Ollama Local** when a
+      local server is running. Confirm the same priming and that no credential is
+      sent.
+- [ ] 46. Confirm the direct `/api/chat` API is used only for compaction and
+      dictation: send a normal turn and observe an `opencode` child; compact the
+      conversation and observe the summarization without a new turn path.
 
 ---
 
@@ -1201,13 +1216,13 @@ fails is either fixed (recorded in the headless section) or listed under §7.
 
 ### Current verification baseline
 
-Measured on the merged `main` after the stack-merge recovery, so the numbers stay
-truthful before sign-off:
+Measured on the current T106+T110 working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.0 (`package.json`)
-- **Node test files:** 143 (`src/**/*.test.ts`)
-- **Node tests:** 1441 declarations: 1441 pass, 0 failures (`npm run test:node`).
-- **DOM suite:** 3 files / 7 tests, all passing (`npm run test:dom`). `npm test`
+- **Node test files:** 159 (`src/**/*.test.ts`)
+- **Node tests:** 1576 declarations: 1576 pass, 0 failures (`npm run test:node`).
+- **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
+- **DOM suite:** 5 files / 24 tests, all passing (`npm run test:dom`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`

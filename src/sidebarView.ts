@@ -93,6 +93,15 @@ import { shouldAutoShowPlanPreview } from './planStepMarkdown';
 import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from './backends/defaults';
 import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
+import { planTurn, type TurnPlan } from './orchestration/plan.ts';
+import { runTurnEnd } from './orchestration/turnEnd.ts';
+import { readOrchestrationSettings } from './orchestration/vscodeSettings.ts';
+import {
+  collectDoubleCheck,
+  doubleCheckNotice,
+  DOUBLE_CHECK_SETTLE_MS
+} from './orchestration/doubleCheck.ts';
+import { readFileDiagnostics } from './orchestration/vscodeDiagnostics.ts';
 import { anyCategoryEnabled } from './context/contextView';
 import type { CheckpointPlanRecord } from './changes/journal';
 import { REVIEW_HUNK_LINE_LIMIT, capReviewLines } from './changes/reviewLines.ts';
@@ -162,6 +171,31 @@ import { planSnapshot, rewindKey } from './sidebar/planSnapshot';
 import { messagePreview, userMessageTime } from './sidebar/reviewFormat';
 import { OPEN_CHAT_TABS_KEY, type ChatSession, type NoticeView } from './sidebar/session';
 import { buildTurnInstruction, describeDecisionOutcome, isCancellation } from './sidebar/turnInstruction';
+import {
+  QUEUED_TURNS_KEY,
+  QUEUE_LEASE_MS,
+  USER_TURN_QUEUE_CAP,
+  clearSessionQueue,
+  createQueuedTurnId,
+  enqueueTurn,
+  foreignQueueLeaseIsLive,
+  invalidQueuedAttachment,
+  parsePersistedTurnQueues,
+  planQueueDrain,
+  queueLeaseDisposition,
+  queueLeaseOwner,
+  queuedTurnThreadTarget,
+  queuedTurnViews,
+  removeQueuedTurn,
+  requeueTurnFront,
+  serializeTurnQueues,
+  sessionMatchesQueueTarget,
+  shouldAnnounceUserMessage,
+  shouldQueueWhileBusy,
+  takeQueuedTurn,
+  type QueuedTurn,
+  type UserTurnQueues
+} from './sidebar/turnQueue';
 import { render } from './sidebar/viewHtml';
 
 /**
@@ -218,6 +252,30 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private loosePlanScanDone = false;
   /** Built-plan turns waiting to start once the current turn has released the lock. */
   private readonly planAutopilotQueue = new Map<string, { session: ChatSession; text: string }>();
+  /** User turns accepted while their chat was busy, FIFO per chat. */
+  private readonly userTurnQueues: UserTurnQueues = new Map();
+  /**
+   * Identity of this window for the persisted queue lease. Only one window may
+   * own a workspace's queue at a time: a second window leaves the payload to a
+   * live owner instead of dispatching the same accepted messages again.
+   */
+  private readonly queueOwnerId = `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  /** True once the persisted queue was claimed (or found owned by another window). */
+  private queuesRestored = false;
+  /** Restored chats wait for activation before their first automatic send. */
+  private readonly restoredQueueSessions = new Set<string>();
+  /** Keeps this window's lease live while it holds queued turns. */
+  private queueHeartbeat?: ReturnType<typeof setInterval>;
+  /** Retry claiming a queue whose previous owner's lease has not expired yet. */
+  private queueRestoreTimer?: ReturnType<typeof setTimeout>;
+  /** Entries kept for a retry but skipped by the drain, so they cannot block others. */
+  private readonly blockedQueuedTurns = new Set<string>();
+  /** Set once this window hands the queue back on shutdown; no local sends after. */
+  private queueFlushStopped = false;
+  /** Serializes workspace-state writes so an awaited release is the last one. */
+  private queueWrite: Promise<void> = Promise.resolve();
+  /** The policy decided for each started turn, bounded to the newest 32. */
+  private readonly turnPlans = new Map<string, TurnPlan>();
   /** One queued continuation per tab, started once that tab's turn releases the lock. */
   private readonly crashContinueQueue = new Map<string, { session: ChatSession; text: string }>();
   /**
@@ -313,7 +371,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.changeJournal = new VscodeChangeJournal(context);
     this.changeTracker = new ChangeTracker(this.changeJournal);
     this.changeWatcher = new WorkspaceChangeWatcher(this.changeTracker);
-    context.subscriptions.push(this.changeWatcher);
+    context.subscriptions.push(this.changeWatcher, {
+      dispose: () => {
+        this.queueFlushStopped = true;
+        void this.releaseQueueLease(true);
+      }
+    });
     // The decision store annotates the journal's recorded bytes; it shares the
     // journal instance so a view read and a decision read agree on content.
     this.changeStore = new VscodeChangeStore(context, { artifacts: this.changeJournal });
@@ -446,7 +509,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // Close the change boundary on a real turn terminus only: an `error`
         // event can be recoverable, so the turn may still be running and must
         // keep its watcher. The turn id guards against a racing new turn.
-        void this.finishChangeTurn(event.turnId);
+        void this.finishChangeTurn(
+          event.turnId,
+          event.type === 'turn/completed' ? 'completed' : 'interrupted'
+        );
       }
       if (event.type === 'approval/denied') {
         // A refusal is the one signal that the step the agent was on never ran:
@@ -521,7 +587,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           this.session.stopContinueAttempts = 0;
         }
         if (this.mode === 'agent' && event.threadId) {
-          void this.considerPlanAutopilot(event.backendId, event.threadId);
+          void this.considerPlanAutopilot(event.backendId, event.threadId, event.turnId);
         }
       }
       });
@@ -677,6 +743,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * turn end, so it never outlives one turn.
    */
   private beginChangeTurn(backendId: string, threadId: string, turnId: string): void {
+    const session = this.session;
+    const plan = session?.turnPlan;
+    if (plan && session) {
+      this.turnPlans.set(turnId, plan);
+      session.turnPlan = undefined;
+      while (this.turnPlans.size > 32) {
+        const oldest = this.turnPlans.keys().next().value;
+        if (oldest === undefined) {
+          break;
+        }
+        this.turnPlans.delete(oldest);
+      }
+    }
     void this.checkHost.cancelThread(backendId, threadId).catch(() => undefined);
     const pending = this.pendingTurnMessage;
     const messageId =
@@ -731,7 +810,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    *
    * The set is this turn alone. Earlier turns keep the cards already on screen.
    */
-  private async finishChangeTurn(turnId: string): Promise<void> {
+  private async finishChangeTurn(
+    turnId: string,
+    terminus: 'completed' | 'interrupted'
+  ): Promise<void> {
     // A terminus for a turn that already ended (a late event after this chat
     // started another turn) must not stop a chat that is still running.
     if (!this.changeTracker.isOpen(turnId)) {
@@ -744,11 +826,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!set) {
       return;
     }
-    const shouldReview = shouldRunDiffReview(this.diffReviewEnabled(), set.entries);
+    const plan = this.turnPlans.get(turnId);
+    const fallback = plan ? undefined : readOrchestrationSettings();
+    const testing = plan?.testing ?? fallback?.testing ?? true;
+    const reviewing = plan?.reviewing ?? fallback?.reviewing ?? false;
+    const doubleCheck = plan?.doubleCheck ?? fallback?.doubleCheck ?? true;
+    const shouldReview = shouldRunDiffReview(reviewing, set.entries);
     // Checks start only for a non-empty, closed change set. A background turn
     // still stores its result; the runner decides whether the visible surface
     // may be repainted.
-    this.startChangeChecks(set);
+    this.startChangeChecks(set, testing);
+    // The advisory diagnostics sweep runs for every completed turn, active or
+    // background. Its notice is routed to the owning chat (or held for it), so
+    // one chat's file names never appear in another.
+    if (doubleCheck && terminus === 'completed') {
+      void this.runDoubleCheck(set);
+    }
     // Only the active conversation's own turn is pushed: a background thread's
     // change set must not replace what the visible surface is showing. Its
     // review is still stored, so switching to that chat restores the findings.
@@ -766,11 +859,63 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // A turn that just touched files makes its opening message a checkpoint, so
     // the per-message entry point offers it without waiting for a reload.
     await this.postCheckpoints(set.backendId, set.threadId);
+    if (plan?.quick && set.entries.length > 0) {
+      this.post({
+        type: 'notice',
+        level: 'info',
+        message: 'Quick task: skipped post-turn orchestration for this turn.'
+      });
+    }
   }
 
-  /** True when the user opted into the advisory second-pass diff review. */
+  /**
+   * Let VS Code publish diagnostics for the just-written files, then read only
+   * those files. The sweep is advisory: a read failure is skipped and the turn
+   * has already finished by the time this runs.
+   */
+  private async runDoubleCheck(set: TurnChangeSet): Promise<void> {
+    if (set.entries.length === 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, DOUBLE_CHECK_SETTLE_MS));
+    const displayByAbs = new Map(set.entries.map((entry) => [entry.absPath, entry.path]));
+    const result = collectDoubleCheck([...displayByAbs.keys()], readFileDiagnostics);
+    const notice = doubleCheckNotice({
+      ...result,
+      names: result.names.map((name) => displayByAbs.get(name) ?? name)
+    });
+    if (notice) {
+      this.postDoubleCheckNotice(set, notice);
+    }
+  }
+
+  /**
+   * The visible chat gets the notice immediately. A background turn's notice is
+   * held for its own chat and posted when the user switches to it, the same way
+   * a held composer notice travels.
+   *
+   * The comparison is against the visible session, not `this.session`: the
+   * detached sweep may run while another session is the current store context,
+   * and its thread is not necessarily the one on screen.
+   */
+  private postDoubleCheckNotice(
+    set: TurnChangeSet,
+    notice: { level: 'info' | 'warning'; message: string }
+  ): void {
+    const visible = this.visible?.activeThread;
+    if (visible?.backendId === set.backendId && visible.threadId === set.threadId) {
+      this.post({ type: 'notice', level: notice.level, message: notice.message });
+      return;
+    }
+    const owner = this.sessionForThread(set.backendId, set.threadId);
+    if (owner) {
+      owner.heldNotice = notice;
+    }
+  }
+
+  /** True when the resolved policy has the advisory second-pass review on. */
   private diffReviewEnabled(): boolean {
-    return vscode.workspace.getConfiguration('melink.review').get<boolean>('diffReview', false);
+    return readOrchestrationSettings().reviewing;
   }
 
   /**
@@ -800,8 +945,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * callback repaints through the existing review path only while this turn is
    * still the visible one.
    */
-  private startChangeChecks(set: TurnChangeSet): void {
-    if (set.entries.length === 0) {
+  private startChangeChecks(set: TurnChangeSet, enabled: boolean): void {
+    if (set.entries.length === 0 || !enabled) {
       return;
     }
     void this.checkHost
@@ -810,6 +955,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         threadId: set.threadId,
         turnId: set.turnId,
         hasChanges: true,
+        // One source of truth: the per-turn resolved testing value replaces the
+        // legacy `enabled` reader in the host. The early return above means a
+        // disabled policy never reaches here, so `shouldRun` stays unused on
+        // this path instead of duplicating the same flag.
+        enabledOverride: enabled,
         onUpdate: () => {
           void this.postChangeReview(set.backendId, set.threadId, set.turnId);
         }
@@ -1177,6 +1327,41 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * The open chat gets the user message of a queued turn that just started.
+   * Stored attachments keep only their path; the preview bytes are read here,
+   * the same way a replay paints a stored bubble.
+   */
+  private async postDispatchedUserMessage(
+    backendId: string,
+    threadId: string,
+    messageId: string,
+    text: string,
+    attachments: Attachment[] | undefined,
+    sentAt: number
+  ): Promise<void> {
+    const [preview] = await this.previewReplay([
+      {
+        id: messageId,
+        kind: 'message',
+        role: 'user',
+        text,
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        status: 'completed',
+        sentAt
+      }
+    ]);
+    this.post({
+      type: 'userMessageSent',
+      backendId,
+      threadId,
+      messageId,
+      text,
+      ...(preview?.attachments && preview.attachments.length > 0 ? { attachments: preview.attachments } : {}),
+      sentAt
+    });
+  }
+
   private collectPlanRecords(): CheckpointPlanRecord[] {
     const records: CheckpointPlanRecord[] = [];
     const seen = new Set<string>();
@@ -1390,6 +1575,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.dictation.dispose();
       this.declinePendingModeSwitches();
       this.clearWebviewMountTimers();
+      // A disposed webview is not a shutdown: the extension host may still be
+      // running a turn and flush the in-memory queue. Keep the lease while
+      // anything is queued; a second window must not reclaim and resend it.
+      void this.releaseQueueLease(false);
       if (this.view === view) {
         this.view = undefined;
       }
@@ -1506,6 +1695,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     session.disposed = true;
+    // Closing a chat is the user's decision to drop it: queued turns go with it
+    // rather than firing into a tab that is no longer on screen.
+    this.discardSessionQueue(session.id);
+    this.restoredQueueSessions.delete(session.id);
+    this.persistQueuedTurns();
     if (!session.turnOpen) {
       this.removeSession(session);
     }
@@ -1521,10 +1715,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.publishTabs();
   }
 
+  private nextTabId(): string {
+    for (;;) {
+      this.tabSeq += 1;
+      const id = `tab_${this.tabSeq}`;
+      if (!this.sessions.some((session) => session.id === id)) {
+        return id;
+      }
+    }
+  }
+
   private createSession(init: ChatTabState): ChatSession {
-    this.tabSeq += 1;
     const session: ChatSession = {
-      id: `tab_${this.tabSeq}`,
+      id: init.tabId && !this.sessions.some((entry) => entry.id === init.tabId) ? init.tabId : this.nextTabId(),
       title: init.title ?? DEFAULT_TAB_TITLE,
       restored: false,
       mode: init.mode ?? readDefaultMode(),
@@ -1575,7 +1778,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'restoring', value: false });
       }
       if (session.heldNotice && this.visible === session) {
-        this.post({ type: 'notice', level: session.heldNotice.level, message: session.heldNotice.message });
+        const held = session.heldNotice;
+        session.heldNotice = undefined;
+        this.post({ type: 'notice', level: held.level, message: held.message });
       }
       if (session.questionNotice && this.visible === session) {
         const notice = session.questionNotice;
@@ -1587,6 +1792,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
     });
     await this.postComposerDraft(session);
+    this.postQueuedTurns(session);
+    // Showing a chat releases its restored queue: it may start now if idle.
+    this.restoredQueueSessions.delete(session.id);
+    this.flushQueuedTurns();
   }
 
   /** Re-send the visible tab's stored conversation without starting a new thread. */
@@ -1662,6 +1871,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   private removeSession(session: ChatSession): void {
+    this.discardSessionQueue(session.id);
+    this.restoredQueueSessions.delete(session.id);
+    this.persistQueuedTurns();
     this.sessions = this.sessions.filter((entry) => entry !== session);
     this.persistOpenTabs();
   }
@@ -1674,6 +1886,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       const draftText = session.composerText.slice(0, COMPOSER_DRAFT_LIMIT);
       const draftAttachments = draftAttachmentsForStore(session.composerAttachments);
       return {
+        tabId: session.id,
         blank,
         ...(backendId ? { backendId } : {}),
         ...(threadId ? { threadId } : {}),
@@ -1819,6 +2032,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       message.type === 'context' ||
       message.type === 'threads' ||
       message.type === 'chatTabs' ||
+      message.type === 'queuedTurns' ||
       message.type === 'showSettings' ||
       message.type === 'settings' ||
       message.type === 'codexVersionCheck' ||
@@ -1837,6 +2051,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.session.questionNotice = undefined;
     }
     void this.view.webview.postMessage(outgoing);
+    // A conversation repaint clears the webview's chip list; always follow it
+    // with this chat's queue so a rewind, restore or handover cannot hide it.
+    if (message.type === 'conversation' && this.visible && !this.visible.disposed) {
+      this.postQueuedTurns(this.visible);
+    }
   }
 
   private async handle(message: WebviewToHostMessage): Promise<void> {
@@ -1863,6 +2082,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         if (this.liveSessions().length === 0) {
           this.loadSavedSessions();
         }
+        // Queued turns are claimed once the tabs exist, so their session ids
+        // can be matched. Restored turns dispatch only for the visible idle
+        // chat (showSession) or on the next turn completion.
+        await this.restoreQueuedTurns();
         const session = this.visible && !this.visible.disposed ? this.visible : this.liveSessions()[0];
         if (session) {
           await this.showSession(session);
@@ -1948,11 +2171,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.modelSettings,
           message.attachments,
           message.backendId,
-          message.updatePlan
+          message.updatePlan,
+          'user',
+          message.queue === true
         );
         break;
       case 'steerTurn':
         await this.steerTurn(message.text);
+        break;
+      case 'cancelQueuedTurn':
+        this.cancelQueuedTurn(message.id);
         break;
       case 'retryQuestion':
         await this.sendTurn(
@@ -3176,10 +3404,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     attachments?: Attachment[],
     backendId?: string,
     updatePlan?: boolean,
-    origin: 'user' | 'autopilot' | 'continue' = 'user'
+    origin: 'user' | 'autopilot' | 'continue' = 'user',
+    queueRequested = false,
+    queuedDispatch = false
   ): Promise<void> {
     const session = this.session;
-    if (origin === 'user' && session?.turnBusy) {
+    if (origin === 'user' && session?.turnBusy && !queuedDispatch) {
+      if (shouldQueueWhileBusy({ busy: true, queueRequested, attachmentCount: attachments?.length ?? 0 })) {
+        await this.enqueueUserTurn(session, {
+          text,
+          model,
+          permissionLevel,
+          requestedSettings,
+          attachments,
+          backendId,
+          updatePlan
+        });
+        return;
+      }
       this.holdUnsent(
         text,
         attachments,
@@ -3187,6 +3429,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       );
       return;
     }
+    // A `queue:true` send can race the end of the host turn: the webview still
+    // thinks it is busy and drew no bubble, so the host posts the row itself.
+    const announceUserMessage = shouldAnnounceUserMessage({
+      origin,
+      busy: Boolean(session?.turnBusy),
+      queueRequested,
+      queuedDispatch
+    });
     if (session) {
       session.turnBusy = true;
       session.heldNotice = undefined;
@@ -3201,7 +3451,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         attachments,
         backendId,
         updatePlan,
-        origin
+        origin,
+        announceUserMessage
       );
     } finally {
       if (session) {
@@ -3368,8 +3619,358 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.session.turnBusy = false;
       }
       this.post({ type: 'busy', value: false, backendId: active.backendId, threadId: active.threadId });
-      this.flushQueuedTurns();
     }
+    this.flushQueuedTurns();
+  }
+
+  /**
+   * Accept a user turn for later instead of starting it now. Validation runs
+   * before anything is queued: malformed or oversized attachments get the same
+   * composer error as an attach attempt, and the turn is never silently lost.
+   */
+  private async enqueueUserTurn(
+    session: ChatSession,
+    input: {
+      text: string;
+      model?: string;
+      permissionLevel?: PermissionLevel;
+      requestedSettings?: import('./backends/types').ModelSettingOverrides;
+      attachments?: Attachment[];
+      backendId?: string;
+      updatePlan?: boolean;
+    }
+  ): Promise<void> {
+    const raw = input.attachments ?? [];
+    const parsed = parseDraftAttachments(raw);
+    if (parsed.length !== raw.length) {
+      this.postQueueAttachmentError();
+      return;
+    }
+    // Clipboard bytes become a path before queueing, so a reload cannot strand
+    // them in memory and the entry stays plain JSON.
+    const retained = persistableAttachments(await this.retainClipboardAttachments(raw)) ?? [];
+    const attachments = parseDraftAttachments(retained);
+    if (attachments.length !== retained.length) {
+      this.postQueueAttachmentError();
+      return;
+    }
+    const invalid = invalidQueuedAttachment(attachments, MAX_ATTACHMENT_BYTES);
+    if (invalid) {
+      this.post({ type: 'attachmentError', message: invalid });
+      return;
+    }
+    // Record the thread this turn was typed into, but only when the chosen
+    // provider owns that thread. A pair is needed for a restore to reopen it.
+    const activeThread = session.activeThread;
+    const targetBackend = input.backendId ?? activeThread?.backendId;
+    const target =
+      activeThread && targetBackend === activeThread.backendId
+        ? { backendId: activeThread.backendId, threadId: activeThread.threadId }
+        : undefined;
+    const entry: QueuedTurn = {
+      id: createQueuedTurnId(),
+      sessionId: session.id,
+      text: input.text,
+      attachments,
+      createdAt: Date.now(),
+      mode: session.mode,
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.permissionLevel ? { permissionLevel: input.permissionLevel } : {}),
+      ...(input.requestedSettings ? { modelSettings: input.requestedSettings } : {}),
+      ...(target ? { backendId: target.backendId, threadId: target.threadId } : {}),
+      ...(input.updatePlan !== undefined ? { updatePlan: input.updatePlan } : {})
+    };
+    const outcome = enqueueTurn(this.userTurnQueues, entry);
+    if (outcome === 'duplicate') {
+      // The webview may still be waiting for an echo of this exact turn.
+      this.postQueuedTurns(session);
+      this.persistQueuedTurns();
+      return;
+    }
+    if (outcome === 'full') {
+      this.postQueuedTurns(session);
+      this.post({
+        type: 'notice',
+        level: 'info',
+        message: `This chat already has ${USER_TURN_QUEUE_CAP} queued messages. Wait for one to send or remove one.`
+      });
+      return;
+    }
+    this.persistQueuedTurns();
+    this.postQueuedTurns(session);
+  }
+
+  private postQueueAttachmentError(): void {
+    this.post({
+      type: 'attachmentError',
+      message: 'One file could not be queued because it was unreadable, unsupported, or too large.'
+    });
+  }
+
+  /** The visible chat is the only one whose composer shows queued chips. */
+  private postQueuedTurns(session: ChatSession | undefined = this.visible): void {
+    if (!session || session.disposed || this.visible !== session) {
+      return;
+    }
+    this.post({ type: 'queuedTurns', entries: queuedTurnViews(this.userTurnQueues, session.id) });
+  }
+
+  private cancelQueuedTurn(id: string): void {
+    const session = this.session;
+    if (session && removeQueuedTurn(this.userTurnQueues, session.id, id)) {
+      this.blockedQueuedTurns.delete(id);
+      this.persistQueuedTurns();
+      this.postQueuedTurns(session);
+    }
+  }
+
+  /** Drop a chat's queue together with any blocked-entry markers. */
+  private discardSessionQueue(sessionId: string): number {
+    for (const entry of this.userTurnQueues.get(sessionId) ?? []) {
+      this.blockedQueuedTurns.delete(entry.id);
+    }
+    return clearSessionQueue(this.userTurnQueues, sessionId);
+  }
+
+  /**
+   * Workspace state holds accepted turns so a reload or extension-host restart
+   * cannot lose text the composer already cleared. Entries carry paths, never
+   * bytes. While this window owns a non-empty queue it refreshes a lease so a
+   * second window on the same workspace leaves the queue alone instead of
+   * dispatching the same messages. (VS Code workspace state is per folder, not
+   * live-synced between windows; the lease is the conservative guard.)
+   */
+  private persistQueuedTurns(): void {
+    if (this.queueFlushStopped) {
+      // The lease was handed back; writing again would steal it from the next
+      // window that is now allowed to dispatch the same entries.
+      return;
+    }
+    const queuedTurns = this.queuedTurnCount();
+    void this.writeQueuedTurns(queueLeaseOwner(queuedTurns, this.queueOwnerId));
+    if (queuedTurns > 0) {
+      this.startQueueHeartbeat();
+    } else {
+      // Emptying the queue releases the lease immediately instead of leaving a
+      // false "another window" owner for the full ten minutes.
+      this.stopQueueHeartbeat();
+    }
+  }
+
+  private queuedTurnCount(): number {
+    let count = 0;
+    for (const queue of this.userTurnQueues.values()) {
+      count += queue.length;
+    }
+    return count;
+  }
+
+  /** Serialize writes so an awaited release is always the last workspace update. */
+  private writeQueuedTurns(owner: string | undefined): Promise<void> {
+    const payload = serializeTurnQueues(this.userTurnQueues, owner);
+    const write = this.queueWrite.then(() =>
+      Promise.resolve(this.context.workspaceState.update(QUEUED_TURNS_KEY, payload))
+    );
+    this.queueWrite = write.then(
+      () => undefined,
+      () => undefined
+    );
+    return this.queueWrite;
+  }
+
+  private startQueueHeartbeat(): void {
+    if (this.queueHeartbeat || this.queueFlushStopped) {
+      return;
+    }
+    this.queueHeartbeat = setInterval(() => {
+      if (this.queueFlushStopped || this.queuedTurnCount() === 0) {
+        this.stopQueueHeartbeat();
+        return;
+      }
+      void this.writeQueuedTurns(this.queueOwnerId);
+    }, 30_000);
+  }
+
+  private stopQueueHeartbeat(): void {
+    if (this.queueHeartbeat) {
+      clearInterval(this.queueHeartbeat);
+      this.queueHeartbeat = undefined;
+    }
+  }
+
+  /**
+   * Hand the lease back only when nothing is left to dispatch, or on shutdown.
+   * A disposed webview in a live extension host keeps the lease: its running
+   * turn can still call `flushQueuedTurns`, and another window claiming the
+   * queue would send the same messages twice.
+   */
+  private async releaseQueueLease(shuttingDown: boolean): Promise<void> {
+    this.stopQueueHeartbeat();
+    if (this.queueRestoreTimer) {
+      clearTimeout(this.queueRestoreTimer);
+      this.queueRestoreTimer = undefined;
+    }
+    if (shuttingDown) {
+      this.queueFlushStopped = true;
+    }
+    const queuedTurns = this.queuedTurnCount();
+    if (queueLeaseDisposition({ queuedTurns, shuttingDown }) === 'keep') {
+      // Leave the persisted owner and heartbeat in place for this live window.
+      this.startQueueHeartbeat();
+      return;
+    }
+    if (queuedTurns === 0) {
+      this.blockedQueuedTurns.clear();
+    }
+    const payload = parsePersistedTurnQueues(this.context.workspaceState.get(QUEUED_TURNS_KEY));
+    if (!payload || (payload.owner && payload.owner !== this.queueOwnerId)) {
+      // Another window already owns it; never clobber a newer claim.
+      return;
+    }
+    await this.writeQueuedTurns(undefined);
+  }
+
+  /** Called from `deactivate`: stop local flushing, then await the release. */
+  async shutdownQueue(): Promise<void> {
+    this.queueFlushStopped = true;
+    await this.releaseQueueLease(true);
+  }
+
+  private scheduleQueueRestore(delayMs: number): void {
+    if (this.queueRestoreTimer) {
+      clearTimeout(this.queueRestoreTimer);
+    }
+    this.queueRestoreTimer = setTimeout(() => {
+      this.queueRestoreTimer = undefined;
+      void this.restoreQueuedTurns();
+    }, delayMs);
+  }
+
+  private async restoreQueuedTurns(): Promise<void> {
+    if (this.queuesRestored || this.queueFlushStopped) {
+      return;
+    }
+    const payload = parsePersistedTurnQueues(this.context.workspaceState.get(QUEUED_TURNS_KEY));
+    if (!payload) {
+      this.queuesRestored = true;
+      return;
+    }
+    if (foreignQueueLeaseIsLive(payload.owner, payload.heartbeat, this.queueOwnerId)) {
+      // Another window is using the queue. Wait until its lease would expire
+      // rather than claim or mutate its data.
+      const wait = Math.max(1_000, QUEUE_LEASE_MS - (Date.now() - payload.heartbeat) + 500);
+      this.scheduleQueueRestore(wait);
+      this.post({
+        type: 'notice',
+        level: 'info',
+        message: 'Queued messages belong to another window on this workspace. They will be restored here if that window closes.'
+      });
+      return;
+    }
+    // Claim before populating, then read the claim back. Two cold-starting
+    // windows can still both write here (workspace state has no compare-and-
+    // swap and is not live-synced); the read-back narrows the race, and the
+    // loser backs off rather than dispatching the same entries.
+    await this.context.workspaceState.update(QUEUED_TURNS_KEY, {
+      ...payload,
+      owner: this.queueOwnerId,
+      heartbeat: Date.now()
+    });
+    const claim = parsePersistedTurnQueues(this.context.workspaceState.get(QUEUED_TURNS_KEY));
+    if (claim?.owner !== this.queueOwnerId) {
+      this.scheduleQueueRestore(1_000);
+      return;
+    }
+    this.queuesRestored = true;
+    const isKnownBackend = (backendId: string): boolean => Boolean(this.registry.get(backendId));
+    let restored = 0;
+    let orphaned = 0;
+    let reopened = false;
+    for (const [sessionId, turns] of payload.queues) {
+      // Each entry remembers the backend and thread it was typed into. Validate
+      // that target before restore: a partial or unknown-provider pair cannot be
+      // dispatched safely and is reported instead of being sent elsewhere.
+      const targets = new Map<string, QueuedTurn>();
+      for (const turn of turns) {
+        if (queuedTurnThreadTarget(turn, isKnownBackend) === 'invalid') {
+          orphaned += 1;
+          continue;
+        }
+        targets.set(turn.id, turn);
+      }
+      const valid = turns.filter((turn) => targets.has(turn.id));
+      if (valid.length === 0) {
+        continue;
+      }
+      let session = this.sessions.find((entry) => entry.id === sessionId && !entry.disposed);
+      if (!session) {
+        // The saved tab list can lag a crash. Reopen the chat from the first
+        // valid entry's thread; later entries retarget themselves on dispatch.
+        const firstTarget = valid
+          .map((turn) => queuedTurnThreadTarget(turn, isKnownBackend))
+          .find((target): target is { backendId: string; threadId: string } => Boolean(target));
+        if (!firstTarget) {
+          orphaned += valid.length;
+          continue;
+        }
+        session = this.createSession({
+          tabId: sessionId,
+          blank: false,
+          backendId: firstTarget.backendId,
+          threadId: firstTarget.threadId,
+          title: 'Restored chat'
+        });
+        reopened = true;
+      }
+      for (const turn of valid) {
+        if (enqueueTurn(this.userTurnQueues, { ...turn, sessionId: session.id }) === 'queued') {
+          restored += 1;
+          // A restored chat sends as soon as it is shown idle, not because some
+          // other chat's turn happened to finish.
+          this.restoredQueueSessions.add(session.id);
+        }
+      }
+    }
+    if (reopened) {
+      this.persistOpenTabs();
+    }
+    this.persistQueuedTurns();
+    if (restored > 0) {
+      this.post({
+        type: 'notice',
+        level: 'info',
+        message:
+          restored === 1
+            ? 'Restored 1 queued message. It sends when its chat is idle.'
+            : `Restored ${restored} queued messages. They send when their chats are idle.`
+      });
+    }
+    if (orphaned > 0) {
+      this.post({
+        type: 'notice',
+        level: 'warning',
+        message:
+          orphaned === 1
+            ? '1 queued message could not be restored because its chat or thread is no longer available.'
+            : `${orphaned} queued messages could not be restored because their chats or threads are no longer available.`
+      });
+    }
+  }
+
+  /** Paths can disappear between queueing and dispatch (workspace storage reset). */
+  private async missingQueuedAttachmentNames(attachments: readonly Attachment[]): Promise<string[]> {
+    const missing: string[] = [];
+    for (const attachment of attachments) {
+      if (!attachment.path) {
+        continue;
+      }
+      try {
+        await vscode.workspace.fs.stat(vscode.Uri.file(attachment.path));
+      } catch {
+        missing.push(attachment.name);
+      }
+    }
+    return missing;
   }
 
   /**
@@ -3458,9 +4059,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     attachments?: Attachment[],
     backendId?: string,
     updatePlan?: boolean,
-    origin: 'user' | 'autopilot' | 'continue' = 'user'
+    origin: 'user' | 'autopilot' | 'continue' = 'user',
+    announceUserMessage = false
   ): Promise<boolean> {
     const openedAt = Date.now();
+    if (this.session) {
+      this.session.turnPlan = undefined;
+    }
     const automatic = origin === 'autopilot';
     const continuing = origin === 'continue';
     if (this.session) {
@@ -3553,6 +4158,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // Plan and Agent honor the selected permission level.
     const mode = this.resolveMode(activeBackendId, this.mode);
     this.mode = mode;
+    if (this.session) {
+      this.session.turnPlan = planTurn({
+        text,
+        mode,
+        origin,
+        hasAttachments: (attachments?.length ?? 0) > 0,
+        hasActivePlan: Boolean(this.store.getPlanState(activeBackendId, threadId)),
+        settings: readOrchestrationSettings()
+      });
+    }
     // The per-model settings are resolved and clamped in the host, so a stale
     // value can never be sent.
     const modelSettings = await this.resolveTurnSettings(activeBackendId, resolvedModel, requestedSettings);
@@ -3612,6 +4227,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // a send that never starts a turn must not strand it on a later turn.
     this.pendingTurnMessage = { messageId, backendId: activeBackendId, threadId };
     await this.captureSentMessage(activeBackendId, threadId, messageId);
+    // A queued turn (or a queue:true send that raced the turn end) was never
+    // drawn by the webview. Post the stored message now so the transcript shows
+    // it before the first reply streams. The stored id makes the next replay
+    // replace this row instead of adding a duplicate.
+    if (announceUserMessage && this.visible === this.session) {
+      await this.postDispatchedUserMessage(activeBackendId, threadId, messageId, text, persisted, openedAt);
+    }
     if (this.session) {
       this.session.turnOpen = true;
     }
@@ -3634,6 +4256,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.pendingTurnMessage = undefined;
       if (this.session) {
         this.session.turnOpen = false;
+        this.session.turnPlan = undefined;
       }
       if (this.session && shouldAutoContinue(error, this.session.stopContinueAttempts)) {
         this.session.stopContinueAttempts += 1;
@@ -3810,6 +4433,23 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   /** Aborts the in-flight turn; the adapter emits the interrupted state. */
   private cancelTurn(): void {
+    // Stop also drops this chat's queued user turns: after an interrupt an
+    // immediate queued send would look like the Stop did nothing.
+    const session = this.session;
+    const queued = session ? this.discardSessionQueue(session.id) : 0;
+    if (session && queued > 0) {
+      this.restoredQueueSessions.delete(session.id);
+      this.persistQueuedTurns();
+      this.postQueuedTurns(session);
+      this.post({
+        type: 'notice',
+        level: 'info',
+        message:
+          queued === 1
+            ? 'Stopped. The 1 queued message was discarded.'
+            : `Stopped. ${queued} queued messages were discarded.`
+      });
+    }
     if (!this.activeThread) {
       return;
     }
@@ -4355,16 +4995,41 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * turn that left the steps and the tool activity unchanged. A question or a
    * refused approval also waits, because the user has to answer.
    */
-  private async considerPlanAutopilot(backendId: string, threadId: string): Promise<void> {
+  private async considerPlanAutopilot(
+    backendId: string,
+    threadId: string,
+    turnId: string
+  ): Promise<void> {
     const session = this.session;
     if (!session || session.disposed || session.mode !== 'agent') {
       return;
     }
+    const plan = this.turnPlans.get(turnId);
     const epoch = session.planEpoch;
-    await this.flushBuiltPlanProgress(backendId, threadId);
-    if (this.session !== session || session.disposed || session.planEpoch !== epoch) {
-      return;
-    }
+    await runTurnEnd(
+      {
+        mode: session.mode,
+        ...(plan ? { plan } : {}),
+        settings: readOrchestrationSettings()
+      },
+      {
+        // Settling is unconditional for an Agent turn: a step left running must
+        // lose its spinner even when autopilot (or quick tasks) turned planning
+        // off. Only the automatic continuation is gated.
+        settle: () => this.flushBuiltPlanProgress(backendId, threadId),
+        isStillCurrent: () =>
+          this.session === session && !session.disposed && session.planEpoch === epoch,
+        continue: () => this.continuePlanIfReady(session, backendId, threadId)
+      }
+    );
+  }
+
+  /** Queue the next automatic turn for a built plan this chat still owns. */
+  private continuePlanIfReady(
+    session: ChatSession,
+    backendId: string,
+    threadId: string
+  ): void {
     if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
       return;
     }
@@ -4396,25 +5061,160 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * One chat's request does not hold the others.
    */
   private flushQueuedTurns(): void {
-    const queues: Array<['continue' | 'autopilot', Map<string, { session: ChatSession; text: string }>]> = [
-      ['continue', this.crashContinueQueue],
-      ['autopilot', this.planAutopilotQueue]
-    ];
-    for (const [origin, queue] of queues) {
-      for (const [id, next] of [...queue.entries()]) {
-        if (next.session.disposed) {
-          queue.delete(id);
-          continue;
-        }
-        if (next.session.turnBusy) {
-          continue;
-        }
-        queue.delete(id);
-        next.session.turnBusy = true;
-        void this.sessionStore.run(next.session, () =>
-          this.sendTurn(next.text, undefined, undefined, undefined, undefined, undefined, undefined, origin)
-        );
+    if (this.queueFlushStopped) {
+      // The lease is with the next window; this process must not send anything
+      // from the queue it handed over.
+      return;
+    }
+    // One pure pass decides order: user turns first, then continue, then
+    // autopilot, with at most one action per chat. Starting an action sets
+    // turnBusy synchronously, so a rapid second completion cannot dispatch the
+    // same chat again from an older snapshot.
+    const actions = planQueueDrain({
+      queues: this.userTurnQueues,
+      gates: this.sessions.map((session) => ({
+        id: session.id,
+        // A restored queue stays parked until its own chat is shown; another
+        // chat's completion must not start a turn in a background tab.
+        turnBusy: session.turnBusy || (this.restoredQueueSessions.has(session.id) && this.visible !== session),
+        turnOpen: session.turnOpen,
+        pendingQuestion: session.pendingQuestion !== undefined,
+        pendingApproval: session.pendingApproval !== undefined,
+        disposed: session.disposed
+      })),
+      continuations: [...this.crashContinueQueue.keys()],
+      autopilot: [...this.planAutopilotQueue.keys()],
+      blocked: this.blockedQueuedTurns
+    });
+    for (const action of actions) {
+      const session = this.sessions.find((candidate) => candidate.id === action.sessionId);
+      if (!session) {
+        this.discardSessionQueue(action.sessionId);
+        this.crashContinueQueue.delete(action.sessionId);
+        this.planAutopilotQueue.delete(action.sessionId);
+        continue;
       }
+      if (action.origin === 'user') {
+        // Remove exactly the planned entry, not queue[0]: an earlier blocked
+        // entry must stay in place while later messages keep flowing.
+        const entry = takeQueuedTurn(this.userTurnQueues, action.sessionId, action.entry.id);
+        if (!entry) {
+          continue;
+        }
+        this.blockedQueuedTurns.delete(entry.id);
+        session.turnBusy = true;
+        if (entry.mode) {
+          session.mode = entry.mode;
+        }
+        this.persistQueuedTurns();
+        if (this.visible === session) {
+          this.postQueuedTurns(session);
+        }
+        void this.sessionStore.run(session, async () => {
+          // Keep the entry but skip it in later drains, so one bad message
+          // cannot hold everything queued after it forever.
+          const blockEntry = (message: string): void => {
+            session.turnBusy = false;
+            this.blockedQueuedTurns.add(entry.id);
+            requeueTurnFront(this.userTurnQueues, entry);
+            this.persistQueuedTurns();
+            if (this.visible === session) {
+              this.postQueuedTurns(session);
+            }
+            this.post({ type: 'notice', level: 'warning', message });
+            this.flushQueuedTurns();
+          };
+          // A retained path can disappear between queueing and dispatch. Keep
+          // the entry and report it rather than dropping accepted text.
+          const missing = await this.missingQueuedAttachmentNames(entry.attachments);
+          if (missing.length > 0) {
+            blockEntry(
+              missing.length === 1
+                ? `The queued message was kept because ${missing[0]} is no longer available. Later queued messages will still send. Remove this message and attach the file again to retry it.`
+                : `The queued message was kept because ${missing.length} attachments are no longer available. Later queued messages will still send. Remove this message and attach the files again to retry it.`
+            );
+            return;
+          }
+          const target = queuedTurnThreadTarget(entry, (backendId) => Boolean(this.registry.get(backendId)));
+          if (target === 'invalid') {
+            blockEntry(
+              'The queued message could not be restored because its provider or thread is no longer available. Later queued messages will still send.'
+            );
+            return;
+          }
+          const targetNeedsResume = target && !sessionMatchesQueueTarget(session, target);
+          if (targetNeedsResume) {
+            if (this.visible !== session) {
+              // Reopen a different thread only when its chat is on screen;
+              // otherwise park it until the user shows that chat.
+              session.turnBusy = false;
+              this.restoredQueueSessions.add(session.id);
+              requeueTurnFront(this.userTurnQueues, entry);
+              this.persistQueuedTurns();
+              if (this.visible === session) {
+                this.postQueuedTurns(session);
+              }
+              return;
+            }
+            await this.resumeThread(target.backendId, target.threadId);
+            if (!sessionMatchesQueueTarget(session, target)) {
+              blockEntry(
+                'The queued message could not reopen its original thread. Later queued messages will still send.'
+              );
+              return;
+            }
+          }
+          if (target) {
+            // The entry's own provider/model must win over a saved composer
+            // choice, otherwise `backendForTurn` could send it to another one.
+            session.composerBackendId = target.backendId;
+            if (entry.model) {
+              session.composerModelId = entry.model;
+            }
+          }
+          try {
+            await this.sendTurn(
+              entry.text,
+              entry.model,
+              entry.permissionLevel,
+              entry.modelSettings,
+              entry.attachments,
+              entry.backendId,
+              entry.updatePlan,
+              'user',
+              false,
+              true
+            );
+          } catch (error) {
+            // The entry was removed before start, so a thrown dispatch must put
+            // it back at the front instead of losing it silently.
+            session.turnBusy = false;
+            requeueTurnFront(this.userTurnQueues, entry);
+            this.persistQueuedTurns();
+            if (this.visible === session) {
+              this.postQueuedTurns(session);
+            }
+            this.post({
+              type: 'notice',
+              level: 'error',
+              message: `The queued message could not be sent and is still queued. ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            });
+          }
+        });
+        continue;
+      }
+      const queue = action.origin === 'continue' ? this.crashContinueQueue : this.planAutopilotQueue;
+      const next = queue.get(session.id);
+      if (!next) {
+        continue;
+      }
+      queue.delete(session.id);
+      session.turnBusy = true;
+      void this.sessionStore.run(session, () =>
+        this.sendTurn(next.text, undefined, undefined, undefined, undefined, undefined, undefined, action.origin)
+      );
     }
   }
 
