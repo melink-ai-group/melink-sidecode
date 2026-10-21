@@ -175,5 +175,5 @@ if (failures.length > 0) {
 console.log('');
 console.log('OK: documentation matches the current tree.');
 console.log(
-  'Known baseline (not run here): typecheck 5 errors; npm test 830/832 with 2 known failures.',
+  'Verify only checks the claims above; it does not run typecheck or the test suites.',
 );
