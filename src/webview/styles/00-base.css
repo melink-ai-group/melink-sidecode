@@ -1,0 +1,35 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Prefer the dynamic viewport unit so the bound tracks the sidebar as the
+ * workbench, panel, or on-screen keyboard changes size. */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+
+/* The webview host injects `body { padding: 0 20px }` after this sheet.
+ * `html body` wins that rule so inset lives on .composer, .transcript, and
+ * the other surfaces, not on a parent the composer cannot override. */
+html body {
+  overflow-x: hidden;
+  padding: 0;
+  background: var(--vscode-sideBar-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family, 'Inter', -apple-system, 'Segoe UI', sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.5;
+}
+

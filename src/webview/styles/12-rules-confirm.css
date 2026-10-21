@@ -1,0 +1,371 @@
+/* ---- Resolved markers: compact, readable, auditable ---- */
+
+.marker {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-left-width: 2px;
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+}
+
+.marker--allow {
+  border-left-color: color-mix(in srgb, var(--melink-success) 60%, transparent);
+}
+
+.marker--always {
+  border-left-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent);
+}
+
+.marker--session,
+.marker--reject {
+  border-left-color: var(--vscode-panel-border);
+}
+
+.marker-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.marker--allow .marker-icon,
+.marker--always .marker-icon {
+  color: var(--vscode-foreground);
+}
+
+.marker-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.marker-title {
+  margin: 0;
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  overflow-wrap: anywhere;
+}
+
+.marker-subject {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 12px);
+}
+
+.marker-sub {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.marker-actions {
+  margin: 4px 0 0;
+}
+
+.btn--link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+}
+
+.btn--link:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.btn--link:disabled {
+  color: var(--vscode-descriptionForeground);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* ---- Always-allow rules surface ---- */
+
+.rules {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.rules-intro {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.rules-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+}
+
+.rule-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rule-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 12px);
+  color: var(--vscode-foreground);
+}
+
+.rule-scope {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.rule-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-foot .spacer {
+  flex: 1 1 auto;
+}
+
+.rule-meta {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* ---- Labelled confirmation for the unrestricted permission level ---- */
+
+.confirm-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--vscode-errorForeground, var(--vscode-widget-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+}
+
+.confirm-gate__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.confirm-gate__icon {
+  flex: 0 0 auto;
+  color: var(--vscode-errorForeground);
+}
+
+.confirm-gate__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.confirm-gate__text {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.confirm-gate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The affected paths a restore confirmation names, so destructive scope is
+   visible before anything is reverted. Bounded height keeps the composer from
+   being pushed off screen for a large change set. */
+.restore-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 72%, transparent);
+}
+
+.restore-modal__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, 100%);
+  max-height: min(560px, 100%);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-foreground);
+}
+
+.restore-modal__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.restore-modal__text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.restore-modal__warn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--vscode-editorWarning-foreground, var(--vscode-widget-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 8%, transparent);
+}
+
+.restore-modal__warn-title,
+.restore-modal__chat-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.restore-modal__chats,
+.restore-modal__messages,
+.restore-modal__paths {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.restore-modal__chats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: disc;
+}
+
+.restore-modal__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.restore-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Mode switch sits above the restore dialog. It replaces the native window prompt. */
+.mode-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 72%, transparent);
+}
+
+.mode-modal__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, 100%);
+  padding: 16px;
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-foreground);
+  box-shadow: 0 12px 40px color-mix(in srgb, #000 45%, transparent);
+}
+
+.mode-modal__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.mode-modal__text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+}
+
+.mode-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.confirm-gate__paths {
+  margin: 6px 0 0;
+  padding: 0 0 0 16px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.control-option--danger {
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 8%, transparent);
+}
+
+.control-option__warn {
+  flex: 0 0 auto;
+  color: var(--vscode-editorWarning-foreground);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Context panel                                                              */
+/* -------------------------------------------------------------------------- */
+
+/* The category list is informational: it says what is sent, while each
+   editable flag has exactly one control in its own region. */
+.context-list {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+

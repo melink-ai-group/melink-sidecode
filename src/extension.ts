@@ -6,6 +6,7 @@ import { VscodeProjectContext } from './context/vscodeHost';
 import { planStepMarkdownPlugin } from './planStepMarkdown';
 import { SidebarViewProvider } from './sidebarView';
 import { attachBrowserSkill, stopBrowserSkill, syncBrowserSkill, BrowserSkill } from './browser/skill';
+import { SKILLS_SECTION } from './settingsKeys';
 
 /**
  * The registry is referenced by `deactivate` as well as by the subscriptions, so
@@ -49,9 +50,9 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
         provider.invalidateContextDelivery();
       }
       if (
-        event.affectsConfiguration('melink.skills.browser') ||
-        event.affectsConfiguration('melink.skills.browserCodex') ||
-        event.affectsConfiguration('melink.skills.browserOpencode')
+        event.affectsConfiguration(`${SKILLS_SECTION}.browser`) ||
+        event.affectsConfiguration(`${SKILLS_SECTION}.browserCodex`) ||
+        event.affectsConfiguration(`${SKILLS_SECTION}.browserOpencode`)
       ) {
         void syncBrowserSkill();
       }

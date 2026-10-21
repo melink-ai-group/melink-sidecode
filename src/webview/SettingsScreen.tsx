@@ -1,13 +1,29 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { THINKING_LEVELS, type BackendModel } from '../backends/types';
-import type { ConnectionTestResult, SettingsPatch, SettingsSnapshot } from '../protocol';
+import { THINKING_LEVELS } from '../backends/types';
+import type { SettingsPatch, SettingsSnapshot } from '../protocol';
 import { formatDictationTarget } from '../dictation/target';
 import { AlertIcon, BackIcon, CheckIcon, CrossIcon, InfoIcon } from './Icons';
-import { summarizeOpencodeCliOutput } from '../backends/opencode/upgradeText';
 import { opencodeRuntimeView } from './runtimeStatus';
 import { contextPatternError } from '../context/contextSettings';
-import { CODEX_VERSION_VALIDATION_HINT } from '../backends/appserver/version.ts';
 import { TabList, TabPanel, type TabItem } from './Tabs';
+import { CONTEXT_BUILTIN_PATTERNS } from './settings/constants';
+import type { SettingsScreenProps } from './settings/types';
+import { draftFrom, type Draft } from './settings/draft';
+import {
+  codexAuthDetail,
+  codexAuthLabel,
+  codexLabel,
+  flattenModels,
+  isHttpUrl,
+  ollamaLabel
+} from './settings/labels';
+import {
+  CliResult,
+  ContextCategory,
+  FieldTip,
+  RefreshIconInline,
+  TestResult
+} from './settings/primitives';
 
 /**
  * The settings screen: providers, credentials, and app-level defaults.
@@ -21,120 +37,6 @@ import { TabList, TabPanel, type TabItem } from './Tabs';
  * `hasToken` drives the chip and placeholder. An invalid field shows an inline
  * message and is not persisted.
  */
-
-/**
- * The built-in ignore patterns shown for reference. They mirror the documented
- * default set in `docs/usage.md`; they are not editable, because the built-in
- * secret and key exclusions are always on.
- */
-const CONTEXT_BUILTIN_PATTERNS: readonly string[] = [
-  'node_modules/',
-  '.git/',
-  'dist/',
-  'build/',
-  'coverage/',
-  '*.min.js',
-  '*.map',
-  'package-lock.json',
-  'yarn.lock',
-  '.env',
-  '*.pem',
-  '*.key',
-  'id_rsa'
-];
-
-export interface SettingsScreenProps {
-  settings?: SettingsSnapshot;
-  connectionTest?: { backendId: string; pending: boolean; result?: ConnectionTestResult };
-  onBack: () => void;
-  onSave: (patch: SettingsPatch, target?: 'global' | 'workspace') => void;
-  onSaveToken: (value: string) => void;
-  onClearToken: () => void;
-  onSaveZenToken: (value: string) => void;
-  onClearZenToken: () => void;
-  onTestConnection: (
-    backendId: string,
-    draft?: { cliSource: 'local' | 'bundled'; path: string }
-  ) => void;
-  /** Set when the protocol warning opened settings, so the Codex page is selected. */
-  settingsProvider?: 'codex';
-  codexVersionCheck?: { pending: boolean; ok?: boolean; message?: string };
-  onValidateCodexVersion: () => void;
-  opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
-  onUpgradeOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
-  onInstallOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
-  onSetZvecGrep: (enabled: boolean, draft?: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  astGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
-  onSetAstGrep: (enabled: boolean, draft?: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  astGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
-  onInstallAstGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  onUpgradeAstGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  zvecGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
-  onInstallZvecGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
-}
-
-/** Local draft state; the host snapshot is the source of truth on save. */
-interface Draft {
-  ollamaBaseUrl: string;
-  ollamaDefaultModel: string;
-  opencodeDefaultModel: string;
-  codexPath: string;
-  codexDefaultModel: string;
-  permissionLevel: SettingsSnapshot['defaults']['permissionLevel'];
-  mode: SettingsSnapshot['defaults']['mode'];
-  thinking: SettingsSnapshot['defaults']['thinking'] | '';
-  dictationModel: string;
-  opencodeEnabled: boolean;
-  opencodeCliSource: 'local' | 'bundled';
-  opencodePath: string;
-  browserCodex: boolean;
-  browserOpencode: boolean;
-  zvecGrepCliSource: 'local' | 'bundled';
-  zvecGrepPath: string;
-  astGrepCliSource: 'local' | 'bundled';
-  astGrepPath: string;
-  contextIncludeInstructions: boolean;
-  contextIncludeShape: boolean;
-  contextIncludeEditorState: boolean;
-  contextIncludeSelection: boolean;
-  contextIncludeChangedFiles: boolean;
-  /** The overall cap, held as a string so a half-typed value is not coerced. */
-  contextMaxKb: string;
-  contextExclude: string[];
-}
-
-/** Seed the draft from a host snapshot; used on load, echo, and reset. */
-function draftFrom(settings: SettingsSnapshot): Draft {
-  return {
-    ollamaBaseUrl: settings.ollama.baseUrl,
-    ollamaDefaultModel: settings.ollama.defaultModel,
-    opencodeDefaultModel: settings.opencodeZen.defaultModel,
-    codexPath: settings.codex.path,
-    codexDefaultModel: settings.codex.defaultModel,
-    permissionLevel: settings.defaults.permissionLevel,
-    mode: settings.defaults.mode,
-    thinking: settings.defaults.thinking ?? '',
-    dictationModel: formatDictationTarget(settings.defaults.dictationModel),
-    opencodeEnabled: settings.opencode.enabled,
-    opencodeCliSource: settings.opencode.cliSource,
-    opencodePath: settings.opencode.local.path,
-    browserCodex: settings.skills.browserCodex,
-    browserOpencode: settings.skills.browserOpencode,
-    zvecGrepCliSource: settings.skills.zvecGrep.cliSource,
-    zvecGrepPath: settings.skills.zvecGrep.local.path,
-    astGrepCliSource: settings.skills.astGrep.cliSource,
-    astGrepPath: settings.skills.astGrep.local.path,
-    contextIncludeInstructions: settings.context.includeInstructions,
-    contextIncludeShape: settings.context.includeShape,
-    contextIncludeEditorState: settings.context.includeEditorState,
-    contextIncludeSelection: settings.context.includeSelection,
-    contextIncludeChangedFiles: settings.context.includeChangedFiles,
-    contextMaxKb: String(Math.round(settings.context.maxBytes / 1024)),
-    contextExclude: [...settings.context.exclude]
-  };
-}
 
 export function SettingsScreen({
   settings,
@@ -1825,223 +1727,3 @@ export function SettingsScreen({
     </main>
   );
 }
-
-/**
- * One context category row: a checkbox, a name, and a plain-language sentence
- * about what the category means in practice. Kept as one component so all five
- * rows share the same structure and focus behaviour.
- */
-function ContextCategory({
-  id,
-  name,
-  description,
-  checked,
-  onChange
-}: {
-  id?: string;
-  name: string;
-  description: string;
-  checked: boolean;
-  /** Absent for a category whose control lives in its own region below. */
-  onChange?: (value: boolean) => void;
-}): JSX.Element {
-  // A read-only row states what is sent without offering a second control for a
-  // setting that already has one: two checkboxes for one flag could desync.
-  if (!onChange || !id) {
-    return (
-      <li className="context-category context-category--static">
-        <span className={`context-mark ${checked ? 'context-mark--on' : 'context-mark--off'}`} aria-hidden="true">
-          {checked ? <CheckIcon /> : <CrossIcon />}
-        </span>
-        <span className="check-body">
-          <span className="check-label">{name}</span>
-          <span className="check-text">{description}</span>
-        </span>
-      </li>
-    );
-  }
-  return (
-    <li className="context-category">
-      <label className="check" htmlFor={id}>
-        <input
-          className="check-input"
-          id={id}
-          type="checkbox"
-          checked={checked}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        <span className="check-box" aria-hidden="true">
-          <CheckIcon />
-        </span>
-        <span className="check-body">
-          <span className="check-label">{name}</span>
-          <span className="check-text">{description}</span>
-        </span>
-      </label>
-    </li>
-  );
-}
-
-/** Compact info control: secondary detail lives in the native tooltip. */
-function FieldTip({ label, text }: { label: string; text: string }): JSX.Element {
-  return (
-    <button type="button" className="icon-btn field-tip" title={text} aria-label={label}>
-      <InfoIcon />
-    </button>
-  );
-}
-
-/** One plain sentence for an install or update. Terminal color and progress bars are stripped. */
-function CliResult({ ok, message }: { ok?: boolean; message: string }): JSX.Element {
-  const text = summarizeOpencodeCliOutput(message, ok === false ? 1 : 0);
-  return (
-    <p className={`runtime-result ${ok ? 'runtime-result--ok' : 'runtime-result--error'}`} role="status">
-      {ok ? <CheckIcon /> : <AlertIcon />}
-      <span>{text}</span>
-    </p>
-  );
-}
-
-/** The Test connection result strip; plain language, never a raw error. */
-function TestResult({
-  backendLabel,
-  test,
-  onRetry
-}: {
-  backendLabel: string;
-  test: { pending: boolean; result?: ConnectionTestResult };
-  onRetry: () => void;
-}): JSX.Element | null {
-  if (test.pending) {
-    return (
-      <div className="test-result test-result--pending" role="status">
-        <span className="spinner" aria-hidden="true" />
-        <div className="test-body">
-          <div className="test-title">Testing {backendLabel}</div>
-          <div className="test-text">Sending a small authenticated request. This can take a few seconds.</div>
-        </div>
-      </div>
-    );
-  }
-  const result = test.result;
-  if (!result) {
-    return null;
-  }
-  const ok = result.outcome === 'ok';
-  return (
-    <div
-      className={`test-result ${ok ? 'test-result--ok' : 'test-result--error'}`}
-      role={ok ? 'status' : 'alert'}
-    >
-      {ok ? <CheckIcon /> : <AlertIcon />}
-      <div className="test-body">
-        <div className="test-title">
-          {ok ? `Connected to ${backendLabel}` : `Test failed - ${outcomeLabel(result.outcome)}`}
-        </div>
-        <div className="test-text">{result.message}</div>
-        {!ok ? (
-          <div className="test-actions">
-            <button className="btn" type="button" onClick={onRetry}>
-              Test connection
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function outcomeLabel(outcome: ConnectionTestResult['outcome']): string {
-  switch (outcome) {
-    case 'invalid-key':
-      return 'invalid API key';
-    case 'host':
-      return 'host unreachable';
-    case 'network':
-      return 'network problem';
-    case 'unavailable':
-      return 'provider unavailable';
-    default:
-      return 'request refused';
-  }
-}
-
-function RefreshIconInline(): JSX.Element {
-  return (
-    <svg className="ico ico--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
-      <path d="M20 11a8 8 0 1 0-1.6 5" />
-      <path d="M20 5v6h-6" />
-    </svg>
-  );
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function flattenModels(models: Record<string, BackendModel[]>): Array<BackendModel & { backendId: string }> {
-  return Object.entries(models).flatMap(([backendId, list]) =>
-    list.map((model) => ({ ...model, backendId }))
-  );
-}
-
-function ollamaLabel(settings: SettingsSnapshot): string {
-  return settings.ollama.status === 'available' ? 'Ollama Cloud' : 'Ollama Cloud';
-}
-
-function codexLabel(settings: SettingsSnapshot): string {
-  if (settings.codex.status === 'unavailable') {
-    return 'Codex (not installed)';
-  }
-  if (settings.codex.status === 'incompatible') {
-    return 'Codex (protocol mismatch)';
-  }
-  if (settings.codex.status === 'auth-mismatch') {
-    return 'Codex (wrong sign-in)';
-  }
-  return 'Codex';
-}
-
-function codexAuthLabel(settings: SettingsSnapshot): string {
-  if (settings.codex.status === 'available') {
-    return 'Signed in';
-  }
-  if (settings.codex.status === 'unavailable') {
-    return 'Not installed';
-  }
-  if (settings.codex.status === 'incompatible') {
-    return 'Incompatible';
-  }
-  if (settings.codex.status === 'auth-mismatch') {
-    return 'API key, not ChatGPT';
-  }
-  return 'Signed out';
-}
-
-function codexAuthDetail(settings: SettingsSnapshot): string {
-  if (settings.codex.status === 'available') {
-    return settings.codex.detail ?? 'Signed in. Codex models are ready.';
-  }
-  if (settings.codex.status === 'unavailable') {
-    return 'Not installed or not on PATH. Set the CLI path above, then test again.';
-  }
-  if (settings.codex.status === 'incompatible') {
-    return (
-      settings.codex.detail ??
-      `The Codex CLI is installed but its protocol version is not supported. ${CODEX_VERSION_VALIDATION_HINT}`
-    );
-  }
-  if (settings.codex.status === 'auth-mismatch') {
-    return (
-      settings.codex.detail ??
-      'Codex is signed in with an API key, not the ChatGPT login. Run the Codex CLI sign-in with the ChatGPT option and remove any API-key setting from the environment.'
-    );
-  }
-  return 'Not signed in. Codex models stay hidden until the CLI sign-in succeeds.';
-}
-

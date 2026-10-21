@@ -1,0 +1,187 @@
+/* ---- App shell ---- */
+
+.app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ---- Sidebar chat tabs. + and history sit on the right of this strip. ---- */
+
+.chat-tab-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.chat-tab-body > .app {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.chat-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  min-width: 0;
+  padding-top: 4px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background)));
+}
+
+.chat-tabs__list {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+}
+
+.chat-tabs__list::-webkit-scrollbar {
+  height: 6px;
+  width: 0;
+}
+
+.chat-tabs__list::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 6px;
+}
+
+.chat-tabs__list::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+.chat-tabs__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-tabs__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 0 6px 4px 4px;
+}
+
+.chat-tab {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 180px;
+  min-width: 0;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
+  cursor: grab;
+}
+
+.chat-tab:active {
+  cursor: grabbing;
+}
+
+.chat-tab--active {
+  z-index: 1;
+  background: transparent;
+  color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
+  box-shadow: inset 0 2px 0 var(--melink-primary);
+}
+
+.chat-tab--dragging {
+  opacity: 0.45;
+}
+
+.chat-tab--drop-before {
+  box-shadow: inset 2px 0 0 var(--melink-primary);
+}
+
+.chat-tab--drop-after {
+  box-shadow: inset -2px 0 0 var(--melink-primary);
+}
+
+.chat-tab--active.chat-tab--drop-before {
+  box-shadow: inset 0 2px 0 var(--melink-primary), inset 2px 0 0 var(--melink-primary);
+}
+
+.chat-tab--active.chat-tab--drop-after {
+  box-shadow: inset 0 2px 0 var(--melink-primary), inset -2px 0 0 var(--melink-primary);
+}
+
+.chat-tab__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 148px;
+  padding: 5px 2px 5px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: inherit;
+}
+
+.chat-tab--active .chat-tab__label {
+  font-weight: 600;
+}
+
+.chat-tab__text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-tab__mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--vscode-foreground);
+}
+
+.chat-tab__mark .spinner {
+  width: 10px;
+  height: 10px;
+}
+
+.chat-tab__unread {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--melink-primary);
+}
+
+.chat-tab__close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+}
+
+.chat-tab__close:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-foreground);
+}
+

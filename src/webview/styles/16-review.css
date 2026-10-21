@@ -1,0 +1,604 @@
+/* ---- Change review surface ----
+ *
+ * The post-turn review panel: one row per changed file with per-file keep and
+ * reject, the diff of an expanded row, and a footer whose single primary action
+ * is Keep all. It is a full-width inline panel inside the view, never a floating
+ * popover (the switcher invariant), so it can never be clipped by the sidebar.
+ *
+ * Color is tokens only. Brand hue (--melink-shell) is deliberately absent here:
+ * it is reserved for provider identity and the streaming caret. Decision state
+ * is carried by text plus an icon, never colour alone.
+ */
+
+.turn-changes {
+  margin: 2px 0 10px;
+}
+
+.changes-review {
+  min-width: 0;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  overflow: auto;
+}
+
+.changes-review:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.changes-review__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 6px;
+}
+
+.changes-review.is-open .changes-review__head {
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.changes-review__collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-review__collapse:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.changes-review__collapse:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.changes-review__chevron {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  transition: transform 0.1s ease;
+}
+
+.changes-review.is-open .changes-review__chevron {
+  transform: rotate(90deg);
+}
+
+.changes-review__counts {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__review {
+  border-color: var(--melink-primary);
+  background: var(--melink-primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.changes-review__review:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
+  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  color: #fff;
+}
+
+/* The spacer pushes the file actions right; narrow sidebars wrap instead of clipping. */
+.changes-review__head .spacer {
+  flex: 1 1 auto;
+}
+
+.changes-review__head .btn:not(.btn--link) {
+  min-height: 0;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  gap: 3px;
+  line-height: 1;
+}
+
+.changes-review__head .changes-review__icon-btn {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.changes-review__head .changes-review__icon-btn--danger {
+  color: var(--vscode-errorForeground);
+}
+
+.changes-review--kept .changes-review__title {
+  color: var(--vscode-descriptionForeground);
+}
+
+/* The check and diff paths sit inset in a 24px view box, so a 1:1 icon
+   leaves a hairline mark in the middle of the button. Scale the glyph up
+   until it fills the control. */
+.changes-review__head .changes-review__icon-btn .ico {
+  width: 20px;
+  height: 20px;
+  transform: scale(1.45);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.changes-review__head .btn--link {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+  gap: 3px;
+  line-height: 1;
+}
+
+.changes-review__head .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.changes-review__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+}
+
+.changes-review__pending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
+.changes-review__pending-note {
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__sep {
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  width: 100%;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 4.25rem minmax(4.5rem, max-content) max-content max-content;
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+}
+
+.changes-review__more {
+  display: flex;
+  justify-content: center;
+  width: calc(100% - 16px);
+  margin: 4px 8px 8px;
+}
+
+.change-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: var(--melink-radius-sm, 4px);
+}
+
+.change-row__line {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 1px 6px 1px 4px;
+}
+
+.change-row__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.change-row__mark--modified {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-foreground));
+}
+
+.change-row__mark--added {
+  color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-foreground));
+}
+
+.change-row__mark--deleted {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-foreground));
+}
+
+.change-row__mark--renamed {
+  color: var(--vscode-gitDecoration-renamedResourceForeground, var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-foreground)));
+}
+
+.change-row__stats {
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.change-row__decision {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.change-row__decision .decision-state--conflict {
+  white-space: nowrap;
+}
+
+.change-row__diff-btn {
+  justify-self: start;
+}
+
+.change-row__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.change-row__actions .btn,
+.change-row__diff-btn {
+  flex: 0 0 auto;
+  min-height: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.change-row__actions .btn:not(.btn--link) {
+  padding: 1px 6px;
+}
+
+.change-row__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+.change-row__icon-btn:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  text-decoration: none;
+}
+
+.change-row__icon-btn--danger {
+  color: var(--vscode-errorForeground);
+}
+
+.change-row__icon-btn--danger:hover:not(:disabled) {
+  color: var(--vscode-errorForeground);
+}
+
+.change-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.change-row--open {
+  border-color: var(--vscode-widget-border, var(--vscode-panel-border));
+  background: var(--vscode-sideBar-background);
+}
+
+.change-row--conflict {
+  border-color: var(--vscode-editorWarning-foreground);
+}
+
+.change-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.change-row__toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 4px 5px 2px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.change-row__toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.change-row__toggle--static {
+  cursor: default;
+}
+
+.change-row__chevron {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  transition: transform 0.1s ease;
+}
+
+.change-row__toggle[aria-expanded="true"] .change-row__chevron {
+  transform: rotate(90deg);
+}
+
+.change-row__chevron-spacer {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+/* Ellipsis on the left: overflow hides the start of the path, the file name stays. */
+.change-row__path {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
+.change-row__tags {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.change-row__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 2px 4px 5px 22px;
+}
+
+.change-row__note {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 4px 5px 22px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.change-row__note > .ico {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.change-row__note--error {
+  color: var(--vscode-errorForeground);
+}
+
+.change-row__note--error > .ico {
+  color: var(--vscode-errorForeground);
+}
+
+/* Each expanded diff scrolls on its own so a large file cannot stretch the sidebar. */
+.change-row__diff {
+  max-height: 180px;
+  overflow: auto;
+  min-width: 0;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  background: color-mix(in srgb, var(--vscode-textCodeBlock-background) 60%, transparent);
+}
+
+.change-row__diff:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.change-hunk + .change-hunk {
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.change-hunk__head {
+  display: block;
+  padding: 3px 8px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-sideBar-background);
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.change-hunk__no-newline {
+  display: block;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* ---- Decision state: text + icon, never colour alone ---- */
+
+.decision-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.decision-state > .ico {
+  flex: 0 0 auto;
+}
+
+.decision-state--pending {
+  color: var(--vscode-descriptionForeground);
+}
+
+.decision-state--kept {
+  color: var(--melink-success);
+}
+
+.decision-state--rejected {
+  color: var(--vscode-errorForeground);
+}
+
+.decision-state--conflict {
+  color: var(--vscode-editorWarning-foreground);
+  white-space: normal;
+}
+
+.decision-state--failed {
+  color: var(--vscode-errorForeground);
+}
+
+/* ---- Destructive reject confirmation (names its paths) ---- */
+
+.changes-review__confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  background: var(--vscode-sideBar-background);
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
+.changes-review__confirm > .ico {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--vscode-errorForeground);
+}
+
+.changes-review__confirm-body {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.changes-review__confirm-paths {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__confirm-paths li {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.changes-review__confirm-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* ---- Footer: exactly one primary action per region ---- */
+
+.changes-review__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.changes-review__summary-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.changes-review__foot-note {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.changes-review__foot-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 340px) {
+  .changes-review__foot-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
