@@ -1,3 +1,4 @@
+import { CONSOLE_BUFFER_LIMIT } from './consoleBuffer.ts';
 import { navigationDecision, navigationOrigin } from './policy.ts';
 
 /** One MCP tool result. An image is a base64 PNG the model can look at. */
@@ -21,6 +22,7 @@ export interface BrowserActions {
   click(input: { selector?: string; text?: string; x?: number; y?: number }): Promise<string>;
   type(text: string, selector?: string): Promise<void>;
   press(key: string): Promise<void>;
+  console(): Promise<string>;
 }
 
 export interface BrowserTool {
@@ -63,6 +65,11 @@ export const BROWSER_TOOLS: readonly BrowserTool[] = [
     name: 'browser_snapshot',
     description:
       'Read the page the user is seeing. Returns the accessibility tree and a screenshot of the current viewport.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'browser_console',
+    description: `Return runtime diagnostics from the browser page since the last navigation: console messages, uncaught page errors, failed requests and HTTP responses with status 400 or above. Keeps the most recent ${CONSOLE_BUFFER_LIMIT} entries. The buffer clears when the address bar or browser_navigate starts a navigation; in-page links, reloads and form submissions do not clear it.`,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
@@ -136,6 +143,8 @@ export async function runBrowserTool(
         return await typeText(actions, args);
       case 'browser_press':
         return await press(actions, args);
+      case 'browser_console':
+        return textResult(await actions.console());
       default:
         return textResult(`Unknown browser tool "${name}".`, true);
     }
