@@ -19,7 +19,7 @@ test('every shared permission level maps to a native Codex sandbox and approval 
     sandbox: 'workspace-write',
     approvalPolicy: {
       granular: {
-        sandbox_approval: false,
+        sandbox_approval: true,
         rules: false,
         skill_approval: true,
         request_permissions: true,
@@ -31,6 +31,19 @@ test('every shared permission level maps to a native Codex sandbox and approval 
     sandbox: 'danger-full-access',
     approvalPolicy: 'never'
   });
+});
+
+test('Codex default can prompt for sandboxed commands so the safety gate runs', () => {
+  const policy = codexPermissionMapping('default').approvalPolicy;
+  assert.equal(typeof policy, 'object');
+  if (typeof policy !== 'object' || policy === null || !('granular' in policy)) {
+    assert.fail('expected a granular approval policy');
+  }
+  assert.equal(policy.granular.sandbox_approval, true);
+  assert.equal(policy.granular.rules, false);
+  assert.equal(policy.granular.skill_approval, true);
+  assert.equal(policy.granular.request_permissions, true);
+  assert.equal(policy.granular.mcp_elicitations, true);
 });
 
 test('the mapping uses native generated values and never a deprecated policy', () => {

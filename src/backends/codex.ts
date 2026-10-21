@@ -31,6 +31,7 @@ import {
 } from './types';
 import { codexCapabilities, codexNativeRequest } from './capabilities';
 import { ruleFor, ruleScopeFor, describeApproval } from './approvals';
+import { safeModeDecision, storedRuleUnlessAsk } from './safeMode.ts';
 import { APPROVAL_TIMEOUT_REASON, APPROVAL_WAIT_MS } from './approvalWait';
 import { codexPermissionMapping, codexSandboxPolicy, DEFAULT_PERMISSION_LEVEL } from './permissions';
 import {
@@ -1561,10 +1562,40 @@ export class CodexBackend implements AgentBackend {
       return;
     }
 
+    // Destructive-command safety runs before stored rules, so an always-allow
+    // first-token rule (`git`, `rm`) cannot silently cover a force push, hard
+    // reset, recursive delete or database drop. `block` refuses outright;
+    // `ask` skips the rule match and surfaces the request with the risk reason.
+    const safety = safeModeDecision(approval);
+    if (safety.action === 'block') {
+      pending.settled = true;
+      this.answerApproval(pending, 'reject');
+      const subject = describeApproval(approval);
+      this.events.fire({
+        type: 'approval/decided',
+        backendId: this.id,
+        threadId,
+        outcome: { requestId: approval.id, decision: 'reject', subject }
+      });
+      this.events.fire({
+        type: 'approval/denied',
+        backendId: this.id,
+        threadId,
+        requestId: approval.id,
+        subject,
+        reason: safety.reason
+      });
+      return;
+    }
+    if (safety.action === 'ask') {
+      approval.reason = safety.reason;
+    }
+
     // A previously stored rule (session, then global) answers without prompting.
     // The decision mirrors the scope the user originally chose, so a session
-    // rule answers `allow-session` and an always rule `allow-always`.
-    const matched = this.approvals?.match(this.id, threadId, approval);
+    // rule answers `allow-session` and an always rule `allow-always`. A
+    // destructive `ask` deliberately bypasses this lookup.
+    const matched = storedRuleUnlessAsk(safety, () => this.approvals?.match(this.id, threadId, approval));
     if (matched) {
       const decision: ApprovalDecision = matched.scope === 'session' ? 'allow-session' : 'allow-always';
       pending.settled = true;

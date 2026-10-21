@@ -84,12 +84,13 @@ which can leave a custom install on an old version).
   permission levels become available. `plan` uses the build agent and honors
   the selected permission level; `ask` uses a read-only agent that cannot run
   commands or write. A read-only permission level denies edits and commands.
-  `default` asks for every
-  edit and command; `unrestricted` (which the UI gates behind a labelled
-  confirmation) allows them. opencode's own enforcement backs ours; it never
-  replaces it. The pinned opencode has no interactive prompt in headless `run`
-  mode, so a `default` turn's `ask` is auto-rejected rather than silently
-  allowed — the in-chat approval surface is a separate ticket.
+  `default` allows workspace edits but asks before every shell command and
+  before leaving the project; `unrestricted` (which the UI gates behind a
+  labelled confirmation) allows them. A `default` turn runs through
+  `opencode serve`, and each `ask` appears on the sidebar approval card, so the
+  command is gated by your decision rather than auto-rejected. opencode's own
+  enforcement backs ours; it never replaces it. Turns that cannot ask (read-only
+  and unrestricted) use the headless `opencode run` path.
 - **Turn it off to fall back.** With the setting off, the direct `/api/chat`
   adapter is used unchanged and no opencode process is started.
 
@@ -240,6 +241,8 @@ settings (**SideCode: Open settings**).
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
 | `melink.codex.defaultModel` | *(empty)* | Default model for Codex; empty uses the CLI default. |
 | `melink.defaults.permissionLevel` | `default` | Permission level for a new conversation (`read-only` / `default` / `unrestricted`). A per-conversation choice overrides it; `unrestricted` must be confirmed. |
+| `melink.safety.destructiveCommands` | `ask` | What to do with a recognised destructive command (`off` / `ask` / `block`). This runs before stored approval rules. |
+| `melink.safety.destructivePatterns` | *(empty)* | Extra case-insensitive regular expressions that mark a command as destructive, using the same action as the built-in checks. Invalid or blank patterns are ignored. |
 | `melink.defaults.mode` | `agent` | Starting mode for a new conversation (`agent` / `plan` / `ask`). `plan` and `ask` are applied to the Codex thread as developer instructions at thread start; `agent` leaves the CLI default. |
 | `melink.defaults.thinking` | *(empty)* | App-level thinking level when a model has no reported default; model-level overrides take precedence. |
 | `melink.context.includeInstructions` | `true` | Include instruction documents (`AGENTS.md`, `README.md`, `.github/copilot-instructions.md`) in the snapshot. |
@@ -324,6 +327,8 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.defaults.mode` | `agent` | Defaults → Default mode |
 | `melink.defaults.thinking` | *(empty)* | Defaults → Default thinking level |
 | `melink.ollama.token` (secret, not a setting) | *(none)* | Providers → Ollama Cloud → API key (Save / Clear) |
+| `melink.safety.destructiveCommands` | `ask` | Not on the settings screen (application scope, user `settings.json`) |
+| `melink.safety.destructivePatterns` | *(empty)* | Not on the settings screen (application scope, user `settings.json`) |
 
 Codex has no stored credential of its own: it signs in through its own CLI, and
 the screen reports that login state rather than holding a secret.
@@ -434,7 +439,7 @@ is not the sandbox.
 | Level | What Codex may do | Asks you when |
 |---|---|---|
 | **Read-only** | Read only; a sandbox blocks writes. | Anything that would write. |
-| **Default** | Write inside the workspace. | Anything outside that sandbox. |
+| **Default** | Write inside the workspace; commands run in the sandbox. | Sandboxed commands that need approval, including destructive ones, and anything outside the sandbox. |
 | **Unrestricted** | No sandbox at all. | Never. |
 
 Select the level from the picker in the title bar. Choosing **Unrestricted** needs
@@ -459,8 +464,48 @@ what it permits (the command prefix or path root) and where it came from, with a
 conversation` rules are scoped to the thread and survive a window reload without
 either re-asking or silently escalating.
 
-Ollama Cloud has no approval channel: it reports a single level and never emits an
-approval request.
+A denied request leaves a notice in the transcript that shows the backend's
+reason — for a safety block, the risk and the bounded, redacted command. The
+agent is told only that the request was denied; it does not receive the full
+notice text.
+
+### Destructive commands
+
+`melink.safety.destructiveCommands` adds a small, host-side check before the
+stored-rule lookup. It recognises recursive deletes (`rm -rf`, PowerShell
+`Remove-Item -Recurse -Force`, `rmdir`/`del`/`erase` with `/s /q` or `/s/q`),
+force pushes (`git push --force`, `--force-with-lease`, `--force-if-includes`,
+`--delete`/`-d`, and `+refspec`/`:refspec`), hard resets (`git reset --hard`),
+database drops only when the
+command is a DB client (`psql`, `mysql`/`mariadb`, `mongosh`/`mongo`, `sqlite3`,
+`sqlcmd`, `clickhouse-client`, `sqlplus`, `prisma db execute`) running
+`DROP TABLE`/`DROP DATABASE` or `dropDatabase()`, and any extra expressions in
+`melink.safety.destructivePatterns`. Wrappers such as `sudo`, `env`, `xargs`,
+`bash -c`, `powershell`/`pwsh` and `cmd /c` are looked through, and quoted SQL
+counts.
+
+- **Ask** (the default) skips a matching stored rule and always shows the
+  decision card, with a reason naming the risk and the bounded, redacted command.
+- **Block** refuses the command without a card; the transcript notice names the
+  risk and the bounded, redacted command, and the agent is told only that it was
+  denied.
+- **Off** restores the previous behaviour: only stored rules decide.
+
+The gate runs whenever a command approval request is raised. Codex **Read-only**
+can raise such requests, **Default** and **Plan** follow the selected level, and
+**Ask** is refused before it can act. **Unrestricted** has no approval path and
+never asks. Codex still auto-approves some commands inside its workspace sandbox,
+so not every default command raises a request.
+
+The reason contains the risk and the bounded command, with no working directory,
+environment or secret-store values. Common password/token forms (`--password`,
+`-p<value>`, `--token`, `--api-key`, `--secret`, and `PASSWORD=`/`TOKEN=`
+values) are redacted to `<redacted>`. A credential written in an unrecognised
+form could still appear, so keep secrets off the command line.
+
+The direct Ollama Cloud `/api/chat` adapter has no approval channel: it reports a
+single level and never emits an approval request. The opencode-backed Ollama
+runtime and OpenCode Zen do have one and use the same check as Codex.
 
 ## Reviewing changes
 

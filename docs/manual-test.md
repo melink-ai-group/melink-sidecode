@@ -219,12 +219,13 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       writes outside the workspace are permitted. Switch to **Ask**, ask it to
       run a destructive command (e.g. delete a scratch file) and to write a file, and
       confirm neither happens. Check the scratch files are unchanged afterwards.
-- [ ] 14h. **Read-only and default never auto-approve edits or commands.**
+- [ ] 14h. **Read-only refuses; default gates shell commands through the card.**
       Select **Read-only**, attempt a write and a destructive command, and
-      confirm both are refused. Select **Default**, attempt a write, and confirm
-      it is **not** auto-approved (headless opencode auto-rejects the `ask`, so
-      the file is not written). Select **Unrestricted** (after the labelled
-      confirmation), attempt a workspace write, and confirm it is performed.
+      confirm both are refused. Select **Default**, attempt a workspace write,
+      and confirm it is allowed; then attempt a shell command and confirm the
+      sidebar approval card appears. Reject it and confirm the command did not
+      run. Select **Unrestricted** (after the labelled confirmation), attempt a
+      workspace write, and confirm it is performed without a card.
 - [ ] 14i. **Reasoning and context.** With a model that reports reasoning, set a
       thinking level and a max context and confirm the turn still completes.
       Select a model that reports **no** reasoning control, set a thinking level,

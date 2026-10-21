@@ -167,11 +167,36 @@
           ],
           "enumDescriptions": [
             "Read-only: Codex runs read-only; anything that would write is requested.",
-            "Default: workspace writes and sandboxed commands run on their own. Anything outside the sandbox is requested.",
+            "Default: workspace writes run in a sandbox; commands may request approval, though Codex still auto-approves some in-sandbox commands. Anything outside the sandbox is requested.",
             "Unrestricted: no sandbox and no prompts. Selecting this requires an explicit confirmation."
           ],
           "default": "default",
           "description": "Permission level used until you pick one in the chat. The picker choice is remembered for the next conversation. Unrestricted must be confirmed before it is applied."
+        },
+        "melink.safety.destructiveCommands": {
+          "type": "string",
+          "enum": [
+            "off",
+            "ask",
+            "block"
+          ],
+          "enumDescriptions": [
+            "Off: no extra check; stored approval rules decide as before.",
+            "Ask: a recognised destructive command always needs your decision, even when a stored rule matches.",
+            "Block: a recognised destructive command is refused without a decision card."
+          ],
+          "default": "ask",
+          "scope": "application",
+          "markdownDescription": "What SideCode does when it recognises a destructive command (recursive delete, force push, hard reset, database drop, or a pattern from `melink.safety.destructivePatterns`). This check runs before stored approval rules, so an `Always allow` rule for `git` or `rm` cannot answer it silently. The reason names the risk and the bounded command; common password/token values are redacted, and no working directory, environment or secret-store values are included."
+        },
+        "melink.safety.destructivePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "Extra regular expressions (case-insensitive) that mark a command as destructive. An invalid or blank pattern is ignored. These patterns use the same **Ask**/**Block** action as the built-in checks."
         },
         "melink.defaults.mode": {
           "type": "string",
