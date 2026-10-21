@@ -103,7 +103,7 @@ export const PERMISSION_LEVEL_DESCRIPTORS: readonly PermissionLevelDescriptor[] 
   {
     level: 'read-only',
     label: 'Read-only',
-    description: 'Codex runs read-only. Anything that would write is requested.',
+    description: 'Read-only. Anything that would write is requested.',
     requiresConfirmation: false
   },
   {
@@ -115,7 +115,7 @@ export const PERMISSION_LEVEL_DESCRIPTORS: readonly PermissionLevelDescriptor[] 
   {
     level: 'unrestricted',
     label: 'Unrestricted',
-    description: 'No sandbox and no prompts. Codex acts without asking.',
+    description: 'No sandbox and no prompts. Actions run without asking.',
     requiresConfirmation: true
   }
 ];

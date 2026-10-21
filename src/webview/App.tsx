@@ -2359,7 +2359,7 @@ export function App(): JSX.Element {
           <div className="turn turn--agent">
             <div className="turn-meta">
               <span className={`provider-dot provider-dot--${active?.id ?? 'ollama'}`} aria-hidden="true" />
-              <span className="meta-strong">melink</span>
+              <span className="meta-strong">SideCode</span>
               <span className="stream-status" role="status">
                 <span className="spinner" aria-hidden="true" />
                 Starting
@@ -2376,7 +2376,7 @@ export function App(): JSX.Element {
         ) : null}
 
         {state.busy ? (
-          <div className="typing-dots" role="status" aria-label="melink is working">
+          <div className="typing-dots" role="status" aria-label="SideCode is working">
             <span />
             <span />
             <span />
@@ -3514,7 +3514,7 @@ function EmptyState({
   return (
     <div className="empty-state empty-state--welcome">
       <img className="empty-logo" src={logoUrl} alt="" />
-      <p className="empty-title empty-title--brand">meLink SideCode</p>
+      <p className="empty-title empty-title--brand">SideCode</p>
       <p className="empty-text">
         On your side. Plan, Edit, or Ask anything.
       </p>
@@ -3767,7 +3767,7 @@ const TranscriptRow = memo(function TranscriptRow({
           {showSpeaker ? (
             <>
               <span className={`provider-dot provider-dot--${providerId}`} aria-hidden="true" />
-              <span className="meta-strong">melink</span>
+              <span className="meta-strong">SideCode</span>
               {item.title ? (
                 <>
                   <span className="meta-sep" aria-hidden="true">
@@ -3937,7 +3937,7 @@ const NarrationRow = memo(function NarrationRow({
       {showSpeaker ? (
         <div className="turn-meta">
           <span className={`provider-dot provider-dot--${providerId}`} aria-hidden="true" />
-          <span className="meta-strong">melink</span>
+          <span className="meta-strong">SideCode</span>
         </div>
       ) : null}
       <button
