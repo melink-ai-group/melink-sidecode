@@ -169,8 +169,9 @@ the same workspace.
 
 ### Pass E — Ollama with the opencode runtime enabled
 
-Record the installed CLI first: `opencode --version` (baseline validated against
-`1.1.65`). ............ Ensure `opencode` resolves on `PATH`, or set
+Record the installed CLI first: `opencode --version` (the T69 regression used
+1.19.x; the installer tracks `releases/latest`). Ensure `opencode` resolves on
+`PATH`, or set
 `melink.ollama.opencode.path` to its full path.
 
 - [ ] 14a. Set the Ollama token (step 2). In **Workspace Settings (JSON)** add:
@@ -196,8 +197,9 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       wait for completion. **Expected:** the reply streams into the transcript
       incrementally (a text item opens and completes) rather than the whole thing
       appearing only at the end. No error banner appears.
-- [ ] 14d. **Tool execution.** Ask the agent to list the workspace files. Confirm
-      a **tool card** appears for the command and completes with its status.
+- [ ] 14d. **Tool execution.** Ask the agent to list the workspace files. At
+      **Default**, approve the command when the card asks. Confirm a **tool card**
+      appears for the command and completes with its status.
 - [ ] 14e. **Config cross-check.** From a terminal in the same workspace, confirm
       the runtime resolves the generated provider against the configured base
       URL and the live model ids:
@@ -215,16 +217,21 @@ Record the installed CLI first: `opencode --version` (baseline validated against
       rather than an error or a stall.
 - [ ] 14g. **Plan follows its permission level; Ask cannot modify the workspace.**
       Switch to **Plan** with **Default**, ask it to create a file, and confirm
-      the workspace sandbox permits writes. With **Unrestricted**, confirm
-      writes outside the workspace are permitted. Switch to **Ask**, ask it to
-      run a destructive command (e.g. delete a scratch file) and to write a file, and
-      confirm neither happens. Check the scratch files are unchanged afterwards.
-- [ ] 14h. **Read-only and default never auto-approve edits or commands.**
-      Select **Read-only**, attempt a write and a destructive command, and
-      confirm both are refused. Select **Default**, attempt a write, and confirm
-      it is **not** auto-approved (headless opencode auto-rejects the `ask`, so
-      the file is not written). Select **Unrestricted** (after the labelled
-      confirmation), attempt a workspace write, and confirm it is performed.
+      the write is proposed for approval and permitted after you allow it. With
+      **Unrestricted**, confirm writes outside the workspace are permitted.
+      Switch to **Ask**, ask it to run a destructive command (e.g. delete a
+      scratch file) and to write a file, and confirm neither happens. Check the
+      scratch files are unchanged afterwards.
+- [ ] 14h. **Read-only and default never auto-approve edits, commands, or web access.**
+      Select **Read-only**, attempt a write, a destructive command, and a web
+      fetch or search, and confirm all three are refused. Select **Default**,
+      attempt a write, a command, and a web fetch or search, and confirm each is
+      **not** auto-approved (the approval card asks first, and rejecting it
+      leaves the file unwritten and the request unmade). Select **Unrestricted**
+      (after the labelled confirmation), attempt a workspace write, and confirm
+      it is performed. At **Read-only**, **Default**, and **Ask**, also ask the
+      agent to delegate to a subagent and confirm delegation is refused (a
+      workspace `opencode.json` may define its own permissive subagent).
 - [ ] 14i. **Reasoning and context.** With a model that reports reasoning, set a
       thinking level and a max context and confirm the turn still completes.
       Select a model that reports **no** reasoning control, set a thinking level,
@@ -503,8 +510,8 @@ what you typed and not from a web search. Do not paste any project fact.
       snapshot cannot be built (or use an over-budget project — a large tree with
       `melink.context.exclude` empty). Send a turn. **Expected:** a plain-language
       notice in place of the context, the turn still sends, and no blocking error.
-- [ ] 39k. **Record the pinned versions** the priming path was verified against:
-      Codex CLI (step 0.3) and opencode (`opencode --version`, baseline `1.1.65`).
+- [ ] 39k. **Record the versions** the priming path was verified against:
+      Codex CLI (step 0.3) and opencode (`opencode --version`, T69 baseline 1.19.x).
       ..............................
 
 ### What is sent by default (for the tester's reference)
@@ -1022,9 +1029,10 @@ These were run from the repo during authoring, without a GUI host:
       `cwd`; `TurnStartParams` exposes no per-turn instructions field. Codex
       priming/`cwd` therefore uses the native field at start/resume, and mid-thread
       deltas are left to Codex's own file access (documented in the README).
-- [x] **opencode priming surface checked.** `opencode run --help` on 1.1.65
-      exposes no system/instructions flag, so the fallback is prompt priming;
-      recorded in the README and in code as a deliberate fallback.
+- [x] **opencode priming surface checked.** `opencode run --help` (1.19.x, the
+      version the installer resolved) exposes no system/instructions flag, so the
+      fallback is prompt priming; recorded in the README and in code as a
+      deliberate fallback.
 
 ### Requires a human on a GUI host
 
@@ -1042,10 +1050,10 @@ need a live model plus a git workspace), and §5 (per-host).
   `codex app-server` JSON-RPC protocol over stdio. The CLI labels the command
   `[experimental]`, so its protocol may change between releases; the checked-in
   bindings under `schemas/` turn that drift into a build/type error.
-- **Pinned versions the priming path was verified against:** `codex-cli 0.156.1`
-  (Windows x86_64) and `opencode 1.1.65`. Re-run §0 step 0.3 and
-  `opencode --version` and confirm these before signing off; a different version
-  invalidates the field/flag assumptions below.
+- **Versions the priming path was verified against:** `codex-cli 0.156.1`
+  (Windows x86_64) and `opencode 1.19.x` (the installer tracks `releases/latest`).
+  Re-run §0 step 0.3 and `opencode --version` and confirm these before signing
+  off; a different version may invalidate the field/flag assumptions below.
 - **Codex has no per-turn instructions field.** In the pinned bindings,
   `baseInstructions`/`developerInstructions` exist on `thread/start` and
   `thread/resume` only. Mid-thread workspace changes are therefore not injected as

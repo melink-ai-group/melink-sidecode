@@ -116,7 +116,7 @@ test('an opencode turn config carries the browser server only when asked', () =>
   assert.equal((on.config.permission as Record<string, string>).browser_snapshot, 'allow');
   const mcp = on.config.mcp as Record<string, { type: string }>;
   assert.equal(mcp.melink_browser?.type, 'local');
-  const agent = (on.config.agent as Record<string, { permission: Record<string, string> }>)['melink-ask'];
+  const agent = (on.config.agent as Record<string, { permission: Record<string, string> }>)[on.agent];
   assert.equal(agent?.permission.melink_browser, 'allow');
   assert.equal(agent?.permission.bash, 'deny');
 });
