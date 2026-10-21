@@ -60,7 +60,7 @@ const REPLY_CLOSE =
   'End with one short plain sentence in its own paragraph that states the result of this request: the answer, what you changed, or what is still blocked. That sentence is the last thing the user reads, and the host shows it apart from the notes above it. Do not end on a table, a list, a code span, or a trailing offer such as "Want me to".';
 
 const QUESTION_BLOCK =
-  'When you need a decision from the user, write that closing sentence first, then stop and end your reply with one fenced sidecode-question block and do not continue until the answers arrive. The block is JSON of the form {"questions":[{"prompt":"...","options":["preferred answer","next-best answer"]}]}. The prompt is one clear sentence. Put the preferred answer first. The host adds a custom-message choice, so do not add one yourself.';
+  'When you need a decision from the user, write that closing sentence first, then stop and end your reply with one fenced sidecode-question block and do not continue until the answers arrive. The block is JSON of the form {"questions":[{"prompt":"...","options":["preferred answer","next-best answer"]}]}. The prompt is one clear sentence. Put the preferred answer first. The host adds a custom-message choice, so do not add one yourself. If an answer is skipped or omitted, do not assume an answer: re-ask the question, or choose the least-destructive option and state the assumption you made.';
 
 /**
  * Where generated documents go. Codex and OpenCode both receive the mode text,

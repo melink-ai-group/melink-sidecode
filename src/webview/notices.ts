@@ -1,5 +1,5 @@
 import type { Dispatch } from 'react';
-import type { Action, AppState } from './state';
+import type { Action, AppState, NoticeAction } from './state';
 
 export function runTokenAction(dispatch: Dispatch<Action>, state: AppState): void {
   const needsToken = state.availability.find((backend) => backend.status === 'unauthenticated');
@@ -11,7 +11,7 @@ export function runTokenAction(dispatch: Dispatch<Action>, state: AppState): voi
   });
 }
 
-export function noticeActionLabel(action: 'setToken' | 'clearToken' | 'refresh' | 'retry'): string {
+export function noticeActionLabel(action: NoticeAction): string {
   switch (action) {
     case 'setToken':
       return 'Set token';
@@ -21,6 +21,8 @@ export function noticeActionLabel(action: 'setToken' | 'clearToken' | 'refresh' 
       return 'Refresh backends';
     case 'retry':
       return 'Retry';
+    case 'retryQuestion':
+      return 'Retry question';
   }
 }
 

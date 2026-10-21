@@ -412,6 +412,18 @@ the prompt keeps the current mode. Unclear wording leaves the selected mode
 alone. Detection is provider-neutral and only runs for modes the backend reports
 as supported.
 
+### Clarifying questions
+
+In Agent and Plan, the assistant can end a reply with `sidecode-question`
+JSON. Every payload in that reply becomes one card, in source order, with the
+host-added custom answer. **Skip** records an instruction, not a choice: the
+assistant must re-ask or pick the least-destructive option and state its
+assumption. A malformed payload is removed from the reply and shown as a
+warning with **Retry**. Ask never opens a card; it removes the payload and
+suggests switching to Agent or Plan. Fence questions are restored after a
+window reload. Native provider questions cannot survive a backend restart, so a
+reload reports that the question was lost instead of silently dropping it.
+
 ### Plan artifact
 
 In Plan mode the plan is written to one markdown file per thread at a

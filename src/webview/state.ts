@@ -44,7 +44,7 @@ import type {
 /** Lifecycle of one transcript item, driving its status affordance. */
 export type ItemStatus = 'streaming' | 'completed' | 'failed' | 'warning' | 'canceled' | 'pending';
 
-export type NoticeAction = 'setToken' | 'clearToken' | 'refresh' | 'retry';
+export type NoticeAction = 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion';
 
 /** The files one chat turn changed, plus the review snapshot once the host sends it. */
 export interface TurnChange {
@@ -316,6 +316,12 @@ export type Action =
        */
       pendingApproval?: ApprovalRequest;
       pendingQuestion?: QuestionRequest;
+      /** A status line appended after the replay, e.g. a lost native question. */
+      notice?: {
+        level: 'info' | 'warning' | 'error';
+        message: string;
+        action?: NoticeAction;
+      };
       plan?: PlanArtifact;
       /** Keep the optimistic user line when a send opens a new thread. */
       keepPendingUserMessage?: boolean;
@@ -769,7 +775,7 @@ export function reduce(state: AppState, action: Action): AppState {
       const nextModel = action.model ?? (providerChanged ? undefined : state.selectedModel);
       const activityKey = action.threadId ? `${action.backendId}:${action.threadId}` : undefined;
       const changedModel = nextModel !== state.selectedModel;
-      return {
+      const nextState: AppState = {
         ...state,
         selectedBackendId: action.backendId,
         selectedModel: nextModel,
@@ -827,6 +833,9 @@ export function reduce(state: AppState, action: Action): AppState {
         restoreResult: undefined,
         restoreConfirmation: undefined
       };
+      return action.notice
+        ? appendStatusNotice(nextState, action.notice.message, action.notice.level, action.notice.action)
+        : nextState;
     }
     case 'olderHistoryLoading':
       return { ...state, loadingOlder: true };
