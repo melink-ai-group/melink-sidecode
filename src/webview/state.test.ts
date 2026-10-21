@@ -13,6 +13,23 @@ import {
 } from './state.ts';
 import type { ApprovalRequest } from '../backends/types.ts';
 
+test('persisted diagnostic notices keep text and severity across tab replay', () => {
+  const item = { id: 'double-check_t1', kind: 'notice' as const, detail: 'status',
+    text: 'No VS Code errors found in the checked files.', noticeLevel: 'warning' as const, status: 'completed' as const };
+  const chat = reduce(initialState, { type: 'conversation', backendId: 'opencode', threadId: 'one', replay: [] });
+  const live = reduce(chat, { type: 'agentEvent', event: { type: 'item/started', backendId: 'opencode', threadId: 'one', item } });
+  assert.equal(live.transcript.at(-1)?.text, item.text);
+  assert.equal(live.transcript.at(-1)?.noticeLevel, 'warning');
+  const away = reduce(live, { type: 'conversation', backendId: 'opencode', threadId: 'two', replay: [] });
+  assert.equal(away.transcript.length, 0);
+  const background = reduce(away, { type: 'agentEvent', event: { type: 'item/started', backendId: 'opencode', threadId: 'one', item } });
+  assert.equal(background.transcript.length, 0);
+  const back = reduce(background, { type: 'conversation', backendId: 'opencode', threadId: 'one', replay: [item] });
+  assert.equal(back.transcript.length, 1);
+  assert.equal(back.transcript[0].text, item.text);
+  assert.equal(back.transcript[0].noticeLevel, 'warning');
+});
+
 function request(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
     id: 'req_1',

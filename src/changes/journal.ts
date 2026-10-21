@@ -1207,6 +1207,11 @@ export class ChangeJournal {
       // a line diff when the before bytes were never stored.
       const status: ChangeStatus = hint === 'deleted' ? 'deleted' : hint === 'created' ? 'created' : 'modified';
       const a = after.get(path) ?? undefined;
+      // File watchers also report created directories. Without readable file
+      // bytes there is no created file to review (or safely reject).
+      if (status === 'created' && !a) {
+        continue;
+      }
       // A reported edit with no pre-turn snapshot used to diff the finished
       // file against empty content, so one changed line reviewed as the whole
       // file. Reverse the reported patch onto the post-edit bytes when it

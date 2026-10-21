@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChangeJournal, type JournalFs, type JournalStorage } from './journal.ts';
 import { ChangeTracker, type TurnChangeSet } from './tracker.ts';
+import { ChangeStore } from './changeStore.ts';
+import { ChangeWatchSession } from './watchSession.ts';
 
 function storage(): JournalStorage {
   const data = new Map<string, unknown>();
@@ -55,6 +57,58 @@ function tracker(fs: FakeFs): ChangeTracker {
   const journal = new ChangeJournal({ storage: storage(), fs, now: () => 1_000 });
   return new ChangeTracker(journal, () => 1_000);
 }
+
+test('OpenCode changes and decisions replay all seven files after journal rehydration', async () => {
+  const fs = new FakeFs();
+  // Clone storage to model a real persisted index, rather than shared objects.
+  const backing = storage();
+  const disk: JournalStorage = {
+    get: <T>(key: string, fallback: T): T => structuredClone(backing.get(key, fallback)),
+    update: async (key, value) => backing.update(key, structuredClone(value))
+  };
+  const paths = Array.from({ length: 7 }, (_, index) => `/ws/src/file${index}.ts`);
+  for (const path of paths) fs.files.set(path, text('before\n'));
+  const journal = new ChangeJournal({ storage: disk, fs });
+  const change = new ChangeTracker(journal);
+  await change.beginTurn({ backendId: 'opencode', threadId: 'one', turnId: 't1', messageId: 'u1', candidates: paths });
+  const watcher = new ChangeWatchSession({
+    workspaceRoots: () => ['/ws'],
+    onObserve: (path, status) => change.watch(path, status)
+  });
+  watcher.observe('/ws/src', 'created'); // A directory event is not a file row.
+  for (const path of paths) {
+    fs.files.set(path, text('after\n'));
+    watcher.observe(path, 'modified');
+  }
+  // The last writes are still debounced when the provider finishes.
+  watcher.flush();
+  const live = await change.endTurn('t1');
+  watcher.stop();
+  assert.equal(live?.entries.length, 7);
+  const reloaded = new ChangeJournal({ storage: disk, fs });
+  const replay = await new ChangeTracker(reloaded).observedSets('one');
+  assert.deepEqual(replay, [live]);
+  const review = await new ChangeStore({ storage: disk, fs: {
+    readFile: (path) => fs.readFile(path),
+    writeFile: async () => { throw new Error('replay must not write'); },
+    deleteFile: async () => { throw new Error('replay must not delete'); }
+  }, artifacts: reloaded }).view('opencode', 'one', 't1');
+  assert.equal(review?.files.length, 7);
+  assert.ok(review?.files.every((file) => file.decision === 'pending' && file.additions === 1 && file.deletions === 1));
+  assert.deepEqual(await new ChangeTracker(reloaded).observedSets('other'), []);
+});
+
+test('duplicate turn start does not replace the original snapshot or message anchor', async () => {
+  const fs = new FakeFs();
+  fs.files.set('/ws/a.ts', text('before'));
+  const change = tracker(fs);
+  await change.beginTurn({ backendId: 'opencode', threadId: 'one', turnId: 't1', messageId: 'u1', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('after'));
+  await change.beginTurn({ backendId: 'opencode', threadId: 'one', turnId: 't1', candidates: ['/ws/a.ts'] });
+  const set = await change.endTurn('t1');
+  assert.equal(set?.entries.length, 1);
+  assert.equal(set?.messageId, 'u1');
+});
 
 test('a reported edit is recorded with source reported and the right relPath', async () => {
   const fs = new FakeFs();

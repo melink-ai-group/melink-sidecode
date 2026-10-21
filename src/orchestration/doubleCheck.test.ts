@@ -16,7 +16,7 @@ test('the settle delay is the documented 1500ms', () => {
   assert.equal(DOUBLE_CHECK_NAME_CAP, 3);
 });
 
-test('a clean sweep reports the file count and an info notice', () => {
+test('a clean sweep keeps the count internally and omits it from the info notice', () => {
   const result = collectDoubleCheck(['src/a.ts', 'src/b.ts'], (path) =>
     path.endsWith('a.ts') ? [warning] : []
   );
@@ -28,7 +28,7 @@ test('a clean sweep reports the file count and an info notice', () => {
   });
   assert.deepEqual(doubleCheckNotice(result), {
     level: 'info',
-    message: 'No errors in 2 changed files.'
+    message: 'No VS Code errors found in the checked files.'
   });
 });
 
