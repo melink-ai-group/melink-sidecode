@@ -372,6 +372,8 @@
     "test:node": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "test:dom": "vitest run",
     "verify": "node scripts/verify.mjs",
+    "eval": "node --experimental-strip-types src/evals/run.ts",
+    "eval:report": "node --experimental-strip-types src/evals/run.ts --report evals/eval-report.md",
     "schemas:generate": "codex app-server generate-ts --out ./schemas",
     "vscode:prepublish": "npm run build",
     "package": "vsce package"
