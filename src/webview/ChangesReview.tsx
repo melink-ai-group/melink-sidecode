@@ -22,6 +22,7 @@ import {
   TrashIcon
 } from './Icons';
 import { prettyPath } from './prettyPath.ts';
+import { diffReviewView, type DiffReviewView } from './diffReviewView.ts';
 
 /**
  * The change review surface: what a turn changed, with per-file keep/reject.
@@ -140,6 +141,7 @@ function ChangesReviewView({
 
   const visibleFiles = review.files.slice(0, visibleFileCount);
   const countLabel = fileCountLabel(review.files);
+  const diffReview = diffReviewView(review.diffReview);
 
   const locked = busy || deciding;
   const allKept = review.files.length > 0 && review.files.every((file) => file.decision === 'accepted');
@@ -173,6 +175,14 @@ function ChangesReviewView({
             </span>
           ) : countLabel ? (
             <span className="changes-review__counts">{countLabel}</span>
+          ) : null}
+          {diffReview ? (
+            <span
+              className={`changes-review__diff-review changes-review__diff-review--${diffReview.tone}`}
+              title={diffReview.detail ?? diffReview.summary}
+            >
+              {diffReview.summary}
+            </span>
           ) : null}
         </button>
         <span className="spacer" />
@@ -221,6 +231,8 @@ function ChangesReviewView({
               <span className="changes-review__pending-note">Decisions stay disabled until the turn finishes.</span>
             </div>
           ) : null}
+
+          {diffReview ? <DiffReviewSection view={diffReview} /> : null}
 
           <ul className="changes-review__list" aria-label="Changed files">
             {visibleFiles.map((file) => (
@@ -299,6 +311,60 @@ function sameChangesReview(prev: ChangesReviewProps, next: ChangesReviewProps): 
 
 /** Skip a re-render unless the snapshot the row shows actually changed. */
 export const ChangesReview = memo(ChangesReviewView, sameChangesReview);
+
+/**
+ * The advisory second-pass review, shown above the file rows.
+ *
+ * It is informational only: the Keep/Reject controls below are unchanged, and a
+ * failed pass is a non-blocking notice rather than a decision blocker. Severity
+ * is a visible word plus an icon, never colour alone.
+ */
+function DiffReviewSection({ view }: { view: DiffReviewView }): JSX.Element {
+  const Icon = view.kind === 'failed' ? InfoIcon : view.kind === 'empty' ? CheckIcon : view.tone === 'info' ? InfoIcon : AlertIcon;
+  return (
+    <section
+      className={`diff-review diff-review--${view.kind} diff-review--${view.tone}`}
+      aria-label="Diff review"
+    >
+      <div className="diff-review__head">
+        <Icon className="ico ico--xs" />
+        <span className="diff-review__title">{view.heading}</span>
+        <span className="diff-review__note">Advisory only; it never keeps or rejects changes.</span>
+      </div>
+      {view.detail ? (
+        <p
+          className="diff-review__detail"
+          role={view.kind === 'failed' ? 'status' : undefined}
+        >
+          {view.detail}
+        </p>
+      ) : null}
+      {view.findings.length > 0 ? (
+        <ul className="diff-review__findings" aria-label="Diff-review findings">
+          {view.findings.map((finding, index) => (
+            <li
+              className={`diff-review__finding diff-review__finding--${finding.severity}`}
+              key={`${finding.location}:${index}`}
+            >
+              <span className={`diff-review__severity diff-review__severity--${finding.severity}`}>
+                {finding.severity === 'info' ? (
+                  <InfoIcon className="ico ico--xs" />
+                ) : (
+                  <AlertIcon className="ico ico--xs" />
+                )}
+                <span>{finding.severityLabel}</span>
+              </span>
+              <span className="diff-review__location" title={finding.location}>
+                {finding.location}
+              </span>
+              <span className="diff-review__message">{finding.message}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
 
 /** One changed file, as a single compact full-width row. The diff opens in the editor. */
 function ChangeRow({
