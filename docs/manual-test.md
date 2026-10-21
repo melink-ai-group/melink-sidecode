@@ -1040,9 +1040,10 @@ fails is either fixed (recorded in the headless section) or listed under §7.
 These were run from the repo during authoring, without a GUI host:
 
 - [x] **Build & typecheck & tests:** `npm run lint`, `npm run build`, and
-      `npm test` all pass (192 pure unit tests cover JSON-RPC framing, the
-      backoff schedule, item translation, project-context rendering/delivery,
-      and the system-message order).
+      `npm test` pass. `npm test` runs the Node unit suite and the jsdom/RTL
+      webview suite; `npm run test:dom` runs the DOM suite alone. The Node tests
+      cover JSON-RPC framing, the backoff schedule, item translation,
+      project-context rendering/delivery, and the system-message order.
 - [x] **Handshake against the live CLI.** Spawned `codex app-server`
       0.156.1, completed `initialize` (with `experimentalApi: true`) + `initialized`,
       and read `userAgent`, `getAuthStatus`, and `model/list`.
