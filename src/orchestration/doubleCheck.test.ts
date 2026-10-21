@@ -28,7 +28,7 @@ test('a clean sweep reports the file count and an info notice', () => {
   });
   assert.deepEqual(doubleCheckNotice(result), {
     level: 'info',
-    message: 'Double-check: no errors in 2 changed files.'
+    message: 'No errors in 2 changed files.'
   });
 });
 
@@ -47,7 +47,7 @@ test('errors are counted and the warning notice names the files', () => {
   assert.deepEqual(doubleCheckNotice(result), {
     level: 'warning',
     message:
-      'Double-check: 3 errors in 2 changed files: src/a.ts, src/b.ts. Open Problems for details.'
+      '3 errors in 2 changed files: src/a.ts, src/b.ts. Open Problems for details.'
   });
 });
 
@@ -57,7 +57,7 @@ test('names are capped at three while the error count stays complete', () => {
   assert.equal(result.errorCount, 4);
   assert.deepEqual(result.names, ['src/a.ts', 'src/b.ts', 'src/c.ts']);
   assert.equal(doubleCheckNotice(result)?.message, 
-    'Double-check: 4 errors in 4 changed files: src/a.ts, src/b.ts, src/c.ts. Open Problems for details.'
+    '4 errors in 4 changed files: src/a.ts, src/b.ts, src/c.ts. Open Problems for details.'
   );
 });
 
@@ -117,6 +117,6 @@ test('duplicate paths are read once', () => {
 test('singular counts read correctly', () => {
   const result = collectDoubleCheck(['src/a.ts'], () => [error]);
   assert.equal(doubleCheckNotice(result)?.message,
-    'Double-check: 1 error in 1 changed file: src/a.ts. Open Problems for details.'
+    '1 error in 1 changed file: src/a.ts. Open Problems for details.'
   );
 });

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Banner preview</title>
+    <link rel="stylesheet" href="../../src/webview/styles.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --vscode-font-family: "Segoe UI", sans-serif;
+        --vscode-font-size: 13px;
+        --vscode-foreground: #cccccc;
+        --vscode-descriptionForeground: #9d9d9d;
+        --vscode-sideBar-background: #1e1e1e;
+        --vscode-editorWidget-background: #252526;
+        --vscode-panel-border: #3c3c3c;
+        --vscode-widget-border: #454545;
+        --vscode-editorWarning-foreground: #cca700;
+        --vscode-errorForeground: #f48771;
+        --vscode-badge-background: #4d4d4d;
+        --vscode-input-background: #3c3c3c;
+        --vscode-input-foreground: #cccccc;
+        --vscode-input-border: #3c3c3c;
+        --vscode-button-background: #0e639c;
+        --vscode-button-foreground: #ffffff;
+        --vscode-focusBorder: #007fd4;
+      }
+      body {
+        width: 420px;
+        margin: 0;
+        padding: 16px;
+        background: var(--vscode-sideBar-background);
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      h2 {
+        margin: 8px 0 0;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--vscode-descriptionForeground);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stack">
+      <h2>Clean</h2>
+      <div class="banner banner--ok banner--status" role="status">
+        <span class="banner-icon" aria-hidden="true">
+          <svg class="ico ico--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="m5 13 4 4 10-10" />
+          </svg>
+        </span>
+        <p class="banner-text">No errors in 8 changed files.</p>
+      </div>
+      <h2>Warning</h2>
+      <div class="banner banner--interrupted banner--status" role="status">
+        <span class="banner-icon" aria-hidden="true">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M12 3 2 20h20L12 3z" />
+            <path d="M12 10v4M12 17h.01" />
+          </svg>
+        </span>
+        <p class="banner-text">3 errors in 2 changed files: src/a.ts, src/b.ts. Open Problems for details.</p>
+      </div>
+      <h2>Error</h2>
+      <div class="banner banner--error banner--status" role="alert">
+        <span class="banner-icon" aria-hidden="true">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M12 3 2 20h20L12 3z" />
+            <path d="M12 10v4M12 17h.01" />
+          </svg>
+        </span>
+        <p class="banner-text">The agent stopped before finishing this reply.</p>
+      </div>
+      <h2>Restore</h2>
+      <div class="banner banner--ok" role="status">
+        <span class="banner-icon" aria-hidden="true">
+          <svg class="ico ico--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M3 12a9 9 0 1 0 3-6.7" />
+            <path d="M3 4v5h5" />
+          </svg>
+        </span>
+        <div>
+          <p class="banner-title">Files restored</p>
+          <p class="banner-text">Reverted 2 files to the snapshot from this message.</p>
+        </div>
+      </div>
+      <h2>Field notice</h2>
+      <p class="field-msg field-msg--notice" role="status">
+        <svg class="ico ico--xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5M12 8h.01" />
+        </svg>
+        <span>Saved to your user settings. A workspace save is not used for this field.</span>
+      </p>
+      <h2>Model notice</h2>
+      <div class="model-group-notice" role="note">
+        <svg class="ico notice-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M12 3 2 20h20L12 3z" />
+          <path d="M12 10v4M12 17h.01" />
+        </svg>
+        <div class="notice-body">
+          <div class="notice-title">Ollama needs a token</div>
+          <div class="notice-text">Add a token before models from this provider can be used.</div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

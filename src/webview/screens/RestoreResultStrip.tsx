@@ -19,7 +19,7 @@ export function RestoreResultStrip({
   const skipped = result.results.filter((entry) => entry.outcome === 'skipped');
   const problems = [...failed, ...conflicts, ...skipped];
   return (
-    <div className={`banner banner--${result.partial ? 'interrupted' : 'status'}`} role="status">
+    <div className={`banner banner--${result.partial ? 'interrupted' : 'ok'}`} role="status">
       <span className="banner-icon" aria-hidden="true">
         <RestoreIcon />
       </span>
