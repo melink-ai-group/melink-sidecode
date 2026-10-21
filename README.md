@@ -576,6 +576,28 @@ or a view is unavailable, each degrades to an explanatory notice instead of
 throwing. The provider and commands are disposed on deactivate and never leak
 across a reload.
 
+## Privacy and the optional local missed-issue log
+
+SideCode has **no network telemetry** and never sends project-derived content
+to any telemetry service. Project context goes only to the provider you select,
+as described in [Project context](#project-context). The only log it can write
+is an opt-in, local-only missed-issue log, off by default via the
+application-scoped `melink.telemetry.failureLog` setting
+(a workspace cannot turn it on). Enable it, then run **SideCode: Record a
+missed issue locally**. One append-only JSONL line is written under the
+extension's global storage:
+
+`<VS Code user data>/User/globalStorage/melink.melink-sidecode/failure-log.jsonl`
+
+Each entry is exactly `timestamp`, `issueClass`, `modelId`, `providerId`,
+`promptVersion`, and `summary`. The issue class is one of `missed-fe-detail`,
+`missed-requirement`, `wrong-command`, `bad-decision`, `tool-misuse`, or
+`other`; `promptVersion` is the mode-prompt version. Newlines and control
+characters are stripped, secret-like values are replaced with `<redacted>`, and
+the summary is capped at about 200 characters. No content, code, prompt, stderr,
+or arbitrary fields are accepted, and the logger makes no network call. See
+[docs/usage.md](docs/usage.md) for the per-OS paths and the full privacy
+statement.
 
 ## Verify it works
 
