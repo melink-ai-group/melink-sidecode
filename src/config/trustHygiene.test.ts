@@ -278,13 +278,13 @@ test('the opencode probe resolves the executable before spawning it', async () =
  */
 test('the connection test goes through the observable client', async () => {
   const ollama = await source('backends/ollama.ts');
-  assert.match(ollama, /this\.client\.probe\('\/api\/tags', token\)/);
+  assert.match(ollama, /this\.client\.probe\('\/api\/tags', token, undefined, \{ timeoutMs \}\)/);
   // No raw fetch: a raw fetch would bypass the transport seam, and with it
   // the only way to observe which host received the credential.
   assert.equal(/\bfetch\(/.test(ollama), false, 'the Ollama adapter uses a raw fetch');
   const client = await source('backends/ollamaBaseUrl.ts');
   assert.match(client, /export async function ollamaProbe\(/);
-  assert.match(client, /async probe\(path: string, token: string/);
+  assert.match(client, /async probe\(/);
 });
 
 /**

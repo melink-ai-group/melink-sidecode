@@ -6,6 +6,12 @@
 
 import type { BackendModel, ModelCapabilities, ThinkingLevel } from '../types.ts';
 import { UNKNOWN_CAPABILITIES, normalizeContextWindow } from '../capabilities.ts';
+import {
+  PROVIDER_PROBE_TIMEOUT_MS,
+  ProviderTimeoutError,
+  probeSignal,
+  withProbeTimeout
+} from '../probeTimeout.ts';
 
 export const ZEN_MODELS_URL = 'https://opencode.ai/zen/v1/models';
 export const MODELS_DEV_URL = 'https://models.dev/api.json';
@@ -202,11 +208,26 @@ export function parseModelsDevOpencode(body: unknown): Record<string, ModelsDevM
   return out;
 }
 
-/** Fetch and merge the live Zen catalog. Never throws; empty on total failure. */
-export async function fetchZenCatalog(options: ZenCatalogOptions, fetchImpl: typeof fetch = fetch): Promise<BackendModel[]> {
+/**
+ * Fetch and merge the live Zen catalog.
+ *
+ * A timeout is the one failure surfaced as an error (`ProviderTimeoutError`),
+ * so the registry can return it as `error` and the picker can offer retry
+ * instead of showing an empty catalog. Every other transport/HTTP failure keeps
+ * the existing degradation: empty/undefined, preserving 401/403/offline
+ * semantics (no catalog, no timeout claim).
+ *
+ * `timeoutMs` is injectable so a test can use a millisecond deadline.
+ */
+export async function fetchZenCatalog(
+  options: ZenCatalogOptions,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS
+): Promise<BackendModel[]> {
+  const signal = probeSignal(timeoutMs);
   const [zenBody, modelsDevBody] = await Promise.all([
-    fetchJson(ZEN_MODELS_URL, fetchImpl),
-    fetchJson(MODELS_DEV_URL, fetchImpl)
+    fetchJson(ZEN_MODELS_URL, fetchImpl, signal, timeoutMs),
+    fetchJson(MODELS_DEV_URL, fetchImpl, signal, timeoutMs)
   ]);
   const ids = parseZenModelsResponse(zenBody);
   if (ids.length === 0) {
@@ -216,14 +237,29 @@ export async function fetchZenCatalog(options: ZenCatalogOptions, fetchImpl: typ
   return mergeZenCatalog(ids, meta, options);
 }
 
-async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown> {
+async function fetchJson(
+  url: string,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+  timeoutMs: number
+): Promise<unknown> {
   try {
-    const response = await fetchImpl(url);
+    // The shared signal goes to the fetch; both the response and its body read
+    // are raced against the same deadline, so a stalled body is a timeout too.
+    const response = await withProbeTimeout('OpenCode Zen', timeoutMs, signal, fetchImpl(url, { signal }));
     if (!response.ok) {
       return undefined;
     }
-    return await response.json();
-  } catch {
+    return await withProbeTimeout('OpenCode Zen', timeoutMs, signal, response.json());
+  } catch (error) {
+    if (error instanceof ProviderTimeoutError) {
+      throw error;
+    }
+    // A fetch that ignores the signal can still reject with its own abort; once
+    // the shared deadline fired, that is a timeout, not an empty catalog.
+    if (signal.aborted) {
+      throw new ProviderTimeoutError('OpenCode Zen', timeoutMs, error);
+    }
     return undefined;
   }
 }

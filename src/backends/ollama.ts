@@ -1,20 +1,20 @@
 import * as vscode from 'vscode';
 import { createId, Emitter } from './base';
 import { OLLAMA_TOKEN_SECRET_KEY } from './secrets';
-import { ThreadStore } from './threadStore';
+import type { ThreadStore } from './threadStore';
 import { describeApproval, ruleFor, ruleScopeFor } from './approvals';
-import { ApprovalStore } from './approvalStore';
+import type { ApprovalStore } from './approvalStore';
 import { APPROVAL_TIMEOUT_REASON, awaitUserDecision } from './approvalWait';
 import { approvalFromOpencode, opencodeReplyFor, type OpencodePermissionAsk } from './opencode/approval';
 import type { OpencodeQuestionAsk } from './opencode/runtime';
 import { SKIPPED_ANSWER, type QuestionAnswer, type QuestionRequest } from '../questions';
-import {
+import { BackendError } from './types';
+import type {
   AgentBackend,
   AgentEvent,
   ApprovalDecision,
   ApprovalRequest,
   ApprovalRule,
-  BackendError,
   BackendModel,
   CompactRequest,
   CompactResult,
@@ -32,6 +32,13 @@ import {
   ThreadSummary
 } from './types';
 import { ollamaCapabilities, ollamaNativeRequest } from './capabilities';
+import {
+  PROVIDER_PROBE_TIMEOUT_MS,
+  isProbeTimeoutError,
+  probeSignal as createProbeSignal,
+  readProbeJson,
+  timeoutMessage
+} from './probeTimeout';
 import { buildContextMessages } from './contextMessages';
 import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './modes';
 // Type-only imports are erased at compile time, so the off path loads neither
@@ -86,9 +93,12 @@ interface CategorizedError {
 
 /** Thrown by the streaming loop; carries provider-neutral wording, never a raw stack. */
 class StreamError extends Error implements CategorizedError {
-  constructor(readonly code: ErrorEventCode, message: string, cause?: unknown) {
+  readonly code: ErrorEventCode;
+
+  constructor(code: ErrorEventCode, message: string, cause?: unknown) {
     super(message);
     this.name = 'StreamError';
+    this.code = code;
     if (cause !== undefined) {
       (this as { cause?: unknown }).cause = cause;
     }
@@ -294,17 +304,27 @@ export class OllamaBackend implements AgentBackend {
   /** Compaction and other work that is not a chat turn. */
   private sideFlight?: AbortController;
 
+  private readonly context: vscode.ExtensionContext;
+  private readonly store?: ThreadStore;
+  private readonly approvals?: ApprovalStore;
+  /**
+   * The transport seam. A test can observe the exact URL and headers every
+   * request goes to — including the "Test connection" request — without a
+   * network.
+   */
+  private readonly transport?: OllamaTransport;
+
   constructor(
-    private readonly context: vscode.ExtensionContext,
-    private readonly store?: ThreadStore,
-    private readonly approvals?: ApprovalStore,
-    /**
-     * The transport seam. A test can observe the exact URL and headers every
-     * request goes to — including the "Test connection" request — without a
-     * network.
-     */
-    private readonly transport?: OllamaTransport
-  ) {}
+    context: vscode.ExtensionContext,
+    store?: ThreadStore,
+    approvals?: ApprovalStore,
+    transport?: OllamaTransport
+  ) {
+    this.context = context;
+    this.store = store;
+    this.approvals = approvals;
+    this.transport = transport;
+  }
 
   private get baseUrl(): string {
     // The host the bearer token is sent to. Read from the user's own settings
@@ -382,7 +402,7 @@ export class OllamaBackend implements AgentBackend {
       return false;
     }
     try {
-      await this.request('/api/tags', token);
+      await this.request('/api/tags', token, undefined, PROVIDER_PROBE_TIMEOUT_MS);
       return true;
     } catch (error) {
       if (error instanceof BackendError && error.code === 'unauthenticated') {
@@ -401,7 +421,7 @@ export class OllamaBackend implements AgentBackend {
    * exactly like every other request: the host that receives the credential
    * is the user's own base URL, never a workspace-supplied one.
    */
-  async testConnection(): Promise<ConnectionTestResult> {
+  async testConnection(timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS): Promise<ConnectionTestResult> {
     if (!isHttpOllamaUrl(this.baseUrl)) {
       return {
         backendId: this.id,
@@ -423,8 +443,16 @@ export class OllamaBackend implements AgentBackend {
       // `BackendError`, and this path has to tell a DNS or refused host apart
       // from a general network failure — and a rejected key (`401`) apart from
       // a host-side failure (any other non-2xx).
-      response = await this.client.probe('/api/tags', token);
+      response = await this.client.probe('/api/tags', token, undefined, { timeoutMs });
     } catch (error) {
+      // A timed-out probe is neither a bad host nor a general network failure.
+      if (isProbeTimeoutError(error)) {
+        return {
+          backendId: this.id,
+          outcome: 'unavailable',
+          message: timeoutMessage('Ollama Cloud', timeoutMs)
+        };
+      }
       // A transport failure is the only place the network and the host differ.
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       if (offline) {
@@ -476,10 +504,27 @@ export class OllamaBackend implements AgentBackend {
    * receives the credential is the one the user configured. A rejected
    * credential is reported without echoing it back to the caller.
    */
-  private async request(path: string, token: string, init?: RequestInit): Promise<Response> {
+  private async request(
+    path: string,
+    token: string,
+    init?: RequestInit,
+    timeoutMs?: number,
+    probeSignal?: AbortSignal
+  ): Promise<Response> {
     try {
-      return await this.client.request(path, token, init);
+      const timeout =
+        timeoutMs !== undefined || probeSignal !== undefined ? { timeoutMs, probeSignal } : undefined;
+      return timeout
+        ? await this.client.request(path, token, init, timeout)
+        : await this.client.request(path, token, init);
     } catch (cause) {
+      // A caller cancel wins over the probe deadline, so Stop is still Stop.
+      if (init?.signal?.aborted) {
+        throw new StreamError('canceled', 'Turn canceled.', cause);
+      }
+      if (cause instanceof BackendError) {
+        throw cause;
+      }
       if (isAbortError(cause)) {
         throw new StreamError('canceled', 'Turn canceled.', cause);
       }
@@ -487,22 +532,26 @@ export class OllamaBackend implements AgentBackend {
     }
   }
 
-  async listModels(): Promise<BackendModel[]> {
+  async listModels(timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS): Promise<BackendModel[]> {
     const token = await this.token();
     if (!token) {
       throw new BackendError('unauthenticated', 'Set an Ollama Cloud token to list models.');
     }
-    const response = await this.request('/api/tags', token);
-    const body = (await response.json()) as OllamaTagsResponse;
+    // One deadline covers the tag list and every per-model capability read, so
+    // a stalled `/api/show` cannot leave the picker half-loaded past the probe.
+    const signal = createProbeSignal(timeoutMs);
+    const response = await this.request('/api/tags', token, undefined, timeoutMs, signal);
+    const body = await readProbeJson<OllamaTagsResponse>(response, 'Ollama Cloud', timeoutMs, signal);
     // No hardcoded array and no fallback list: the picker is exactly what the
     // live server reports, so removing a model server-side removes it here.
     const names = this.tagNamesFromBody(body);
     // Each model's descriptor is read from `/api/show`, in parallel. A model
     // whose `/api/show` fails still appears, with an all-unknown descriptor, so
-    // a single metadata failure cannot hide a usable model.
+    // a single metadata failure cannot hide a usable model. A timeout is not
+    // just another metadata failure: it rejects the list so the UI can retry.
     return Promise.all(
       names.map(async (name) => {
-        const capabilities = await this.modelCapabilities(name);
+        const capabilities = await this.modelCapabilities(name, timeoutMs, signal);
         return {
           id: name,
           label: name,
@@ -536,21 +585,44 @@ export class OllamaBackend implements AgentBackend {
    * model's `capabilities` list, which drive context, thinking and tool support.
    * A model the server no longer knows, or whose show call fails, yields
    * `undefined` so the caller degrades to all-unknown rather than guessing.
+   *
+   * `timeoutMs`/`probeSignal` are supplied only by `listModels`, so every
+   * capability read shares that list's single deadline. The turn path calls
+   * this without them and stays untimed, as before.
    */
-  async modelCapabilities(modelId: string): Promise<ModelCapabilities | undefined> {
+  async modelCapabilities(
+    modelId: string,
+    timeoutMs?: number,
+    probeSignal?: AbortSignal
+  ): Promise<ModelCapabilities | undefined> {
     const token = await this.token();
     if (!token) {
       return undefined;
     }
+    const timed = timeoutMs !== undefined || probeSignal !== undefined;
+    const deadlineMs = timeoutMs ?? PROVIDER_PROBE_TIMEOUT_MS;
+    const deadline = timed ? probeSignal ?? createProbeSignal(deadlineMs) : undefined;
     let show: unknown;
     try {
-      const response = await this.request('/api/show', token, {
-        method: 'POST',
-        body: JSON.stringify({ model: modelId })
-      });
-      show = await response.json();
-    } catch {
+      const response = await this.request(
+        '/api/show',
+        token,
+        {
+          method: 'POST',
+          body: JSON.stringify({ model: modelId })
+        },
+        timed ? deadlineMs : undefined,
+        deadline
+      );
+      show = deadline
+        ? await readProbeJson<unknown>(response, 'Ollama Cloud', deadlineMs, deadline)
+        : await response.json();
+    } catch (error) {
       // A metadata failure is not a list failure: the model is simply unknown.
+      // A probe timeout, however, must reach listModels so the UI can retry.
+      if (isProbeTimeoutError(error)) {
+        throw error;
+      }
       return undefined;
     }
     return ollamaCapabilities(show, this.modes);
