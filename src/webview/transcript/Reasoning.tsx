@@ -35,7 +35,10 @@ export function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Eleme
   const toggle = (): void => setExpanded((value) => !value);
 
   return (
-    <article className={`turn turn--reasoning${expanded ? '' : ' turn--reasoning--collapsed'}`} aria-live="polite">
+    <article
+      className={`turn turn--reasoning${expanded ? '' : ' turn--reasoning--collapsed'}`}
+      aria-live="off"
+    >
       <button
         type="button"
         className="reasoning-toggle"
@@ -57,7 +60,7 @@ export function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Eleme
             {preview}
           </span>
         ) : null}
-        <span className="status-slot">
+        <span className="status-slot" aria-hidden="true">
           {item.status === 'streaming' ? <StatusMark tone="running" label="Thinking" /> : null}
         </span>
         <span
@@ -83,7 +86,7 @@ export function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Eleme
           ) : null}
           {item.status === 'streaming' && text ? <span className="caret" aria-hidden="true" /> : null}
           {incomplete ? (
-            <p className="reasoning-incomplete" role="status">
+            <p className="reasoning-incomplete">
               Thinking stopped early; this section may be incomplete.
             </p>
           ) : null}

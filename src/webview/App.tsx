@@ -1,6 +1,7 @@
 import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ApprovalDecision, ApprovalRule } from '../backends/types';
 import { historyEntries, historyLoading } from './historyEntries';
+import { reasoningTransition } from './reasoningStatus';
 import { pinnedUserMessage, userMessagePinText, type UserMessageFrame } from './pinnedUserMessage';
 import { isSubmitEnter } from './keys';
 import { acceptComposerRestore, hostAttachments, switchComposerDraft, type ComposerDraft } from './composerDraft';
@@ -29,6 +30,8 @@ import {
   reduce,
   skillToggleAction,
   visibleModeSnapshot,
+  type ItemStatus,
+  type TranscriptItemView,
   type TurnChange
 } from './state';
 import { setPrettyPathRoots } from './prettyPath.ts';
@@ -75,6 +78,31 @@ function acceptsSteer(backendId: string | undefined): boolean {
   return backendId === 'codex' || backendId === 'ollama';
 }
 
+/**
+ * One live region for every reasoning item in the transcript. It stays mounted
+ * while reasoning is collapsed inside an activity group or narration row, where
+ * the reasoning card itself is not rendered. Streamed text never enters it.
+ */
+function ReasoningAnnouncements({ items }: { items: TranscriptItemView[] }): JSX.Element {
+  const [announcement, setAnnouncement] = useState('');
+  const previous = useRef<Map<string, ItemStatus>>(new Map());
+  const signature = items
+    .filter((item) => item.kind === 'reasoning')
+    .map((item) => `${item.id}:${item.status}`)
+    .join('|');
+  useEffect(() => {
+    const next = reasoningTransition(previous.current, items);
+    previous.current = next.statuses;
+    if (next.announcement) {
+      setAnnouncement(next.announcement);
+    }
+  }, [signature]);
+  return (
+    <p className="sr-only" role="status">
+      {announcement}
+    </p>
+  );
+}
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reduce, initialState);
   setPrettyPathRoots(state.workspaceRoots);
@@ -2162,6 +2190,7 @@ export function App(): JSX.Element {
   return (
     <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
       {tabStrip}
+      <ReasoningAnnouncements items={state.transcript} />
       <div
         className="transcript"
         ref={transcriptRef}
