@@ -216,6 +216,9 @@ export interface ContextBudget {
 /** Largest excerpt of an explicitly attached file. The rest is marked truncated. */
 export const ATTACHED_FILE_BYTES = 12_288;
 
+export const MAX_MANIFEST_SCRIPTS = 12;
+export const MAX_SCRIPT_VALUE_BYTES = 160;
+
 export const DEFAULT_BUDGET: ContextBudget = {
   identity: 2_048,
   shape: 6_144,
@@ -649,6 +652,200 @@ function excerptOf(value: string, maxBytes: number): { text: string; truncated: 
   return cutToBytes(value.replace(/\r\n/g, '\n').trim(), maxBytes);
 }
 
+function cutToWordBytes(value: string, maxBytes: number): { text: string; truncated: boolean } {
+  const cut = cutToBytes(value, maxBytes);
+  if (!cut.truncated) {
+    return cut;
+  }
+  const boundary = Math.max(
+    cut.text.lastIndexOf('\n'),
+    cut.text.lastIndexOf(' '),
+    cut.text.lastIndexOf('\t')
+  );
+  if (boundary <= 0) {
+    return cut;
+  }
+  return { text: cut.text.slice(0, boundary), truncated: true };
+}
+
+interface ReadmeHeading {
+  index: number;
+  level: number;
+  text: string;
+}
+
+interface ReadmeSection {
+  start: number;
+  end: number;
+}
+
+const README_SECTION_PATTERN =
+  /\b(?:develop(?:ment)?|commands?|build(?:ing)?|install(?:ation)?|tests?|testing|requirements?|getting started|quick ?start|setup|scripts?|quality|contributing)\b/i;
+
+const README_COMMAND_PATTERN =
+  /^\s*(?:\$\s+)?(?:npm|npx|yarn|pnpm|bun|deno|node|tsc|make|go|cargo|pytest|python|pip|dotnet|mvn|gradle|git|sh|bash|\.\/|code)\b/;
+
+const README_VERSION_PATTERN = /\bnode(?:\.js)?\b[^\n]*\b\d+\.\d+(?:\.\d+)?\+?/i;
+
+function readmeHeadings(lines: readonly string[]): ReadmeHeading[] {
+  const headings: ReadmeHeading[] = [];
+  let fenced = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) {
+      continue;
+    }
+    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (match) {
+      headings.push({ index, level: match[1].length, text: match[2].trim() });
+    }
+  }
+  return headings;
+}
+
+function readmeSections(lines: readonly string[], headings: readonly ReadmeHeading[]): ReadmeSection[] {
+  const selected: ReadmeSection[] = [];
+  for (let i = 0; i < headings.length; i += 1) {
+    const heading = headings[i];
+    if (!README_SECTION_PATTERN.test(heading.text)) {
+      continue;
+    }
+    let end = lines.length;
+    for (let j = i + 1; j < headings.length; j += 1) {
+      if (headings[j].level <= heading.level) {
+        end = headings[j].index;
+        break;
+      }
+    }
+    selected.push({ start: heading.index, end });
+  }
+
+  selected.sort((a, b) => a.start - b.start);
+  const merged: ReadmeSection[] = [];
+  for (const section of selected) {
+    const last = merged[merged.length - 1];
+    if (last && section.start <= last.end) {
+      last.end = Math.max(last.end, section.end);
+    } else {
+      merged.push({ ...section });
+    }
+  }
+  return merged;
+}
+
+function tailToBytes(value: string, maxBytes: number): string {
+  if (byteLength(value) <= maxBytes) {
+    return value;
+  }
+  const buffer = Buffer.from(value, 'utf8');
+  let start = buffer.length - maxBytes;
+  while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) {
+    start += 1;
+  }
+  return buffer.subarray(start).toString('utf8');
+}
+
+function prioritizedSection(
+  lines: readonly string[],
+  section: ReadmeSection,
+  maxBytes: number
+): string {
+  const kept: string[] = [];
+  for (let index = section.start; index < section.end; index += 1) {
+    const line = lines[index];
+    if (/^#{1,6}\s+/.test(line) || README_COMMAND_PATTERN.test(line)) {
+      kept.push(line);
+      continue;
+    }
+    if (README_VERSION_PATTERN.test(line)) {
+      kept.push(line);
+      const baseIndent = /^\s*/.exec(line)?.[0].length ?? 0;
+      let next = index + 1;
+      while (next < section.end) {
+        const candidate = lines[next];
+        if (candidate.trim().length === 0) {
+          break;
+        }
+        const indent = /^\s*/.exec(candidate)?.[0].length ?? 0;
+        if (indent <= baseIndent && /^(?:\s*[-*+]\s+|\s*#{1,6}\s+)/.test(candidate)) {
+          break;
+        }
+        kept.push(candidate);
+        next += 1;
+      }
+      index = next - 1;
+    }
+  }
+  return cutToBytes(kept.join('\n').trim(), maxBytes).text.trim();
+}
+
+export function readmeExcerptOf(value: string, maxBytes: number): { text: string; truncated: boolean } {
+  const normalized = value.replace(/\r\n/g, '\n').trim();
+  if (byteLength(normalized) <= maxBytes) {
+    return { text: normalized, truncated: false };
+  }
+  if (maxBytes <= 0) {
+    return { text: '', truncated: true };
+  }
+
+  const lines = normalized.split('\n');
+  const headings = readmeHeadings(lines);
+  const firstSection =
+    headings.find((heading) => heading.level >= 2)?.index ??
+    headings.find((heading) => heading.index > 0)?.index ??
+    lines.length;
+  const headBudget = Math.min(256, Math.max(96, Math.floor(maxBytes * 0.25)));
+  const head = cutToWordBytes(lines.slice(0, firstSection).join('\n').trim(), headBudget).text.trim();
+
+  const sections = readmeSections(lines, headings);
+  const pieces: string[] = [];
+  let used = 0;
+  const marker = '\n\n…\n\n';
+
+  const push = (text: string): void => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    const separator = pieces.length > 0 ? marker : '';
+    const remaining = maxBytes - used - byteLength(separator);
+    if (remaining <= 0) {
+      return;
+    }
+    const bounded = cutToBytes(trimmed, remaining).text.trim();
+    if (!bounded) {
+      return;
+    }
+    pieces.push(bounded);
+    used += byteLength(separator) + byteLength(bounded);
+  };
+
+  push(head);
+  for (const section of sections) {
+    const body = lines.slice(section.start, section.end).join('\n');
+    const separator = pieces.length > 0 ? byteLength(marker) : 0;
+    if (byteLength(body) <= maxBytes - used - separator) {
+      push(body);
+    } else {
+      push(prioritizedSection(lines, section, maxBytes - used - separator));
+    }
+  }
+
+  if (sections.length === 0) {
+    const separator = pieces.length > 0 ? marker : '';
+    const tailBudget = maxBytes - used - byteLength(separator);
+    if (tailBudget > 0) {
+      push(tailToBytes(normalized, tailBudget));
+    }
+  }
+
+  return { text: pieces.join(marker).trim(), truncated: true };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Project shape helpers                                                      */
 /* -------------------------------------------------------------------------- */
@@ -736,7 +933,7 @@ export function readManifestFields(path: string, text: string): Record<string, s
       }
       const scripts = parsed.scripts;
       if (scripts && typeof scripts === 'object') {
-        fields.scripts = Object.keys(scripts as Record<string, unknown>).slice(0, 24).join(', ');
+        Object.assign(fields, scriptFields(scripts as Record<string, unknown>));
       }
       if (name === 'tsconfig.json' && typeof parsed.extends === 'string') {
         fields.extends = parsed.extends;
@@ -767,6 +964,25 @@ export function readManifestFields(path: string, text: string): Record<string, s
 function firstMatch(text: string, pattern: RegExp): string | undefined {
   const match = pattern.exec(text);
   return match ? match[1] : undefined;
+}
+
+function scriptFields(scripts: Record<string, unknown>): Record<string, string> {
+  const fields: Record<string, string> = {};
+  const entries = Object.entries(scripts).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string'
+  );
+  for (const [name, value] of entries.slice(0, MAX_MANIFEST_SCRIPTS)) {
+    const singleLine = value.replace(/\s+/g, ' ').trim();
+    const bounded = cutToBytes(singleLine, MAX_SCRIPT_VALUE_BYTES);
+    fields[`scripts.${name}`] = bounded.truncated
+      ? `${cutToBytes(singleLine, MAX_SCRIPT_VALUE_BYTES - byteLength('…')).text}…`
+      : bounded.text;
+  }
+  const hidden = entries.length - Math.min(entries.length, MAX_MANIFEST_SCRIPTS);
+  if (hidden > 0) {
+    fields.scripts = `… ${hidden} more script${hidden === 1 ? '' : 's'} not shown`;
+  }
+  return fields;
 }
 
 function joinPath(root: string, ...relative: string[]): string {
@@ -1203,7 +1419,10 @@ export class ProjectContext implements ProjectContextReads {
       if (text === undefined) {
         continue;
       }
-      const bounded = excerptOf(text, this.budget.excerptBytes);
+      const bounded =
+        candidate.kind === 'readme'
+          ? readmeExcerptOf(text, this.budget.excerptBytes)
+          : excerptOf(text, this.budget.excerptBytes);
       documents.push({
         path: displayPath(candidate.path, roots) ?? toPosix(candidate.path),
         kind: candidate.kind,
@@ -1446,25 +1665,38 @@ export class ProjectContext implements ProjectContextReads {
       truncated: markers.length > 0 ? markers.join('; ') : null
     };
 
+    while (jsonBytes(shape) > this.budget.shape && shape.files.length > 0) {
+      const before = shape.files.length;
+      shape = { ...shape, files: shape.files.slice(0, Math.floor(before / 2)) };
+      shape.truncated = markerJoin(shape.truncated, truncationMarker(shape.files.length, allFiles.length));
+    }
     while (jsonBytes(shape) > this.budget.shape && shape.tree.length > 0) {
-      shape = { ...shape, tree: shape.tree.slice(0, Math.floor(shape.tree.length / 2)) };
+      const before = shape.tree.length;
+      shape = { ...shape, tree: shape.tree.slice(0, Math.floor(before / 2)) };
       shape.truncated = markerJoin(shape.truncated, truncationMarker(shape.tree.length, treeTotal));
     }
     while (jsonBytes(shape) > this.budget.shape && shape.languages.length > 0) {
-      shape = { ...shape, languages: shape.languages.slice(0, Math.floor(shape.languages.length / 2)) };
+      const before = shape.languages.length;
+      shape = { ...shape, languages: shape.languages.slice(0, Math.floor(before / 2)) };
       shape.languagesTruncated = true;
       shape.truncated = markerJoin(shape.truncated, truncationMarker(shape.languages.length, languageTotal));
     }
-    while (jsonBytes(shape) > this.budget.shape && shape.manifests.length > 0) {
-      shape = { ...shape, manifests: shape.manifests.slice(0, Math.floor(shape.manifests.length / 2)) };
+    while (jsonBytes(shape) > this.budget.shape && shape.manifests.length > 1) {
+      const before = shape.manifests.length;
+      shape = { ...shape, manifests: shape.manifests.slice(0, Math.max(1, Math.floor(before / 2))) };
       shape.truncated = markerJoin(shape.truncated, truncationMarker(shape.manifests.length, manifestTotal));
     }
-    while (jsonBytes(shape) > this.budget.shape && shape.files.length > 0) {
-      shape = { ...shape, files: shape.files.slice(0, Math.floor(shape.files.length / 2)) };
-      shape.truncated = markerJoin(shape.truncated, truncationMarker(shape.files.length, allFiles.length));
-    }
     if (jsonBytes(shape) > this.budget.shape) {
-      shape = { ...shape, languages: [], tree: [], manifests: [], files: [] };
+      const reserved =
+        shape.manifests.find((hit) => hit.kind === 'package.json') ?? shape.manifests[0];
+      const minimal: ProjectShape = {
+        ...shape,
+        languages: [],
+        tree: [],
+        files: [],
+        manifests: reserved ? [reserved] : []
+      };
+      shape = jsonBytes(minimal) <= this.budget.shape ? minimal : { ...minimal, manifests: [] };
     }
     return shape;
   }
