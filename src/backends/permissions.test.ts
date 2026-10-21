@@ -98,3 +98,38 @@ test('ask refuses tools outright while plan only narrows permissions', () => {
   assert.equal(modeRefusesTools('ask'), true);
   assert.equal(modeRefusesTools('plan'), false);
 });
+
+test('all three permission levels keep their labels and meaning in the descriptor map', () => {
+  assert.deepEqual(
+    PERMISSION_LEVEL_DESCRIPTORS.map((entry) => entry.level),
+    ['read-only', 'default', 'unrestricted']
+  );
+  assert.deepEqual(
+    PERMISSION_LEVEL_DESCRIPTORS.map((entry) => entry.label),
+    ['Read-only', 'Default', 'Unrestricted']
+  );
+
+  const readOnly = permissionDescriptor('read-only');
+  assert.equal(readOnly.level, 'read-only');
+  assert.match(readOnly.description, /^Read-only\b/);
+  assert.match(readOnly.description, /write/i);
+
+  const workspace = permissionDescriptor('default');
+  assert.equal(workspace.level, 'default');
+  assert.match(workspace.description, /workspace writes/i);
+  assert.match(workspace.description, /sandboxed commands/i);
+
+  const unrestricted = permissionDescriptor('unrestricted');
+  assert.equal(unrestricted.level, 'unrestricted');
+  assert.match(unrestricted.description, /no sandbox/i);
+  assert.match(unrestricted.description, /no prompts/i);
+});
+
+test('permission descriptors name no provider, so the copy stays provider-neutral', () => {
+  const providerNames = /Codex|Ollama|OpenCode|Zen/i;
+  for (const entry of PERMISSION_LEVEL_DESCRIPTORS) {
+    assert.equal(providerNames.test(entry.description), false, `${entry.level}: ${entry.description}`);
+    assert.ok(entry.description.length > 0, `${entry.level} has no description`);
+    assert.equal(permissionDescriptor(entry.level).label, entry.label);
+  }
+});

@@ -827,7 +827,7 @@ export function SettingsScreen({
                 value={draft.opencodeDefaultModel}
                 onChange={(event) => update('opencodeDefaultModel', event.target.value)}
               >
-                <option value="">First free model reported by the provider</option>
+                <option value="">First model in the catalog</option>
                 {modelOptions
                   .filter((option) => option.backendId === 'opencode')
                   .map((option) => (

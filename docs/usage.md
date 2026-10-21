@@ -38,16 +38,19 @@ shows Busy and Unread. Drag a tab to reorder it.
 
 ## Providers
 
-The sidebar can talk to two providers, independently:
+The sidebar can talk to three providers, independently:
 
 - **Ollama Cloud** — hosted models, needs a token.
 - **OpenAI Codex CLI** — the local `codex` CLI, needs the CLI installed and signed in.
+- **OpenCode Zen** — the shared `opencode` CLI; free models need no key, and paid
+  models need a Zen API key.
+
 There are four possible states per provider:
 
 | State | Meaning |
 |---|---|
-| **available** | Usable now; its models appear in the picker. |
-| **unauthenticated** | Runs, but has no usable credential. Shown with a **Set token** action (Ollama) or a jump to settings (Codex). |
+| **available** | Usable now; its models appear in the picker. OpenCode Zen is available with free models even when no key is stored. |
+| **unauthenticated** | Runs, but has no usable credential. Ollama Cloud shows a **Set token** action; Codex jumps to settings. A missing OpenCode Zen key does not make Zen unauthenticated: it only blocks paid models per turn, while free models stay selectable. |
 | **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0–0.163.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
 | **unavailable** | Cannot run at all (e.g. the Codex CLI is not installed). Hidden entirely — never rendered as broken. |
 
@@ -71,7 +74,8 @@ release into that source's install directory. When opencode is already connected
 which can leave a custom install on an old version).
 
 - **Identity is unchanged.** There is still one **Ollama Cloud** provider with
-  the same badge and dot; opencode is a runtime behind it, not a new provider.
+  the same badge and dot; opencode is a runtime behind it, not a fourth
+  provider. (OpenCode Zen is its own provider and uses the same shared CLI.)
 - **Models are the same list.** The runtime is pointed at exactly the models
   `GET /api/tags` returns, against the configured `melink.ollama.baseUrl`.
 - **Streaming is the same experience.** Events are parsed as they arrive into
@@ -80,16 +84,23 @@ which can leave a custom install on an old version).
 - **Sessions resume.** A second message in the same conversation continues the
   same opencode session. If that session is gone, a fresh one starts and a
   notice says so.
-- **Modes and permissions.** With the runtime on, all three modes and all three
-  permission levels become available. `plan` uses the build agent and honors
-  the selected permission level; `ask` uses a read-only agent that cannot run
-  commands or write. A read-only permission level denies edits and commands.
-  `default` asks for every
-  edit and command; `unrestricted` (which the UI gates behind a labelled
-  confirmation) allows them. opencode's own enforcement backs ours; it never
-  replaces it. The pinned opencode has no interactive prompt in headless `run`
-  mode, so a `default` turn's `ask` is auto-rejected rather than silently
-  allowed — the in-chat approval surface is a separate ticket.
+- **Modes and permissions.** Ollama Cloud advertises all three modes
+  (`agent`, `plan`, `ask`) on both the direct and opencode paths. On the direct
+  `/api/chat` path they are applied as per-turn instructions, and that adapter
+  cannot edit files or run commands. With the runtime on, `plan` uses the build
+  agent and honors the selected permission level; `ask` uses a read-only agent
+  that cannot run commands or write. A read-only permission level denies edits
+  and commands. `default` allows edits and commands inside the workspace; leaving
+  the workspace (`external_directory`) asks. `unrestricted` (which the UI gates
+  behind a labelled confirmation) allows both without asking. opencode's own
+  enforcement backs ours; it never replaces it. A turn that can raise an `ask`
+  runs through `opencode serve` so the card can be answered; a turn with no
+  possible `ask` uses `opencode run --format json`. For Ollama Cloud the approval
+  channel exists only while this runtime is enabled. A decision that never
+  arrives is refused after **120 seconds** (`APPROVAL_WAIT_MS` in
+  `src/backends/approvalWait.ts`) with the reason *"No decision arrived within
+  120 seconds, so this action was refused and the agent can try a different
+  approach."* — never silently allowed.
 - **Turn it off to fall back.** With the setting off, the direct `/api/chat`
   adapter is used unchanged and no opencode process is started.
 
@@ -120,7 +131,8 @@ the chat with a bounded height and its own scrolling list. It contains:
 - **One group per available provider**, each with its own provider badge and dot.
 - **A live model list** fetched from that provider. For Ollama Cloud this is
   exactly `GET /api/tags` — no hardcoded fallback. Codex lists the models the
-  local CLI reports.
+  local CLI reports. OpenCode Zen lists the live Zen catalog (free and, when a
+  key is stored, paid models).
 - **A filter box** to narrow long lists by name.
 - **Per-provider entries** for a provider that is not signed in, with a **Set
   token** button.
@@ -142,7 +154,7 @@ instead of spinning forever.
   in-flight turn. A canceled turn keeps whatever was already generated and is
   marked *Stopped*, not as an error.
 
-An empty chat shows the meLink mark and the name **meLink SideCode**. The composer
+An empty chat shows the SideCode logo and the name **SideCode**. The composer
 opens tall so the first message has room to be written.
 
 ### Automatic mode selection
@@ -166,7 +178,9 @@ and a copy button on code blocks. Alongside messages you may see:
 - **Reasoning** — the model's reasoning text, when the provider emits it.
 - **Approval cards** — a decision the agent is waiting on. The turn stays paused
   until you choose **Allow once**, **Allow for this conversation**, **Always
-  allow**, or **Reject**; nothing is decided for you on a timeout. See below.
+  allow**, or **Reject**. If you do not answer within 120 seconds the request is
+  auto-refused with a plain-language reason so the agent can try another
+  approach; it is never auto-allowed. See below.
 - **Notices** — see below.
 
 Every agent turn shows the provider dot it came from, so a mixed-provider
@@ -221,8 +235,10 @@ settings (**SideCode: Open settings**).
 |---|---|
 | **SideCode: Set Ollama Cloud token** | Prompt for the bearer token, store it in secret storage. |
 | **SideCode: Clear Ollama Cloud token** | Delete the stored token. |
+| **SideCode: Set OpenCode Zen API key** (`melink.setOpencodeZenToken`) | Prompt for the optional Zen key, store it in secret storage (paid models). |
+| **SideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`) | Delete the stored Zen key. |
 | **SideCode: Refresh project context** | Rebuild the project context snapshot for the next turn. |
-| **SideCode: Refresh backend availability** | Re-probe both providers. |
+| **SideCode: Refresh backend availability** | Re-probe every provider. |
 | **SideCode: Open settings** | Open the inline settings screen. |
 
 ## Settings reference
@@ -231,17 +247,17 @@ settings (**SideCode: Open settings**).
 |---|---|---|
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. The token is sent only to this host. |
 | `melink.ollama.defaultModel` | *(empty)* | Default Ollama model; empty uses the first model reported. |
+| `melink.opencode.defaultModel` | *(empty)* | Default OpenCode Zen model; empty uses the first model in the catalog the app can show (free list without a key, full list with one). |
 | `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the opencode agentic runtime (tool execution, file edits, session resume). Off uses the direct `/api/chat` adapter and spawns no opencode process. |
-| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
+| `melink.ollama.opencode.cliSource` | `local` | Shared opencode CLI source: `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`; a bare name is resolved from `PATH`. Ignored when bundled. |
-| `melink.ollama.opencode.zvecGrep` | `false` | Connect zvec-grep to OpenCode. Turning it on installs the `zg` CLI when it is missing (Node.js 22+) and runs `zg install --target opencode`. Turning it off runs `zg uninstall --target opencode` and leaves the CLI and workspace indexes in place. Stored in user settings. A new OpenCode session picks up the change. |
-| `melink.skills.browserCodex` | `true` | Let Codex open a browser tab in the editor to check layout. |
-| `melink.skills.browserOpencode` | `true` | Let OpenCode open a browser tab in the editor to check layout. |
+| `melink.ollama.opencode.zvecGrep` | `false` | Legacy zvec-grep switch, read only when `melink.skills.zvecGrep` is unset. Prefer the skills key. |
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
 | `melink.codex.defaultModel` | *(empty)* | Default model for Codex; empty uses the CLI default. |
 | `melink.defaults.permissionLevel` | `default` | Permission level for a new conversation (`read-only` / `default` / `unrestricted`). A per-conversation choice overrides it; `unrestricted` must be confirmed. |
-| `melink.defaults.mode` | `agent` | Starting mode for a new conversation (`agent` / `plan` / `ask`). `plan` and `ask` are applied to the Codex thread as developer instructions at thread start; `agent` leaves the CLI default. |
+| `melink.defaults.mode` | `agent` | Starting mode for a new conversation (`agent` / `plan` / `ask`). The adapter applies it as instructions at thread start. |
 | `melink.defaults.thinking` | *(empty)* | App-level thinking level when a model has no reported default; model-level overrides take precedence. |
+| `melink.defaults.dictationModel` | *(empty)* | Ollama or Codex model (`provider / model`) that cleans dictated speech; it does not answer. Empty disables the microphone. |
 | `melink.context.includeInstructions` | `true` | Include instruction documents (`AGENTS.md`, `README.md`, `.github/copilot-instructions.md`) in the snapshot. |
 | `melink.context.includeShape` | `true` | Include project shape (languages, directory tree, manifests) in the snapshot. |
 | `melink.context.includeEditorState` | `true` | Follow the active file and open editors. When off, no active-file path, language, or open-editor list is read or sent, and the composer strip names no current file. |
@@ -249,13 +265,23 @@ settings (**SideCode: Open settings**).
 | `melink.context.includeChangedFiles` | `true` | Include the changed-files notice in the per-turn delta. |
 | `melink.context.maxBytes` | `20480` | Overall byte cap for a rendered snapshot. When it is reached, categories truncate in order: open editors, then instruction documents, then the tree. |
 | `melink.context.exclude` | *(empty)* | Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. |
+| `melink.skills.browserCodex` | `true` | Let Codex open a browser tab in the editor to check layout. |
+| `melink.skills.browserOpencode` | `true` | Let OpenCode (Ollama runtime and OpenCode Zen) open a browser tab in the editor to check layout. |
+| `melink.skills.browser` | `true` | Legacy single browser switch, read only when the per-provider browser keys are unset. |
+| `melink.skills.zvecGrep` | `false` | Connect zvec-grep (semantic + keyword + ripgrep MCP) to OpenCode. Enabling writes an absolute-path MCP entry; disabling removes it and leaves the CLI installed. |
+| `melink.skills.zvecGrep.cliSource` | `local` | `local` (path / PATH) or `bundled` (extension global storage). |
+| `melink.skills.zvecGrep.path` | `zg` | Path to `zg` when `cliSource` is local. |
+| `melink.skills.astGrep` | `false` | Connect ast-grep (structural search/rewrite MCP) to OpenCode. |
+| `melink.skills.astGrep.cliSource` | `local` | `local` or `bundled` (extension global storage). |
+| `melink.skills.astGrep.path` | `ast-grep` | Path to `ast-grep` when `cliSource` is local. |
 
 The same settings are reachable from the in-product **settings screen**
 (gear icon in the title bar), which opens inline in the sidebar rather than as a
-separate window. It groups **Providers** (Ollama base URL, masked API key with
-Save/Clear, Codex CLI path and login state) above **Defaults** (default model,
-permission level, mode), and offers **Test connection** per provider. A value
-that fails validation shows an inline message and is not saved.
+separate window. It groups **Providers** (Ollama Cloud and OpenCode Zen base /
+key fields, Codex CLI path and login state) above **Defaults** (default models,
+dictation, permission level, mode), with **CLI**, **Context**, and **Skills**
+tabs, and offers **Test connection** per provider. A value that fails validation
+shows an inline message and is not saved.
 
 ## The settings screen
 
@@ -272,14 +298,22 @@ floating popover — and groups the settings as **Providers** above **Defaults**
   VS Code secret storage (see [Credentials](#credentials)).
 - **Codex** — the CLI path override and the current login state, one sentence
   each about what they affect.
+- **OpenCode Zen** — the default Zen model, and an optional masked Zen API key
+  with **Save key** / **Clear key**. Free models work without a key; a stored key
+  unlocks paid models. Both actions write only to VS Code secret storage.
 - **Test connection** — runs a real authenticated call and reports the outcome
   in plain language: a rejected key, an unreachable host, and a network problem
   read differently, so a wrong key is distinguishable from a wrong base URL. A
   failure never prints a raw stack trace or the key.
 
-**Defaults** — the default model, permission level, and mode for a new
-conversation. The app-level thinking choice applies when a model has no reported
-default; a saved per-model choice takes precedence.
+**CLI** — the shared `opencode` binary used by OpenCode Zen and the optional
+Ollama runtime: **local** or **bundled**, the local path, and Install / Update.
+The **Use opencode for Ollama turns** switch is `melink.ollama.opencode.enabled`.
+
+**Defaults** — the default models (Ollama, OpenCode Zen, Codex), the dictation
+model, permission level, and mode for a new conversation. The app-level thinking
+choice applies when a model has no reported default; a saved per-model choice
+takes precedence.
 
 **Context** — what the agent is told about this workspace before your first
 message. Each category (instruction documents, project shape, editor state,
@@ -314,26 +348,51 @@ read when a conversation starts, so they take effect on the next conversation.
 
 ### Audit: every contributed setting and stored credential
 
-| Configuration key / credential | Default | On the settings screen |
-|---|---|---|
-| `melink.ollama.baseUrl` | `https://ollama.com` | Providers → Ollama Cloud → Base URL |
-| `melink.ollama.defaultModel` | *(empty)* | Defaults → Default model |
-| `melink.codex.path` | `codex` | Providers → Codex → Codex CLI path |
-| `melink.codex.defaultModel` | *(empty)* | Defaults → Default model |
-| `melink.defaults.permissionLevel` | `default` | Defaults → Default permission level |
-| `melink.defaults.mode` | `agent` | Defaults → Default mode |
-| `melink.defaults.thinking` | *(empty)* | Defaults → Default thinking level |
-| `melink.ollama.token` (secret, not a setting) | *(none)* | Providers → Ollama Cloud → API key (Save / Clear) |
+| Configuration key / credential | Default | On the settings screen | Consumer |
+|---|---|---|---|
+| `melink.ollama.baseUrl` | `https://ollama.com` | Providers → Ollama Cloud → Base URL | `OllamaBackend.baseUrl`; the token is sent only to this host |
+| `melink.ollama.defaultModel` | *(empty)* | Providers → Ollama Cloud → Default model | `OllamaBackend.defaultModel` when no model is selected |
+| `melink.opencode.defaultModel` | *(empty)* | Providers → OpenCode Zen → Default model | `OpencodeBackend.defaultModel`; empty uses the first model the app's catalog shows (free list without a key, full list with one) |
+| `melink.ollama.opencode.enabled` | `true` | CLI → Use opencode for Ollama turns | `OllamaBackend.opencodeEnabled`; gates the runtime and `hasApprovalChannel` |
+| `melink.ollama.opencode.path` | `opencode` | CLI → opencode CLI path | Resolver, when `cliSource` is `local` |
+| `melink.ollama.opencode.cliSource` | `local` | CLI → opencode CLI source | `readOpencodeCliSource` / shared CLI resolver |
+| `melink.ollama.opencode.zvecGrep` | `false` | Skills → zvec-grep (legacy fallback; no separate control) | `SettingsService.zvecEnabled`, only when `melink.skills.zvecGrep` is unset |
+| `melink.codex.path` | `codex` | Providers → Codex → Codex CLI path | `CodexBackend` spawn path |
+| `melink.codex.defaultModel` | *(empty)* | Providers → Codex → Default model | `CodexBackend.defaultModel` when no model is selected |
+| `melink.defaults.permissionLevel` | `default` | Defaults → Default permission level | `readDefaultPermissionLevel()` seeds a new thread; the adapter maps it |
+| `melink.defaults.mode` | `agent` | Defaults → Default mode | `readDefaultMode()` seeds a new thread |
+| `melink.defaults.thinking` | *(empty)* | Defaults → Default thinking level | `readDefaultThinking()` → model setting resolution |
+| `melink.defaults.dictationModel` | *(empty)* | Defaults → Dictation model | Dictation controller target; cleans dictated text only; empty disables the microphone |
+| `melink.context.includeInstructions` | `true` | Context → instruction documents | `VscodeProjectContextHost.contextSettings()` → snapshot |
+| `melink.context.includeShape` | `true` | Context → project shape | `contextSettings()` → snapshot |
+| `melink.context.includeEditorState` | `true` | Context → editor state | `contextSettings()` → `ProjectContext.buildEditor` |
+| `melink.context.includeSelection` | `true` | Context → selection | `contextSettings()` → `ProjectContext.buildEditor`; selected text is sent verbatim |
+| `melink.context.includeChangedFiles` | `true` | Context → changed files | `contextSettings()` → `ProjectContext.getDelta` |
+| `melink.context.maxBytes` | `20480` | Context → Maximum context size | `ProjectContext` cap and context render budget |
+| `melink.context.exclude` | *(empty)* | Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → snapshot globs |
+| `melink.skills.browserCodex` | `true` | Skills → Browser → Codex | Browser tools offered to Codex |
+| `melink.skills.browserOpencode` | `true` | Skills → Browser → OpenCode | Browser tools offered to the Ollama runtime and OpenCode Zen |
+| `melink.skills.browser` | `true` | Skills → Browser (legacy fallback; no separate control) | Browser policy, only when the per-provider keys are unset |
+| `melink.skills.zvecGrep` | `false` | Skills → zvec-grep → Use semantic search | `SettingsService.setZvecGrep` / `applyZvecGrep` writes the MCP entry |
+| `melink.skills.zvecGrep.cliSource` | `local` | Skills → zvec-grep → CLI source | `readZvecGrepCliSource` |
+| `melink.skills.zvecGrep.path` | `zg` | Skills → zvec-grep → CLI path | Resolver when `cliSource` is local |
+| `melink.skills.astGrep` | `false` | Skills → ast-grep → Use structural search | `SettingsService.setAstGrep` / `applyAstGrep` writes the MCP entry |
+| `melink.skills.astGrep.cliSource` | `local` | Skills → ast-grep → CLI source | `readAstGrepCliSource` |
+| `melink.skills.astGrep.path` | `ast-grep` | Skills → ast-grep → CLI path | Resolver when `cliSource` is local |
+| `melink.ollama.token` (secret, not a setting) | *(none)* | Providers → Ollama Cloud → API key (Save / Clear) | Bearer credential for Ollama Cloud requests; `SecretStorage` only |
+| `melink.opencode.zenToken` (secret, not a setting) | *(none)* | Providers → OpenCode Zen → Zen API key (Save / Clear) | OpenCode Zen paid models and catalog; `SecretStorage` only |
 
 Codex has no stored credential of its own: it signs in through its own CLI, and
 the screen reports that login state rather than holding a secret.
 
 ## Credentials
 
-The Ollama Cloud token lives only in VS Code **secret storage**. It is read only
-for the `Authorization` header and is never written to `settings.json`, output
+The Ollama Cloud token (`melink.ollama.token`) and the optional OpenCode Zen API
+key (`melink.opencode.zenToken`) live only in VS Code **secret storage**. Each is
+read only for its own provider request (the Ollama `Authorization` header, or the
+Zen catalog / model request) and is never written to `settings.json`, output
 channels, or logs. A rejected credential is reported as an actionable notice, not
-as a raw HTTP status.
+as a raw HTTP status. Codex holds no SideCode secret: it uses its own CLI login.
 
 ## Project context
 
@@ -427,14 +486,14 @@ channels, telemetry, or error text.
 
 ## Permission levels and approvals
 
-The permission level governs **when Codex asks you**; the sandbox Codex enforces
-separately is what actually limits the files and commands it can touch. Approval
-is not the sandbox.
+The permission level governs **when the agent asks you**; the provider's sandbox
+or permission config is what actually limits the files and commands it can
+touch. Approval is not the sandbox.
 
-| Level | What Codex may do | Asks you when |
+| Level | What the agent may do | Asks you when |
 |---|---|---|
-| **Read-only** | Read only; a sandbox blocks writes. | Anything that would write. |
-| **Default** | Write inside the workspace. | Anything outside that sandbox. |
+| **Read-only** | Read only; writes are blocked. | Anything that would write. |
+| **Default** | Write inside the workspace. | Anything outside that scope. |
 | **Unrestricted** | No sandbox at all. | Never. |
 
 Select the level from the picker in the title bar. Choosing **Unrestricted** needs
@@ -442,9 +501,16 @@ an explicit, labelled confirmation first, because it removes the safety net rath
 than sandboxing you more loosely; it is never enabled as a side effect of any
 other action. The choice is saved for the next turn and for new conversations.
 
-When Codex needs a decision, the turn is **paused** and a card appears above the
-composer. Nothing is decided for you — not on a timeout, not on a retry, not on a
-reconnect. You choose:
+The picker is shown for every backend that exposes an approval channel: Codex,
+OpenCode Zen, and Ollama Cloud while `melink.ollama.opencode.enabled` is on.
+OpenCode Zen and that runtime enforce all three levels; each uses `opencode
+serve` for a turn that can raise an `ask` and `opencode run` only when no `ask`
+exists. The direct `/api/chat` adapter reports only the single `default` level
+and never raises an approval card (`hasApprovalChannel` is `opencodeEnabled`), so
+it has no level picker and nothing to approve.
+
+When the agent needs a decision, the turn is **paused** and a card appears above
+the composer. You choose:
 
 | Decision | Effect |
 |---|---|
@@ -453,14 +519,17 @@ reconnect. You choose:
 | **Always allow** | A lasting rule, shown in the rules panel and revocable at any time. |
 | **Reject** | Denied, and the agent is told so it can adapt rather than stall. |
 
+A request that is not answered within **120 seconds** is auto-refused with the
+reason *"No decision arrived within 120 seconds, so this action was refused and
+the agent can try a different approach."* (`APPROVAL_WAIT_MS` in
+`src/backends/approvalWait.ts`). It is never auto-allowed, and a late click cannot
+apply a second answer; a retry or reconnect does not decide it either.
+
 Stored **Always allow** rules are listed under the header, each showing exactly
 what it permits (the command prefix or path root) and where it came from, with a
 **Revoke** action. `Always allow` rules live in global state; `Allow for this
 conversation` rules are scoped to the thread and survive a window reload without
 either re-asking or silently escalating.
-
-Ollama Cloud has no approval channel: it reports a single level and never emits an
-approval request.
 
 ## Reviewing changes
 

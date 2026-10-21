@@ -1,7 +1,7 @@
 {
   "name": "melink-sidecode",
   "displayName": "SideCode",
-  "description": "SideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud and the OpenAI Codex CLI.",
+  "description": "SideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, the OpenAI Codex CLI, and OpenCode Zen.",
   "version": "0.2.0",
   "publisher": "melink",
   "icon": "media/melink-logo.png",
@@ -118,7 +118,7 @@
         "melink.opencode.defaultModel": {
           "type": "string",
           "default": "",
-          "description": "Default OpenCode Zen model. Empty means the first free model reported by the backend is used. Free models work without a Zen API key; paid models require SideCode: Set OpenCode Zen API key."
+          "description": "Default OpenCode Zen model. Empty means the first model the app's catalog shows is used: the free list without a Zen API key, or the full live list with one. Free models work without a key; paid models require SideCode: Set OpenCode Zen API key."
         },
         "melink.ollama.opencode.enabled": {
           "type": "boolean",
