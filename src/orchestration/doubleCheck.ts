@@ -71,13 +71,13 @@ export function doubleCheckNotice(result: DoubleCheckResult): DoubleCheckNotice 
   }
   const files = `${result.fileCount} changed ${result.fileCount === 1 ? 'file' : 'files'}`;
   if (result.status === 'clean') {
-    return { level: 'info', message: `Double-check: no errors in ${files}.` };
+    return { level: 'info', message: `No errors in ${files}.` };
   }
   const errors = `${result.errorCount} ${result.errorCount === 1 ? 'error' : 'errors'}`;
   const names = result.names.join(', ');
   return {
     level: 'warning',
-    message: `Double-check: ${errors} in ${files}: ${names}. Open Problems for details.`
+    message: `${errors} in ${files}: ${names}. Open Problems for details.`
   };
 }
 
