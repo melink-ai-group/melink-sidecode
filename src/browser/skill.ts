@@ -12,6 +12,7 @@ import {
 } from './policy.ts';
 import { BrowserPage } from './session.ts';
 import { runBrowserTool, type BrowserActions, type ToolResult } from './tools.ts';
+import { SKILLS_SECTION } from '../settingsKeys';
 
 /**
  * Owns the bridge, the page, and the editor tab for one window.
@@ -40,7 +41,7 @@ export class BrowserSkill {
   }
 
   private skillSettings(): { browser?: unknown; browserCodex?: unknown; browserOpencode?: unknown } {
-    const config = vscode.workspace.getConfiguration('melink.skills');
+    const config = vscode.workspace.getConfiguration(SKILLS_SECTION);
     return {
       browser: configuredSettingValue(config.inspect('browser')),
       browserCodex: configuredSettingValue(config.inspect('browserCodex')),

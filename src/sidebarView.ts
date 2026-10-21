@@ -9,14 +9,13 @@ import { parseDictationTarget } from './dictation/target';
 import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
 import { SettingsService } from './settings';
 import { PlanStore } from './planStore';
-import { ThreadStore, type PersistedPlanState } from './backends/threadStore';
+import { ThreadStore } from './backends/threadStore';
 import {
   BackendError,
   denyInProgressStep,
   settleInProgressSteps,
   type ApprovalRequest,
   type Attachment,
-  type AttachmentKind,
   type DefaultMode,
   type ModelSettingField,
   type ModelSettingOverrides,
@@ -87,8 +86,7 @@ import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from
 import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
 import { anyCategoryEnabled } from './context/contextView';
-import type { ChangeHunkView } from './changes/changeStore';
-import type { CheckpointPlanRecord, CheckpointPlanState } from './changes/journal';
+import type { CheckpointPlanRecord } from './changes/journal';
 import { VscodeChangeJournal } from './changes/vscodeJournal';
 import { VscodeChangeStore } from './changes/vscodeChangeStore';
 import { VscodeCheckpointStore } from './changes/vscodeCheckpoint';
@@ -125,73 +123,22 @@ import {
   pinnedModelSettings,
   withPinnedDefaults
 } from './composerControls';
-
-/**
- * One sidebar chat tab. Fields that used to live once on the provider move here
- * so two open conversations do not share a thread, a mode, or a pending prompt.
- */
-interface ChatSession {
-  id: string;
-  title: string;
-  restored: boolean;
-  activeThread?: ThreadHandle;
-  mode: DefaultMode;
-  /** True once this tab's mode was chosen or restored, so a later show does not replace it. */
-  modeChosen: boolean;
-  /** Permission this chat runs at. Absent until the tab is shown, then kept on the tab. */
-  tabPermission?: PermissionLevel;
-  /** Model the user picked for this chat. Absent until they pick one or the tab is first shown. */
-  composerBackendId?: string;
-  composerModelId?: string;
-  /** Per-model setting overrides pinned to this chat. */
-  modelSettings: Record<string, ModelSettingOverrides>;
-  pendingApproval?: ApprovalRequest;
-  pendingQuestion?: { source: 'fence' | 'native'; request: QuestionRequest };
-  nativePlanThisTurn: boolean;
-  revisePlanThisTurn: boolean;
-  /** Answers already folded into this thread's plan, in ask order. */
-  planDecisions: string[];
-  /** Bumped on a user send so a late autopilot decision cannot start another turn. */
-  planEpoch: number;
-  /** True when the open turn was started to keep a built plan moving. */
-  planRunAutomatic: boolean;
-  /** Steps-and-work signature of the previous turn, for the loop check. */
-  planRunSignature?: string;
-  /** A refused approval this turn must not be retried automatically. */
-  planHold: boolean;
-  /** Continuations already used since the provider last stopped. A user send resets this. */
-  stopContinueAttempts: number;
-  pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
-  /** No conversation has been bound to this tab yet. */
-  blank: boolean;
-  /** Unsent composer text. Restored with the tab. */
-  composerText: string;
-  /** Unsent composer files. Inline bytes stay in memory; the saved record does not. */
-  composerAttachments: Attachment[];
-  /** Thread to resume the first time this tab is shown. */
-  resume?: { backendId: string; threadId: string };
-  disposed: boolean;
-  /** True while this tab's turn is still running, including after the tab is closed. */
-  turnOpen: boolean;
-  /** True from the moment this tab's send is accepted until that send's promise settles. */
-  turnBusy: boolean;
-  /** Notice that belongs to this tab and is shown again when the tab is reopened. */
-  heldNotice?: { level: 'info' | 'warning' | 'error'; message: string };
-  /**
-   * The webview clears the composer as soon as Send is clicked. When that send
-   * is refused, ignore the empty draft that is still in flight.
-   */
-  ignoreNextEmptyDraft: boolean;
-  /** History captured for this tab, oldest first. Absent until a chat is painted. */
-  loadedTranscript?: TranscriptItem[];
-  /** Index of the first painted row. Rows before it load when the reader scrolls up. */
-  historyHidden?: number;
-  /** The provider still has rows older than `loadedTranscript`. */
-  serverHasOlder?: boolean;
-}
-
-/** Open sidebar tabs, so a reload can put the same chats back. */
-const OPEN_CHAT_TABS_KEY = 'melink.openChatTabs';
+import {
+  MAX_ATTACHMENT_BYTES,
+  createAttachmentId,
+  decodeDataUrl,
+  draftAttachmentsForStore,
+  extensionForAttachment,
+  kindForMime,
+  mimeForName,
+  persistableAttachments,
+  safeDraftFileName
+} from './sidebar/attachments';
+import { planSnapshot, rewindKey } from './sidebar/planSnapshot';
+import { capReviewLines, messagePreview, userMessageTime } from './sidebar/reviewFormat';
+import { OPEN_CHAT_TABS_KEY, type ChatSession } from './sidebar/session';
+import { buildTurnInstruction, describeDecisionOutcome, isCancellation } from './sidebar/turnInstruction';
+import { render } from './sidebar/viewHtml';
 
 /**
  * Renders the SideCode sidebar. Each open conversation is a tab in that view.
@@ -1257,7 +1204,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       if (token.isCancellationRequested || this.webviewMounted || this.view !== view) {
         return;
       }
-      view.webview.html = this.render(view.webview);
+      view.webview.html = render(view.webview, this.extensionUri);
     };
     this.webviewMountTimers.push(setTimeout(mount, 0), setTimeout(mount, 750));
   }
@@ -4778,36 +4725,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.registry.decideApproval(backendId, threadId, requestId, decision);
   }
 
-  private render(webview: vscode.Webview): string {
-    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview.js'));
-    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview.css'));
-    const nonce = createNonce();
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src ${webview.cspSource}`,
-      `script-src 'nonce-${nonce}'`,
-      // The host loads webview resources through its own worker. `default-src
-      // 'none'` would block that worker unless it is named here.
-      `worker-src ${webview.cspSource}`,
-      `font-src ${webview.cspSource}`
-    ].join('; ');
-
-    return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="${csp}" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link href="${styleUri}" rel="stylesheet" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script nonce="${nonce}" src="${scriptUri}"></script>
-  </body>
-</html>`;
-  }
-
   /**
    * Read image bytes for the webview preview. The stored attachment keeps only
    * its path, so this copy is what the bubble shows and is not written back.
@@ -4869,222 +4786,4 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return attachment;
     }
   }
-}
-
-/**
- * A plain-language summary of one decision outcome, or `undefined` when the
- * decision took effect. A conflict requires an explicit choice; any other
- * failure names its own reason so the UI shows why, not a generic error.
- */
-function describeDecisionOutcome(result: import('./changes/changeStore').ChangeDecisionResult): string | undefined {
-  if (result.ok) {
-    return undefined;
-  }
-  if (result.conflict) {
-    return 'That file changed after the turn. Choose whether to keep the current file or overwrite it with the pre-turn content.';
-  }
-  return result.error ?? 'The decision could not be applied.';
-}
-
-function isCancellation(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const named = error as { name?: unknown; message?: unknown };
-  if (named.name === 'AbortError') {
-    return true;
-  }
-  return typeof named.message === 'string' && /cancel/i.test(named.message);
-}
-
-
-/**
- * The turn text sent at the build transition. The plan's bullet list is already
- * the todo list; this tells the agent to execute it, so building the plan moves
- * the thread into execution rather than being a no-op.
- */
-function buildTurnInstruction(steps: readonly TodoStep[]): string {
-  const list = steps.map((step) => `- [ ] ${step.text}`).join('\n');
-  return [
-    'Build the approved plan. Execute each step in order. As soon as you start a step, write a checkbox line on its own line that repeats the step text exactly: "- [~] ...". As soon as you finish it, write "- [x] ...". The plan document and the todo list update from those lines while you work. Leave the plan document prose unchanged.',
-    '',
-    list
-  ].join('\n');
-}
-
-function createNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i += 1) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
-}
-
-/** A pick larger than this is refused with an inline message, never attached. */
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-
-/** Stable-enough id for a chip; the webview only needs it to key and remove. */
-function createAttachmentId(): string {
-  return `att_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** Extension -> mime map for the formats the picker filter offers. */
-const MIME_BY_EXTENSION: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  m4a: 'audio/mp4',
-  ogg: 'audio/ogg',
-  webm: 'video/webm',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  json: 'application/json',
-  jsonc: 'application/json',
-  yaml: 'text/yaml',
-  yml: 'text/yaml',
-  toml: 'text/plain',
-  csv: 'text/csv',
-  log: 'text/plain',
-  xml: 'application/xml',
-  html: 'text/html',
-  css: 'text/css',
-  scss: 'text/css',
-  less: 'text/css',
-  js: 'text/javascript',
-  jsx: 'text/javascript',
-  ts: 'text/typescript',
-  tsx: 'text/typescript',
-  py: 'text/x-python',
-  rb: 'text/x-ruby',
-  go: 'text/x-go',
-  rs: 'text/x-rust',
-  java: 'text/x-java',
-  kt: 'text/x-kotlin',
-  c: 'text/x-c',
-  h: 'text/x-c',
-  cpp: 'text/x-c++',
-  hpp: 'text/x-c++',
-  cs: 'text/x-csharp',
-  sh: 'text/x-sh',
-  ps1: 'text/x-powershell',
-  sql: 'text/x-sql'
-};
-
-/** Keep the inline review to the first lines of an expanded file. */
-function capReviewLines(hunks: ChangeHunkView[], limit: number): { hunks: ChangeHunkView[]; truncated: boolean } {
-  let remaining = limit;
-  let truncated = false;
-  const capped: ChangeHunkView[] = [];
-  for (const hunk of hunks) {
-    if (remaining <= 0) {
-      truncated = true;
-      break;
-    }
-    const lines = hunk.lines.slice(0, remaining);
-    if (lines.length < hunk.lines.length) {
-      truncated = true;
-    }
-    remaining -= lines.length;
-    capped.push({ ...hunk, lines });
-  }
-  return { hunks: capped, truncated };
-}
-
-/** Provider-neutral mime for a filename; `application/octet-stream` when unknown. */
-function mimeForName(name: string): string {
-  const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '';
-  return MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
-}
-
-/** The broad class a chip uses; text is the fallback for any unknown type. */
-function kindForMime(mimeType: string): AttachmentKind {
-  if (mimeType.startsWith('image/')) {
-    return 'image';
-  }
-  if (mimeType.startsWith('audio/') || mimeType.startsWith('video/')) {
-    return 'audio';
-  }
-  if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') {
-    return 'text';
-  }
-  return 'file';
-}
-
-/** Metadata saved with the open tabs. Inline bytes stay out of workspace state. */
-function draftAttachmentsForStore(attachments: readonly Attachment[]): NonNullable<ChatTabState['draftAttachments']> {
-  return parseDraftAttachments(persistableAttachments(attachments) ?? []);
-}
-
-function decodeDataUrl(dataUrl: string): Uint8Array | undefined {
-  const match = /^data:[^;,]+;base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUrl);
-  if (!match?.[1]) {
-    return undefined;
-  }
-  return Buffer.from(match[1], 'base64');
-}
-
-function safeDraftFileName(id: string): string {
-  const cleaned = id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
-  return cleaned || 'attachment';
-}
-
-function rewindKey(backendId: string, threadId: string): string {
-  return `${backendId}\0${threadId}`;
-}
-
-function planSnapshot(state: PersistedPlanState): CheckpointPlanState {
-  return {
-    path: state.path,
-    title: state.title,
-    summary: state.summary,
-    body: state.body,
-    steps: state.steps.map((step) => ({ text: step.text, status: step.status })),
-    built: state.built,
-    completedDismissed: state.completedDismissed,
-    updatedAt: state.updatedAt
-  };
-}
-
-function messagePreview(text: string | undefined, fallback: string): string {
-  const line = (text ?? '').trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
-  if (!line) {
-    return fallback;
-  }
-  return line.length > 80 ? `${line.slice(0, 80)}...` : line;
-}
-
-function userMessageTime(id: string): number | undefined {
-  const match = /^user_(\d+)_/.exec(id);
-  return match ? Number(match[1]) : undefined;
-}
-
-function extensionForAttachment(attachment: Attachment): string {
-  const fromName = attachment.name.includes('.') ? attachment.name.slice(attachment.name.lastIndexOf('.')) : '';
-  if (fromName) {
-    return fromName;
-  }
-  if (attachment.mimeType === 'image/jpeg') {
-    return '.jpg';
-  }
-  if (attachment.mimeType === 'image/gif') {
-    return '.gif';
-  }
-  if (attachment.mimeType === 'image/webp') {
-    return '.webp';
-  }
-  return '.png';
-}
-
-/** Strip inline bytes before an attachment is persisted. The path, when one was saved, stays. */
-function persistableAttachments(attachments?: readonly Attachment[]): Attachment[] | undefined {
-  if (!attachments || attachments.length === 0) {
-    return undefined;
-  }
-  return attachments.map(({ dataUrl: _dataUrl, ...rest }) => rest);
 }

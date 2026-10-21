@@ -1,0 +1,651 @@
+/* ---- Buttons ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn--primary {
+  border-color: var(--melink-primary);
+  background: var(--melink-primary);
+  color: var(--melink-surface);
+  min-height: 30px;
+  padding: 6px 16px;
+  font-weight: 650;
+}
+
+.btn--secondary {
+  min-height: 30px;
+  padding: 6px 14px;
+  border-color: var(--melink-primary);
+  background: transparent;
+  color: var(--melink-primary);
+  font-weight: 600;
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--melink-primary) 14%, transparent);
+}
+
+.btn--primary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
+  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+}
+
+.btn--danger {
+  color: var(--vscode-errorForeground);
+}
+
+.btn--quiet {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+.icon-btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.icon-btn:disabled:hover {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+
+.icon-btn.icon-btn--primary {
+  background: var(--melink-primary);
+  color: var(--melink-surface);
+}
+
+.icon-btn.icon-btn--primary .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.icon-btn.icon-btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  color: var(--melink-surface);
+}
+
+.history-anchor {
+  position: relative;
+}
+
+.history-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 72vw);
+  max-height: min(420px, 60vh);
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow, #000) 35%, transparent);
+  overflow: hidden;
+}
+
+.history-menu__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.history-menu__search .model-filter {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.history-menu .model-list {
+  max-height: 320px;
+}
+
+/* ---- Composer ---- */
+
+.composer {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px 4px;
+  border-top: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-background);
+  /* Keep the composer bounded; floating panels do not affect this height. */
+  max-height: calc(100% - 64px);
+  min-height: 0;
+}
+
+/* The plan card sits in the footer and takes its own space, so the transcript
+ * stays above it instead of scrolling underneath. */
+.todo-dock {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(42vh, 320px);
+  overflow: auto;
+}
+
+.composer-box {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-input-background);
+}
+
+.composer-box:focus-within {
+  border-color: var(--vscode-focusBorder);
+}
+
+.composer-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 10px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font-family: inherit;
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.45;
+  resize: none;
+  outline: none;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.composer-input::placeholder {
+  color: var(--vscode-descriptionForeground);
+}
+
+/* An empty chat keeps the mark visible and gives the draft the rest of the
+ * sidebar so the first message can be written in a tall field. */
+.app--chat-empty .transcript {
+  flex: 0 1 auto;
+  min-height: 148px;
+}
+
+.app--chat-empty .transcript-end {
+  display: none;
+}
+
+.app--chat-empty .composer.composer--expanded {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.app--chat-empty .composer.composer--expanded .composer-box {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app--chat-empty .composer.composer--expanded .composer-input {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* The base 50vh cap leaves a gap under the control row once the box is taller. */
+  max-height: none;
+  overflow-y: auto;
+}
+
+.composer-row {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding: 4px 6px 6px 8px;
+}
+
+.composer-row .btn,
+.composer-row .control-trigger,
+.composer-row .mode-menu {
+  flex: 0 0 auto;
+}
+
+.composer-row .model-trigger .trigger-model {
+  max-width: 9em;
+}
+
+/* Mode list opens upward from the composer trigger, only as wide as the names. */
+.mode-menu {
+  position: relative;
+  min-width: 0;
+}
+
+/* Permission and model settings use the same anchored card as the mode list.
+ * --popup-left / --popup-right flip the card to the side that fits. */
+.mode-menu .control-panel,
+.mode-menu .model-panel {
+  left: var(--popup-left, 0);
+  right: var(--popup-right, auto);
+  bottom: calc(100% + 4px);
+  width: min(440px, var(--popup-max, calc(100vw - 28px)));
+  max-width: var(--popup-max, calc(100vw - 28px));
+  min-height: 0;
+  max-height: min(420px, 62vh);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
+}
+
+.mode-menu__list {
+  position: absolute;
+  z-index: 16;
+  left: 0;
+  bottom: calc(100% + 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 108px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
+}
+
+.mode-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mode-menu__option .control-check {
+  margin-left: auto;
+  margin-top: 0;
+}
+
+.mode-menu__option--plan,
+.control-trigger.control-trigger--plan {
+  color: var(--melink-yellow);
+}
+
+.mode-menu__option--agent,
+.control-trigger.control-trigger--agent {
+  color: var(--melink-shell);
+}
+
+.mode-menu__option--ask,
+.control-trigger.control-trigger--ask {
+  color: var(--melink-success);
+}
+
+.mode-menu__option:hover,
+.mode-menu__option:focus-visible,
+.mode-menu__option[aria-selected='true'] {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.mode-menu__option:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.control-trigger--mode:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.control-trigger--plan:hover:not(:disabled) {
+  color: var(--melink-yellow);
+}
+
+.control-trigger--agent:hover:not(:disabled) {
+  color: var(--melink-shell);
+}
+
+.control-trigger--ask:hover:not(:disabled) {
+  color: var(--melink-success);
+}
+
+.composer-row .spacer {
+  flex: 1 1 auto;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.composer-actions .context-meter {
+  width: 16px;
+  height: 16px;
+  margin-left: 0;
+}
+
+.composer-actions .context-meter__ring {
+  width: 16px;
+  height: 16px;
+}
+
+.composer-attach {
+  width: 28px;
+  height: 28px;
+}
+
+.composer-attach .ico {
+  width: 18px;
+  height: 18px;
+}
+
+.composer-row .composer-action {
+  --composer-mode: var(--melink-primary);
+  --composer-mode-ink: var(--melink-surface);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.composer-row .composer-action .ico,
+.composer-row .icon-btn.icon-btn--primary.composer-action .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.composer-row .composer-action--mode-plan {
+  --composer-mode: var(--melink-yellow);
+  --composer-mode-ink: var(--melink-text-primary);
+}
+
+.composer-row .composer-action--mode-agent {
+  --composer-mode: var(--melink-shell);
+  --composer-mode-ink: var(--melink-surface);
+}
+
+.composer-row .composer-action--mode-ask {
+  --composer-mode: var(--melink-success);
+  --composer-mode-ink: var(--melink-surface);
+}
+
+.composer-row .icon-btn.icon-btn--primary.composer-action {
+  background: var(--composer-mode);
+  color: var(--composer-mode-ink);
+}
+
+.composer-row .icon-btn.icon-btn--primary.composer-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--composer-mode) 85%, black);
+  color: var(--composer-mode-ink);
+}
+
+.icon-btn.composer-action--mic-starting,
+.icon-btn.composer-action--mic-listening,
+.icon-btn.composer-action--mic-downloading,
+.icon-btn.composer-action--mic-working {
+  position: relative;
+}
+
+.icon-btn.composer-action--mic-starting,
+.icon-btn.composer-action--mic-starting:hover {
+  color: var(--composer-mode);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.icon-btn.composer-action--mic-listening,
+.icon-btn.composer-action--mic-listening:hover {
+  color: var(--composer-mode);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.icon-btn.composer-action--mic-downloading,
+.icon-btn.composer-action--mic-downloading:hover {
+  color: var(--composer-mode);
+}
+
+.icon-btn.composer-action--mic-working,
+.icon-btn.composer-action--mic-working:hover {
+  color: var(--composer-mode);
+}
+
+.composer-action--mic-downloading::after,
+.composer-action--mic-working::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+.icon-btn.composer-action--stop {
+  background: color-mix(in srgb, var(--melink-surface) 82%, var(--vscode-foreground));
+  color: var(--melink-text-primary);
+  border: 0;
+}
+
+.icon-btn.composer-action--stop:hover {
+  background: var(--melink-surface);
+  color: var(--melink-text-primary);
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--composer-mode, var(--melink-primary)) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+/* Clarifying question, in the composer column, in the plan yellow. */
+.question-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--melink-yellow) 55%, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: color-mix(in srgb, var(--melink-yellow) 12%, var(--vscode-sideBar-background));
+}
+
+.question-card:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.question-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.question-card__title {
+  color: var(--melink-yellow);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.question-card__count,
+.question-card__header {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.question-card__prompt {
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.question-card__options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.question-card__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--melink-radius-sm, 4px);
+  cursor: pointer;
+}
+
+.question-card__option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--melink-yellow) 70%, transparent);
+  background: color-mix(in srgb, var(--melink-yellow) 18%, transparent);
+}
+
+.question-card__option input {
+  margin-top: 2px;
+  accent-color: var(--melink-yellow);
+}
+
+.question-card__option-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.question-card__chip {
+  flex: 0 0 auto;
+  color: var(--melink-yellow);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.question-card__custom {
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--melink-yellow) 45%, var(--vscode-input-border, var(--vscode-panel-border)));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.question-card__custom:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.question-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.question-card__skip {
+  margin-right: auto;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.question-card__skip:hover,
+.question-card__skip:focus-visible {
+  color: var(--vscode-foreground);
+}
+
+.question-card__continue {
+  min-height: 28px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--melink-yellow);
+  color: #1a1604;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.question-card__continue:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--melink-yellow) 85%, black);
+}
+
+.question-card__continue:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.question-card__continue:focus-visible,
+.question-card__skip:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
