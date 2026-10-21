@@ -205,7 +205,12 @@ export class ChangeTracker {
   }
 
   async sessionFor(threadId: string): Promise<TurnChangeSet | undefined> {
-    const session = sessionChangeSet(this.journal.listTurns(threadId));
+    // Filter before merging: a missing baseline must not become a created file.
+    const turns = await Promise.all(this.journal.listTurns(threadId).map(async (turn) => ({
+      ...turn,
+      files: await this.listed(turn.files)
+    })));
+    const session = sessionChangeSet(turns);
     if (!session) {
       return undefined;
     }

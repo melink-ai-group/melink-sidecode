@@ -1,3 +1,5 @@
+import type { JournalFileEntry } from './journal.ts';
+
 /**
  * Directory names that are never a conversation change. `node_modules` and VCS
  * metadata are ignored even when a workspace forgets to list them. `.opencode`
@@ -82,12 +84,15 @@ export function excludedByIgnore(relPath: string, sources: readonly GitignoreSou
   return state.ignored;
 }
 
-/** A binary, an ignored directory, or a gitignored path is not a review row. */
+type ReviewFile = Pick<JournalFileEntry, 'binary' | 'relPath' | 'status' | 'hasBefore' | 'hasAfter'>;
+
+/** Only files with a recorded baseline (or recorded new content) are review rows. */
 export function listedForReview(
-  file: { binary: boolean; relPath: string },
+  file: ReviewFile,
   sources: readonly GitignoreSource[]
 ): boolean {
-  return !file.binary && !excludedByIgnore(file.relPath, sources);
+  const recorded = file.status === 'created' ? file.hasAfter : file.hasBefore;
+  return recorded && !file.binary && !excludedByIgnore(file.relPath, sources);
 }
 
 /**
@@ -136,7 +141,7 @@ export async function reviewSources(
 }
 
 /** Files the changes strip and the review page should show, in the same order. */
-export async function filterListedFiles<T extends { absPath: string; relPath: string; binary: boolean }>(
+export async function filterListedFiles<T extends ReviewFile & { absPath: string }>(
   files: readonly T[],
   readFile: (absPath: string) => Promise<Uint8Array | undefined>
 ): Promise<T[]> {
