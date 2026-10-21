@@ -1,0 +1,379 @@
+/* ---- Floating model and conversation panels ---- */
+
+.model-panel {
+  position: absolute;
+  z-index: 20;
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(440px, calc(100vw - 20px));
+  min-height: min(280px, 48vh);
+  max-height: min(560px, 78vh);
+  margin: 0;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent);
+  overflow: hidden;
+}
+
+/* The panel's chrome is fixed; only the body between it scrolls, so a short
+ * sidebar keeps the title, filter, tabs, and foot reachable. */
+.model-panel__head,
+.model-panel .model-filter-row,
+.model-panel__tabs,
+.model-panel__foot {
+  flex: 0 0 auto;
+}
+
+.model-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 10px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.model-panel__head .spacer {
+  flex: 1 1 auto;
+}
+
+.model-filter-row {
+  position: relative;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.model-panel__tabs {
+  flex: 0 0 auto;
+}
+
+/* Only this region scrolls: the head, filter, tabs, and foot stay fixed. */
+.model-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.model-filter-row .filter-ico {
+  position: absolute;
+  left: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--vscode-descriptionForeground);
+  pointer-events: none;
+}
+
+.model-filter {
+  width: 100%;
+  padding: 3px 8px 3px 26px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.model-filter::placeholder {
+  color: var(--vscode-descriptionForeground);
+}
+
+.model-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+/* Inside the tabbed panel body, that body is the single scroll container, so
+ * the list itself must not scroll a second time. */
+.model-panel__body .model-list {
+  flex: 0 0 auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.model-group {
+  padding: 4px 0 6px;
+}
+
+.model-group + .model-group {
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.model-group__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 4px;
+}
+
+.model-group__head .provider-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.model-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 10px 5px 24px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-option:hover,
+.model-option:focus-visible {
+  background: var(--vscode-list-hoverBackground);
+  outline: none;
+}
+
+.model-option:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.model-option--empty {
+  color: var(--vscode-descriptionForeground);
+  cursor: default;
+}
+
+.model-option .model-option-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-option .model-check {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--vscode-foreground);
+}
+
+.model-option[aria-selected='true'] {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+}
+
+.model-option[aria-selected='true'] .model-check {
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+}
+
+.model-option .model-sub {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.model-option[aria-selected='true'] .model-sub {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.model-option .thread-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#history-panel .model-option {
+  padding-left: 10px;
+}
+
+#history-panel .thread-title {
+  flex: 1 1 auto;
+}
+
+/* Unauthenticated provider: an actionable disabled entry, never an empty list. */
+
+.model-group-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-left: 3px solid var(--vscode-editorWarning-foreground);
+  border-radius: var(--melink-radius-sm, 4px);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 8%, var(--vscode-sideBar-background));
+  font-size: 11px;
+}
+
+.model-group-notice .notice-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.model-group-notice .notice-body {
+  min-width: 0;
+}
+
+.model-group-notice .notice-title {
+  color: var(--vscode-foreground);
+  font-weight: 600;
+}
+
+.model-group-notice .notice-text {
+  color: var(--vscode-descriptionForeground);
+}
+
+.model-group-notice .notice-actions {
+  margin-top: 6px;
+}
+
+/* A provider whose live list failed: inline error with a retry, not a raw 401. */
+
+.model-group-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-left: 3px solid var(--vscode-errorForeground);
+  border-radius: var(--melink-radius-sm, 4px);
+  background: color-mix(in srgb, var(--vscode-errorForeground) 8%, var(--vscode-sideBar-background));
+  font-size: 11px;
+}
+
+.model-group-error .error-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--vscode-errorForeground);
+}
+
+.model-group-error .error-body {
+  min-width: 0;
+}
+
+.model-group-error .error-title {
+  color: var(--vscode-foreground);
+  font-weight: 600;
+}
+
+.model-group-error .error-text {
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.model-group-error .error-actions {
+  margin-top: 6px;
+}
+
+/* Filter with no matches, and the no-provider case. */
+
+.model-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 20px 16px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+.model-empty .empty-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--melink-radius-lg, 8px);
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.model-empty .empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.model-empty .empty-text {
+  font-size: 13px;
+}
+
+.model-empty__actions {
+  margin-top: 2px;
+}
+
+.model-panel__foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.model-panel__foot .ico {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+/* Loading: the stale selection stays in the trigger, groups show skeletons. */
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 24px;
+}
+
+.skeleton-bar {
+  height: 10px;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.skeleton-bar--60 {
+  width: 60%;
+}
+
+.skeleton-bar--40 {
+  width: 40%;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar {
+    animation: none;
+  }
+}
+

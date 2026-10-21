@@ -4,6 +4,7 @@ import type { BackendRegistry } from './backends/registry';
 import type { BackendStatus, ConnectionTestResult, DefaultMode, PermissionLevel } from './backends/types';
 import { PERMISSION_LEVELS } from './backends/types';
 import { DEFAULT_MODES } from './backends/modes';
+import { SKILLS_SECTION } from './settingsKeys';
 import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from './backends/defaults';
 import { isThinkingLevel } from './backends/capabilities';
 import type { SettingsPatch, SettingsSnapshot } from './protocol';
@@ -71,7 +72,6 @@ const OLLAMA_OPENCODE_SECTION = 'melink.ollama.opencode';
 const OPENCODE_SECTION = 'melink.opencode';
 const CODEX_SECTION = 'melink.codex';
 const DEFAULTS_SECTION = 'melink.defaults';
-const SKILLS_SECTION = 'melink.skills';
 
 /**
  * Keys the settings screen reads and writes. Used to detect whether a workspace

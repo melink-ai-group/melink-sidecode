@@ -1,0 +1,240 @@
+
+@media (max-width: 340px) {
+  .context-reduced {
+    display: none;
+  }
+}
+
+/* ---- Plan review card, todo list, and mode affordance ----
+ *
+ * One plan artifact, two treatments that never compete: the review card while a
+ * plan is pending, and the todo list once it is built. Colors are tokens only;
+ * brand hue is not used here (the provider dot and streaming caret own it). State
+ * is conveyed by label and glyph, never by hue alone.
+ */
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  overflow: hidden;
+}
+
+.plan-card--revising {
+  border-color: var(--vscode-focusBorder);
+}
+
+.plan-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  min-width: 0;
+}
+
+.plan-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.plan-card__path {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 60%;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.plan-card__path:hover {
+  background: var(--vscode-list-hoverBackground);
+  text-decoration: underline;
+}
+
+.plan-card__path:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.plan-card__path-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.plan-card__build {
+  flex: 0 0 auto;
+  min-height: 22px;
+  padding: 2px 12px;
+  border-color: var(--melink-primary-blue);
+  background: var(--melink-primary-blue);
+  color: var(--melink-surface);
+  font-size: 12px;
+}
+
+.plan-card__build:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
+  background: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
+}
+
+.plan-revising {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  background: var(--vscode-sideBar-background);
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
+.plan-doc {
+  padding: 8px;
+  max-height: 216px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  min-width: 0;
+}
+
+.plan-doc:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.plan-doc__summary > .md > :first-child {
+  margin-top: 0;
+}
+
+.plan-doc__summary > .md > :last-child {
+  margin-bottom: 0;
+}
+
+.plan-doc .md__p {
+  overflow-wrap: anywhere;
+}
+
+.plan-doc__empty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.plan-steps {
+  margin: 6px 0 0;
+  padding: 0 0 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-steps li {
+  overflow-wrap: anywhere;
+}
+
+.plan-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  background: var(--vscode-sideBar-background);
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
+.plan-confirm > .ico {
+  flex: 0 0 auto;
+  color: var(--vscode-errorForeground);
+}
+
+.plan-confirm__msg {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plan-confirm__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.plan-revise {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  min-width: 0;
+}
+
+.plan-revise__field {
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+
+.plan-revise__field:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.plan-revise__field::placeholder {
+  color: var(--vscode-descriptionForeground);
+}
+
+.plan-revise__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.plan-revise__note,
+.plan-actions__note {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  min-width: 0;
+}
+
