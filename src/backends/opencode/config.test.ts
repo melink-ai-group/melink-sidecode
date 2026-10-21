@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  OPENCODE_AGENT_AGENT,
   OPENCODE_API_KEY_ENV,
   OPENCODE_ASK_AGENT,
+  OPENCODE_PLAN_AGENT,
   OPENCODE_PROVIDER_ID,
   buildOpencodeConfig,
+  opencodeAgentConfig,
   opencodeAgentForMode,
   opencodeBaseUrl,
   opencodePermission,
@@ -37,41 +40,87 @@ test('the UI thinking ladder maps onto OpenAI-compatible reasoning efforts', () 
   assert.equal(opencodeReasoningEffort('extra high'), 'high');
 });
 
-test('modes map onto opencode primitives: build for agent and plan, and a read-only ask agent', () => {
-  assert.equal(opencodeAgentForMode('agent'), 'build');
-  assert.equal(opencodeAgentForMode('plan'), 'build');
-  assert.equal(opencodeAgentForMode('ask'), OPENCODE_ASK_AGENT);
+const FULL_DENY = {
+  edit: 'deny',
+  write: 'deny',
+  patch: 'deny',
+  bash: 'deny',
+  external_directory: 'deny',
+  webfetch: 'deny',
+  websearch: 'deny',
+  task: 'deny'
+} as const;
+
+const FULL_ALLOW = {
+  edit: 'allow',
+  write: 'allow',
+  patch: 'allow',
+  bash: 'allow',
+  external_directory: 'allow',
+  webfetch: 'allow',
+  websearch: 'allow',
+  task: 'allow'
+} as const;
+
+test('modes map onto dedicated, unpredictable custom agent names', () => {
+  assert.equal(opencodeAgentForMode('agent', 'fixed'), `${OPENCODE_AGENT_AGENT}-fixed`);
+  assert.equal(opencodeAgentForMode('plan', 'fixed'), `${OPENCODE_PLAN_AGENT}-fixed`);
+  assert.equal(opencodeAgentForMode('ask', 'fixed'), `${OPENCODE_ASK_AGENT}-fixed`);
+  assert.notEqual(OPENCODE_AGENT_AGENT, 'build');
+  assert.notEqual(OPENCODE_PLAN_AGENT, 'build');
+  // Without an injected nonce each call is a fresh unpredictable name.
+  const first = opencodeAgentForMode('agent');
+  const second = opencodeAgentForMode('agent');
+  assert.match(first, /^melink-agent-[0-9a-f]{16}$/);
+  assert.notEqual(first, second);
 });
 
-test('ask denies edit/write/patch/bash whatever level was picked', () => {
-  for (const level of ['unrestricted', 'default', 'read-only'] as const) {
-    assert.deepEqual(opencodePermission(level, 'ask'), {
-      edit: 'deny',
-      write: 'deny',
-      patch: 'deny',
-      bash: 'deny'
-    });
+test('every generated agent is explicitly enabled and cannot delegate', () => {
+  const permission = opencodePermission('default', 'agent');
+  for (const mode of ['agent', 'plan', 'ask'] as const) {
+    const definitions = opencodeAgentConfig(mode, permission, 'fixed');
+    const names = Object.keys(definitions);
+    assert.equal(names.length, 1);
+    const agent = definitions[names[0]] as Record<string, unknown>;
+    // Inline `disable: false` wins over a workspace `agent.<same name>.disable:
+    // true`, so the turn cannot fall back to the workspace's `build` agent.
+    assert.equal(agent.disable, false);
+    assert.equal((agent.tools as Record<string, unknown>).task, false);
   }
 });
 
-test('default auto-allows workspace edits and commands, and still asks to leave the project', () => {
-  assert.deepEqual(opencodePermission('read-only', 'agent'), {
-    edit: 'deny',
-    write: 'deny',
-    patch: 'deny',
-    bash: 'deny'
-  });
+test('ask denies every mutating and network tool whatever level was picked', () => {
+  for (const level of ['unrestricted', 'default', 'read-only'] as const) {
+    assert.deepEqual(opencodePermission(level, 'ask'), FULL_DENY);
+  }
+});
+
+test('default asks before edits, commands, web access, and leaving the project', () => {
+  assert.deepEqual(opencodePermission('read-only', 'agent'), FULL_DENY);
+  // opencode cannot sandbox a child process or its HTTP tools, so default
+  // surfaces every one as an approval instead of auto-allowing it.
   assert.deepEqual(opencodePermission('default', 'agent'), {
-    edit: 'allow',
-    write: 'allow',
-    patch: 'allow',
-    bash: 'allow',
-    external_directory: 'ask'
+    edit: 'ask',
+    write: 'ask',
+    patch: 'ask',
+    bash: 'ask',
+    external_directory: 'ask',
+    webfetch: 'ask',
+    websearch: 'ask',
+    task: 'deny'
   });
-  const unrestricted = opencodePermission('unrestricted', 'agent');
-  assert.equal(unrestricted.edit, 'allow');
-  assert.equal(unrestricted.bash, 'allow');
-  assert.equal(unrestricted.external_directory, 'allow');
+  assert.equal(opencodePermission('default', 'agent').bash, 'ask');
+  assert.equal(opencodePermission('default', 'plan').bash, 'ask');
+  assert.equal(opencodePermission('default', 'agent').webfetch, 'ask');
+  assert.equal(opencodePermission('default', 'agent').websearch, 'ask');
+  assert.deepEqual(opencodePermission('unrestricted', 'agent'), FULL_ALLOW);
+  // A workspace-defined subagent must not escape the selected level: only
+  // unrestricted may delegate.
+  assert.equal(opencodePermission('default', 'agent').task, 'deny');
+  assert.equal(opencodePermission('default', 'plan').task, 'deny');
+  assert.equal(opencodePermission('read-only', 'agent').task, 'deny');
+  assert.equal(opencodePermission('default', 'ask').task, 'deny');
+  assert.equal(opencodePermission('unrestricted', 'agent').task, 'allow');
   assert.equal(opencodeRequiresApproval('default', 'agent'), true);
   assert.equal(opencodeRequiresApproval('default', 'plan'), true);
   assert.equal(opencodeRequiresApproval('read-only', 'agent'), false);
@@ -94,7 +143,7 @@ test('the generated config points at the configured base URL and the live model 
   // No model id is rewritten and no list is hardcoded: every live id appears.
   assert.deepEqual(Object.keys(provider.models as Record<string, unknown>).sort(), [...modelIds].sort());
   assert.equal(built.modelRef, `${OPENCODE_PROVIDER_ID}/tomng/nanbeige4.1`);
-  assert.equal(built.agent, 'build');
+  assert.match(built.agent, /^melink-agent-[0-9a-f]{16}$/);
 });
 
 test('the provider id is namespaced so a user opencode auth entry cannot override our token', () => {
@@ -217,10 +266,13 @@ test('ask mode defines a read-only agent and plan mode follows the selected perm
     mode: 'ask',
     permissionLevel: 'unrestricted'
   });
-  assert.equal(ask.agent, OPENCODE_ASK_AGENT);
-  const agent = (ask.config.agent as Record<string, Record<string, unknown>>)[OPENCODE_ASK_AGENT];
-  assert.deepEqual(agent.tools, { write: false, edit: false, patch: false, bash: false });
-  assert.deepEqual(ask.config.permission, { edit: 'deny', write: 'deny', patch: 'deny', bash: 'deny' });
+  assert.match(ask.agent, /^melink-ask-[0-9a-f]{16}$/);
+  const agent = (ask.config.agent as Record<string, Record<string, unknown>>)[ask.agent];
+  assert.deepEqual(agent.tools, { write: false, edit: false, patch: false, bash: false, task: false });
+  assert.equal(agent.disable, false);
+  assert.equal(typeof agent.prompt, 'string');
+  assert.ok((agent.prompt as string).length > 0);
+  assert.deepEqual(ask.config.permission, FULL_DENY);
 
   const plan = buildOpencodeConfig({
     baseUrl: 'https://ollama.com',
@@ -229,13 +281,16 @@ test('ask mode defines a read-only agent and plan mode follows the selected perm
     mode: 'plan',
     permissionLevel: 'default'
   });
-  assert.equal(plan.agent, 'build');
+  assert.match(plan.agent, /^melink-plan-[0-9a-f]{16}$/);
   assert.deepEqual(plan.config.permission, {
-    edit: 'allow',
-    write: 'allow',
-    patch: 'allow',
-    bash: 'allow',
-    external_directory: 'ask'
+    edit: 'ask',
+    write: 'ask',
+    patch: 'ask',
+    bash: 'ask',
+    external_directory: 'ask',
+    webfetch: 'ask',
+    websearch: 'ask',
+    task: 'deny'
   });
 
   const writablePlan = buildOpencodeConfig({
@@ -245,9 +300,30 @@ test('ask mode defines a read-only agent and plan mode follows the selected perm
     mode: 'plan',
     permissionLevel: 'unrestricted'
   });
-  assert.deepEqual(writablePlan.config.permission, {
-    edit: 'allow', write: 'allow', patch: 'allow', bash: 'allow', external_directory: 'allow'
-  });
+  assert.deepEqual(writablePlan.config.permission, FULL_ALLOW);
+});
+
+test('the generated custom agent carries the computed permission for every mode', () => {
+  for (const mode of ['agent', 'plan', 'ask'] as const) {
+    for (const level of ['read-only', 'default', 'unrestricted'] as const) {
+      const built = buildOpencodeConfig({
+        baseUrl: 'https://ollama.com',
+        modelIds: ['m'],
+        modelId: 'm',
+        mode,
+        permissionLevel: level
+      });
+      const agents = built.config.agent as Record<string, Record<string, unknown>>;
+      const agent = agents[built.agent];
+      assert.deepEqual(Object.keys(agents), [built.agent]);
+      assert.equal(agents.build, undefined);
+      assert.equal(agent.disable, false);
+      assert.equal(typeof agent.prompt, 'string');
+      assert.ok((agent.prompt as string).length > 0);
+      assert.equal((agent.tools as Record<string, unknown>).task, false);
+      assert.deepEqual(agent.permission, built.config.permission);
+    }
+  }
 });
 
 test('the generated config disables sharing and autoupdate so a turn has no side effects', () => {

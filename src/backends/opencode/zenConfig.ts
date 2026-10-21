@@ -19,8 +19,9 @@ import { isDefaultMode } from '../modes.ts';
 import type { BrowserCommand } from '../../browser/config.ts';
 import { browserPermissionKeys, mergeOpencodeMcp } from '../../browser/config.ts';
 import {
-  OPENCODE_ASK_AGENT,
+  opencodeAgentConfig,
   opencodeAgentForMode,
+  opencodeAgentSuffix,
   opencodePermission,
   opencodeReasoningEffort,
   outputLimitFor,
@@ -46,6 +47,8 @@ export interface ZenConfigInput {
   browser?: BrowserCommand;
   skillMcp?: Record<string, unknown>;
   skillPermissions?: Record<string, 'allow'>;
+  /** Test seam only; production generates a fresh random nonce per turn. */
+  agentNonce?: string;
 }
 
 /**
@@ -56,6 +59,7 @@ export function buildZenOpencodeConfig(input: ZenConfigInput): OpencodeConfigRes
   const { modelIds, modelId, settings, capabilities, mode, permissionLevel, browser, skillMcp, skillPermissions } =
     input;
   const resolvedMode: DefaultMode = isDefaultMode(mode) ? mode : 'agent';
+  const nonce = opencodeAgentSuffix(input.agentNonce);
 
   const models: Record<string, unknown> = {};
   for (const id of modelIds) {
@@ -115,21 +119,16 @@ export function buildZenOpencodeConfig(input: ZenConfigInput): OpencodeConfigRes
   if (mcp) {
     config.mcp = mcp;
   }
-  if (resolvedMode === 'ask') {
-    config.agent = {
-      [OPENCODE_ASK_AGENT]: {
-        description: 'Answers questions without changing the workspace.',
-        mode: 'primary',
-        tools: { write: false, edit: false, patch: false, bash: false },
-        permission: config.permission
-      }
-    };
-  }
+  config.agent = opencodeAgentConfig(
+    resolvedMode,
+    config.permission as Record<string, 'allow' | 'ask' | 'deny'>,
+    nonce
+  );
 
   return {
     config,
     modelRef: `${ZEN_PROVIDER_ID}/${modelId}`,
-    agent: opencodeAgentForMode(resolvedMode),
+    agent: opencodeAgentForMode(resolvedMode, nonce),
     contextApplied,
     reasoningApplied,
     reasoningUnsupported

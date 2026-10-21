@@ -209,16 +209,25 @@ streams chat and does not spawn opencode.
 - **Sessions.** The runtime's session id is persisted per thread, so a second
   turn in the same thread resumes the same session. A stale id degrades to a
   fresh session with a visible notice.
-- **Modes and permissions.** `agent` and `plan` map to opencode's build agent,
-  while `ask` maps to a generated read-only agent. Permission levels
-  map onto opencode's own `permission` config: `read-only` denies edits and
-  commands, `default` asks for them, and only `unrestricted` (gated behind the
-  labelled confirmation) allows them without asking. Ask forces read-only;
-  Plan honors the selected permission level. opencode's enforcement is a
-  second gate, not a replacement for ours. The pinned opencode version has no
-  `--auto` flag and no interactive prompt in `run` mode, so an `ask` is
-  auto-rejected rather than silently allowed; the in-chat approval surface is a
-  separate ticket.
+- **Modes and permissions.** `agent`, `plan`, and `ask` each map to a freshly
+  named generated opencode agent (`melink-agent-<nonce>`, `melink-plan-<nonce>`,
+  `melink-ask-<nonce>`) with an explicit prompt, `disable: false`, the `task`
+  tool off, and the selected permission block. A workspace `opencode.json` is
+  still loaded for its MCP servers, skills, and other project settings, but the
+  inline per-turn definition wins on overlapping keys: it cannot disable the
+  active agent, fall back to `build`, replace the prompt, or widen the permission
+  block, and a workspace-defined subagent cannot be called because `task` is
+  denied. Project plugins and remote `instructions` URLs are a separate,
+  pre-existing concern and are not isolated by this fix. Permission levels map
+  onto opencode's own `permission` config: `read-only` and Ask deny edits,
+  commands, external directories, webfetch, websearch, and subagent delegation;
+  `default` asks before every edit, write, patch, command, external directory,
+  webfetch, and websearch, and denies delegation; only `unrestricted` (gated
+  behind the labelled confirmation) allows them without asking. Default also
+  keeps network access blocked for Codex's sandbox. Plan honors the selected
+  permission level. opencode's enforcement is a second gate, not a replacement
+  for ours. The bundled 1.19.x CLI exposes `--auto`, but the sidebar never passes
+  it; an `ask` is answered through the sidebar's approval card.
 - **Fallback is exact.** With the setting off, the direct `/api/chat` adapter
   runs unchanged: no opencode module is loaded on that path and no child process
   is spawned.
@@ -255,9 +264,9 @@ How each provider receives it:
 
 `melink.ollama.opencode.enabled` **off** leaves the direct `/api/chat` request
 body unchanged apart from the context messages, and spawns no child process. The
-opencode and Codex paths were verified against the versions pinned below.
+opencode and Codex paths were verified against the versions below.
 
-### Pinned versions the priming path was verified against
+### Versions the priming path was verified against
 
 - **Codex CLI: `codex-cli 0.156.1`** — the generated bindings in `schemas/`
   expose `baseInstructions`/`developerInstructions` on `thread/start` and
@@ -265,9 +274,10 @@ opencode and Codex paths were verified against the versions pinned below.
   why Codex priming is native at start/resume and left to Codex's own file access
   mid-thread. The supported protocol window is `0.154.0–0.163.x`; a server
   outside it is reported as `incompatible` with its version rather than used.
-- **opencode: `1.1.65`** — `opencode run --help` exposes no
-  system/instructions flag, so the snapshot is delivered by priming the turn text.
-  This is a deliberate fallback, not an oversight.
+- **opencode: `1.19.x`** — the installer tracks `releases/latest`, and the T69
+  regression ran against the bundled 1.19.x CLI. `opencode run --help` exposes
+  no system/instructions flag, so the snapshot is delivered by priming the turn
+  text. This is a deliberate fallback, not an oversight.
 
 Both providers are also spawned with the workspace root as their working
 directory, so their own project discovery reads the real `AGENTS.md` even when the
@@ -501,18 +511,20 @@ capability flag.
 
 ### Optional opencode runtime
 
-The Ollama opencode runtime is a per-turn, short-lived child process. It is
-pinned and verified against **`opencode 1.1.65`**; the flags used (`run`,
+The Ollama opencode runtime is a per-turn, short-lived child process. It runs
+whatever `opencode` the installer resolved (the installer tracks
+`releases/latest`; the T69 regression used 1.19.x); the flags used (`run`,
 `--format json`, `--model`, `--agent`, `--session`, `--variant`) are the ones
 that version's `opencode run --help` lists. Notes:
 
-- The pinned version emits whole message parts rather than token deltas, so a
-  text or reasoning part is forwarded as one `item/started` + `item/delta` +
+- The runtime emits whole message parts rather than token deltas, so a text or
+  reasoning part is forwarded as one `item/started` + `item/delta` +
   `item/completed` group keyed by its part id.
-- It has **no `--auto` flag** (passing it prints help and exits non-zero), so the
+- The bundled 1.19.x CLI exposes `--auto`, but the sidebar never passes it: the
   turn's permission level is expressed entirely through the generated
-  `permission` config. A headless `ask` is auto-rejected rather than prompted,
-  which is why `default` never silently writes.
+  `permission` config, and an `ask` is answered through the sidebar's approval
+  card. That is why `default` never silently writes, runs a command, or fetches
+  the web.
 - A stream that ends without a terminal `step_finish` (`reason: "stop"`) is a
   stream error, not a successful turn.
 - The credential is supplied through the provider's `env` declaration and the

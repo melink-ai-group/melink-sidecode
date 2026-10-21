@@ -14,6 +14,9 @@ test('buildEnv defaults the credential to OLLAMA_API_KEY for the Ollama runtime'
   });
   assert.equal(env[DEFAULT_OPENCODE_API_KEY_ENV], 'secret-token');
   assert.equal(env.OLLAMA_API_KEY, 'secret-token');
+  // The workspace config is still loaded; the inline generated config wins on
+  // overlapping keys, so the child no longer needs a project-config off switch.
+  assert.equal(env.OPENCODE_DISABLE_PROJECT_CONFIG, undefined);
 });
 
 test('buildEnv can place the credential under OPENCODE_API_KEY for Zen', () => {
