@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { ChevronDownIcon } from '../Icons';
 import { Markdown } from '../Markdown';
 import { plainRowText } from '../plainRowText';
+import { shouldToggleReasoningBody } from '../reasoningClick';
 import type { TranscriptItemView } from '../state';
 import { StatusMark } from './shared';
 
@@ -67,7 +68,14 @@ export function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Eleme
         </span>
       </button>
       {expanded && (text || item.status === 'streaming' || incomplete) ? (
-        <div className="turn-body md" onClick={toggle}>
+        <div
+          className="turn-body md"
+          onClick={(event) => {
+            const selectionText = window.getSelection()?.toString() ?? '';
+            const target = event.target instanceof Element ? event.target : null;
+            if (shouldToggleReasoningBody({ selectionText, target })) toggle();
+          }}
+        >
           {text ? (
             <Markdown text={item.text} />
           ) : item.status === 'streaming' ? (
