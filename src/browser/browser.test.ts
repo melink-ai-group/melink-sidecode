@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { browserPermissionKeys, codexBrowserConfig, mergeOpencodeMcp, type BrowserCommand } from './config.ts';
+import { ConsoleBuffer, EMPTY_CONSOLE_TEXT, attachPageDiagnostics, navigatePage } from './consoleBuffer.ts';
 import {
   browserSkillEnabled,
   browserSkillEnabledFor,
   configuredSettingValue,
   navigationDecision
 } from './policy.ts';
-import { runBrowserTool, type BrowserActions } from './tools.ts';
+import { BrowserPage, type PlaywrightModule, type PlaywrightPage } from './session.ts';
+import { BROWSER_TOOLS, runBrowserTool, type BrowserActions } from './tools.ts';
 import { buildOpencodeConfig } from '../backends/opencode/config.ts';
 
 const command: BrowserCommand = {
@@ -126,7 +128,308 @@ test('browser permission keys allow the server and each tool', () => {
   assert.equal(keys.melink_browser, 'allow');
   assert.equal(keys.browser_navigate, 'allow');
   assert.equal(keys.browser_click, 'allow');
+  assert.equal(keys.browser_console, 'allow');
 });
+
+test('browser_console is listed with an empty schema and states the buffer behavior', () => {
+  const tool = BROWSER_TOOLS.find((item) => item.name === 'browser_console');
+  assert.ok(tool);
+  assert.deepEqual(tool.inputSchema, { type: 'object', properties: {}, additionalProperties: false });
+  assert.match(tool.description, /200/);
+  assert.match(tool.description, /address bar or browser_navigate starts a navigation/i);
+  assert.match(tool.description, /in-page links, reloads and form submissions do not clear/i);
+});
+
+test('browser_console dispatches to the actions and returns formatted text', async () => {
+  const result = await runBrowserTool(fakeActions([]), 'browser_console', {}, async () => false, new Set());
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(result.content, [{ type: 'text', text: EMPTY_CONSOLE_TEXT }]);
+});
+
+test('browser_console returns the buffer text the actions provide', async () => {
+  const actions: BrowserActions = {
+    ...fakeActions([]),
+    async console() {
+      return '[error] http://localhost:3000 [404]: HTTP 404 Not Found';
+    }
+  };
+  const result = await runBrowserTool(actions, 'browser_console', {}, async () => false, new Set());
+  assert.deepEqual(result.content, [{ type: 'text', text: '[error] http://localhost:3000 [404]: HTTP 404 Not Found' }]);
+});
+
+test('attachPageDiagnostics captures all events in order, detaches, and reattaches without duplicates', () => {
+  const buffer = new ConsoleBuffer();
+  const page = new FakePage();
+  const detach = attachPageDiagnostics(page, buffer);
+
+  page.emit('console', consoleMessage('one'));
+  page.emit('pageerror', { message: 'boom', stack: 'Error: boom\n    at handler (app.js:1:2)' });
+  page.emit('requestfailed', { url: () => 'http://localhost:3000/api', failure: () => ({ errorText: 'net::ERR_FAILED' }) });
+  page.emit('response', { url: () => 'http://localhost:3000/missing', status: () => 404, statusText: () => 'Not Found' });
+
+  assert.deepEqual(
+    buffer.entries().map((entry) => entry.level),
+    ['log', 'error', 'error', 'error']
+  );
+  assert.equal(buffer.size(), 4);
+
+  const beforeDetach = buffer.format();
+  detach();
+  page.emit('console', consoleMessage('after detach'));
+  assert.equal(buffer.format(), beforeDetach);
+
+  const detachAgain = attachPageDiagnostics(page, buffer);
+  page.emit('console', consoleMessage('reattached'));
+  assert.equal(buffer.size(), 5);
+  assert.equal(firstLineCount(buffer.format()), 5);
+  detachAgain();
+});
+
+test('navigatePage clears before goto and keeps entries emitted during the new load', async () => {
+  const buffer = new ConsoleBuffer();
+  const page = new FakePage();
+  attachPageDiagnostics(page, buffer);
+  buffer.push({ level: 'log', text: 'stale', url: 'http://localhost:3000/' });
+
+  let atGoto = '';
+  page.beforeGoto = () => {
+    atGoto = buffer.format();
+  };
+  const result = await navigatePage(page, buffer, 'http://localhost:3000/next');
+  assert.equal(atGoto, EMPTY_CONSOLE_TEXT);
+  assert.deepEqual(page.gotoCalls, ['http://localhost:3000/next']);
+  assert.deepEqual(result, { url: 'http://localhost:3000/next', title: 'Page' });
+
+  page.emit('console', consoleMessage('loaded'));
+  assert.match(buffer.format(), /loaded/);
+  assert.doesNotMatch(buffer.format(), /stale/);
+});
+
+test('open attaches diagnostics once per page and close removes them and clears the buffer', async () => {
+  const { module, browsers } = fakePlaywright();
+  const browserPage = new BrowserPage(module);
+
+  await browserPage.open(() => undefined);
+  const first = browsers[0]?.pages[0];
+  assert.ok(first);
+  assert.deepEqual(first.added, ['console', 'pageerror', 'requestfailed', 'response']);
+
+  first.emit('console', consoleMessage('first page'));
+  assert.equal(firstLineCount(browserPage.consoleText()), 1);
+
+  await browserPage.close();
+  assert.deepEqual(first.removed, ['console', 'pageerror', 'requestfailed', 'response']);
+  assert.equal(browserPage.consoleText(), EMPTY_CONSOLE_TEXT);
+  assert.equal(browsers[0]?.closed, true);
+  first.emit('console', consoleMessage('after close'));
+  assert.equal(browserPage.consoleText(), EMPTY_CONSOLE_TEXT);
+
+  await browserPage.open(() => undefined);
+  const second = browsers[1]?.pages[0];
+  assert.ok(second);
+  assert.deepEqual(second.added, ['console', 'pageerror', 'requestfailed', 'response']);
+  second.emit('console', consoleMessage('second page'));
+  assert.equal(firstLineCount(browserPage.consoleText()), 1);
+  assert.match(browserPage.consoleText(), /second page/);
+  await browserPage.close();
+});
+
+test('navigate clears before goto and keeps entries emitted afterwards', async () => {
+  const { module, browsers } = fakePlaywright();
+  const browserPage = new BrowserPage(module);
+  await browserPage.open(() => undefined);
+  const page = browsers[0]?.pages[0];
+  assert.ok(page);
+
+  page.emit('console', consoleMessage('before navigation'));
+  assert.match(browserPage.consoleText(), /before navigation/);
+
+  let atGoto = '';
+  page.beforeGoto = () => {
+    atGoto = browserPage.consoleText();
+  };
+  await browserPage.navigate('http://localhost:3000/next');
+  assert.equal(atGoto, EMPTY_CONSOLE_TEXT);
+  assert.deepEqual(page.gotoCalls, ['http://localhost:3000/next']);
+
+  page.emit('console', consoleMessage('after navigation'));
+  page.emit('response', { url: () => 'http://localhost:3000/next', status: () => 500 });
+  const text = browserPage.consoleText();
+  assert.match(text, /after navigation/);
+  assert.doesNotMatch(text, /before navigation/);
+  assert.match(text, /\[error\] http:\/\/localhost:3000\/next \[500\]: HTTP 500/);
+  await browserPage.close();
+});
+
+test('non-navigation actions do not clear buffered diagnostics', async () => {
+  const { module, browsers } = fakePlaywright();
+  const browserPage = new BrowserPage(module);
+  await browserPage.open(() => undefined);
+  const page = browsers[0]?.pages[0];
+  assert.ok(page);
+
+  page.emit('console', consoleMessage('kept'));
+  const before = browserPage.consoleText();
+  await browserPage.resize(900, 700);
+  await browserPage.snapshot();
+  await browserPage.click({ selector: '#save' });
+  await browserPage.click({ text: 'Save' });
+  await browserPage.click({ x: 10, y: 20 });
+  await browserPage.type('hello', '#name');
+  await browserPage.type('hello');
+  await browserPage.press('Enter');
+  await browserPage.press('a');
+  assert.equal(browserPage.consoleText(), before);
+  await browserPage.close();
+});
+
+function firstLineCount(text: string): number {
+  return text === EMPTY_CONSOLE_TEXT ? 0 : text.split('\n').length;
+}
+
+function consoleMessage(text: string): {
+  type: () => string;
+  text: () => string;
+  location: () => { url: string };
+} {
+  return {
+    type: () => 'log',
+    text: () => text,
+    location: () => ({ url: 'http://localhost:3000/' })
+  };
+}
+
+type PageEventName = 'console' | 'pageerror' | 'requestfailed' | 'response';
+
+class FakeCdp {
+  readonly sent: string[] = [];
+  detaches = 0;
+
+  async send(method: string): Promise<unknown> {
+    this.sent.push(method);
+    return undefined;
+  }
+
+  on(_event: 'Page.screencastFrame', _handler: (frame: { data: string; sessionId: number }) => void): void {
+    return undefined;
+  }
+
+  async detach(): Promise<void> {
+    this.detaches += 1;
+  }
+}
+
+class FakePage implements PlaywrightPage {
+  readonly added: PageEventName[] = [];
+  readonly removed: PageEventName[] = [];
+  readonly gotoCalls: string[] = [];
+  readonly cdp = new FakeCdp();
+  beforeGoto?: () => void;
+  private readonly handlers = new Map<PageEventName, Set<(value: unknown) => void>>();
+  private currentUrl = 'about:blank';
+  private size = { width: 1280, height: 800 };
+
+  on(event: PageEventName, handler: (value: unknown) => void): void {
+    this.added.push(event);
+    const handlers = this.handlers.get(event) ?? new Set<(value: unknown) => void>();
+    handlers.add(handler);
+    this.handlers.set(event, handlers);
+  }
+
+  off(event: PageEventName, handler: (value: unknown) => void): void {
+    this.removed.push(event);
+    this.handlers.get(event)?.delete(handler);
+  }
+
+  emit(event: PageEventName, value: unknown): void {
+    for (const handler of this.handlers.get(event) ?? []) {
+      handler(value);
+    }
+  }
+
+  async goto(url: string): Promise<unknown> {
+    this.gotoCalls.push(url);
+    this.beforeGoto?.();
+    this.currentUrl = url;
+    return undefined;
+  }
+
+  url(): string {
+    return this.currentUrl;
+  }
+
+  async title(): Promise<string> {
+    return 'Page';
+  }
+
+  async setViewportSize(size: { width: number; height: number }): Promise<void> {
+    this.size = size;
+  }
+
+  viewportSize(): { width: number; height: number } {
+    return this.size;
+  }
+
+  async screenshot(): Promise<Buffer> {
+    return Buffer.from('png');
+  }
+
+  locator(_selector: string): {
+    ariaSnapshot(): Promise<string>;
+    click(options: { timeout: number }): Promise<void>;
+  } {
+    return {
+      ariaSnapshot: async () => 'button "Save"',
+      click: async () => undefined
+    };
+  }
+
+  getByText(_text: string, _options: { exact: boolean }): { first(): { click(options: { timeout: number }): Promise<void> } } {
+    return { first: () => ({ click: async () => undefined }) };
+  }
+
+  readonly mouse = { click: async (_x: number, _y: number) => undefined };
+  readonly keyboard = {
+    type: async (_text: string) => undefined,
+    press: async (_key: string) => undefined,
+    insertText: async (_text: string) => undefined
+  };
+
+  context(): { newCDPSession(page: PlaywrightPage): Promise<FakeCdp> } {
+    return { newCDPSession: async () => this.cdp };
+  }
+}
+
+class FakeBrowser {
+  readonly pages: FakePage[] = [];
+  closed = false;
+
+  async newPage(): Promise<FakePage> {
+    const page = new FakePage();
+    this.pages.push(page);
+    return page;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+function fakePlaywright(): { module: PlaywrightModule; browsers: FakeBrowser[] } {
+  const browsers: FakeBrowser[] = [];
+  return {
+    browsers,
+    module: {
+      chromium: {
+        async launch() {
+          const browser = new FakeBrowser();
+          browsers.push(browser);
+          return browser;
+        }
+      }
+    }
+  };
+}
 
 function fakeActions(opened: string[]): BrowserActions {
   return {
@@ -148,6 +451,9 @@ function fakeActions(opened: string[]): BrowserActions {
     },
     async press() {
       return undefined;
+    },
+    async console() {
+      return new ConsoleBuffer().format();
     }
   };
 }
