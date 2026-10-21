@@ -316,7 +316,8 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\" \"tools/**/*.test.mjs\"",
+    "visual": "node tools/visual-harness/run.mjs",
     "schemas:generate": "codex app-server generate-ts --out ./schemas",
     "vscode:prepublish": "npm run build",
     "package": "vsce package"

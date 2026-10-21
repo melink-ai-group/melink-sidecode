@@ -1,0 +1,80 @@
+/*
+ * Fixed light theme for the visual harness.
+ *
+ * These are static approximations of VS Code's light workbench variables. They
+ * intentionally do not follow the host theme, so a screenshot does not change
+ * when the developer's editor theme changes. The brand tokens still come from
+ * `tokens.css`, which the webview stylesheet imports.
+ */
+:root {
+  color-scheme: light;
+
+  --vscode-font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --vscode-font-size: 13px;
+  --vscode-editor-font-family: Consolas, 'Courier New', monospace;
+  --vscode-editor-font-size: 13px;
+
+  --vscode-foreground: #1f2328;
+  --vscode-descriptionForeground: #616161;
+  --vscode-sideBar-background: #ffffff;
+  --vscode-sideBarSectionHeader-background: #f3f3f3;
+  --vscode-editorGroupHeader-tabsBackground: #f3f3f3;
+  --vscode-editor-background: #ffffff;
+  --vscode-editorWidget-background: #ffffff;
+  --vscode-editorWidget-border: #d4d4d4;
+  --vscode-panel-border: #e5e5e5;
+  --vscode-widget-border: #d4d4d4;
+  --vscode-widget-shadow: rgba(0, 0, 0, 0.16);
+
+  --vscode-input-background: #ffffff;
+  --vscode-input-foreground: #1f2328;
+  --vscode-input-border: #cecece;
+  --vscode-focusBorder: #0090f1;
+
+  --vscode-button-background: #005fb8;
+  --vscode-button-foreground: #ffffff;
+
+  --vscode-badge-background: #e4e6eb;
+  --vscode-badge-foreground: #1f2328;
+
+  --vscode-list-activeSelectionBackground: #e8f0fe;
+  --vscode-list-activeSelectionForeground: #1f2328;
+  --vscode-list-hoverBackground: #f2f2f2;
+
+  --vscode-tab-activeForeground: #1f2328;
+  --vscode-tab-inactiveForeground: #6e6e6e;
+  --vscode-toolbar-hoverBackground: #e8e8e8;
+  --vscode-textLink-foreground: #005fb8;
+  --vscode-textCodeBlock-background: #f6f8fa;
+
+  --vscode-scrollbarSlider-background: rgba(100, 100, 100, 0.4);
+  --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);
+  --vscode-progressBar-background: #005fb8;
+
+  --vscode-errorForeground: #b5200d;
+  --vscode-editorWarning-foreground: #bf8803;
+  --vscode-charts-blue: #005fb8;
+  --vscode-diffEditor-insertedTextBackground: rgba(155, 185, 85, 0.2);
+  --vscode-diffEditor-removedTextBackground: rgba(255, 0, 0, 0.2);
+
+  --vscode-gitDecoration-addedResourceForeground: #1a7f37;
+  --vscode-gitDecoration-deletedResourceForeground: #b5200d;
+  --vscode-gitDecoration-modifiedResourceForeground: #bf8803;
+  --vscode-gitDecoration-renamedResourceForeground: #007100;
+}
+
+html,
+body {
+  background: var(--vscode-sideBar-background);
+  color: var(--vscode-foreground);
+}
+
+/* Determinism: no animations, transitions, smooth scrolling or text caret. */
+*,
+*::before,
+*::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+  caret-color: transparent !important;
+}

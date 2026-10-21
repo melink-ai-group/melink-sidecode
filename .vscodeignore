@@ -17,3 +17,5 @@ DESIGN.md
 tokens.css
 docs/**
 schemas/**
+tools/**
+.melink/**
