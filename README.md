@@ -145,13 +145,24 @@ to launch an Extension Development Host. Other scripts:
 ```sh
 npm run typecheck  # tsc --noEmit
 npm run lint       # alias for typecheck
-npm test           # pure unit tests (node --experimental-strip-types)
+npm test           # node unit suite, then the jsdom/RTL webview suite
+npm run test:node  # node --experimental-strip-types --test "src/**/*.test.ts"
+npm run test:dom   # vitest run (src/webview/**/*.dom.test.tsx)
 ```
 
 `npm run typecheck` and `npm test` are the required quality gates. CI runs both
 on every pull request to `main` and again before a release; a failure blocks the
 release. Use Node **22.6+** (CI uses **22.12**) for these commands. Building and
 packaging only need Node **20+**.
+
+`npm test` runs both suites and exits non-zero if either one fails. The DOM
+suite mounts the real webview `App` in jsdom with Testing Library; it covers
+the composer, the replayed reasoning panel, select-to-collapse, and IME-safe
+Enter. It is host-free: `acquireVsCodeApi`, `ResizeObserver`,
+`window.getSelection`, scrolling, and `matchMedia` are stubbed in
+`src/webview/domSetup.ts`. jsdom has no editor host, layout, clipboard, or real
+IME, so these tests do not replace the manual VS Code pass in
+`docs/manual-test.md`.
 
 ## Set up a provider
 
