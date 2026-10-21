@@ -8,6 +8,10 @@ import type {
   TranscriptItem
 } from '../backends/types';
 import type { QuestionRequest } from '../questions';
+import type { HostToWebviewMessage } from '../protocol';
+
+/** A notice message without its discriminant, so a session can carry it. */
+export type NoticeView = Omit<Extract<HostToWebviewMessage, { type: 'notice' }>, 'type'>;
 
 /**
  * One sidebar chat tab. Fields that used to live once on the provider move here
@@ -60,6 +64,8 @@ export interface ChatSession {
   turnBusy: boolean;
   /** Notice that belongs to this tab and is shown again when the tab is reopened. */
   heldNotice?: { level: 'info' | 'warning' | 'error'; message: string };
+  /** A question notice held for a background tab until that tab is painted. */
+  questionNotice?: NoticeView;
   /**
    * The webview clears the composer as soon as Send is clicked. When that send
    * is refused, ignore the empty draft that is still in flight.

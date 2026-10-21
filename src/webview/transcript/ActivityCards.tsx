@@ -13,17 +13,15 @@ export const NarrationRow = memo(function NarrationRow({
   message,
   items,
   showSpeaker,
-  providerId,
-  hideQuestions
+  providerId
 }: {
   message: TranscriptItemView;
   items: TranscriptItemView[];
   showSpeaker: boolean;
   providerId: string;
-  hideQuestions?: boolean;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const text = plainRowText(visibleTranscriptText(message.text, { hideQuestions }));
+  const text = plainRowText(visibleTranscriptText(message.text));
   const running = items.some((item) => item.status === 'streaming' || item.status === 'pending') || message.status === 'streaming';
   return (
     <article className={`narration${expanded ? ' narration--open' : ''}`}>
@@ -71,7 +69,6 @@ export const NarrationRow = memo(function NarrationRow({
   prev.message === next.message &&
   prev.showSpeaker === next.showSpeaker &&
   prev.providerId === next.providerId &&
-  prev.hideQuestions === next.hideQuestions &&
   sameItems(prev.items, next.items)
 );
 

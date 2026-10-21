@@ -65,13 +65,13 @@ test('a tagged attached-file block is hidden even when the model echoes it', () 
   assert.equal(visibleTranscriptText(text), 'Here is the plan.');
 });
 
-test('plan and agent hide a question fence; ask leaves it as text', () => {
+test('every mode hides a question fence, including ask', () => {
   const text = 'Before the plan.\n```sidecode-question\n{"questions":[{"prompt":"Which?","options":["A","B"]}]}\n```';
-  assert.equal(visibleTranscriptText(text, { hideQuestions: true }), 'Before the plan.');
-  assert.match(visibleTranscriptText(text), /sidecode-question/);
+  assert.equal(visibleTranscriptText(text), 'Before the plan.');
+  assert.doesNotMatch(visibleTranscriptText(text), /sidecode-question/);
 });
 
-test('plan and agent hide a bare question payload and keep the sentence after it', () => {
+test('every mode hides a bare or malformed question payload and keeps the sentence after it', () => {
   const text = [
     'I have enough context to plan.',
     '',
@@ -80,10 +80,19 @@ test('plan and agent hide a bare question payload and keep the sentence after it
     'I need these answers before writing the plan.'
   ].join('\n');
   assert.equal(
-    visibleTranscriptText(text, { hideQuestions: true }),
+    visibleTranscriptText(text),
     'I have enough context to plan.\n\nI need these answers before writing the plan.'
   );
-  assert.match(visibleTranscriptText(text), /"questions"/);
+  assert.doesNotMatch(visibleTranscriptText(text), /"questions"/);
+  const malformed = 'Before.\n```sidecode-question\nnot json\n```\nAfter.';
+  assert.equal(visibleTranscriptText(malformed), 'Before.\n\nAfter.');
+  assert.equal(visibleTranscriptText('Before.\n{"questions":[]}\nAfter.'), 'Before.\n\nAfter.');
+  assert.equal(visibleTranscriptText('Before.\n{"questions": [}\nAfter.'), 'Before.\n\nAfter.');
+  assert.equal(visibleTranscriptText('Before.\n{"questions": [{"prompt":"Which?"'), 'Before.');
+  assert.equal(
+    visibleTranscriptText('Before. {"questions":[]} After.'),
+    'Before. {"questions":[]} After.'
+  );
 });
 
 test('a real answer that says "this file" is kept', () => {

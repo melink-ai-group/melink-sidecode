@@ -6,11 +6,30 @@
  * ranked suggestions, then a custom message the host always adds.
  */
 
+import type { NoticeAction } from './webview/state.ts';
+
 /** The third choice. The model does not supply it. */
 export const CUSTOM_OPTION_LABEL = 'Something else';
 
-/** Recorded when the user skips a question so a blocking request can finish. */
-export const SKIPPED_ANSWER = 'Skipped';
+/**
+ * Recorded when the user skips a question so a blocking request can finish.
+ * It is an instruction, not a decision: the model must not invent an answer.
+ */
+export const SKIPPED_ANSWER =
+  'Skipped \u2014 do not assume an answer; re-ask this question, or choose the least-destructive option and state the assumption.';
+
+/** The warning shown when a model's question payload is not valid JSON. */
+export const INVALID_QUESTION_MESSAGE =
+  'The agent sent a question in a format SideCode could not read. It was removed from the reply.';
+
+/** Ask mode answers only, so a question payload there is a no-op. */
+export const ASK_MODE_QUESTION_MESSAGE =
+  'Ask mode does not ask questions. Switch to Agent or Plan if you want the assistant to ask.';
+
+/** The turn sent when Retry is used on an unreadable question payload. */
+export function questionRetryInstruction(): string {
+  return 'Your previous question block could not be read. Re-ask the unanswered question using one valid JSON sidecode-question block, or ask it in plain text. Do not repeat work that is already done.';
+}
 
 export interface ClarifyingQuestion {
   id: string;
@@ -42,49 +61,109 @@ export interface QuestionAnswer {
 const MAX_OPTIONS = 6;
 
 const CLOSED_FENCE = /```([^\n`]*)\r?\n([\s\S]*?)```/g;
-const UNCLOSED_QUESTION_FENCE = /```[ \t]*(sidecode[-_ ]?questions?|questions?)[^\n]*\r?\n([\s\S]*)$/i;
-const QUESTION_OBJECT_START = /\{\s*"questions"\s*:/g;
+const QUESTION_FENCE_OPEN = /```[ \t]*(?:sidecode[-_ ]?questions?|questions?)[^\n`]*\r?\n/gi;
+const QUESTION_FENCE_TEXT = /```[ \t]*(?:sidecode[-_ ]?questions?|questions?)[^\n`]*/i;
+/**
+ * A bare payload is only recognised at the start of a line, outside a fence.
+ * JSON quoted inline in prose, or in a code sample, is not a question.
+ */
+const QUESTION_OBJECT_AT_LINE_START = /^[ \t]*\{\s*"questions"\s*:/gm;
+const QUESTION_BODY_START = /^\s*\{\s*"questions"\s*:/;
+const QUESTION_INFO = /^(?:sidecode[-_ ]?questions?|questions?)$/i;
+const JSON_INFO = /^(?:json|jsonc)$/i;
 
 interface QuestionSpan {
   start: number;
   end: number;
-  questions: ClarifyingQuestion[];
+  /** Undefined on an invalid span, which is removed but cannot be asked. */
+  questions?: ClarifyingQuestion[];
+  invalid?: boolean;
+}
+
+/** The warning and retry affordance for a question payload that would not parse. */
+export function invalidQuestionNotice(offerRetry = true): {
+  level: 'warning';
+  message: string;
+  action?: NoticeAction;
+} {
+  return offerRetry
+    ? { level: 'warning', message: INVALID_QUESTION_MESSAGE, action: 'retryQuestion' }
+    : { level: 'warning', message: INVALID_QUESTION_MESSAGE };
+}
+
+/** The non-blocking notice Ask mode shows when a reply carries a question. */
+export function askModeQuestionNotice(): { level: 'info'; message: string } {
+  return { level: 'info', message: ASK_MODE_QUESTION_MESSAGE };
 }
 
 /**
- * Pull a question payload out of an assistant reply and remove it.
- * Accepts a `sidecode-question` fence, the same JSON in another fence, and a
- * bare `{"questions":[...]}` object. The last payload is the one that is asked.
- * Invalid JSON is left in place. An empty result means there is nothing to ask.
+ * True when `text` carries a question payload, valid or malformed. Used by Ask
+ * mode to explain that it does not open a question card.
  */
-export function extractSidecodeQuestions(text: string): { text: string; questions?: ClarifyingQuestion[] } {
+export function containsQuestionPayload(text: string): boolean {
+  // A question-tagged fence counts even while its closing fence is still
+  // streaming. Everything else goes through the fence-aware span scan, so a
+  // code sample that merely contains the payload text is not a question.
+  return QUESTION_FENCE_TEXT.test(text) || findQuestionSpans(text).length > 0;
+}
+
+/**
+ * Pull every question payload out of an assistant reply and remove all of them,
+ * valid and invalid. Payloads keep source order; ids are reassigned `q1..` so
+ * two payloads cannot collide. A malformed question fence is removed and
+ * reported through `invalid`. An empty result means there is nothing to ask.
+ */
+export function extractSidecodeQuestions(text: string): {
+  text: string;
+  questions?: ClarifyingQuestion[];
+  invalid?: boolean;
+} {
   const spans = findQuestionSpans(text);
   if (spans.length === 0) {
     return { text };
   }
-  const questions = spans[spans.length - 1]?.questions ?? [];
+  const questions: ClarifyingQuestion[] = [];
+  let invalid = false;
+  for (const span of spans) {
+    if (span.invalid) {
+      invalid = true;
+      continue;
+    }
+    if (span.questions) {
+      questions.push(...span.questions);
+    }
+  }
   let stripped = text;
   for (const span of [...spans].reverse()) {
     stripped = stripped.slice(0, span.start) + stripped.slice(span.end);
   }
-  return {
-    text: stripped.replace(/\n{3,}/g, '\n\n').trim(),
-    questions: questions.map((question, index) => ({ ...question, id: question.id || `q${index + 1}` }))
+  const result: { text: string; questions?: ClarifyingQuestion[]; invalid?: boolean } = {
+    text: stripped.replace(/\n{3,}/g, '\n\n').trim()
   };
+  if (questions.length > 0) {
+    result.questions = questions.map((question, index) => ({ ...question, id: `q${index + 1}` }));
+  }
+  if (invalid) {
+    result.invalid = true;
+  }
+  return result;
 }
 
-/** Hide a question payload from the transcript while Plan or Agent is streaming it. */
+/**
+ * Hide every question payload from the transcript for every mode, including a
+ * malformed fence and a payload that is still streaming.
+ */
 export function hideQuestionFence(text: string): string {
-  const extracted = extractSidecodeQuestions(text);
-  let next = extracted.questions ? extracted.text : text;
-  next = next.replace(/```[ \t]*(?:sidecode[-_ ]?questions?|questions?)[^\n]*\r?\n[\s\S]*$/i, '');
+  let next = extractSidecodeQuestions(text).text;
+  next = next.replace(/```[ \t]*(?:sidecode[-_ ]?questions?|questions?)[^\n`]*[\s\S]*$/i, '');
   next = hideUnbalancedQuestionTail(next);
   return next.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /**
  * Every question payload in `text`, earliest first. A fence owns the JSON
- * inside it, so the same object is not reported twice.
+ * inside it, so the same object is not reported twice. Invalid question fences
+ * become spans too, so the malformed text is removed rather than shown.
  */
 function findQuestionSpans(text: string): QuestionSpan[] {
   const spans: QuestionSpan[] = [];
@@ -94,18 +173,24 @@ function findQuestionSpans(text: string): QuestionSpan[] {
     const start = match.index ?? 0;
     const end = start + match[0].length;
     fences.push([start, end]);
-    const questions = parseQuestionJson(match[2] ?? '');
+    const info = match[1] ?? '';
+    const body = match[2] ?? '';
+    const questions = parseQuestionJson(body);
     if (questions) {
       spans.push({ start, end, questions });
+    } else if (isQuestionInfo(info) || (isJsonInfo(info) && looksLikeQuestionPayload(body))) {
+      spans.push({ start, end, invalid: true });
     }
   }
-  const unclosed = findUnclosedQuestionFence(text);
-  if (unclosed && !spans.some((span) => spansOverlap(span, unclosed))) {
+  const unclosed = findUnclosedQuestionFence(text, fences);
+  if (unclosed) {
     spans.push(unclosed);
     fences.push([unclosed.start, unclosed.end]);
   }
-  for (const bare of findBareQuestionObjects(text)) {
-    const insideFence = fences.some(([start, end]) => bare.start >= start && bare.end <= end);
+  for (const bare of findBareQuestionSpans(text)) {
+    // An unbalanced candidate runs to the end of the text, so containment must
+    // be judged by where it starts, not where its (unfinished) span ends.
+    const insideFence = fences.some(([start, end]) => bare.start >= start && bare.start < end);
     if (insideFence || spans.some((span) => spansOverlap(span, bare))) {
       continue;
     }
@@ -115,38 +200,69 @@ function findQuestionSpans(text: string): QuestionSpan[] {
   return spans;
 }
 
-function findUnclosedQuestionFence(text: string): QuestionSpan | undefined {
-  const match = UNCLOSED_QUESTION_FENCE.exec(text);
-  if (!match || match.index === undefined) {
-    return undefined;
+/**
+ * A fence left open at the end of a streamed reply. A parseable payload keeps
+ * any prose after it; an unreadable body is removed to the end as invalid.
+ */
+function findUnclosedQuestionFence(text: string, fences: Array<[number, number]>): QuestionSpan | undefined {
+  QUESTION_FENCE_OPEN.lastIndex = 0;
+  for (const match of text.matchAll(QUESTION_FENCE_OPEN)) {
+    const start = match.index ?? 0;
+    if (fences.some(([fenceStart, fenceEnd]) => start >= fenceStart && start < fenceEnd)) {
+      continue;
+    }
+    const bodyStart = start + match[0].length;
+    const body = text.slice(bodyStart);
+    const inner = findBareQuestionObjects(body);
+    const last = inner[inner.length - 1];
+    if (last) {
+      return { start, end: bodyStart + last.end, questions: last.questions };
+    }
+    return { start, end: text.length, invalid: true };
   }
-  const body = match[2] ?? '';
-  const inner = findBareQuestionObjects(body);
-  const last = inner[inner.length - 1];
-  if (!last) {
-    return undefined;
-  }
-  const bodyStart = match.index + match[0].length - body.length;
-  return { start: match.index, end: bodyStart + last.end, questions: last.questions };
+  return undefined;
+}
+
+function isQuestionInfo(info: string): boolean {
+  return QUESTION_INFO.test(info.trim());
+}
+
+function isJsonInfo(info: string): boolean {
+  return JSON_INFO.test(info.trim());
+}
+
+function looksLikeQuestionPayload(body: string): boolean {
+  return QUESTION_BODY_START.test(body);
 }
 
 function findBareQuestionObjects(text: string): QuestionSpan[] {
+  return findBareQuestionSpans(text).filter((span) => span.questions !== undefined);
+}
+
+/**
+ * Every bare `{"questions":...}` candidate at a line start, earliest first. A
+ * balanced object that does not parse, or has no usable question, is still a
+ * payload: it is removed and flagged invalid. An unbalanced candidate owns the
+ * rest of the text, so a partial stream cannot leave raw JSON behind. Inline
+ * prose and fenced code samples are never candidates.
+ */
+function findBareQuestionSpans(text: string): QuestionSpan[] {
   const spans: QuestionSpan[] = [];
-  for (let index = 0; index < text.length; index += 1) {
-    if (text[index] !== '{') {
+  QUESTION_OBJECT_AT_LINE_START.lastIndex = 0;
+  for (const match of text.matchAll(QUESTION_OBJECT_AT_LINE_START)) {
+    const lineStart = match.index ?? 0;
+    const candidate = lineStart + match[0].indexOf('{');
+    if (spans.some((span) => candidate >= span.start && candidate < span.end)) {
       continue;
     }
-    const end = matchingBrace(text, index);
+    const end = matchingBrace(text, candidate);
     if (end < 0) {
-      continue;
+      spans.push({ start: lineStart, end: text.length, invalid: true });
+      break;
     }
-    const questions = parseQuestionJson(text.slice(index, end));
-    if (!questions) {
-      continue;
-    }
-    const [start, expandedEnd] = expandWrappingTicks(text, index, end);
-    spans.push({ start, end: expandedEnd, questions });
-    index = expandedEnd - 1;
+    const expandedEnd = expandWrappingTicks(text, candidate, end)[1];
+    const questions = parseQuestionJson(text.slice(candidate, end));
+    spans.push(questions ? { start: lineStart, end: expandedEnd, questions } : { start: lineStart, end: expandedEnd, invalid: true });
   }
   return spans;
 }
@@ -165,14 +281,31 @@ function expandWrappingTicks(text: string, start: number, end: number): [number,
 }
 
 function hideUnbalancedQuestionTail(text: string): string {
+  const fences = closedFenceRanges(text);
   let last = -1;
-  for (const match of text.matchAll(QUESTION_OBJECT_START)) {
-    last = match.index ?? last;
+  for (const match of text.matchAll(QUESTION_OBJECT_AT_LINE_START)) {
+    const candidate = (match.index ?? 0) + match[0].indexOf('{');
+    if (fences.some(([start, end]) => candidate >= start && candidate < end)) {
+      continue;
+    }
+    last = candidate;
   }
   if (last < 0 || matchingBrace(text, last) >= 0) {
     return text;
   }
-  return text.slice(0, last);
+  const lineStart = text.lastIndexOf('\n', last) + 1;
+  return text.slice(0, lineStart);
+}
+
+/** Every closed fence in `text`, as `[start, end)` offsets. */
+function closedFenceRanges(text: string): Array<[number, number]> {
+  const fences: Array<[number, number]> = [];
+  CLOSED_FENCE.lastIndex = 0;
+  for (const match of text.matchAll(CLOSED_FENCE)) {
+    const start = match.index ?? 0;
+    fences.push([start, start + match[0].length]);
+  }
+  return fences;
 }
 
 function matchingBrace(text: string, open: number): number {

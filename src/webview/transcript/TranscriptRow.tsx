@@ -8,7 +8,7 @@ import { AttachmentList, type ViewableImage } from '../composer/attachments';
 import { bridge } from '../hostBridge';
 import { noticeActionLabel } from '../notices';
 import type { CheckpointView } from '../../protocol';
-import type { TranscriptItemView } from '../state';
+import type { NoticeAction, TranscriptItemView } from '../state';
 import { ApprovalPrompt, ApprovalResolvedCard } from './ApprovalCards';
 import { ToolCard } from './ActivityCards';
 import { FileChangeCard } from './FileChangeCard';
@@ -19,7 +19,6 @@ export const TranscriptRow = memo(function TranscriptRow({
   item,
   providerId,
   showSpeaker,
-  hideQuestions,
   pendingId,
   checkpoint,
   onDecide,
@@ -32,8 +31,6 @@ export const TranscriptRow = memo(function TranscriptRow({
   providerId: string;
   /** The opening reply of a turn, and the closing one once that turn has settled. */
   showSpeaker?: boolean;
-  /** Plan and Agent hide a sidecode-question fence. Ask leaves it as text. */
-  hideQuestions?: boolean;
   pendingId?: string;
   /** The send-time snapshot for this message, when one was stored. */
   checkpoint?: CheckpointView;
@@ -41,7 +38,7 @@ export const TranscriptRow = memo(function TranscriptRow({
   onOpenRules: () => void;
   onRestore: (messageId: string) => void;
   onViewImage: (images: ViewableImage[], index: number) => void;
-  onNoticeAction: (action: 'setToken' | 'clearToken' | 'refresh' | 'retry', noticeText?: string) => void;
+  onNoticeAction: (action: NoticeAction, noticeText?: string) => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
     const text = visibleTranscriptText(item.text);
@@ -149,7 +146,7 @@ export const TranscriptRow = memo(function TranscriptRow({
   }
 
   // Assistant message: markdown output with a streaming caret.
-  const assistantText = visibleTranscriptText(item.text, { hideQuestions });
+  const assistantText = visibleTranscriptText(item.text);
   if (!assistantText && item.status !== 'failed') {
     return null;
   }
@@ -211,7 +208,6 @@ export const TranscriptRow = memo(function TranscriptRow({
   prev.item === next.item &&
   prev.providerId === next.providerId &&
   prev.showSpeaker === next.showSpeaker &&
-  prev.hideQuestions === next.hideQuestions &&
   prev.pendingId === next.pendingId &&
   prev.checkpoint === next.checkpoint
 );
