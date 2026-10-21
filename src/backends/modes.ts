@@ -21,6 +21,14 @@ import { DEFAULT_MODES, type DefaultMode, type PermissionLevel } from './types.t
  * used where it exists; native mode selection is not available and is not faked.
  */
 
+/**
+ * Version of the mode prompt text below (`developerInstructions`). Bump this
+ * whenever any mode prompt changes, so a local missed-issue entry records which
+ * prompt generation produced the behaviour. It is metadata only and is never
+ * sent anywhere.
+ */
+export const MODE_PROMPT_VERSION = '2026-10-21';
+
 /** Whether a mode forces the workspace read-only, whatever level was chosen. */
 export type ModeEnforcement = 'act' | 'read-only' | 'answer-only';
 

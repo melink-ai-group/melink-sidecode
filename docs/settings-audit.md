@@ -22,6 +22,7 @@ what actually consumes it (so no control is inert).
 | `melink.context.includeChangedFiles` | boolean, `true` | **Added by this ticket** — Context → Included by default | `contextSettings()` → `ProjectContext.getDelta`; off omits the changed-files notice |
 | `melink.context.maxBytes` | number, `20480` | **Added by this ticket** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
 | `melink.context.exclude` | array, *(empty)* | **Added by this ticket** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
+| `melink.telemetry.failureLog` | boolean, `false`, **application scope** | **Not on the screen** — VS Code Settings or the **SideCode: Record a missed issue locally** command | `createFailureLogHost()` / `recordFailureEntry()`; false keeps the command informational and touches no directory or file. Application scope means a workspace cannot opt in |
 
 ## Credentials
 

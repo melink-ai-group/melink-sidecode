@@ -6,6 +6,26 @@ import { VscodeProjectContext } from './context/vscodeHost';
 import { planStepMarkdownPlugin } from './planStepMarkdown';
 import { SidebarViewProvider } from './sidebarView';
 import { attachBrowserSkill, stopBrowserSkill, syncBrowserSkill, BrowserSkill } from './browser/skill';
+import { MODE_PROMPT_VERSION } from './backends/modes';
+import { createFailureLogHost } from './telemetry/failureLogHost';
+import {
+  FAILURE_LOG_ISSUE_CLASSES,
+  recordFailureEntry,
+  type FailureIssueClass
+} from './telemetry/failureLog';
+
+/** Plain labels for the closed missed-issue taxonomy. */
+const FAILURE_LOG_ISSUE_LABELS: Record<FailureIssueClass, string> = {
+  'missed-fe-detail': 'Missed a frontend detail',
+  'missed-requirement': 'Missed a requirement',
+  'wrong-command': 'Ran the wrong command',
+  'bad-decision': 'Made a bad decision',
+  'tool-misuse': 'Misused a tool',
+  other: 'Other'
+};
+
+const FAILURE_LOG_OFF_MESSAGE =
+  'The local missed-issue log is off. Turn on "melink.telemetry.failureLog" in Settings to save entries on this machine. Nothing is ever sent.';
 
 /**
  * The registry is referenced by `deactivate` as well as by the subscriptions, so
@@ -101,7 +121,70 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
     }),
     vscode.commands.registerCommand('melink.refreshContext', () => provider.refreshProjectContext()),
     vscode.commands.registerCommand('melink.refreshBackends', () => activeRegistry.refresh()),
-    vscode.commands.registerCommand('melink.openSettings', () => provider.openInlineSettings())
+    vscode.commands.registerCommand('melink.openSettings', () => provider.openInlineSettings()),
+    vscode.commands.registerCommand('melink.recordMissedIssue', async () => {
+      // Application scope, read from the user value only: a workspace setting
+      // can never opt the log in, even if one is written by hand.
+      const inspected = vscode.workspace
+        .getConfiguration('melink')
+        .inspect<boolean>('telemetry.failureLog');
+      const host = createFailureLogHost({
+        enabled: () => inspected?.globalValue === true,
+        globalStoragePath: context.globalStorageUri.fsPath,
+        now: () => new Date().toISOString()
+      });
+
+      if (!host.sink.enabled()) {
+        await vscode.window.showInformationMessage(FAILURE_LOG_OFF_MESSAGE);
+        return;
+      }
+
+      const picked = await vscode.window.showQuickPick(
+        FAILURE_LOG_ISSUE_CLASSES.map((issueClass) => ({
+          label: FAILURE_LOG_ISSUE_LABELS[issueClass],
+          issueClass
+        })),
+        { title: 'Record a missed issue', placeHolder: 'Which kind of miss was it?' }
+      );
+      if (!picked) {
+        return;
+      }
+
+      const summary = await vscode.window.showInputBox({
+        title: 'Record a missed issue',
+        prompt: 'One short summary. It stays on this machine; never paste code, prompts, or secrets.',
+        placeHolder: 'What did the agent miss?',
+        ignoreFocusOut: true,
+        validateInput: (value) => (value.trim() ? undefined : 'Enter a short summary.')
+      });
+      if (summary === undefined) {
+        return;
+      }
+
+      const identity = provider.failureLogIdentity();
+      const result = await recordFailureEntry(host.sink, {
+        issueClass: picked.issueClass,
+        modelId: identity.modelId,
+        providerId: identity.providerId,
+        promptVersion: MODE_PROMPT_VERSION,
+        summary
+      }).catch(() => undefined);
+      if (!result) {
+        await vscode.window.showErrorMessage('The local missed-issue entry could not be written.');
+        return;
+      }
+      if (!result.ok) {
+        if (result.reason === 'disabled') {
+          await vscode.window.showInformationMessage(FAILURE_LOG_OFF_MESSAGE);
+        } else {
+          await vscode.window.showWarningMessage(result.message ?? 'The entry was not saved.');
+        }
+        return;
+      }
+      await vscode.window.showInformationMessage(
+        `Saved locally to ${host.path}. Nothing was sent.`
+      );
+    })
   );
 
   void activeRegistry.refresh();
