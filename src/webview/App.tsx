@@ -2291,7 +2291,6 @@ export function App(): JSX.Element {
         onInstallZvecGrep={installZvecGrep}
       />
       </div>
-      <BusyCorner busy={backgroundBusy} overlay />
       </main>
     );
   }

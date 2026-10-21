@@ -3,7 +3,7 @@ import type { ApprovalDecision } from '../../backends/types';
 import { Markdown } from '../Markdown';
 import { splitReplyClose } from '../replyClose';
 import { visibleTranscriptText } from '../visibleTranscript';
-import { AlertIcon, CopyIcon, PersonIcon, RestoreIcon, StopIcon } from '../Icons';
+import { AlertIcon, CheckIcon, CopyIcon, PersonIcon, RestoreIcon, StopIcon } from '../Icons';
 import { AttachmentList, type ViewableImage } from '../composer/attachments';
 import { bridge } from '../hostBridge';
 import { noticeActionLabel } from '../notices';
@@ -103,11 +103,13 @@ export const TranscriptRow = memo(function TranscriptRow({
   }
 
   if (item.kind === 'notice' && item.detail === 'status') {
-    const tone = item.noticeLevel === 'error' ? 'error' : 'interrupted';
+    const level = item.noticeLevel ?? 'info';
+    const tone = level === 'error' ? 'error' : level === 'warning' ? 'interrupted' : 'ok';
+    const Icon = tone === 'ok' ? CheckIcon : AlertIcon;
     return (
-      <div className={`banner banner--${tone} banner--status`} role={tone === 'error' ? 'alert' : 'status'}>
+      <div className={`banner banner--${tone} banner--status`} role={level === 'error' ? 'alert' : 'status'}>
         <span className="banner-icon" aria-hidden="true">
-          <AlertIcon />
+          <Icon />
         </span>
         <p className="banner-text">{item.text}</p>
         {item.noticeAction ? (
