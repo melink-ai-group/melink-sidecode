@@ -68,7 +68,7 @@ function opencodePrompt(
   const context = request.context;
   const block = freshSession ? context?.snapshot ?? context?.notice : context?.delta ?? context?.notice;
   const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
-  const instructions = modeInstructions(mode);
+  const instructions = modeInstructions(mode, request.context?.frontendStack);
   const preface = !freshSession
     ? undefined
     : recovery?.trim()

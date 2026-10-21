@@ -9,7 +9,11 @@ import type {
   ViewedFileAttachment
 } from './projectContext.ts';
 
-function snapshot(files: string[] = ['src/index.ts'], selectionText: string | null = null): ProjectSnapshot {
+function snapshot(
+  files: string[] = ['src/index.ts'],
+  selectionText: string | null = null,
+  frameworks?: string
+): ProjectSnapshot {
   return {
     timestamp: 1_000,
     workspace: {
@@ -24,7 +28,10 @@ function snapshot(files: string[] = ['src/index.ts'], selectionText: string | nu
     shape: {
       languages: [{ language: 'TypeScript', files: files.length }],
       tree: [],
-      manifests: [],
+      manifests:
+        frameworks === undefined
+          ? []
+          : [{ path: 'package.json', kind: 'package.json', fields: { frameworks } }],
       files,
       totalFiles: files.length,
       languagesTruncated: false,
@@ -64,6 +71,8 @@ class FakeReads implements ProjectContextReads {
   includeSelection = true;
   /** A counter so a test can prove the snapshot was actually rebuilt. */
   snapshotReads = 0;
+  /** Frontend dependencies the fixture manifest reports. */
+  frameworks: string | undefined = 'react, react-dom';
   attachment?: ViewedFileAttachment;
 
   async viewedFileAttachment(): Promise<ViewedFileAttachment | undefined> {
@@ -76,7 +85,7 @@ class FakeReads implements ProjectContextReads {
       this.failNext = false;
       throw new Error('snapshot failed');
     }
-    return snapshot(this.files, this.includeSelection ? 'const secret = 1;' : null);
+    return snapshot(this.files, this.includeSelection ? 'const secret = 1;' : null, this.frameworks);
   }
 
   async getDelta(previous: ProjectSnapshot, current?: ProjectSnapshot): Promise<ProjectDelta> {
@@ -285,4 +294,43 @@ test('invalidateAll re-arms every thread and is safe when no thread is open', as
   assert.equal(b.priming, true);
   assert.doesNotMatch(a.snapshot!, /const secret = 1;/);
   assert.doesNotMatch(b.snapshot!, /const secret = 1;/);
+});
+
+test('the detected frontend stack rides on the prime, every delta turn, and refresh', async () => {
+  const reads = new FakeReads();
+  const delivery = new ContextDelivery({ reads });
+
+  const prime = await delivery.snapshot();
+  assert.equal(prime.payload.frontendStack, 'react');
+  delivery.begin('ollama:fe', prime, false);
+
+  const first = await delivery.forTurn('ollama:fe');
+  assert.equal(first.frontendStack, 'react');
+
+  reads.files = ['src/index.ts', 'src/new.ts'];
+  const deltaTurn = await delivery.forTurn('ollama:fe');
+  assert.ok(deltaTurn.delta);
+  assert.equal(deltaTurn.frontendStack, 'react');
+
+  const refreshed = await delivery.refresh('ollama:fe');
+  assert.equal(refreshed.frontendStack, 'react');
+
+  // An explicit non-frontend answer is `none`, not a missing field.
+  reads.frameworks = 'react-dom';
+  const noStack = await delivery.refresh('ollama:fe');
+  assert.equal(noStack.frontendStack, 'none');
+});
+
+test('no snapshot at all means no frontend stack', async () => {
+  const reads = new FakeReads();
+  reads.failNext = true;
+  const delivery = new ContextDelivery({ reads });
+
+  const prime = await delivery.snapshot();
+  assert.equal(prime.payload.frontendStack, undefined);
+
+  reads.failNext = true;
+  const turn = await delivery.forTurn('ollama:no-context');
+  assert.equal(turn.frontendStack, undefined);
+  assert.equal(turn.delta, undefined);
 });

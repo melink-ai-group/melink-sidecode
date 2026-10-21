@@ -908,6 +908,37 @@ const MANIFEST_KINDS: readonly string[] = [
 
 const ENTRY_POINT_DIRECTORIES: readonly string[] = ['src', 'app', 'cmd'];
 
+/**
+ * Frontend packages worth naming in the manifest summary. The list is fixed so
+ * the field is deterministic, and capped by its own length so a large
+ * dependency set cannot make the snapshot unbounded.
+ */
+const FRONTEND_DEPENDENCIES: readonly string[] = [
+  'next',
+  'react',
+  'react-dom',
+  'vue',
+  'nuxt',
+  'svelte',
+  '@sveltejs/kit',
+  '@angular/core',
+  'solid-js',
+  'preact'
+];
+
+/** Known frontend dependencies present in a package manifest's dependencies. */
+function frontendDependencies(parsed: Record<string, unknown>): string[] {
+  const declared = new Set<string>();
+  for (const group of [parsed.dependencies, parsed.devDependencies]) {
+    if (group && typeof group === 'object') {
+      for (const name of Object.keys(group as Record<string, unknown>)) {
+        declared.add(name.toLowerCase());
+      }
+    }
+  }
+  return FRONTEND_DEPENDENCIES.filter((name) => declared.has(name.toLowerCase()));
+}
+
 /** Hard depth bound for the walk, independent of the file-count budget. */
 const MAX_WALK_DEPTH = 6;
 
@@ -934,6 +965,12 @@ export function readManifestFields(path: string, text: string): Record<string, s
       const scripts = parsed.scripts;
       if (scripts && typeof scripts === 'object') {
         Object.assign(fields, scriptFields(scripts as Record<string, unknown>));
+      }
+      if (name === 'package.json') {
+        const frameworks = frontendDependencies(parsed);
+        if (frameworks.length > 0) {
+          fields.frameworks = frameworks.join(', ');
+        }
       }
       if (name === 'tsconfig.json' && typeof parsed.extends === 'string') {
         fields.extends = parsed.extends;

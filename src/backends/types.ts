@@ -7,6 +7,7 @@
  */
 
 import type { QuestionAnswer, QuestionRequest } from '../questions.ts';
+import type { FrontendStack } from '../context/frontendStack.ts';
 
 export type { ClarifyingQuestion, QuestionAnswer, QuestionRequest } from '../questions.ts';
 
@@ -224,6 +225,12 @@ export interface ContextPayload {
    * folder is open, in which case an adapter falls back to its own default.
    */
   workspaceRoot?: string;
+  /**
+   * The frontend stack detected from the raw snapshot, so acting modes can add
+   * the matching checklist. `none` is a real answer for a non-frontend project;
+   * absent means no snapshot was available at all.
+   */
+  frontendStack?: FrontendStack;
 }
 
 export interface StartThreadOptions {
