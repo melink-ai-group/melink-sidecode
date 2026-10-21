@@ -3,7 +3,6 @@ import test from 'node:test';
 import { mergeThreadRef } from './threadRef.ts';
 
 interface SampleRef {
-  backendId: string;
   threadId: string;
   title: string;
   mode?: 'agent';
@@ -14,13 +13,11 @@ interface SampleRef {
 
 test('refreshing a thread keeps the opencode session and a codex thread id', () => {
   const previous: SampleRef = {
-    backendId: 'ollama',
     threadId: 'thread_1',
     title: 'Hello',
     opencodeSessionId: 'ses_1'
   };
   const refreshed = mergeThreadRef(previous, {
-    backendId: 'ollama',
     threadId: 'thread_1',
     title: 'Hello again',
     mode: 'agent'
@@ -33,8 +30,8 @@ test('refreshing a thread keeps the opencode session and a codex thread id', () 
   assert.equal(omitted.opencodeSessionId, 'ses_1');
 
   const codex = mergeThreadRef<SampleRef>(
-    { backendId: 'codex', threadId: 'thr_codex', title: 'Old' },
-    { backendId: 'codex', threadId: 'thr_codex', title: 'New' }
+    { threadId: 'thr_codex', title: 'Old' },
+    { threadId: 'thr_codex', title: 'New' }
   );
   assert.equal(codex.threadId, 'thr_codex');
   assert.equal(codex.opencodeSessionId, undefined);
@@ -42,22 +39,20 @@ test('refreshing a thread keeps the opencode session and a codex thread id', () 
 
 test('refreshing a thread keeps the compaction handover', () => {
   const previous: SampleRef = {
-    backendId: 'codex',
     threadId: 'thr_codex',
     title: 'Hello',
     handoverSummary: 'Keep the plan.'
   };
   const refreshed = mergeThreadRef(previous, {
-    backendId: 'codex',
     threadId: 'thr_codex',
     title: 'Hello again'
   });
   assert.equal(refreshed.handoverSummary, 'Keep the plan.');
   assert.equal(refreshed.title, 'Hello again');
 
-  const carried = mergeThreadRef(
+  const carried = mergeThreadRef<SampleRef>(
     { ...refreshed, handoverHistoryCount: 4 },
-    { backendId: 'codex', threadId: 'thr_codex', title: 'Still going' }
+    { threadId: 'thr_codex', title: 'Still going' }
   );
   assert.equal(carried.handoverSummary, 'Keep the plan.');
   assert.equal(carried.handoverHistoryCount, 4);

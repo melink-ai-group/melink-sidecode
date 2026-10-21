@@ -107,13 +107,13 @@ export async function runOpencodeServerTurn(
     }
 
     const created = options.sessionId
-      ? { id: options.sessionId }
+      ? { ok: true as const, id: options.sessionId }
       : await createSession(baseUrl, options, env);
-    if (!created.id) {
+    if (!created.ok) {
       return {
         outcome: 'provider',
         terminal: false,
-        detail: created.detail ?? 'The opencode session could not be started.'
+        detail: created.detail
       };
     }
     const sessionId = created.id;
@@ -204,7 +204,7 @@ async function createSession(
   baseUrl: string,
   options: OpencodeRunOptions,
   env: NodeJS.ProcessEnv
-): Promise<{ id: string; detail?: undefined } | { id?: undefined; detail: string }> {
+): Promise<{ ok: true; id: string } | { ok: false; detail: string }> {
   let response: Response;
   try {
     response = await serverFetch(baseUrl, options.cwd, '/session', {
@@ -221,16 +221,20 @@ async function createSession(
     }, env);
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
-    return { detail: message ? `The opencode session could not be started. ${message}` : 'The opencode session could not be started.' };
+    return {
+      ok: false,
+      detail: message ? `The opencode session could not be started. ${message}` : 'The opencode session could not be started.'
+    };
   }
   const text = await response.text().catch(() => '');
   const id = response.ok ? sessionIdFromBody(text) : undefined;
   if (id) {
-    return { id };
+    return { ok: true, id };
   }
   const reason = serverErrorDetail(text);
   const status = response.ok ? '' : ` (HTTP ${response.status})`;
   return {
+    ok: false,
     detail: reason
       ? `The opencode session could not be started${status}. ${reason}`
       : `The opencode session could not be started${status}.`
