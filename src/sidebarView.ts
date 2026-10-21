@@ -102,6 +102,14 @@ import { WorkspaceChangeWatcher } from './changes/vscodeChanges';
 import { NativeDiffService, type NativeDiffResult } from './changes/vscodeDiff';
 import { OPEN_CHANGE_DIFF_COMMAND, OPEN_TURN_CHANGES_COMMAND } from './changes/nativeDiff';
 import { ChangeTracker, type TurnChangeSet } from './changes/tracker';
+import { CheckHost } from './review/checkHost.ts';
+import { decisionBlockReason } from './review/checkGate.ts';
+import {
+  VscodeCheckStore,
+  spawnShellCheck,
+  vscodeCheckWorkspace
+} from './review/vscodeCheckHost.ts';
+import { readWorkspaceCheckSettings } from './review/vscodeCheckSettings.ts';
 import type { VscodeProjectContext } from './context/vscodeHost';
 import type {
   HostToWebviewMessage,
@@ -224,6 +232,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private readonly reviewStore: ReviewStore;
   /**
+   * The post-turn check result store and runner. Checks are advisory evidence
+   * about a finished turn: they never reach a model and never decide a Keep.
+   */
+  private readonly checkStore: VscodeCheckStore;
+  private readonly checkHost: CheckHost;
+  /**
    * Per-message checkpoints over the journal's send-time snapshots. The store
    * reverts files. This view rewinds the transcript and the plans, and keeps
    * the undo point that puts them back.
@@ -291,6 +305,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // journal instance so a view read and a decision read agree on content.
     this.changeStore = new VscodeChangeStore(context, { artifacts: this.changeJournal });
     this.reviewStore = new ReviewStore(context.workspaceState);
+    this.checkStore = new VscodeCheckStore(context);
+    this.checkHost = new CheckHost({
+      store: this.checkStore,
+      readSettings: readWorkspaceCheckSettings,
+      ...vscodeCheckWorkspace(),
+      spawn: spawnShellCheck,
+      isKnownTurn: (backendId, threadId, turnId) => this.isKnownCheckTurn(backendId, threadId, turnId),
+      isActiveTurn: (backendId, threadId) => this.isActiveCheckTurn(backendId, threadId)
+    });
     // Checkpoints share the same journal and the decision store, so a restore
     // can invalidate a superseded decision and use the recorded before/after
     // bytes the review path already reads.
@@ -583,6 +606,28 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * True while a turn is still known to the host: either the journal recorded
+   * it, or it belongs to a conversation this view still has open. A background
+   * turn stays known, so its checks may finish and be stored without repainting
+   * the visible surface.
+   */
+  private isKnownCheckTurn(backendId: string, threadId: string, turnId: string): boolean {
+    const turn = this.changeJournal.getTurn(turnId);
+    if (turn && turn.backendId === backendId && turn.threadId === threadId) {
+      return true;
+    }
+    return [...this.sessions].some(
+      (session) =>
+        session.activeThread?.backendId === backendId && session.activeThread.threadId === threadId
+    );
+  }
+
+  /** True when this thread's turn is the one the visible review surface shows. */
+  private isActiveCheckTurn(backendId: string, threadId: string): boolean {
+    return this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId;
+  }
+
+  /**
    * Open the change boundary for a turn. The candidate set is seeded with the
    * paths a pre-turn snapshot is worth taking of: the files currently open in
    * editors, plus every file this thread's earlier turns touched, so a later
@@ -592,6 +637,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * turn end, so it never outlives one turn.
    */
   private beginChangeTurn(backendId: string, threadId: string, turnId: string): void {
+    void this.checkHost.cancelThread(backendId, threadId).catch(() => undefined);
     const pending = this.pendingTurnMessage;
     const messageId =
       pending && pending.backendId === backendId && pending.threadId === threadId ? pending.messageId : undefined;
@@ -659,6 +705,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const shouldReview = shouldRunDiffReview(this.diffReviewEnabled(), set.entries);
+    // Checks start only for a non-empty, closed change set. A background turn
+    // still stores its result; the runner decides whether the visible surface
+    // may be repainted.
+    this.startChangeChecks(set);
     // Only the active conversation's own turn is pushed: a background thread's
     // change set must not replace what the visible surface is showing. Its
     // review is still stored, so switching to that chat restores the findings.
@@ -702,6 +752,29 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       store: this.reviewStore,
       timeoutMs: DIFF_REVIEW_TIMEOUT_MS
     });
+  }
+
+  /**
+   * Offer post-turn checks for one finished change set. The runner stores a
+   * `running` view before spawning and a final view when it settles; the
+   * callback repaints through the existing review path only while this turn is
+   * still the visible one.
+   */
+  private startChangeChecks(set: TurnChangeSet): void {
+    if (set.entries.length === 0) {
+      return;
+    }
+    void this.checkHost
+      .startTurnChecks({
+        backendId: set.backendId,
+        threadId: set.threadId,
+        turnId: set.turnId,
+        hasChanges: true,
+        onUpdate: () => {
+          void this.postChangeReview(set.backendId, set.threadId, set.turnId);
+        }
+      })
+      .catch(() => undefined);
   }
 
   /**
@@ -755,11 +828,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const diffReview = this.diffReviewEnabled()
       ? this.reviewStore.get(backendId, threadId, turnId)
       : undefined;
+    const checks = this.checkStore.get(backendId, threadId, turnId);
     this.post({
       type: 'changes/review',
       review: {
         ...review,
         ...(diffReview === undefined ? {} : { diffReview }),
+        ...(checks ? { checks } : {}),
         files: review.files.map((file) =>
           file.hunks.length === 0
             ? file
@@ -798,7 +873,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     hunkId?: string;
     decision: 'accepted' | 'rejected';
     conflictResolution?: import('./changes/changeStore').ConflictResolution;
+    overrideChecks?: boolean;
   }): Promise<void> {
+    if (message.decision === 'accepted') {
+      const blocked = decisionBlockReason(
+        this.checkStore.get(message.backendId, message.threadId, message.turnId),
+        message.overrideChecks === true
+      );
+      if (blocked) {
+        const result: import('./changes/changeStore').ChangeDecisionResult = {
+          relPath: message.path,
+          decision: 'pending',
+          ok: false,
+          error: blocked
+        };
+        this.post({ type: 'changes/decisionResult', results: [result], message: blocked });
+        return;
+      }
+    }
     const result = await this.changeStore.decide({
       backendId: message.backendId,
       threadId: message.threadId,
@@ -824,7 +916,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     turnId: string;
     decision: 'accepted' | 'rejected';
     conflictResolution?: import('./changes/changeStore').ConflictResolution;
+    overrideChecks?: boolean;
   }): Promise<void> {
+    if (message.decision === 'accepted') {
+      const blocked = decisionBlockReason(
+        this.checkStore.get(message.backendId, message.threadId, message.turnId),
+        message.overrideChecks === true
+      );
+      if (blocked) {
+        const review = await this.changeStore.view(message.backendId, message.threadId, message.turnId);
+        const results: import('./changes/changeStore').ChangeDecisionResult[] = (review?.files ?? []).map(
+          (file) => ({ relPath: file.path, decision: 'pending', ok: false, error: blocked })
+        );
+        this.post({ type: 'changes/decisionResult', results, message: blocked });
+        return;
+      }
+    }
     const results = await this.changeStore.decideAll({
       backendId: message.backendId,
       threadId: message.threadId,
@@ -3446,6 +3553,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (this.session) {
       this.session.turnOpen = true;
     }
+    // A new user turn supersedes any check run still finishing for this thread.
+    void this.checkHost.cancelThread(activeBackendId, threadId).catch(() => undefined);
     try {
       await backend.sendTurn(
         { backendId: activeBackendId, threadId, model: resolvedModel },

@@ -258,6 +258,15 @@ settings (**SideCode: Open settings**).
 | `melink.context.includeChangedFiles` | `true` | Include the changed-files notice in the per-turn delta. |
 | `melink.context.maxBytes` | `20480` | Overall byte cap for a rendered snapshot. When it is reached, categories truncate in order: open editors, then instruction documents, then the tree. |
 | `melink.context.exclude` | *(empty)* | Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. |
+| `melink.review.checks.enabled` | `true` | Run post-turn checks after a turn that changed files. Off skips them entirely; an untrusted workspace is always skipped. |
+| `melink.review.checks.commands` | *(empty)* | Explicit commands to run. Empty means auto-detect `typecheck` (falling back to `lint`) and `test` from `package.json`; an explicitly saved empty list turns checks off. |
+| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5–600. A timed-out check is killed and reported as timed out. |
+
+The `melink.review.checks.*` values are read directly by the post-turn check host.
+The inline settings screen does not yet expose controls for them. The review
+panel's collapsed header shows the run summary and expanding it lists one row per
+check with its status word, duration, and any bounded failure detail or skipped
+reason.
 
 The same settings are reachable from the in-product **settings screen**
 (gear icon in the title bar), which opens inline in the sidebar rather than as a
@@ -378,6 +387,9 @@ read when a conversation starts, so they take effect on the next conversation.
 
 | Configuration key / credential | Default | On the settings screen |
 |---|---|---|
+| `melink.review.checks.enabled` | `true` | Not yet on the screen - read by the post-turn check host |
+| `melink.review.checks.commands` | *(empty)* | Not yet on the screen - explicit commands; empty means auto-detect |
+| `melink.review.checks.timeoutSeconds` | `120` | Not yet on the screen - per-check timeout, clamped 5-600 |
 | `melink.ollama.baseUrl` | `https://ollama.com` | Providers → Ollama Cloud → Base URL |
 | `melink.ollama.defaultModel` | *(empty)* | Defaults → Default model |
 | `melink.codex.path` | `codex` | Providers → Codex → Codex CLI path |
@@ -592,6 +604,38 @@ never decides anything for you. A decision is only made when you click:
 Keep is not undoable from the panel; Reject overwrites what was on disk, so undo
 it with your own tooling (for example `git checkout -- <path>`) if you reject by
 mistake.
+
+### Post-turn checks
+
+After a turn that changed files is recorded, SideCode can run the project's own
+checks before you keep it. Checks are **advisory evidence**, not an automatic
+decision:
+
+- **Default detection.** With `melink.review.checks.commands` unset, SideCode
+  reads `package.json` and runs `typecheck` when present (otherwise `lint`), then
+  `test`. Each command is `<packageManager> run <script>`, using the manifest's
+  `packageManager` (for example `pnpm@9`) and falling back to `npm`. An explicit
+  empty list turns checks off; a non-empty list runs those commands verbatim.
+- **Trust.** Checks run only when the workspace is **trusted**. An untrusted
+  workspace stores and shows *"Checks skipped: workspace is untrusted."* and
+  spawns no process, regardless of settings.
+- **One run at a time.** A new turn, or a new message in the same conversation,
+  supersedes the previous run: the old child is killed and its late output is
+  ignored. A run left in progress when the window reloads becomes **skipped**
+  with the reason *"Checks were interrupted when the window reloaded."* rather
+  than a spinner that never stops.
+- **Bounded output.** Each stream is capped at 64 KiB as it arrives, and the
+  stored result keeps only the last 4,000 characters with a leading `…`. Check
+  output is shown only in the review surface: it is never sent to a model or
+  provider and is never logged.
+- **Keep gating.** While checks are **running**, Keep and Keep all are disabled.
+  If any check **failed**, **timed out**, or **errored**, Keep opens a
+  confirmation that names the failed check and says it will be bypassed; only
+  confirming sends `overrideChecks: true`. Override is a deliberate user action,
+  never automatic. Reject is never gated, so you can always undo a turn even
+  when its checks are red.
+- **No auto-keep.** A green run does not keep anything; the panel still waits for
+  your decision.
 
 ### Conflicts
 

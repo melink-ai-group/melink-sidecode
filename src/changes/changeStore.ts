@@ -1,5 +1,6 @@
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import type { DiffReviewResult } from '../review/diffReview.ts';
+import type { CheckRunView } from '../review/checks.ts';
 import { filterListedFiles, listedForReview, reviewSources, workspaceRootOf } from './ignore.ts';
 import { relPathKey, type JournalFileEntry, type JournalStorage, type JournalTurn } from './journal.ts';
 import { applyRejectedHunks, diffLines, type DiffLine } from './diff.ts';
@@ -105,6 +106,8 @@ export interface ChangeView {
    * only actions, and a failed review is represented here as a notice.
    */
   diffReview?: DiffReviewResult;
+  /** The post-turn check run attached by the host, when one exists. */
+  checks?: CheckRunView;
 }
 
 /** A decision request for one file, or one hunk when `hunkId` is set. */
