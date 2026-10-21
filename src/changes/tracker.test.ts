@@ -61,7 +61,7 @@ test('a reported edit is recorded with source reported and the right relPath', a
   fs.files.set('/ws/a.ts', text('one'));
   const change = tracker(fs);
 
-  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1', candidates: ['/ws/a.ts'] });
   fs.files.set('/ws/a.ts', text('two'));
   change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }]);
   const set = await change.endTurn();
@@ -89,7 +89,7 @@ test('a watched modify of a snapshotted file is recorded when the bytes change',
   assert.equal(set.entries[0].status, 'modified');
 });
 
-test('a watched modify with no pre-turn snapshot is still listed', async () => {
+test('a watched modify with no pre-turn snapshot is hidden', async () => {
   const fs = new FakeFs();
   fs.files.set('/ws/readme.md', text('hello'));
   const change = tracker(fs);
@@ -100,9 +100,8 @@ test('a watched modify with no pre-turn snapshot is still listed', async () => {
   const set = await change.endTurn();
 
   assert.ok(set, 'the turn was observed');
-  assert.equal(set.entries.length, 1);
-  assert.equal(set.entries[0].path, 'readme.md');
-  assert.equal(set.entries[0].status, 'modified');
+  assert.deepEqual(set.entries, []);
+  assert.deepEqual((await change.sessionFor('thr'))?.entries, []);
 });
 
 test('build output is not attributed to the turn', async () => {
@@ -113,7 +112,7 @@ test('build output is not attributed to the turn', async () => {
   fs.files.set('/ws/frontend/dist/assets/index.js', text('bundle'));
   fs.files.set('/ws/frontend/src/Card.tsx', text('export function Card() {}'));
   change.watch('/ws/frontend/dist/assets/index.js', 'created');
-  change.watch('/ws/frontend/src/Card.tsx', 'modified');
+  change.watch('/ws/frontend/src/Card.tsx', 'created');
   const set = await change.endTurn();
 
   assert.ok(set);
@@ -245,7 +244,7 @@ test('a reported source wins over a watched one for the same path', async () => 
   fs.files.set('/ws/a.ts', text('one'));
   const change = tracker(fs);
 
-  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1', candidates: ['/ws/a.ts'] });
   change.watch('/ws/a.ts', 'modified');
   fs.files.set('/ws/a.ts', text('two'));
   change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }]);
@@ -364,7 +363,7 @@ test('latestFor returns the recorded set for a reload and skips unobserved turns
   fs.files.set('/ws/a.ts', text('one'));
   const change = tracker(fs);
 
-  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1' });
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 't1', candidates: ['/ws/a.ts'] });
   fs.files.set('/ws/a.ts', text('two'));
   change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }]);
   await change.endTurn();

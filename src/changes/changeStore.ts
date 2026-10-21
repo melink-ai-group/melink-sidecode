@@ -548,13 +548,7 @@ export class ChangeStore {
       (entry.hasBefore ? entry.beforeHash !== undefined : true) &&
       (entry.hasAfter ? entry.afterHash !== undefined : true);
 
-    // A modification with no stored before side used to diff the finished file
-    // against empty content, so every unchanged line reviewed as an addition.
-    const missingBaseline = !entry.hasBefore && entry.status !== 'created';
-    if (missingBaseline) {
-      detail = 'No pre-change snapshot was recorded, so unchanged lines are not shown as additions.';
-      diffable = entry.inlineable && !entry.binary;
-    } else if (canDiff) {
+    if (canDiff) {
       const before = await this.readSide(turnId, entry, 'before');
       const after = await this.readSide(turnId, entry, 'after');
       if ((entry.hasBefore ? before !== undefined : true) && (entry.hasAfter ? after !== undefined : true)) {

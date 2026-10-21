@@ -565,8 +565,23 @@ test('undoing one turn restores that turn baseline and leaves earlier steps alon
   assert.ok(earlier?.files.some((file) => file.path === 'a.ts'));
 });
 
-test('an unknown turn has no view', async () => {
+test('unknown turns and unchanged OpenCode reports without a baseline have no review rows', async () => {
   const fs = new FakeFs();
-  const store = new ChangeStore({ storage: storage(), fs, artifacts: new ChangeJournal({ storage: storage(), fs }), now: () => 1_000 });
-  assert.equal(await store.view('codex', 'thr', 'missing'), undefined);
+  const saved = storage();
+  fs.files.set('/ws/a.ts', text('unchanged\n'));
+  const journal = new ChangeJournal({ storage: saved, fs });
+  await journal.beginTurn({ turnId: 't1', threadId: 'thr', backendId: 'opencode' });
+  await journal.observe('t1', '/ws/a.ts', 'reported', 'modified');
+  await journal.endTurn('t1');
+  assert.equal(journal.getTurn('t1')?.files[0].hasBefore, false);
+
+  for (const artifacts of [journal, new ChangeJournal({ storage: saved, fs })]) {
+    const store = new ChangeStore({ storage: storage(), fs, artifacts });
+    const view = await store.view('opencode', 'thr', 't1');
+    assert.deepEqual(view?.files, []);
+    assert.equal(view?.additions, 0);
+    assert.equal(view?.deletions, 0);
+    assert.equal(await store.view('opencode', 'thr', 'missing'), undefined);
+  }
+  assert.equal(fs.writes, 0);
 });
