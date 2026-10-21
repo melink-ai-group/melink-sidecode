@@ -36,6 +36,26 @@ history sits to the left of the primary **+** new-chat button, which is the
 rightmost control. History is a searchable list (title and model) that still
 shows Busy and Unread. Drag a tab to reorder it.
 
+## Install the matching platform package
+
+GitHub Releases publishes one VSIX per supported OS and architecture:
+
+| Release asset | Platform |
+|---|---|
+| `melink-sidecode-<version>-win32-x64.vsix` | Windows x64 |
+| `melink-sidecode-<version>-linux-x64.vsix` | Linux x64 |
+| `melink-sidecode-<version>-darwin-x64.vsix` | macOS Intel (x64) |
+| `melink-sidecode-<version>-darwin-arm64.vsix` | macOS Apple Silicon (arm64) |
+
+Download and install the file that matches the machine running VS Code. Open VSX
+hosts publish through their own channels and do not offer these per-platform
+release assets. The platform-specific dictation binaries (`ffmpeg` and the ONNX
+Whisper runtime) are staged into `dist/` at build time from that same platform,
+so no native binary is downloaded at first run. (The Whisper speech model itself
+is downloaded once and cached.) A VSIX for another OS/architecture still
+opens the sidebar but cannot run dictation. macOS arm64 is supported; Windows
+arm64 and Linux arm64 are not published.
+
 ## Providers
 
 The sidebar can talk to two providers, independently:

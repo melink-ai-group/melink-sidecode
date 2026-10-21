@@ -94,6 +94,29 @@ settings below.
      file.
 3. Reload the window when prompted.
 
+### Release assets by platform
+
+A release publishes one VSIX per supported OS and architecture. Pick the file
+that matches the machine that will run SideCode:
+
+| Release asset | Platform |
+|---|---|
+| `melink-sidecode-<version>-win32-x64.vsix` | Windows x64 |
+| `melink-sidecode-<version>-linux-x64.vsix` | Linux x64 |
+| `melink-sidecode-<version>-darwin-x64.vsix` | macOS Intel (x64) |
+| `melink-sidecode-<version>-darwin-arm64.vsix` | macOS Apple Silicon (arm64) |
+
+Dictation (the microphone button) needs `ffmpeg` and the ONNX Whisper runtime for
+the host platform. Both are staged into `dist/` **at build time from the matching
+build host**, so no native binary is downloaded on first run. (The Whisper
+speech model itself is downloaded once and cached.) Install the asset for your
+OS/architecture: the wrong one can still load the sidebar but cannot run
+dictation.
+
+macOS arm64 (`darwin-arm64`) is supported and built on a macOS 14 arm64 runner.
+Windows arm64 and Linux arm64 are not published; use the x64 asset under
+emulation or build locally from source.
+
 ### Build from source
 
 ```sh
@@ -108,6 +131,12 @@ with:
 ```sh
 npm run package   # produces melink-sidecode-0.2.0.vsix
 ```
+
+`npm run package` still packages for the current host under the default name. For
+a release-style, platform-named package, run `npm run build` and
+`npm run verify:dictation` first, then run
+`npm run package-platform -- --target <win32-x64|linux-x64|darwin-x64|darwin-arm64>`;
+it writes `melink-sidecode-<version>-<target>.vsix`.
 
 Then install the `.vsix` as in Option A.
 
