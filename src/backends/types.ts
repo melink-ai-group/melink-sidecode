@@ -707,10 +707,26 @@ export interface ApprovalRule {
   /** Human-readable scope: exactly what the rule allows. */
   scope: string;
   /**
-   * Command-prefix tokens the rule allows (native exec-policy `prefix_rule`
-   * shape). Empty or absent for a non-command rule.
+   * Native exec-policy `prefix_rule` token shape, recorded for compatibility
+   * with the CLI. Matching uses `commandFamily`; empty or absent for a
+   * non-command rule.
    */
   commandPrefix?: string[];
+  /**
+   * Normalized command family (program + leading non-flag tokens) this rule
+   * matches. A rule with no family is a legacy rule and never matches.
+   */
+  commandFamily?: string[];
+  /**
+   * True when `commandFamily` is the exact token list of an unclassifiable or
+   * composed command, so it only matches that exact token list.
+   */
+  commandExact?: boolean;
+  /**
+   * Whether the recorded git command is a write. A read-only git rule never
+   * matches a write request.
+   */
+  gitWrite?: boolean;
   /** File roots the rule allows writes under, for a `file-change` rule. */
   paths?: string[];
   /** Host the rule allows network access to, for a permissions rule. */
