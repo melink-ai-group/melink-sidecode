@@ -4166,7 +4166,7 @@ function ApprovalPrompt({
 
         {request?.command ? (
           <pre className="codeblock" aria-label="Command the agent wants to run">
-            {request.command}
+            {request.displayCommand ?? request.command}
           </pre>
         ) : null}
 
@@ -4379,8 +4379,10 @@ function StatusMark({
 /** A short, honest label for what a settled approval concerned. */
 function describeApprovalSubject(request: ApprovalRequest): string {
   switch (request.kind) {
-    case 'command':
-      return request.command ? prettyPath(request.command) : 'a command';
+    case 'command': {
+      const command = request.displayCommand ?? request.command;
+      return command ? prettyPath(command) : 'a command';
+    }
     case 'file-change': {
       const paths = request.paths ?? [];
       if (paths.length === 0) {

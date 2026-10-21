@@ -4,6 +4,7 @@ import { createId, Emitter } from './base';
 import { OPENCODE_ZEN_TOKEN_SECRET_KEY } from './secrets';
 import { ThreadStore } from './threadStore';
 import { describeApproval, ruleFor, ruleScopeFor } from './approvals';
+import { safeModeDecision, storedRuleUnlessAsk } from './safeMode.ts';
 import { ApprovalStore } from './approvalStore';
 import { APPROVAL_TIMEOUT_REASON, awaitUserDecision } from './approvalWait';
 import { approvalFromOpencode, opencodeReplyFor, type OpencodePermissionAsk } from './opencode/approval';
@@ -680,7 +681,18 @@ export class OpencodeBackend implements AgentBackend {
     signal: AbortSignal
   ): Promise<'once' | 'always' | 'reject'> {
     const request = approvalFromOpencode(ask, this.cwd);
-    const matched = this.approvals?.match(this.id, threadId, request);
+    // Safety precedes stored rules: a destructive command must not be answered
+    // by a broad first-token rule. `block` refuses before a card exists; `ask`
+    // skips the rule lookup and forces the user decision with the risk reason.
+    const safety = safeModeDecision(request);
+    if (safety.action === 'block') {
+      this.publishRefusal(threadId, request, safety.reason);
+      return Promise.resolve('reject');
+    }
+    if (safety.action === 'ask') {
+      request.reason = safety.reason;
+    }
+    const matched = storedRuleUnlessAsk(safety, () => this.approvals?.match(this.id, threadId, request));
     if (matched) {
       const decision: ApprovalDecision = matched.scope === 'session' ? 'allow-session' : 'allow-always';
       this.events.fire({

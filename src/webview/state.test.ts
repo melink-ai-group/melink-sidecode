@@ -7,6 +7,7 @@ import {
   initialState,
   pendingApproval,
   reduce,
+  requestMessage,
   visibleModeSnapshot,
   type AppState
 } from './state.ts';
@@ -32,6 +33,58 @@ test('each decision maps to a scope sentence that names how long it lasts', () =
   assert.equal(decisionLabel('allow-session'), 'Allowed for this session');
   assert.equal(decisionLabel('reject'), 'Rejected');
   assert.match(decisionMessage('reject'), /denied/i);
+});
+
+test('a denied notice shows the backend reason and only says the agent was told denied', () => {
+  const state = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 'thread_1', replay: [] });
+  const denied = reduce(state, {
+    type: 'agentEvent',
+    event: {
+      type: 'approval/denied',
+      backendId: 'codex',
+      threadId: 'thread_1',
+      requestId: 'req_1',
+      subject: 'rm -rf /tmp/build',
+      reason: 'Blocked recursive delete: rm -rf /tmp/build'
+    }
+  });
+  const notice = denied.transcript[denied.transcript.length - 1];
+  assert.match(notice.text, /rm -rf \/tmp\/build/);
+  assert.match(notice.text, /Blocked recursive delete/);
+  assert.match(notice.text, /agent was told it was denied/i);
+});
+
+test('the pending card and denied notice never fall back to the raw command', () => {
+  const raw = 'mysql -uroot -psecret -e "DROP DATABASE app"';
+  const requestWithDisplay = request({
+    command: raw,
+    displayCommand: 'mysql -uroot -p<redacted> -e "DROP DATABASE app"'
+  });
+  const card = requestMessage(requestWithDisplay);
+  assert.equal(card.includes('secret'), false);
+  assert.match(card, /<redacted>/);
+
+  const state = reduce(initialState, {
+    type: 'conversation',
+    backendId: 'codex',
+    threadId: 'thread_1',
+    replay: [{ id: 'req_1', kind: 'approval-requested', approval: requestWithDisplay, text: card, status: 'pending' }]
+  });
+  const denied = reduce(state, {
+    type: 'agentEvent',
+    event: {
+      type: 'approval/denied',
+      backendId: 'codex',
+      threadId: 'thread_1',
+      requestId: 'req_1',
+      subject: raw,
+      reason: 'Blocked database drop: mysql -uroot -p<redacted> -e "DROP DATABASE app"'
+    }
+  });
+  const notice = denied.transcript[denied.transcript.length - 1];
+  assert.equal(notice.text.includes('secret'), false);
+  assert.equal(notice.text.includes(raw), false);
+  assert.match(notice.text, /<redacted>/);
 });
 
 test('a reload repaints exactly one pending prompt for the open request', () => {

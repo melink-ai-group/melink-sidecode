@@ -205,9 +205,11 @@ export function opencodePermission(
       return { edit: 'allow', write: 'allow', patch: 'allow', bash: 'allow', external_directory: 'allow' };
     case 'default':
     default:
-      // Ordinary workspace work is allowed. Leaving the project directory still
-      // asks. Only `unrestricted` also allows `external_directory`.
-      return { edit: 'allow', write: 'allow', patch: 'allow', bash: 'allow', external_directory: 'ask' };
+      // Edits stay ordinary workspace work, but a shell command always asks so
+      // the host's destructive-command classifier and the approval card get a
+      // chance to see it. Leaving the project directory asks too. Only
+      // `unrestricted` allows bash without an approval path.
+      return { edit: 'allow', write: 'allow', patch: 'allow', bash: 'ask', external_directory: 'ask' };
   }
 }
 

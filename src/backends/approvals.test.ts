@@ -150,6 +150,15 @@ test('the session key is per backend and per thread, so scopes cannot leak', () 
 test('describeApproval names the command or path scope it actually covers', () => {
   assert.equal(describeApproval(commandRequest({ command: 'ls' })), 'ls');
   assert.equal(describeApproval(commandRequest({ command: undefined })), 'a command');
+  assert.equal(
+    describeApproval(
+      commandRequest({
+        command: 'mysql -uroot -psecret -e "DROP DATABASE app"',
+        displayCommand: 'mysql -uroot -p<redacted> -e "DROP DATABASE app"'
+      })
+    ),
+    'mysql -uroot -p<redacted> -e "DROP DATABASE app"'
+  );
   assert.equal(describeApproval({ id: 'r', kind: 'file-change', method: 'x', paths: ['/a'] }), 'writes under /a');
   assert.equal(
     describeApproval({ id: 'r', kind: 'file-change', method: 'x', paths: ['/a', '/b'] }),

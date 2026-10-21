@@ -54,7 +54,7 @@ test('ask denies edit/write/patch/bash whatever level was picked', () => {
   }
 });
 
-test('default auto-allows workspace edits and commands, and still asks to leave the project', () => {
+test('default auto-allows workspace edits, asks before bash, and still asks to leave the project', () => {
   assert.deepEqual(opencodePermission('read-only', 'agent'), {
     edit: 'deny',
     write: 'deny',
@@ -65,7 +65,7 @@ test('default auto-allows workspace edits and commands, and still asks to leave 
     edit: 'allow',
     write: 'allow',
     patch: 'allow',
-    bash: 'allow',
+    bash: 'ask',
     external_directory: 'ask'
   });
   const unrestricted = opencodePermission('unrestricted', 'agent');
@@ -234,7 +234,7 @@ test('ask mode defines a read-only agent and plan mode follows the selected perm
     edit: 'allow',
     write: 'allow',
     patch: 'allow',
-    bash: 'allow',
+    bash: 'ask',
     external_directory: 'ask'
   });
 

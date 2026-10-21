@@ -16,8 +16,9 @@ import type {
 export function describeApproval(request: ApprovalRequest): string {
   switch (request.kind) {
     case 'command': {
-      if (request.command) {
-        return request.command;
+      const command = request.displayCommand ?? request.command;
+      if (command) {
+        return command;
       }
       return 'a command';
     }
