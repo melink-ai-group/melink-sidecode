@@ -8,8 +8,14 @@ import {
   zvecGrepOpencodeServer,
   type OpencodeLocalMcpServer
 } from './opencodeMcp.ts';
-import { readAstGrepCliSource, resolveAstGrepExecutable } from '../backends/astGrep/resolve.ts';
-import { readZvecGrepCliSource, resolveZvecGrepExecutable } from '../backends/zvecGrep/resolve.ts';
+import { resolveAstGrepExecutable } from '../backends/astGrep/resolve.ts';
+import { resolveZvecGrepExecutable } from '../backends/zvecGrep/resolve.ts';
+import {
+  readTrustedAstGrepCliSource,
+  readTrustedAstGrepPath,
+  readTrustedZvecGrepCliSource,
+  readTrustedZvecGrepPath
+} from '../config/settings.ts';
 import { SKILLS_SECTION } from '../settingsKeys';
 
 const LEGACY_ZVEC = 'melink.ollama.opencode.zvecGrep';
@@ -43,15 +49,17 @@ export async function skillMcpForOpencodeTurn(options: {
   let astServer: OpencodeLocalMcpServer | undefined;
 
   if (zvecEnabled) {
-    const source = readZvecGrepCliSource(config.get<unknown>(`${SKILLS_SECTION}.zvecGrep.cliSource`));
-    const path = config.get<string>(`${SKILLS_SECTION}.zvecGrep.path`, 'zg') || 'zg';
+    // The source and the path come from the user's own settings only, so a
+    // workspace cannot choose the binary the skill runs.
+    const source = readTrustedZvecGrepCliSource();
+    const path = readTrustedZvecGrepPath();
     const executable = resolveZvecGrepExecutable({ source, path, roots });
     zvecServer = zvecGrepOpencodeServer(executable);
   }
 
   if (astEnabled) {
-    const source = readAstGrepCliSource(config.get<unknown>(`${SKILLS_SECTION}.astGrep.cliSource`));
-    const path = config.get<string>(`${SKILLS_SECTION}.astGrep.path`, 'ast-grep') || 'ast-grep';
+    const source = readTrustedAstGrepCliSource();
+    const path = readTrustedAstGrepPath();
     const executable = resolveAstGrepExecutable({ source, path, roots });
     const mcpScript = astGrepMcpScriptPath(options.extensionPath);
     if (existsSync(mcpScript)) {

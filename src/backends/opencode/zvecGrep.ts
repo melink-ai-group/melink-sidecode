@@ -19,6 +19,7 @@ import {
   bundledZvecGrepPrefix,
   type ZvecGrepCliSource
 } from '../zvecGrep/resolve.ts';
+import { resolveExecutableCommand } from '../executables.ts';
 import type { SkillResolveRoots } from '../skillCli.ts';
 
 /**
@@ -454,6 +455,10 @@ async function probeZg(ctx: ReturnType<typeof normalizeContext>): Promise<ZvecGr
  *
  * Bundled prefers the SideCode-managed prefix. Local uses the path setting,
  * PATH, then npm's global prefix.
+ *
+ * A path setting that is relative and contains a separator is skipped: it
+ * would run a file from the workspace's working directory, so the PATH lookup
+ * is used instead.
  */
 async function locateZg(ctx: ReturnType<typeof normalizeContext>): Promise<string | undefined> {
   const io = ctx.io;
@@ -465,10 +470,10 @@ async function locateZg(ctx: ReturnType<typeof normalizeContext>): Promise<strin
     return undefined;
   }
 
-  const trimmed = ctx.path.trim();
-  if (trimmed.length > 0) {
-    if (await zgRuns(io, trimmed)) {
-      return trimmed;
+  const resolved = resolveExecutableCommand(ctx.path, '');
+  if (resolved.ok && resolved.command.length > 0) {
+    if (await zgRuns(io, resolved.command)) {
+      return resolved.command;
     }
   }
 

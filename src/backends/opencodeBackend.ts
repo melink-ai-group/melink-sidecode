@@ -34,7 +34,7 @@ import {
 } from './types';
 import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './modes';
 import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
-import { readOpencodeCliSource, resolveOpencodeExecutable } from './opencode/resolve';
+import { resolveOpencodeExecutable } from './opencode/resolve';
 import { probeOpencode } from './opencode/status';
 import {
   COMPACTION_INSTRUCTIONS,
@@ -52,6 +52,7 @@ import type { OpencodeOutcome } from './opencode/runtime';
 import { fetchZenCatalog } from './opencode/zenCatalog';
 import { ZEN_API_KEY_ENV, ZEN_BASE_URL } from './opencode/zenConfig';
 import { opencodeRequiresApproval } from './opencode/config';
+import { readTrustedOpencodeCliSource, readTrustedOpencodePath } from '../config/settings.ts';
 
 interface CategorizedError {
   code: ErrorEventCode;
@@ -119,11 +120,16 @@ export class OpencodeBackend implements AgentBackend {
     private readonly approvals?: ApprovalStore
   ) {}
 
+  /**
+   * Executable every opencode spawn uses.
+   *
+   * The source and the path come from the user's own settings only, so a
+   * workspace cannot choose the binary that runs.
+   */
   private get opencodePath(): string {
-    const config = vscode.workspace.getConfiguration('melink.ollama.opencode');
     return resolveOpencodeExecutable({
-      source: readOpencodeCliSource(config.get('cliSource')),
-      path: config.get<string>('path', 'opencode') || 'opencode',
+      source: readTrustedOpencodeCliSource(),
+      path: readTrustedOpencodePath(),
       roots: {
         extensionPath: this.context.extensionPath,
         globalStoragePath: this.context.globalStorageUri.fsPath

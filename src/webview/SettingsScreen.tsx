@@ -5,6 +5,8 @@ import { formatDictationTarget } from '../dictation/target';
 import { AlertIcon, BackIcon, CheckIcon, CrossIcon, InfoIcon } from './Icons';
 import { opencodeRuntimeView } from './runtimeStatus';
 import { contextPatternError } from '../context/contextSettings';
+import { executablePathError, resolveExecutableCommand } from '../backends/executables.ts';
+import { noticeForField } from '../config/fieldNotices.ts';
 import { TabList, TabPanel, type TabItem } from './Tabs';
 import { CONTEXT_BUILTIN_PATTERNS } from './settings/constants';
 import type { SettingsScreenProps } from './settings/types';
@@ -67,6 +69,7 @@ export function SettingsScreen({
 }: SettingsScreenProps): JSX.Element {
   const [draft, setDraft] = useState<Draft | undefined>(undefined);
   const [errors, setErrors] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
+  const [notices, setNotices] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
   const [token, setToken] = useState('');
   const [tokenSaved, setTokenSaved] = useState(false);
   const [zenToken, setZenToken] = useState('');
@@ -98,6 +101,7 @@ export function SettingsScreen({
       return;
     }
     setErrors(settings.saveErrors ?? {});
+    setNotices(settings.saveNotices ?? {});
   }, [settings]);
 
   // A successful local install writes a new absolute path on the host. Adopt it
@@ -199,6 +203,7 @@ export function SettingsScreen({
       setDraft(draftFrom(settings));
     }
     setErrors({});
+    setNotices({});
     setToken('');
     setTokenSaved(false);
     setZenToken('');
@@ -219,10 +224,36 @@ export function SettingsScreen({
     }
     if (!draft.codexPath.trim()) {
       nextErrors.codexPath = 'Enter the CLI path or name. This value was not saved.';
+    } else {
+      // A relative path would run a file from the workspace — with a
+      // separator, or in the Windows drive-relative form.
+      const codexResolved = resolveExecutableCommand(draft.codexPath, 'codex');
+      if (!codexResolved.ok) {
+        nextErrors.codexPath = executablePathError(codexResolved.reason, 'Codex CLI');
+      }
     }
     // The path is only meaningful for a local CLI.
     if (draft.opencodeCliSource === 'local' && !draft.opencodePath.trim()) {
       nextErrors.opencodePath = 'Enter the opencode CLI path or name. This value was not saved.';
+    } else if (draft.opencodeCliSource === 'local') {
+      const opencodeResolved = resolveExecutableCommand(draft.opencodePath, 'opencode');
+      if (!opencodeResolved.ok) {
+        nextErrors.opencodePath = executablePathError(opencodeResolved.reason, 'opencode CLI');
+      }
+    }
+    // The skill CLI paths follow the same rule: a relative path would run a
+    // file from the workspace.
+    if (draft.zvecGrepCliSource === 'local' && draft.zvecGrepPath.trim()) {
+      const zvecResolved = resolveExecutableCommand(draft.zvecGrepPath, 'zg');
+      if (!zvecResolved.ok) {
+        nextErrors.zvecGrepPath = executablePathError(zvecResolved.reason, 'zg CLI');
+      }
+    }
+    if (draft.astGrepCliSource === 'local' && draft.astGrepPath.trim()) {
+      const astResolved = resolveExecutableCommand(draft.astGrepPath, 'ast-grep');
+      if (!astResolved.ok) {
+        nextErrors.astGrepPath = executablePathError(astResolved.reason, 'ast-grep CLI');
+      }
     }
     // The cap is entered in kilobytes, so the value the user sees is readable;
     // it is stored as bytes. A non-integer or out-of-range value is refused.
@@ -314,6 +345,10 @@ export function SettingsScreen({
   const ollamaStatus = connectionTest?.backendId === 'ollama' ? connectionTest : undefined;
   const opencodeStatus = connectionTest?.backendId === 'opencode' ? connectionTest : undefined;
   const codexStatus = connectionTest?.backendId === 'codex' ? connectionTest : undefined;
+  // The host's notice map, read through one accessor. The host is the
+  // authority on which fields were redirected, so the screen adds nothing of
+  // its own: it renders the notice the host echoed, or nothing.
+  const noticeFor = (field: keyof SettingsPatch): string | undefined => noticeForField(field, notices);
   const modelOptions = flattenModels(settings.models);
   const runtimeView = opencodeRuntimeView(settings.opencode, {
     enabled: draft.opencodeEnabled,
@@ -351,6 +386,13 @@ export function SettingsScreen({
         : 'Not installed. Install the CLI, then turn this on.';
   const zvecCliDraft = { cliSource: draft.zvecGrepCliSource, path: draft.zvecGrepPath };
   const astCliDraft = { cliSource: draft.astGrepCliSource, path: draft.astGrepPath };
+  // A refused skill path is reported by the host on the toggle that carried
+  // it, so the message lands on the path field rather than only in the
+  // result strip. A save refusal wins over it: the save is the later word.
+  const zvecPathError =
+    errors.zvecGrepPath ?? (zvecGrep?.field === 'zvecGrepPath' ? zvecGrep.fieldMessage : undefined);
+  const astPathError =
+    errors.astGrepPath ?? (astGrep?.field === 'astGrepPath' ? astGrep.fieldMessage : undefined);
   const zvecProbe =
     draft.zvecGrepCliSource === 'bundled' ? settings.skills.zvecGrep.bundled : settings.skills.zvecGrep.local;
   const astProbe =
@@ -460,6 +502,7 @@ export function SettingsScreen({
                   ? 'Install downloads into extension global storage so the binary survives closing VS Code. Every turn uses that binary, not PATH.'
                   : 'Use the path below or PATH. Install and Update use this selection immediately.'}
               </p>
+              <ScopeNotice id="opencode-cli-source-notice" notice={noticeFor('opencodeCliSource')} />
 
               {draft.opencodeCliSource === 'local' ? (
                 <>
@@ -474,7 +517,9 @@ export function SettingsScreen({
                     spellCheck={false}
                     autoComplete="off"
                     aria-invalid={errors.opencodePath ? true : undefined}
-                    aria-describedby={errors.opencodePath ? 'opencode-path-error' : 'opencode-status'}
+                    aria-describedby={
+                      errors.opencodePath ? 'opencode-path-error' : 'opencode-path-help opencode-status'
+                    }
                     onChange={(event) => update('opencodePath', event.target.value)}
                   />
                   {errors.opencodePath ? (
@@ -482,7 +527,16 @@ export function SettingsScreen({
                       <AlertIcon />
                       <span>{errors.opencodePath}</span>
                     </p>
+                  ) : noticeFor('opencodePath') ? (
+                    <p className="field-msg field-msg--notice" id="opencode-path-notice" role="status">
+                      <InfoIcon />
+                      <span>{noticeFor('opencodePath')}</span>
+                    </p>
                   ) : null}
+                  <p className="field-help" id="opencode-path-help">
+                    Path to the opencode CLI. A bare name is resolved from PATH. This setting is read from your
+                    user settings only, so a workspace cannot choose the binary that runs.
+                  </p>
                 </>
               ) : (
                 <p className="field-help" id="opencode-bundled-path">
@@ -600,9 +654,15 @@ export function SettingsScreen({
                   <AlertIcon />
                   <span>{errors.ollamaBaseUrl}</span>
                 </p>
+              ) : noticeFor('ollamaBaseUrl') ? (
+                <p className="field-msg field-msg--notice" id="ollama-base-url-notice" role="status">
+                  <InfoIcon />
+                  <span>{noticeFor('ollamaBaseUrl')}</span>
+                </p>
               ) : (
                 <p className="field-help" id="ollama-base-url-help">
-                  Where Ollama Cloud requests are sent. The key below is sent to this host.
+                  Where Ollama Cloud requests are sent. The key below is sent to this host. This setting is read
+                  from your user settings only, so a workspace cannot redirect the key.
                 </p>
               )}
 
@@ -864,9 +924,15 @@ export function SettingsScreen({
                   <AlertIcon />
                   <span>{errors.codexPath}</span>
                 </p>
+              ) : noticeFor('codexPath') ? (
+                <p className="field-msg field-msg--notice" id="codex-path-notice" role="status">
+                  <InfoIcon />
+                  <span>{noticeFor('codexPath')}</span>
+                </p>
               ) : (
                 <p className="field-help" id="codex-path-help">
-                  Path to the Codex CLI. A bare name is resolved from PATH.
+                  Path to the Codex CLI. A bare name is resolved from PATH. This setting is read from your user
+                  settings only, so a workspace cannot choose the binary that runs.
                 </p>
               )}
 
@@ -981,8 +1047,15 @@ export function SettingsScreen({
                 <option value="unrestricted">Unrestricted (no prompts)</option>
               </select>
               <p className="field-help">
-                How much the agent may do without asking. A per-conversation choice overrides it.
+                How much the agent may do without asking. A per-conversation choice overrides it. Read from your
+                user settings only, so a workspace cannot raise the default.
               </p>
+              {noticeFor('permissionLevel') ? (
+                <p className="field-msg field-msg--notice" id="default-permission-notice" role="status">
+                  <InfoIcon />
+                  <span>{noticeFor('permissionLevel')}</span>
+                </p>
+              ) : null}
               {permissionConfirm ? (
                 <div className="confirm-gate" role="alertdialog" aria-label="Confirm unrestricted default">
                   <div className="confirm-gate__head">
@@ -1447,6 +1520,7 @@ export function SettingsScreen({
                   ? 'Install downloads into extension storage. Turns use that binary, not PATH.'
                   : 'Use the path below or PATH. Install and Update use this selection immediately.'}
               </p>
+              <ScopeNotice id="ast-grep-cli-source-notice" notice={noticeFor('astGrepCliSource')} />
 
               {draft.astGrepCliSource === 'local' ? (
                 <>
@@ -1460,8 +1534,18 @@ export function SettingsScreen({
                     value={draft.astGrepPath}
                     spellCheck={false}
                     autoComplete="off"
+                    aria-invalid={astPathError ? true : undefined}
+                    aria-describedby={astPathError ? 'ast-grep-path-error' : undefined}
                     onChange={(event) => update('astGrepPath', event.target.value)}
                   />
+                  {astPathError ? (
+                    <p className="field-msg field-msg--error" id="ast-grep-path-error" role="alert">
+                      <AlertIcon />
+                      <span>{astPathError}</span>
+                    </p>
+                  ) : (
+                    <ScopeNotice id="ast-grep-path-notice" notice={noticeFor('astGrepPath')} />
+                  )}
                 </>
               ) : (
                 <p className="field-help skill-path" title={settings.skills.astGrep.bundled.path}>
@@ -1596,6 +1680,7 @@ export function SettingsScreen({
                   ? 'Install downloads into extension storage. Turns use that binary, not PATH.'
                   : 'Use the path below or PATH. Install and Update use this selection immediately.'}
               </p>
+              <ScopeNotice id="zvec-grep-cli-source-notice" notice={noticeFor('zvecGrepCliSource')} />
 
               {draft.zvecGrepCliSource === 'local' ? (
                 <>
@@ -1609,8 +1694,18 @@ export function SettingsScreen({
                     value={draft.zvecGrepPath}
                     spellCheck={false}
                     autoComplete="off"
+                    aria-invalid={zvecPathError ? true : undefined}
+                    aria-describedby={zvecPathError ? 'zvec-grep-path-error' : undefined}
                     onChange={(event) => update('zvecGrepPath', event.target.value)}
                   />
+                  {zvecPathError ? (
+                    <p className="field-msg field-msg--error" id="zvec-grep-path-error" role="alert">
+                      <AlertIcon />
+                      <span>{zvecPathError}</span>
+                    </p>
+                  ) : (
+                    <ScopeNotice id="zvec-grep-path-notice" notice={noticeFor('zvecGrepPath')} />
+                  )}
                 </>
               ) : (
                 <p className="field-help skill-path" title={settings.skills.zvecGrep.bundled.path}>
@@ -1716,6 +1811,7 @@ export function SettingsScreen({
             type="button"
             disabled={!dirty}
             onClick={() => save('workspace')}
+            title="Saves to this workspace's .vscode/settings.json. The credential host, the CLI paths and the permission default are always saved to your user settings."
           >
             Save to workspace
           </button>
@@ -1725,5 +1821,25 @@ export function SettingsScreen({
         </button>
       </footer>
     </main>
+  );
+}
+
+/**
+ * The scope notice for a trust-sensitive field.
+ *
+ * Nine fields are read from the user's own settings only, so a "Save to
+ * workspace" writes them there instead. The value is persisted, so the
+ * message is a notice -- but it must be shown on every one of the nine, or the
+ * screen would claim a workspace save that never happened.
+ */
+function ScopeNotice({ id, notice }: { id: string; notice?: string }): JSX.Element | null {
+  if (!notice) {
+    return null;
+  }
+  return (
+    <p className="field-msg field-msg--notice" id={id} role="status">
+      <InfoIcon />
+      <span>{notice}</span>
+    </p>
   );
 }

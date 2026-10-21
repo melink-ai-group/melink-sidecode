@@ -7,6 +7,7 @@ import {
   type SkillCliSource,
   type SkillResolveRoots
 } from '../skillCli.ts';
+import { resolveExecutableCommand } from '../executables.ts';
 
 /**
  * Where the ast-grep CLI comes from for SideCode skills.
@@ -51,6 +52,13 @@ export function managedAstGrepInstallDir(): string {
   return join(homedir(), '.ast-grep', 'bin');
 }
 
+/**
+ * The `ast-grep` executable the ast-grep skill uses.
+ *
+ * A relative path is refused: it would resolve against the workspace working
+ * directory. That covers a relative path with a separator (`./evil`) and the
+ * Windows drive-relative form (`C:evil.exe`).
+ */
 export function resolveAstGrepExecutable(options: {
   source: AstGrepCliSource;
   path: string;
@@ -59,8 +67,8 @@ export function resolveAstGrepExecutable(options: {
   if (options.source === 'bundled') {
     return bundledAstGrepExecutable(options.roots);
   }
-  const trimmed = options.path.trim();
-  return trimmed.length > 0 ? trimmed : 'ast-grep';
+  const resolved = resolveExecutableCommand(options.path, 'ast-grep');
+  return resolved.ok ? resolved.command : 'ast-grep';
 }
 
 export function astGrepInstallDirFor(options: {

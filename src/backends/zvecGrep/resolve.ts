@@ -6,6 +6,7 @@ import {
   type SkillCliSource,
   type SkillResolveRoots
 } from '../skillCli.ts';
+import { resolveExecutableCommand } from '../executables.ts';
 
 /**
  * Where the zvec-grep (`zg`) CLI comes from.
@@ -55,6 +56,13 @@ export function bundledZvecGrepExecutable(
   return preferred;
 }
 
+/**
+ * The `zg` executable the zvec-grep skill uses.
+ *
+ * A relative path is refused: it would resolve against the workspace working
+ * directory. That covers a relative path with a separator (`./evil`) and the
+ * Windows drive-relative form (`C:evil.exe`).
+ */
 export function resolveZvecGrepExecutable(options: {
   source: ZvecGrepCliSource;
   path: string;
@@ -64,8 +72,9 @@ export function resolveZvecGrepExecutable(options: {
   if (options.source === 'bundled') {
     return bundledZvecGrepExecutable(options.roots, options.platform);
   }
-  const trimmed = options.path.trim();
-  return trimmed.length > 0 ? trimmed : options.platform === 'win32' ? 'zg.cmd' : 'zg';
+  const fallback = options.platform === 'win32' ? 'zg.cmd' : 'zg';
+  const resolved = resolveExecutableCommand(options.path, fallback);
+  return resolved.ok ? resolved.command : fallback;
 }
 
 export function bundledZvecGrepPresent(

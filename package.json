@@ -27,6 +27,23 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "SideCode works in an untrusted workspace, but the settings that decide where a credential is sent, which binary is spawned, and what the permission default is are read from your user settings only. These settings are ignored when they come from a workspace: melink.ollama.baseUrl, melink.ollama.opencode.path, melink.ollama.opencode.cliSource, melink.codex.path, melink.skills.zvecGrep.path, melink.skills.zvecGrep.cliSource, melink.skills.astGrep.path, melink.skills.astGrep.cliSource, melink.defaults.permissionLevel. The application scope of these settings is enforced by SideCode itself, so a workspace value never reaches them, trusted or not. Open the workspace in Restricted Mode to keep the workspace from changing anything at all.",
+      "restrictedConfigurations": [
+        "melink.ollama.baseUrl",
+        "melink.ollama.opencode.path",
+        "melink.ollama.opencode.cliSource",
+        "melink.codex.path",
+        "melink.skills.zvecGrep.path",
+        "melink.skills.zvecGrep.cliSource",
+        "melink.skills.astGrep.path",
+        "melink.skills.astGrep.cliSource",
+        "melink.defaults.permissionLevel"
+      ]
+    }
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -108,7 +125,8 @@
         "melink.ollama.baseUrl": {
           "type": "string",
           "default": "https://ollama.com",
-          "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **SideCode: Set Ollama Cloud token** is sent as a bearer credential to this host."
+          "scope": "application",
+          "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **SideCode: Set Ollama Cloud token** is sent as a bearer credential to this host. This setting is read from your user settings only, so a workspace cannot redirect the token to another host."
         },
         "melink.ollama.defaultModel": {
           "type": "string",
@@ -128,10 +146,12 @@
         "melink.ollama.opencode.path": {
           "type": "string",
           "default": "opencode",
-          "description": "Path to the opencode CLI executable used when melink.ollama.opencode.enabled is on and melink.ollama.opencode.cliSource is local. Resolved from PATH when it is a bare name. Ignored when cliSource is bundled."
+          "scope": "application",
+          "description": "Path to the opencode CLI executable used when melink.ollama.opencode.enabled is on and melink.ollama.opencode.cliSource is local. Resolved from PATH when it is a bare name. A relative path is refused, including the Windows drive-relative form (C:evil.exe), because it would run a file from the workspace. Ignored when cliSource is bundled. Read from your user settings only, so a workspace cannot choose the binary that runs."
         },
         "melink.ollama.opencode.cliSource": {
           "type": "string",
+          "scope": "application",
           "enum": [
             "local",
             "bundled"
@@ -141,7 +161,7 @@
             "Use the SideCode-downloaded CLI in extension global storage. Install and Update fetch the official GitHub release into that folder; it survives closing VS Code."
           ],
           "default": "local",
-          "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path`. **bundled** downloads into extension global storage and every turn uses that binary instead of the machine PATH."
+          "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path`. **bundled** downloads into extension global storage and every turn uses that binary instead of the machine PATH. Read from your user settings only."
         },
         "melink.ollama.opencode.zvecGrep": {
           "type": "boolean",
@@ -151,7 +171,8 @@
         "melink.codex.path": {
           "type": "string",
           "default": "codex",
-          "description": "Path to the OpenAI Codex CLI executable. Resolved from PATH when it is a bare name."
+          "scope": "application",
+          "description": "Path to the OpenAI Codex CLI executable. Resolved from PATH when it is a bare name. A relative path is refused, including the Windows drive-relative form (C:evil.exe), because it would run a file from the workspace. Read from your user settings only, so a workspace cannot choose the binary that runs."
         },
         "melink.codex.defaultModel": {
           "type": "string",
@@ -160,6 +181,7 @@
         },
         "melink.defaults.permissionLevel": {
           "type": "string",
+          "scope": "application",
           "enum": [
             "read-only",
             "default",
@@ -171,7 +193,7 @@
             "Unrestricted: no sandbox and no prompts. Selecting this requires an explicit confirmation."
           ],
           "default": "default",
-          "description": "Permission level used until you pick one in the chat. The picker choice is remembered for the next conversation. Unrestricted must be confirmed before it is applied."
+          "description": "Permission level used until you pick one in the chat. The picker choice is remembered for the next conversation. Unrestricted must be confirmed before it is applied. Read from your user settings only, so a workspace cannot raise the permission default."
         },
         "melink.defaults.mode": {
           "type": "string",
@@ -275,18 +297,20 @@
         },
         "melink.skills.zvecGrep.cliSource": {
           "type": "string",
+          "scope": "application",
           "enum": ["local", "bundled"],
           "enumDescriptions": [
             "Use zg on this machine (path setting or PATH / npm global).",
             "Use the SideCode-managed install under extension global storage."
           ],
           "default": "local",
-          "markdownDescription": "Where the zvec-grep CLI comes from."
+          "markdownDescription": "Where the zvec-grep CLI comes from. Read from your user settings only."
         },
         "melink.skills.zvecGrep.path": {
           "type": "string",
           "default": "zg",
-          "description": "Path to the zg CLI when melink.skills.zvecGrep.cliSource is local. Ignored when bundled."
+          "scope": "application",
+          "description": "Path to the zg CLI when melink.skills.zvecGrep.cliSource is local. Ignored when bundled. A relative path is refused, including the Windows drive-relative form (C:evil.exe), because it would run a file from the workspace. Read from your user settings only, so a workspace cannot choose the binary that runs."
         },
         "melink.skills.astGrep": {
           "type": "boolean",
@@ -295,18 +319,20 @@
         },
         "melink.skills.astGrep.cliSource": {
           "type": "string",
+          "scope": "application",
           "enum": ["local", "bundled"],
           "enumDescriptions": [
             "Use ast-grep on this machine (path setting or PATH).",
             "Use the SideCode-downloaded CLI under extension global storage."
           ],
           "default": "local",
-          "markdownDescription": "Where the ast-grep CLI comes from."
+          "markdownDescription": "Where the ast-grep CLI comes from. Read from your user settings only."
         },
         "melink.skills.astGrep.path": {
           "type": "string",
           "default": "ast-grep",
-          "description": "Path to the ast-grep CLI when melink.skills.astGrep.cliSource is local. Ignored when bundled."
+          "scope": "application",
+          "description": "Path to the ast-grep CLI when melink.skills.astGrep.cliSource is local. Ignored when bundled. A relative path is refused, including the Windows drive-relative form (C:evil.exe), because it would run a file from the workspace. Read from your user settings only, so a workspace cannot choose the binary that runs."
         }
       }
     }

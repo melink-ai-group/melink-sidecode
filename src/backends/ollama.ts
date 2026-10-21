@@ -39,7 +39,8 @@ import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './mod
 // imported inside the enabled branch only. `isFileTool` is a pure predicate
 // with no child-process dependency, so it is safe to import directly.
 import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
-import { readOpencodeCliSource, resolveOpencodeExecutable } from './opencode/resolve';
+import { resolveOpencodeExecutable } from './opencode/resolve';
+import { readTrustedOpencodeCliSource, readTrustedOpencodePath } from '../config/settings.ts';
 import { ollamaContextUsed } from './contextUsage';
 import {
   COMPACTION_INSTRUCTIONS,
@@ -56,6 +57,12 @@ import type { OpencodeEvent } from './opencode/events';
 import { quietTurnMessage, watchOpencodeQuiet } from './opencode/quiet';
 import type { OpencodeOutcome } from './opencode/runtime';
 import { isAbsolute, resolve } from 'node:path';
+import {
+  OllamaClient,
+  defaultOllamaTransport,
+  isHttpOllamaUrl,
+  type OllamaTransport
+} from './ollamaBaseUrl.ts';
 
 interface OllamaTagsResponse {
   models?: Array<{ name?: string; model?: string; details?: { parameter_size?: string } }>;
@@ -85,20 +92,6 @@ class StreamError extends Error implements CategorizedError {
     if (cause !== undefined) {
       (this as { cause?: unknown }).cause = cause;
     }
-  }
-}
-
-function normalizeBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, '');
-}
-
-/** A base URL must be a full http(s) address, or the request never leaves. */
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
   }
 }
 
@@ -304,11 +297,33 @@ export class OllamaBackend implements AgentBackend {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly store?: ThreadStore,
-    private readonly approvals?: ApprovalStore
+    private readonly approvals?: ApprovalStore,
+    /**
+     * The transport seam. A test can observe the exact URL and headers every
+     * request goes to — including the "Test connection" request — without a
+     * network.
+     */
+    private readonly transport?: OllamaTransport
   ) {}
 
   private get baseUrl(): string {
-    return normalizeBaseUrl(vscode.workspace.getConfiguration('melink.ollama').get<string>('baseUrl', 'https://ollama.com'));
+    // The host the bearer token is sent to. Read from the user's own settings
+    // only: a workspace `.vscode/settings.json` must not be able to redirect
+    // the credential to a host of the repository's choosing.
+    return this.client.baseUrl;
+  }
+
+  /**
+   * The client that talks to the configured host.
+   *
+   * It owns the base-URL rule (user scope only) and the transport seam, so
+   * the adapter never re-derives which host receives the credential.
+   */
+  private get client(): OllamaClient {
+    return new OllamaClient(
+      vscode.workspace.getConfiguration().inspect<string>('melink.ollama.baseUrl'),
+      this.transport ?? defaultOllamaTransport()
+    );
   }
 
   /** Whether the opencode agentic runtime is enabled. Default `true`. */
@@ -319,12 +334,16 @@ export class OllamaBackend implements AgentBackend {
   /**
    * Executable every opencode spawn uses. Bundled ignores the path setting so
    * the machine PATH cannot slip into turns.
+   *
+   * The source and the path are read from the user's own settings only, and a
+   * relative path is refused — with a separator or in the Windows
+   * drive-relative form — so neither the repository nor a workspace override
+   * can choose the binary that runs.
    */
   private get opencodePath(): string {
-    const config = vscode.workspace.getConfiguration('melink.ollama.opencode');
     return resolveOpencodeExecutable({
-      source: readOpencodeCliSource(config.get('cliSource')),
-      path: config.get<string>('path', 'opencode') || 'opencode',
+      source: readTrustedOpencodeCliSource(),
+      path: readTrustedOpencodePath(),
       roots: {
         extensionPath: this.context.extensionPath,
         globalStoragePath: this.context.globalStorageUri.fsPath
@@ -377,9 +396,13 @@ export class OllamaBackend implements AgentBackend {
    * Real authenticated call for the settings screen's Test connection action.
    * Never throws: a rejected key, an unreachable host, and a network failure
    * each become a distinct plain-language outcome, and the token never appears.
+   *
+   * The request goes through the client, so the transport seam observes it
+   * exactly like every other request: the host that receives the credential
+   * is the user's own base URL, never a workspace-supplied one.
    */
   async testConnection(): Promise<ConnectionTestResult> {
-    if (!isHttpUrl(this.baseUrl)) {
+    if (!isHttpOllamaUrl(this.baseUrl)) {
       return {
         backendId: this.id,
         outcome: 'host',
@@ -396,9 +419,11 @@ export class OllamaBackend implements AgentBackend {
     }
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/api/tags`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      // The status-preserving probe: the client wraps a transport failure in a
+      // `BackendError`, and this path has to tell a DNS or refused host apart
+      // from a general network failure — and a rejected key (`401`) apart from
+      // a host-side failure (any other non-2xx).
+      response = await this.client.probe('/api/tags', token);
     } catch (error) {
       // A transport failure is the only place the network and the host differ.
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -409,7 +434,8 @@ export class OllamaBackend implements AgentBackend {
           message: 'This device appears to be offline. Reconnect, then test again.'
         };
       }
-      if (isDnsOrRefused(error)) {
+      const cause = error instanceof BackendError ? error.cause : error;
+      if (isDnsOrRefused(cause)) {
         return {
           backendId: this.id,
           outcome: 'host',
@@ -443,31 +469,22 @@ export class OllamaBackend implements AgentBackend {
     };
   }
 
-  /** Reject a credential without ever echoing it back to the caller. */
+  /**
+   * One authenticated request to the configured host.
+   *
+   * The client owns the base-URL rule and the transport, so the host that
+   * receives the credential is the one the user configured. A rejected
+   * credential is reported without echoing it back to the caller.
+   */
   private async request(path: string, token: string, init?: RequestInit): Promise<Response> {
-    let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...(init?.headers ?? {})
-        }
-      });
+      return await this.client.request(path, token, init);
     } catch (cause) {
       if (isAbortError(cause)) {
         throw new StreamError('canceled', 'Turn canceled.', cause);
       }
-      throw new BackendError('unavailable', `Cannot reach Ollama Cloud at ${this.baseUrl}. Check the network or the base URL setting.`, cause);
+      throw cause;
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new BackendError('unauthenticated', 'Your Ollama Cloud token was rejected. It may be expired or revoked.');
-    }
-    if (!response.ok) {
-      throw new BackendError('provider', `Ollama Cloud returned ${response.status} ${response.statusText}.`);
-    }
-    return response;
   }
 
   async listModels(): Promise<BackendModel[]> {
