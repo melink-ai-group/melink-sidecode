@@ -73,6 +73,11 @@ export class WorkspaceChangeWatcher {
     this.watcher = undefined;
   }
 
+  /** Deliver queued observations while the ending turn can still receive them. */
+  flush(): void {
+    this.session?.flush();
+  }
+
   /** Alias so the host can register this with `context.subscriptions`. */
   dispose(): void {
     this.stop();

@@ -155,6 +155,10 @@ export async function captureScreen({ browser, baseUrl, screen, viewport, outDir
         errors.push(message.text());
       }
     });
+    page.on('requestfailed', (request) => errors.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText}`));
+    page.on('response', (response) => {
+      if (response.status() >= 400) errors.push(`HTTP ${response.status()}: ${response.url()}`);
+    });
 
     await step(label, 'navigate to the harness shell', () =>
       page.goto(`${baseUrl}/tools/visual-harness/index.html`, { waitUntil: 'load' })

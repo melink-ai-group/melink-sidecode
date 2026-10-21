@@ -6,11 +6,25 @@ import {
   initialHistoryHidden,
   mergeOlderItems,
   newerThanLoaded,
+  transcriptWithNewer,
   prependOlderHistory,
   revealStoredHistory,
   visibleHistory,
   withStoredUserIds
 } from './historyWindow.ts';
+import { mergeTranscriptTool } from './transcriptTool.ts';
+
+test('an OpenCode tool keeps its completed paths and output when captured history is repainted', () => {
+  const pending: TranscriptItem = { id: 'tool1', kind: 'file-change', files: [], text: '' };
+  const complete = mergeTranscriptTool(pending, { id: 'tool1', kind: 'file-change', files: [{ path: 'src/a.ts' }], text: 'Edited successfully' });
+  const repeated = mergeTranscriptTool(complete, { id: 'tool1', kind: 'file-change', files: [], text: '' });
+  assert.deepEqual(repeated.files, [{ path: 'src/a.ts' }]);
+  assert.equal(repeated.text, 'Edited successfully');
+  const notice: TranscriptItem = { id: 'check1', kind: 'notice', detail: 'status', noticeLevel: 'info', text: 'Checked files.' };
+  const replay = transcriptWithNewer([item('old'), pending], [complete, notice]);
+  assert.deepEqual(replay, [item('old'), complete, notice]);
+  assert.deepEqual(transcriptWithNewer(replay, [complete, notice]), replay);
+});
 
 function item(id: string, role?: 'user' | 'assistant', text = id): TranscriptItem {
   return { id, kind: 'message', role, text, status: 'completed' };

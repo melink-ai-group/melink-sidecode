@@ -92,6 +92,9 @@ export class ChangeTracker {
    * the tracker. A different thread stays open beside it.
    */
   async beginTurn(options: BeginTurnOptions): Promise<void> {
+    if (this.openTurns.has(options.turnId)) {
+      return;
+    }
     for (const open of this.openTurns.values()) {
       if (open.threadId === options.threadId && open.turnId !== options.turnId) {
         this.openTurns.delete(open.turnId);

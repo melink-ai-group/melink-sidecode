@@ -501,6 +501,8 @@ export interface Attachment {
 export interface TranscriptItem {
   id: string;
   kind: TranscriptItemKind;
+  /** Persisted status notice severity and optional recovery control. */
+  noticeLevel?: 'info' | 'warning' | 'error';
   /** Present when `kind` is `message`. */
   role?: MessageRole;
   /** Short label, e.g. a tool name or a model name. */

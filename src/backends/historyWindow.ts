@@ -75,7 +75,7 @@ export function newerThanLoaded(loaded: readonly TranscriptItem[], stored: reado
   return newer.reverse();
 }
 
-/** Loaded history plus any turns the local log recorded after that snapshot. */
+/** Refresh captured rows from the local log, then append newer turns. */
 export function transcriptWithNewer(
   loaded: readonly TranscriptItem[] | undefined,
   stored: readonly TranscriptItem[]
@@ -83,7 +83,8 @@ export function transcriptWithNewer(
   if (!loaded || loaded.length === 0) {
     return [...stored];
   }
-  return [...loaded, ...newerThanLoaded(loaded, stored)];
+  const byId = new Map(stored.map((item) => [item.id, item]));
+  return [...loaded.map((item) => byId.get(item.id) ?? item), ...newerThanLoaded(loaded, stored)];
 }
 
 /**

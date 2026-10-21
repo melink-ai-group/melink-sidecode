@@ -18,6 +18,7 @@ import {
   denyInProgressStep,
   settleInProgressSteps,
   type ApprovalRequest,
+  type AgentEvent,
   type Attachment,
   type DefaultMode,
   type ModelSettingField,
@@ -290,6 +291,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private readonly changeJournal: VscodeChangeJournal;
   private readonly changeTracker: ChangeTracker;
+  private changePaintVersion = 0;
   /**
    * The post-hoc decision store: per-file and per-hunk accept/reject over the
    * journal's recorded bytes. It is deliberately separate from the approval
@@ -824,6 +826,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!this.changeTracker.isOpen(turnId)) {
       return;
     }
+    this.changeWatcher.flush();
     const set = await this.changeTracker.endTurn(turnId);
     if (!this.changeTracker.isTracking) {
       this.changeWatcher.stop();
@@ -895,27 +898,36 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * The visible chat gets the notice immediately. A background turn's notice is
-   * held for its own chat and posted when the user switches to it, the same way
-   * a held composer notice travels.
-   *
-   * The comparison is against the visible session, not `this.session`: the
-   * detached sweep may run while another session is the current store context,
-   * and its thread is not necessarily the one on screen.
+   * Save the notice in its owning transcript so tab switches and reloads replay
+   * every result. Live item events are scoped by the webview to the same chat.
    */
   private postDoubleCheckNotice(
     set: TurnChangeSet,
     notice: { level: 'info' | 'warning'; message: string }
   ): void {
-    const visible = this.visible?.activeThread;
-    if (visible?.backendId === set.backendId && visible.threadId === set.threadId) {
-      this.post({ type: 'notice', level: notice.level, message: notice.message });
-      return;
-    }
-    const owner = this.sessionForThread(set.backendId, set.threadId);
-    if (owner) {
-      owner.heldNotice = notice;
-    }
+    // Store the result before publishing it. Background results then replay in
+    // their owning transcript, including after a window reload.
+    const event: Extract<AgentEvent, { type: 'item/started' }> = {
+      type: 'item/started',
+      backendId: set.backendId,
+      threadId: set.threadId,
+      item: {
+        id: `double-check_${set.turnId}`,
+        kind: 'notice',
+        detail: 'status',
+        text: notice.message,
+        noticeLevel: notice.level,
+        status: 'completed'
+      }
+    };
+    this.store.applyEvent(event);
+    this.post({ type: 'agentEvent', event });
+    const completed: Extract<AgentEvent, { type: 'item/completed' }> = {
+      type: 'item/completed', backendId: set.backendId, threadId: set.threadId,
+      itemId: event.item.id, status: 'completed'
+    };
+    this.store.applyEvent(completed);
+    this.post({ type: 'agentEvent', event: completed });
   }
 
   /** True when the resolved policy has the advisory second-pass review on. */
@@ -990,15 +1002,28 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
       return;
     }
+    let version = this.changePaintVersion;
     const sets = await this.changeTracker.observedSets(threadId);
+    if (this.visible?.activeThread?.backendId !== backendId ||
+        this.visible.activeThread.threadId !== threadId) {
+      return;
+    }
+    if (version !== this.changePaintVersion) {
+      return this.postThreadChangeSets(backendId, threadId);
+    }
     this.post({ type: 'changes/changed', backendId, threadId, turnId: '', entries: [] });
     for (const set of sets) {
       this.postTurnChanged(set);
+      version = this.changePaintVersion;
       await this.postChangeReview(set.backendId, set.threadId, set.turnId);
+      if (version !== this.changePaintVersion) {
+        return this.postThreadChangeSets(backendId, threadId);
+      }
     }
   }
 
   private postTurnChanged(set: TurnChangeSet): void {
+    this.changePaintVersion += 1;
     this.post({
       type: 'changes/changed',
       backendId: set.backendId,

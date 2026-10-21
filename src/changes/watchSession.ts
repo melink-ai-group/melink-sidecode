@@ -93,7 +93,7 @@ export class ChangeWatchSession {
     }, this.debounceMs);
   }
 
-  private flush(): void {
+  flush(): void {
     if (this.timer) {
       this.clearTimer(this.timer);
       this.timer = undefined;

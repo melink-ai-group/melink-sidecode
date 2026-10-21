@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { stampTurnWorked } from './turnTiming.ts';
+import { mergeTranscriptTool } from './transcriptTool.ts';
 import { PERMISSION_LEVELS, type AgentEvent, type DefaultMode, type PermissionLevel, type TodoStep, type TranscriptItem } from './types';
 import { mergeThreadRef } from './threadRef.ts';
 
@@ -347,7 +348,15 @@ export class ThreadStore implements vscode.Disposable {
     switch (event.type) {
       case 'item/started': {
         const stored = this.getTranscript(event.backendId, event.threadId);
-        if (stored.some((item) => item.id === event.item.id)) {
+        const existing = stored.find((item) => item.id === event.item.id);
+        if (existing) {
+          // OpenCode repeats a call id as pending, running, then completed.
+          // Keep the final file paths/output just as the live renderer does.
+          if (existing.kind === 'tool' || existing.kind === 'file-change') {
+            this.setTranscript(event.backendId, event.threadId, stored.map((item) =>
+              item.id === event.item.id ? mergeTranscriptTool(item, event.item) : item
+            ));
+          }
           return;
         }
         this.setTranscript(event.backendId, event.threadId, [

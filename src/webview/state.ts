@@ -1406,6 +1406,7 @@ function toTranscriptItemView(backendId: string) {
   return (item: TranscriptItem): TranscriptItemView => ({
     id: item.id,
     kind: item.kind,
+    noticeLevel: item.noticeLevel,
     backendId,
     role: item.role,
     title: item.title,
@@ -1542,6 +1543,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
           {
             id: event.item.id,
             kind: event.item.kind,
+            noticeLevel: event.item.noticeLevel,
             backendId: event.backendId,
             role: event.item.role,
             title: event.item.title,
@@ -1550,7 +1552,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
             command: cleanToolTarget(event.item.command),
             files: event.item.files,
             approval: event.item.approval,
-            text: event.item.kind === 'tool' ? (event.item.text ?? '') : '',
+            text: event.item.kind === 'tool' || event.item.kind === 'notice' ? (event.item.text ?? '') : '',
             status: 'streaming'
           }
         ]
