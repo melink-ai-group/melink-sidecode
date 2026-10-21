@@ -2,6 +2,7 @@ import { useEffect, useRef, type JSX } from 'react';
 import type { Attachment } from '../../backends/types';
 import { MAX_ATTACHMENT_BYTES, kindForMime } from '../../attachments';
 import { ChevronRightIcon, CrossIcon, PaperclipIcon } from '../Icons';
+import { trapTab } from '../focusTrap';
 
 /**
  * Turn one clipboard `File` into an attachment. Images are read to a data URL
@@ -121,16 +122,28 @@ export function ImageViewer({
   onClose: () => void;
 }): JSX.Element {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
   const current = images[Math.min(Math.max(index, 0), images.length - 1)];
   const several = images.length > 1;
 
   useEffect(() => {
+    const invoking = document.activeElement;
+    restoreRef.current = invoking instanceof HTMLElement ? invoking : null;
     closeRef.current?.focus();
+    return () => {
+      const target = restoreRef.current;
+      if (target?.isConnected) {
+        target.focus();
+      }
+    };
   }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Tab') {
+        trapTab(event, dialogRef.current);
+      } else if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
       } else if (event.key === 'ArrowLeft' && several) {
@@ -152,6 +165,7 @@ export function ImageViewer({
         role="dialog"
         aria-modal="true"
         aria-label={current?.name ?? 'Image'}
+        ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
       >
         {several ? (

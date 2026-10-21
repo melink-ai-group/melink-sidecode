@@ -1022,6 +1022,61 @@ Where the journal lives:
       `melink.changeJournal` key from `state.vscdb` (optional; a clean scratch
       workspace for the next run also does this).
 
+### Pass 13 - keyboard and screen-reader dialogs
+
+*Applies to: Codex and opencode (both).* This proves focus is trapped while a
+dialog is open, Escape returns focus to what opened it, and the reasoning status
+is announced without reading streamed text on every delta.
+
+- [ ] 59. **Image viewer.** In the composer, attach two images and send them.
+      With the keyboard, tab to a sent image's **View <name>** button and press
+      Enter.
+      - **Expected:** the image viewer opens with focus on **Close image** (not
+        the chat behind it). Press **Tab**: focus cycles through Previous image,
+        Next image, and Close image only, and never reaches the composer.
+        Press **Shift+Tab** from the first control: focus wraps to Close image.
+        Press **Escape**: the viewer closes and focus returns to the **View
+        <name>** button that opened it. Tab once more and confirm focus continues
+        in the chat from that button.
+- [ ] 59a. **Image viewer, one image and arrows.** Repeat with a single image.
+      - **Expected:** only **Close image** is focusable, so Tab stays on it (no
+        focus escapes to the chat). With two or more images, ArrowLeft and
+        ArrowRight still change the image while the dialog is open.
+- [ ] 59b. **Change-review reject confirmation.** Make a turn that changes one
+      file, open **Files changed**, and tab to that row's **Reject** button.
+      Press Enter (or click it).
+      - **Expected:** the confirmation opens with focus on **Cancel**. Press
+        **Tab**: focus moves to the confirm button; press **Tab** again and focus
+        wraps back to **Cancel**. **Shift+Tab** from **Cancel** wraps to the
+        confirm button. The affected-path list still names the file(s) and was
+        not changed by this pass. Press **Escape**: the confirmation closes
+        without rejecting anything, and focus returns to the **Reject** button.
+- [ ] 59c. **Confirm restores focus too.** Open the confirmation again, choose
+      the confirm button, and wait for the decision result and the review
+      repaint.
+      - **Expected:** the file is rejected as in Pass 1, and focus returns to a
+        usable control in the review panel: the **Reject** trigger when it is
+        still enabled (for example the header's **Undo this turn** control after
+        a bulk reject), otherwise the **Files changed** header button when the
+        repaint disables that row's **Reject**. It does **not** remain on a
+        disabled button and does not fall back to the document body. Press
+        **Tab** once and confirm focus moves into the review controls (not
+        behind the panel).
+- [ ] 59d. **Reasoning announcement.** With a screen reader running, send a turn
+      to a model that reports reasoning and let it stream. Then repeat with a
+      turn where reasoning is followed by at least one tool call, leaving the
+      activity group collapsed.
+      - **Expected:** the screen reader announces **Reasoning in progress** once
+        when reasoning starts, then **Reasoning finished** when the reasoning
+        item completes (not necessarily when the whole turn settles), in **both**
+        the solo and the grouped/collapsed cases. If you press **Stop** during
+        reasoning, it announces **Reasoning stopped** when that item stops.
+        Start and finish are one status announcement each, **not** one per
+        streamed delta, and the streamed reasoning text is never read as a live
+        update; the user can expand the reasoning card to read it. Expanding or
+        collapsing the card announces only the button state, not the body text
+        as a live update.
+
 ---
 
 ## 4d. Dictation by platform (Windows x64 / Linux x64)
