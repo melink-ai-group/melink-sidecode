@@ -556,6 +556,25 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * The active chat's provider and model for the opt-in local missed-issue log.
+   * `unknown` is reported rather than inventing an identity when no chat is
+   * open. This is read-only metadata; it never includes prompts or code.
+   */
+  failureLogIdentity(): { providerId: string; modelId: string } {
+    const session = this.visible ?? this.session;
+    const thread = session?.activeThread;
+    const providerId =
+      session?.composerBackendId && this.registry.get(session.composerBackendId)
+        ? session.composerBackendId
+        : thread?.backendId;
+    const modelId = session?.composerModelId ?? thread?.model;
+    return {
+      providerId: providerId ?? 'unknown',
+      modelId: modelId ?? 'unknown'
+    };
+  }
+
   private get mode(): DefaultMode {
     return this.session?.mode ?? readDefaultMode();
   }

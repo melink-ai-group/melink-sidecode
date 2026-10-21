@@ -77,6 +77,7 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | Key | Scope | Purpose |
 |---|---|---|
 | `melink.review.checks` | workspace | Newest 50 check runs, keyed `backendId:threadId:turnId`; a stored `running` run is read back as `skipped` after a reload. This is state, not a setting, and it shares the name with the configuration section only by design. |
+| `melink.telemetry.failureLog` | boolean, `false`, **application scope** | **Not on the screen** — VS Code Settings or the **SideCode: Record a missed issue locally** command | `createFailureLogHost()` / `recordFailureEntry()`; false keeps the command informational and touches no directory or file. Application scope means a workspace cannot opt in |
 
 ## Credentials
 

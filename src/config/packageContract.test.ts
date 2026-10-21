@@ -80,7 +80,9 @@ test('no other contributed setting is application-scoped by accident', async () 
     'melink.review.diffReview',
     // The destructive-command safety policy is a user decision, not a workspace one.
     'melink.safety.destructiveCommands',
-    'melink.safety.destructivePatterns'
+    'melink.safety.destructivePatterns',
+    // The failure log is opt-in and user-scoped by design.
+    'melink.telemetry.failureLog'
   ];
   const pkg = await manifest();
   const properties = pkg.contributes?.configuration?.properties ?? {};
