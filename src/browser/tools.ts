@@ -46,6 +46,14 @@ export interface BrowserTool {
   inputSchema: Record<string, unknown>;
 }
 
+/**
+ * What the user chose when asked to allow an origin.
+ *
+ * `once` navigates this time without remembering anything; `session` navigates
+ * and the caller may remember the exact origin; `deny` does not navigate.
+ */
+export type OriginApproval = 'once' | 'session' | 'deny';
+
 const VIEWPORT = {
   type: 'object',
   properties: {
@@ -60,7 +68,7 @@ export const BROWSER_TOOLS: readonly BrowserTool[] = [
   {
     name: 'browser_navigate',
     description:
-      'Open a URL the user provides in the editor browser tab. Localhost works only if the app is already running. Other sites ask the user before opening.',
+      'Open a URL in the editor browser tab the user is watching, including localhost. Every http(s) origin asks the user unless it was already allowed for this session. Allowing an origin also permits browser_click, browser_type, browser_press and browser_snapshot in that tab; non-http(s) addresses are rejected.',
     inputSchema: {
       type: 'object',
       properties: { url: { type: 'string', description: 'Absolute http or https URL.' } },
@@ -149,21 +157,22 @@ export function textResult(text: string, isError = false): ToolResult {
 /**
  * Run one browser tool.
  *
- * `allow` is called only when the address is not localhost and not already
- * allowed. A denial does not navigate.
+ * `allow` is called for every http(s) origin that is not already granted for
+ * the session, including localhost. It only reports the user's choice;
+ * `runBrowserTool` never mutates the grants. A denial does not navigate.
  */
 export async function runBrowserTool(
   actions: BrowserActions,
   name: string,
   raw: unknown,
-  allow: (origin: string) => Promise<boolean>,
-  allowedOrigins: ReadonlySet<string>
+  allow: (origin: string) => Promise<OriginApproval>,
+  grantedOrigins: { has(origin: string): boolean }
 ): Promise<ToolResult> {
   const args = asRecord(raw);
   try {
     switch (name) {
       case 'browser_navigate':
-        return await navigate(actions, args, allow, allowedOrigins);
+        return await navigate(actions, args, allow, grantedOrigins);
       case 'browser_resize':
         return await resize(actions, args);
       case 'browser_snapshot':
@@ -190,14 +199,14 @@ export async function runBrowserTool(
 async function navigate(
   actions: BrowserActions,
   args: Record<string, unknown>,
-  allow: (origin: string) => Promise<boolean>,
-  allowedOrigins: ReadonlySet<string>
+  allow: (origin: string) => Promise<OriginApproval>,
+  grantedOrigins: { has(origin: string): boolean }
 ): Promise<ToolResult> {
   const url = typeof args.url === 'string' ? args.url.trim() : '';
   if (!url) {
     return textResult('Provide a url.', true);
   }
-  const decision = navigationDecision(url, allowedOrigins);
+  const decision = navigationDecision(url, grantedOrigins);
   if (decision === 'invalid') {
     return textResult('Only http and https addresses can be opened.', true);
   }
@@ -206,8 +215,8 @@ async function navigate(
     if (!origin) {
       return textResult('Only http and https addresses can be opened.', true);
     }
-    const accepted = await allow(origin);
-    if (!accepted) {
+    const approval = await allow(origin);
+    if (approval !== 'once' && approval !== 'session') {
       return textResult(`Navigation to ${origin} was denied.`, true);
     }
   }
