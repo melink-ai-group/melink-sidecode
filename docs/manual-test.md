@@ -1201,28 +1201,21 @@ fails is either fixed (recorded in the headless section) or listed under §7.
 
 ### Current verification baseline
 
-Measured on this commit (2026-10-20), so the numbers stay truthful before sign-off:
+Measured on the merged `main` after the stack-merge recovery, so the numbers stay
+truthful before sign-off:
 
 - **Package version:** 0.2.0 (`package.json`)
-- **Node test files:** 88 (`src/**/*.test.ts`)
-- **Node tests:** 832 declarations: 830 pass, 2 known failures —
-  `the spawned child env has inherited credentials scrubbed and keeps auth.json discoverable`
-  (`src/backends/appserver/connection.test.ts`, PATH casing) and
-  `the codex adapter delivers context through native instructions, not a synthetic turn`
-  (`src/context/hygiene.test.ts`, stale `developerInstructions` regex). Tracked by
-  T64 item A; this is not a green suite.
-- **Typecheck:** 5 known errors (`npm run typecheck` / `npm run lint`), tracked by
-  T64 item A; not green.
-- **Hex colour literals:** 19 occurrences across 17 lines in
-  `src/webview/styles.css`, tracked by T64 item 23.
-- **DOM suite (T79 / PR #13):** if the jsdom/RTL suite is present, `npm test` adds
-  its 7 DOM tests on top of the node count above. This document and
-  `npm run verify` keep the node-suite claim separate, so both stay truthful
-  before and after that merge.
+- **Node test files:** 143 (`src/**/*.test.ts`)
+- **Node tests:** 1441 declarations: 1441 pass, 0 failures (`npm run test:node`).
+- **DOM suite:** 3 files / 7 tests, all passing (`npm run test:dom`). `npm test`
+  runs the node, tools and DOM suites together.
+- **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
+- **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`
+  (the split style modules use the `--melink-scrim`, `--melink-mask`,
+  `--melink-on-primary` and `--melink-on-accent` tokens); `npm run check:hex` enforces this.
 
 `npm run verify` checks the version, file/test counts, and hex count above against
-the tree. It deliberately does not run `npm test` or `tsc`, so the known baseline
-above stays visible instead of blocking on it.
+the tree. It deliberately does not run `npm test` or `tsc`.
 
 ### Executed headlessly (host-independent checks)
 
