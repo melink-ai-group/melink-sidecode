@@ -138,13 +138,40 @@ You can set all of this from **SideCode: Open settings** without editing JSON:
 the CLI tab carries the **opencode CLI source** and path fields. The status line
 shows one of three distinct states — detected (with the CLI version), missing, or
 not runnable — and an invalid path is refused inline without overwriting a
-previously stored valid one. The **Skills** tab configures **ast-grep**
-(structural search/rewrite) and **zvec-grep** (semantic + keyword search). Each
-skill has a local or bundled CLI source (bundled lives under extension global
-storage, like opencode). Turning a skill on installs the CLI when needed, writes
-an absolute-path MCP entry into your user OpenCode config, and injects that
-server into SideCode turns. Turning it off removes the MCP entry and leaves the
-CLI installed.
+previously stored valid one. The **Skills** tab configures **ast-grep** (structural search/rewrite) and
+**zvec-grep** (semantic + keyword search). Each skill has a local or bundled CLI
+source (bundled lives under extension global storage, like opencode). The
+**enable toggle is the first control** in each panel; it is application-scoped,
+like the path it runs, so a workspace value cannot flip it back after a reload.
+Turning a skill on installs the CLI when needed, rewrites the one known legacy
+`zg --server --stdio` entry to `zg server --stdio`, writes an absolute-path MCP
+entry into your user OpenCode config, and injects that server into SideCode
+turns. Turning it off removes the MCP entry and leaves the CLI installed. The
+source, path and enabled flag are written only after the apply succeeded, so a
+failed install never leaves a half-changed CLI selection behind.
+
+Each panel shows a status chip: **Ready**, **Needs setup**, **Missing binary**,
+**Index missing**, **Error** (with the reason) or **Working...**. **Test** probes
+the CLI and its MCP server (`initialize` + `tools/list`) without writing
+anything; a missing binary, an unsupported version and a server that does not
+answer each get their own sentence. zvec-grep also needs a workspace index:
+**Build index** runs the supported `zg index` in this workspace (an explicit
+action; nothing indexes automatically), and until it succeeds searches return
+`INDEX_MISSING`. A new index needs an embedding model (`zg config model set
+<model> --default` or `ZVEC_GREP_EMBEDDING`); the build result names that when it
+is missing. A JSONC OpenCode config with comments or trailing commas is read
+safely, and the previous file is kept as `opencode.json.bak` before a rewrite.
+
+**Saving settings.** The footer's primary action writes the scope that controls
+the values on screen: it saves to this workspace's `.vscode/settings.json` when
+a workspace override is in effect (labelled **Save to workspace**), otherwise to
+your user settings. **Save user settings** is still offered beside it. Credential
+hosts, CLI paths/sources and the permission default are always written to user
+settings, with an inline notice saying so. While the host is saving, the button
+is disabled and reads **Saving...** with a spinner and `aria-busy`; the result is
+reported in the footer, and a failed or refused field keeps the draft for a
+retry. Every changed control is in the patch, and the echo re-seeds the form, so
+what you see is what was stored.
 
 
 ### Ollama Local
@@ -320,10 +347,10 @@ settings (**SideCode: Open settings**).
 | `melink.context.includeChangedFiles` | `true` | Include the changed-files notice in the per-turn delta. |
 | `melink.context.maxBytes` | `20480` | Overall byte cap for a rendered snapshot. When it is reached, categories truncate in order: open editors, then instruction documents, then the tree. |
 | `melink.context.exclude` | *(empty)* | Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. |
-| `melink.review.checks.enabled` | `true` | Run post-turn checks after a turn that changed files. Off skips them entirely; an untrusted workspace is always skipped. |
+| `melink.review.checks.enabled` | `false` | Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit value still wins; an untrusted workspace is always skipped. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands to run. Empty means auto-detect `typecheck` (falling back to `lint`) and `test` from `package.json`; an explicitly saved empty list turns checks off. |
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5–600. A timed-out check is killed and reported as timed out. |
-| `melink.orchestration.testing` | `true` | Post-turn typecheck/lint and tests. Falls back to `melink.review.checks.enabled` when unset. |
+| `melink.orchestration.testing` | `false` | Post-turn typecheck/lint and tests; default off. Falls back to `melink.review.checks.enabled` when unset. |
 | `melink.orchestration.reviewing` | `false` | Advisory read-only diff review. Falls back to `melink.review.diffReview` when unset. |
 | `melink.orchestration.doubleCheck` | `true` | Sweep changed files for VS Code errors after a turn. |
 | `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for short single-question Agent turns. |
@@ -336,17 +363,18 @@ settings (**SideCode: Open settings**).
 | `melink.skills.browserCodex` | `true` | Let Codex open a browser tab in the editor to check layout. |
 | `melink.skills.browserOpencode` | `true` | Let OpenCode (Ollama runtime and OpenCode Zen) open a browser tab in the editor to check layout. |
 | `melink.skills.browser` | `true` | Legacy single browser switch, read only when the per-provider browser keys are unset. |
-| `melink.skills.zvecGrep` | `false` | Connect zvec-grep (semantic + keyword + ripgrep MCP) to OpenCode. Enabling writes an absolute-path MCP entry; disabling removes it and leaves the CLI installed. |
+| `melink.skills.zvecGrep` | `false` | Application-scoped. Connect zvec-grep (semantic + keyword + ripgrep MCP) to OpenCode. Enabling writes an absolute-path MCP entry and persists source/path/enabled only after the apply succeeds; disabling removes the entry and leaves the CLI installed. |
 | `melink.skills.zvecGrep.cliSource` | `local` | `local` (path / PATH) or `bundled` (extension global storage). |
 | `melink.skills.zvecGrep.path` | `zg` | Path to `zg` when `cliSource` is local. |
-| `melink.skills.astGrep` | `false` | Connect ast-grep (structural search/rewrite MCP) to OpenCode. |
+| `melink.skills.astGrep` | `false` | Application-scoped. Connect ast-grep (structural search/rewrite MCP) to OpenCode; source/path/enabled persist together after a successful apply. |
 | `melink.skills.astGrep.cliSource` | `local` | `local` or `bundled` (extension global storage). |
 | `melink.skills.astGrep.path` | `ast-grep` | Path to `ast-grep` when `cliSource` is local. |
 
 The `melink.review.checks.*` values are read directly by the post-turn check host
 for the explicit command list and timeout. Whether the pass runs at all is the
-**Orchestration -> Testing** toggle (`melink.orchestration.testing`), which falls
-back to `melink.review.checks.enabled` until you save it. The review panel's
+**Orchestration -> Testing** toggle (`melink.orchestration.testing`), which is off
+by default and falls back to `melink.review.checks.enabled` until you save it. The
+review panel's
 collapsed header shows the run summary and expanding it lists one row per check
 with its status word, duration, and any bounded failure detail or skipped reason.
 
@@ -373,15 +401,15 @@ that would make opening a folder a security problem, so those settings are
 | `melink.ollamaLocal.baseUrl` | The destination of local prompts. A workspace must not redirect them. |
 | `melink.ollama.opencode.path`, `melink.ollama.opencode.cliSource` | The binary a turn spawns. The child runs with the workspace as its working directory. |
 | `melink.codex.path` | The Codex CLI binary a turn spawns. |
-| `melink.skills.zvecGrep.path`, `melink.skills.zvecGrep.cliSource` | The `zg` binary the search skill spawns. |
-| `melink.skills.astGrep.path`, `melink.skills.astGrep.cliSource` | The `ast-grep` binary the search skill spawns. |
+| `melink.skills.zvecGrep`, `melink.skills.zvecGrep.path`, `melink.skills.zvecGrep.cliSource` | Whether the skill runs, and the `zg` binary it spawns. |
+| `melink.skills.astGrep`, `melink.skills.astGrep.path`, `melink.skills.astGrep.cliSource` | Whether the skill runs, and the `ast-grep` binary it spawns. |
 | `melink.defaults.permissionLevel` | The permission a new conversation starts with. A workspace must not be able to raise it to `unrestricted`. |
 
 A workspace value for one of these is ignored even if it was written before
 this restriction, and the **Save to workspace** action writes these to your
 user settings instead, with a short note on the field. Every one of the ten
 fields shows that note. Every other SideCode setting (model names, context
-toggles, skill flags) keeps its normal workspace-scope behaviour.
+toggles) keeps its normal workspace-scope behaviour. Skill enable flags are application-scoped with the CLI path they run.
 
 Two further rules apply to the CLI paths, because they name the binary that
 runs: a **relative path** is refused — it would resolve inside the workspace —
@@ -482,11 +510,11 @@ read when a conversation starts, so they take effect on the next conversation.
 
 | Configuration key / credential | Default | On the settings screen |
 |---|---|---|
-| `melink.review.checks.enabled` | `true` | Not yet on the screen - read by the post-turn check host |
+| `melink.review.checks.enabled` | `false` | Not yet on the screen - legacy fallback read by the post-turn check host |
 | `melink.review.checks.commands` | *(empty)* | Not yet on the screen - explicit commands; empty means auto-detect |
 | `melink.review.checks.timeoutSeconds` | `120` | Not yet on the screen - per-check timeout, clamped 5-600 |
 | `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
-| `melink.orchestration.testing` | `true` | Orchestration -> Testing |
+| `melink.orchestration.testing` | `false` | Orchestration -> Testing |
 | `melink.orchestration.reviewing` | `false` | Orchestration -> Reviewing |
 | `melink.orchestration.doubleCheck` | `true` | Orchestration -> Double-check |
 | `melink.orchestration.quickTask` | `true` | Orchestration -> Quick tasks |
@@ -863,7 +891,7 @@ reply finishes. Changes apply from the **next turn**; the summary at the top of
 the tab spells out the current policy. Every pass is advisory and none of them
 changes the reply, the tools, or the permission level.
 
-- **Testing** (`melink.orchestration.testing`, default on) runs the project's
+- **Testing** (`melink.orchestration.testing`, default off) runs the project's
   typecheck/lint and tests through the post-turn check runner described above.
 - **Reviewing** (`melink.orchestration.reviewing`, default off) adds the advisory
   diff review. It falls back to `melink.review.diffReview` until saved.

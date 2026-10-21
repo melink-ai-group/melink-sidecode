@@ -41,6 +41,63 @@ async function settle(page) {
   });
 }
 
+async function assertNoOverflow(page, label) {
+  const result = await page.evaluate(() => {
+    const doc = document.documentElement;
+    const wide = doc.scrollWidth > doc.clientWidth + 1;
+    const offenders = [];
+    for (const element of document.querySelectorAll(
+      '.settings .panel--fill, .settings .panel__body, .skill-panel, .skill-controls, .skill-actions'
+    )) {
+      if (element.offsetParent === null) {
+        continue;
+      }
+      if (element.scrollWidth > element.clientWidth + 1) {
+        offenders.push(
+          `${element.className}: scrollWidth ${element.scrollWidth} > clientWidth ${element.clientWidth}`
+        );
+      }
+    }
+    return { wide, offenders };
+  });
+  if (result.wide) {
+    throw new Error('the page has horizontal overflow (documentElement.scrollWidth exceeds clientWidth)');
+  }
+  if (result.offenders.length > 0) {
+    throw new Error(`horizontal overflow in ${result.offenders.join(' | ')}`);
+  }
+  console.log(`[visual] ${label}: no horizontal overflow`);
+}
+
+async function assertInViewport(page, label, selectors, viewport) {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if ((await locator.count()) === 0) {
+      throw new Error(`expected ${selector} to exist for the viewport check`);
+    }
+    if (!(await locator.isVisible())) {
+      throw new Error(`${selector} is not visible`);
+    }
+    const box = await locator.boundingBox();
+    if (!box) {
+      throw new Error(`${selector} has no layout box`);
+    }
+    if (
+      box.x < 0 ||
+      box.y < 0 ||
+      box.x + box.width > viewport.width + 1 ||
+      box.y + box.height > viewport.height + 1
+    ) {
+      throw new Error(
+        `${selector} is clipped (x ${Math.round(box.x)}..${Math.round(box.x + box.width)}, ` +
+          `y ${Math.round(box.y)}..${Math.round(box.y + box.height)}, ` +
+          `viewport ${viewport.width}x${viewport.height})`
+      );
+    }
+  }
+  console.log(`[visual] ${label}: asserted ${selectors.length} in-viewport controls`);
+}
+
 async function seed(page, messages) {
   await page.evaluate((hostMessages) => {
     for (const message of hostMessages) {
@@ -156,6 +213,14 @@ export async function captureScreen({ browser, baseUrl, screen, viewport, outDir
     if (screen.assertRows) {
       await step(label, `assert rows ${screen.assertRows.selector}`, () =>
         assertVisibleRows(page, label, screen.assertRows, viewport)
+      );
+    }
+    if (screen.assertNoOverflow) {
+      await step(label, 'assert no horizontal overflow', () => assertNoOverflow(page, label));
+    }
+    if (screen.assertInViewport) {
+      await step(label, 'assert controls are in the viewport', () =>
+        assertInViewport(page, label, screen.assertInViewport, viewport)
       );
     }
 

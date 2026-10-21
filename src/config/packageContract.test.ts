@@ -107,7 +107,10 @@ test('the trust-scoped keys are exactly the ones the code protects', async () =>
         key.endsWith('.baseUrl') ||
         key.endsWith('.path') ||
         key.endsWith('.cliSource') ||
-        key.endsWith('.permissionLevel')
+        key.endsWith('.permissionLevel') ||
+        // A skill enable flag decides whether a binary-spawning MCP tool runs.
+        key === 'melink.skills.zvecGrep' ||
+        key === 'melink.skills.astGrep'
       );
     })
     .map(([key]) => key)
@@ -143,7 +146,7 @@ test('the orchestration keys are window-scoped with the designed defaults', asyn
   const pkg = await manifest();
   const properties = pkg.contributes?.configuration?.properties ?? {};
   const expected: Array<[string, boolean]> = [
-    ['melink.orchestration.testing', true],
+    ['melink.orchestration.testing', false],
     ['melink.orchestration.reviewing', false],
     ['melink.orchestration.doubleCheck', true],
     ['melink.orchestration.quickTask', true],

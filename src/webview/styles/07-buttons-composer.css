@@ -211,6 +211,10 @@
 
 /* An empty chat keeps the mark visible and gives the draft the rest of the
  * sidebar so the first message can be written in a tall field. */
+.app--chat-empty .chat-main {
+  flex: 0 1 auto;
+}
+
 .app--chat-empty .transcript {
   flex: 0 1 auto;
   min-height: 148px;

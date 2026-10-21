@@ -69,12 +69,17 @@ export function resolveZvecGrepExecutable(options: {
   roots: SkillResolveRoots;
   platform?: NodeJS.Platform;
 }): string {
+  const platform = options.platform ?? process.platform;
   if (options.source === 'bundled') {
-    return bundledZvecGrepExecutable(options.roots, options.platform);
+    return bundledZvecGrepExecutable(options.roots, platform);
   }
-  const fallback = options.platform === 'win32' ? 'zg.cmd' : 'zg';
+  const fallback = platform === 'win32' ? 'zg.cmd' : 'zg';
   const resolved = resolveExecutableCommand(options.path, fallback);
-  return resolved.ok ? resolved.command : fallback;
+  const command = resolved.ok ? resolved.command : fallback;
+  // npm installs `zg` as a `.cmd` shim on Windows. Node's spawn does not apply
+  // PATHEXT, and OpenCode spawns this exact argv, so a bare name must become
+  // `zg.cmd` here rather than fail at tool time.
+  return platform === 'win32' && command === 'zg' ? 'zg.cmd' : command;
 }
 
 export function bundledZvecGrepPresent(

@@ -69,7 +69,7 @@ export function clampCheckTimeoutSeconds(value: unknown): number {
 
 /** Resolve inspected or injected values into the core settings shape. */
 export function resolveCheckSettingsInput(input: CheckSettingsInput): ResolvedCheckSettings {
-  const enabled = typeof input.enabled === 'boolean' ? input.enabled : true;
+  const enabled = typeof input.enabled === 'boolean' ? input.enabled : false;
   const timeoutSeconds = clampCheckTimeoutSeconds(input.timeoutSeconds);
 
   const explicit = firstDefined(
@@ -104,7 +104,9 @@ export function readCheckSettingsFrom(
   trusted: boolean
 ): ResolvedCheckSettings {
   return resolveCheckSettingsInput({
-    enabled: effective(inspect.enabled) ?? inspect.enabled?.defaultValue,
+    // The schema default is not an explicit choice: a fresh profile stays off
+    // until the user (or the orchestration plan) asks for checks.
+    enabled: effective(inspect.enabled),
     commandsGlobal: inspect.commands?.globalValue,
     commandsWorkspace: inspect.commands?.workspaceValue,
     commandsWorkspaceFolder: inspect.commands?.workspaceFolderValue,

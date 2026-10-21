@@ -376,6 +376,7 @@ export class OllamaBackend implements AgentBackend {
   private async skillMcpForTurn(): Promise<{
     mcp?: Record<string, unknown>;
     permissions: Record<string, 'allow'>;
+    astGrep: boolean;
   }> {
     const { skillMcpForOpencodeTurn } = await import('../skills/resolveForTurn.ts');
     return skillMcpForOpencodeTurn({
@@ -973,7 +974,8 @@ export class OllamaBackend implements AgentBackend {
         : {}),
       ...(browser ? { browser } : {}),
       ...(skills.mcp ? { skillMcp: skills.mcp } : {}),
-      ...(Object.keys(skills.permissions).length > 0 ? { skillPermissions: skills.permissions } : {})
+      ...(Object.keys(skills.permissions).length > 0 ? { skillPermissions: skills.permissions } : {}),
+      ...(skills.astGrep ? { astGrepSkill: true } : {})
     });
     if (built.reasoningUnsupported) {
       this.events.fire({

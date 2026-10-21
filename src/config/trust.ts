@@ -107,8 +107,11 @@ export const TRUST_SCOPED_KEYS: readonly string[] = [
   'melink.ollama.opencode.path',
   'melink.ollama.opencode.cliSource',
   'melink.codex.path',
+  // Whether a binary-spawning skill can run, and which binary it spawns.
+  'melink.skills.zvecGrep',
   'melink.skills.zvecGrep.path',
   'melink.skills.zvecGrep.cliSource',
+  'melink.skills.astGrep',
   'melink.skills.astGrep.path',
   'melink.skills.astGrep.cliSource',
   // The effective permission default.
@@ -136,7 +139,7 @@ export const WORKSPACE_SAVE_REFUSED_MESSAGE =
  * Whether a settings key may be written to workspace settings.
  *
  * Only the trust-sensitive keys are refused; every other SideCode setting
- * (model names, context toggles, skill flags) keeps its existing
+ * (model names, context toggles, the browser skill flags) keeps its existing
  * workspace-scope behaviour.
  */
 export function keyAllowsWorkspaceScope(key: string): boolean {
@@ -144,15 +147,56 @@ export function keyAllowsWorkspaceScope(key: string): boolean {
 }
 
 /** Where a settings key is written. */
-export type SettingsWriteScope = 'global' | 'workspace';
+export type SettingsWriteScope = 'global' | 'workspace' | 'folder';
 
 /**
  * The scope one key is written to.
  *
  * A trust-sensitive key is always written to the user's own settings, even
- * when a workspace save was asked for: the value would be ignored on the next
- * read, so a workspace write would look like it worked and change nothing.
+ * when a workspace or folder save was asked for: the value would be ignored on
+ * the next read, so such a write would look like it worked and change nothing.
  */
 export function saveScopeForKey(key: string, requested: SettingsWriteScope): SettingsWriteScope {
   return keyAllowsWorkspaceScope(key) ? requested : 'global';
+}
+
+/**
+ * The nearest explicit override that controls a key's effective value.
+ *
+ * VS Code merges folder over workspace over user settings. The settings screen
+ * must save to the same scope that supplies the value it shows, or the
+ * override keeps winning while the draft looks unsaved.
+ */
+export function controllingScope(
+  inspected: InspectedSetting<unknown> | undefined
+): 'folder' | 'workspace' | undefined {
+  if (!inspected) {
+    return undefined;
+  }
+  if (inspected.workspaceFolderValue !== undefined) {
+    return 'folder';
+  }
+  if (inspected.workspaceValue !== undefined) {
+    return 'workspace';
+  }
+  return undefined;
+}
+
+/**
+ * The scope one key is written to when the primary save asked for `requested`.
+ *
+ * A user-settings save (`global`) always stays global: the user explicitly
+ * asked for a value their own settings control. Otherwise the nearest existing
+ * override wins (folder > workspace), falling back to the requested scope when
+ * the key has no override yet. Trust-sensitive keys are redirected later by
+ * `fieldSaveOutcome`.
+ */
+export function resolveWriteScope(
+  requested: SettingsWriteScope,
+  inspected: InspectedSetting<unknown> | undefined
+): SettingsWriteScope {
+  if (requested === 'global') {
+    return 'global';
+  }
+  return controllingScope(inspected) ?? requested;
 }

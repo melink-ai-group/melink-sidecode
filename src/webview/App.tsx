@@ -1,4 +1,4 @@
-import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
+﻿import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ApprovalDecision, ApprovalRule } from '../backends/types';
 import { historyEntries, historyLoading } from './historyEntries';
 import { reasoningTransition } from './reasoningStatus';
@@ -102,8 +102,20 @@ function ReasoningAnnouncements({ items }: { items: TranscriptItemView[] }): JSX
     </p>
   );
 }
+/** The screen's outer bound; the host settles at 15 s, this only unsticks a lost reply. */
+const SETTINGS_SAVE_WATCHDOG_MS = 20000;
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reduce, initialState);
+  /** Set synchronously on click so two clicks in one tick post once. */
+  const settingsSavePendingRef = useRef(false);
+  const settingsSaveWatchdogRef = useRef<number | undefined>(undefined);
+  const clearSettingsSaveWatchdog = (): void => {
+    if (settingsSaveWatchdogRef.current !== undefined) {
+      window.clearTimeout(settingsSaveWatchdogRef.current);
+      settingsSaveWatchdogRef.current = undefined;
+    }
+  };
+  useEffect(() => () => clearSettingsSaveWatchdog(), []);
   setPrettyPathRoots(state.workspaceRoots);
   const [draft, setDraft] = useState('');
   /** True between queueing a message and the host's `queuedTurns` echo. */
@@ -320,6 +332,18 @@ export function App(): JSX.Element {
         case 'settings':
           dispatch({ type: 'settings', settings: message.settings });
           break;
+        case 'settingsSave':
+          settingsSavePendingRef.current = message.pending;
+          if (!message.pending) {
+            clearSettingsSaveWatchdog();
+          }
+          dispatch({
+            type: 'settingsSave',
+            pending: message.pending,
+            ok: message.ok,
+            message: message.message
+          });
+          break;
         case 'showSettings':
           dispatch({ type: 'openSettings', provider: message.section });
           bridge.post({ type: 'getSettings' });
@@ -383,6 +407,16 @@ export function App(): JSX.Element {
             ok: message.ok,
             message: message.message,
             path: message.path
+          });
+          break;
+        case 'skillAction':
+          dispatch({
+            type: 'skillAction',
+            skill: message.skill,
+            action: message.action,
+            pending: message.pending,
+            ok: message.ok,
+            message: message.message
           });
           break;
         case 'context':
@@ -836,7 +870,7 @@ export function App(): JSX.Element {
   // Load every available backend's models so the floating panel can list them all
   // in one place; the provider concept stays in the host, the panel only reads
   // the neutral `models` payload. An unauthenticated provider has no list to
-  // fetch — it is represented by an actionable entry instead.
+  // fetch â€” it is represented by an actionable entry instead.
   useEffect(() => {
     for (const backend of available) {
       if (state.models[backend.id] === undefined && state.modelErrors[backend.id] === undefined) {
@@ -998,11 +1032,34 @@ export function App(): JSX.Element {
   };
 
   const closeSettings = (): void => {
+    settingsSavePendingRef.current = false;
+    clearSettingsSaveWatchdog();
     dispatch({ type: 'closeSettings' });
   };
 
-  const saveSettings = (patch: SettingsPatch, target?: 'global' | 'workspace'): void => {
+  const saveSettings = (patch: SettingsPatch, target?: 'global' | 'workspace' | 'folder'): void => {
+    // Set before dispatch/post so a second click in the same tick is ignored,
+    // not merely hidden by the disabled attribute on the next render.
+    if (settingsSavePendingRef.current || state.settingsSave?.pending) {
+      return;
+    }
+    settingsSavePendingRef.current = true;
+    dispatch({ type: 'settingsSave', pending: true });
     bridge.post({ type: 'saveSettings', patch, ...(target ? { target } : {}) });
+    clearSettingsSaveWatchdog();
+    settingsSaveWatchdogRef.current = window.setTimeout(() => {
+      if (!settingsSavePendingRef.current) {
+        return;
+      }
+      settingsSavePendingRef.current = false;
+      dispatch({
+        type: 'settingsSave',
+        pending: false,
+        ok: false,
+        message:
+          'The save did not answer in time. Your draft is still here, so you can retry; reopen Settings to see anything that was stored.'
+      });
+    }, SETTINGS_SAVE_WATCHDOG_MS);
   };
 
   const saveOllamaToken = (value: string): void => {
@@ -1068,6 +1125,20 @@ export function App(): JSX.Element {
   const installZvecGrep = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
     dispatch({ type: 'zvecGrepInstall', pending: true });
     bridge.post({ type: 'installZvecGrep', cliSource: draft.cliSource, path: draft.path });
+  };
+
+  const runSkillAction = (
+    skill: 'zvecGrep' | 'astGrep',
+    action: 'test' | 'index',
+    draft?: { cliSource: 'local' | 'bundled'; path: string }
+  ): void => {
+    dispatch({ type: 'skillAction', skill, action, pending: true });
+    bridge.post({
+      type: 'skillAction',
+      skill,
+      action,
+      ...(draft ? { cliSource: draft.cliSource, path: draft.path } : {})
+    });
   };
 
   const testConnection = (
@@ -1487,11 +1558,11 @@ export function App(): JSX.Element {
         ? 'Click to stop'
         : 'Click to dictate, or hold to talk';
   const micTitle = !state.settings
-    ? 'Loading settings…'
+    ? 'Loading settingsâ€¦'
     : !dictationModel
       ? 'Choose a dictation model in Settings.'
       : dictationStatus && micGestureHint
-        ? `${dictationStatus} — ${micGestureHint}`
+        ? `${dictationStatus} â€” ${micGestureHint}`
         : dictationStatus ?? micGestureHint ?? 'Dictate a message';
   const showMic =
     listening || cleaning || (!state.busy && draft.trim().length === 0 && state.attachments.length === 0);
@@ -1509,7 +1580,7 @@ export function App(): JSX.Element {
     listeningRef.current = false;
     setListening(false);
     setCleaning(true);
-    setDictationStatus('Finishing the recording…');
+    setDictationStatus('Finishing the recordingâ€¦');
     bridge.post({ type: 'stopDictation', requestId });
   };
   stopDictationRef.current = stopDictation;
@@ -1523,7 +1594,7 @@ export function App(): JSX.Element {
     listeningRef.current = true;
     dispatch({ type: 'dismissAttachmentError' });
     setListening(true);
-    setDictationStatus('Starting the microphone…');
+    setDictationStatus('Starting the microphoneâ€¦');
     bridge.post({ type: 'startDictation', requestId });
   };
 
@@ -2265,6 +2336,7 @@ export function App(): JSX.Element {
       <div className="chat-tab-body">
       <SettingsScreen
         settings={state.settings}
+        settingsSave={state.settingsSave}
         connectionTest={state.connectionTest}
         settingsProvider={state.settingsProvider}
         codexVersionCheck={state.codexVersionCheck}
@@ -2289,6 +2361,8 @@ export function App(): JSX.Element {
         onUpgradeAstGrep={upgradeAstGrep}
         zvecGrepInstall={state.zvecGrepInstall}
         onInstallZvecGrep={installZvecGrep}
+        skillAction={state.skillAction}
+        onSkillAction={runSkillAction}
       />
       </div>
       </main>
@@ -2369,122 +2443,124 @@ export function App(): JSX.Element {
     <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
       {tabStrip}
       <ReasoningAnnouncements items={state.transcript} />
-      <div
-        className="transcript"
-        ref={transcriptRef}
-        role="log"
-        aria-label="Conversation transcript"
-      >
-        <div className="user-pin-anchor">
-          {pinnedPreview && pinnedUserId ? (
-            <button
-              key={pinnedUserId}
-              type="button"
-              className="user-pin"
-              aria-label="Show this message"
-              title="Show this message"
-              onClick={() => jumpToUserMessage(pinnedUserId)}
-            >
-              <span className={pinnedPreview.length > 140 ? 'user-pin__text user-pin__text--fade' : 'user-pin__text'}>
-                {pinnedPreview}
-              </span>
-            </button>
-          ) : null}
-        </div>
-        {!state.restoring && state.hasOlderHistory ? (
-          <div className="history-more">
-            <button type="button" onClick={() => requestOlder(true)} disabled={state.loadingOlder}>
-              {state.loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
-            </button>
+      <div className="chat-main">
+        <div
+          className="transcript"
+          ref={transcriptRef}
+          role="log"
+          aria-label="Conversation transcript"
+        >
+          <div className="user-pin-anchor">
+            {pinnedPreview && pinnedUserId ? (
+              <button
+                key={pinnedUserId}
+                type="button"
+                className="user-pin"
+                aria-label="Show this message"
+                title="Show this message"
+                onClick={() => jumpToUserMessage(pinnedUserId)}
+              >
+                <span className={pinnedPreview.length > 140 ? 'user-pin__text user-pin__text--fade' : 'user-pin__text'}>
+                  {pinnedPreview}
+                </span>
+              </button>
+            ) : null}
           </div>
-        ) : null}
-        {state.restoring ? (
-          <div className="restoring" role="status">
-            <span className="spinner" aria-hidden="true" />
-            Restoring conversation...
-          </div>
-        ) : state.transcript.length === 0 && !state.startingTurn && !state.notice ? (
-          <EmptyState state={state} dispatch={dispatch} hasAvailable={available.length > 0} />
-        ) : (
-          transcriptEntries.map((entry) => {
-            const entryId = entry.kind === 'item' ? entry.item.id : entry.id;
-            const elapsed = elapsedNotes.get(entryId);
-            return (
-              <Fragment key={entryId}>
-                {entry.kind === 'group' ? (
-                  <ActivityGroup family={entry.family} items={entry.items} />
-                ) : entry.kind === 'narration' ? (
-                  <NarrationRow
-                    message={entry.message}
-                    items={entry.items}
-                    showSpeaker={speakers.has(entry.id)}
-                    providerId={entry.message.backendId ?? active?.id ?? 'ollama'}
-                  />
-                ) : (
-                  <TranscriptRow
-                    item={entry.item}
-                    showSpeaker={speakers.has(entry.item.id)}
-                    providerId={entry.item.backendId ?? active?.id ?? 'ollama'}
-                    pendingId={pending?.id}
-                    checkpoint={state.checkpoints?.find((checkpoint) => checkpoint.messageId === entry.item.id)}
-                    onDecide={decide}
-                    onOpenRules={() => dispatch({ type: 'openRules' })}
-                    onRestore={restoreCheckpoint}
-                    onViewImage={(images, index) => setImageViewer({ images, index })}
-                    onNoticeAction={runNoticeAction}
-                  />
-                )}
-                {elapsed != null ? <p className="turn-elapsed">{formatWorked(elapsed)}</p> : null}
-                {cardsAfter(entry)}
-              </Fragment>
-            );
-          })
-        )}
-
-        {state.plan && !state.plan.built ? (
-          <PlanSurface
-            plan={state.plan}
-            revising={state.planRevising}
-            rejectConfirmationOpen={state.rejectConfirmationOpen}
-            busy={state.busy}
-            onOpenPlan={openPlan}
-            onBuild={buildPlan}
-            onOpenReject={() => dispatch({ type: 'requestRejectConfirmation' })}
-            onCancelReject={() => dispatch({ type: 'cancelRejectConfirmation' })}
-            onReject={rejectPlan}
-            onRevise={revisePlan}
-          />
-        ) : null}
-
-        {state.busy && state.startingTurn ? (
-          <div className="turn turn--agent">
-            <div className="turn-meta">
-              <span className={`provider-dot provider-dot--${active?.id ?? 'ollama'}`} aria-hidden="true" />
-              <span className="meta-strong">SideCode</span>
-              <span className="stream-status" role="status">
-                <span className="spinner" aria-hidden="true" />
-                Starting
-              </span>
+          {!state.restoring && state.hasOlderHistory ? (
+            <div className="history-more">
+              <button type="button" onClick={() => requestOlder(true)} disabled={state.loadingOlder}>
+                {state.loadingOlder ? 'Loading earlier messagesâ€¦' : 'Load earlier messages'}
+              </button>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+          {state.restoring ? (
+            <div className="restoring" role="status">
+              <span className="spinner" aria-hidden="true" />
+              Restoring conversation...
+            </div>
+          ) : state.transcript.length === 0 && !state.startingTurn && !state.notice ? (
+            <EmptyState state={state} dispatch={dispatch} hasAvailable={available.length > 0} />
+          ) : (
+            transcriptEntries.map((entry) => {
+              const entryId = entry.kind === 'item' ? entry.item.id : entry.id;
+              const elapsed = elapsedNotes.get(entryId);
+              return (
+                <Fragment key={entryId}>
+                  {entry.kind === 'group' ? (
+                    <ActivityGroup family={entry.family} items={entry.items} />
+                  ) : entry.kind === 'narration' ? (
+                    <NarrationRow
+                      message={entry.message}
+                      items={entry.items}
+                      showSpeaker={speakers.has(entry.id)}
+                      providerId={entry.message.backendId ?? active?.id ?? 'ollama'}
+                    />
+                  ) : (
+                    <TranscriptRow
+                      item={entry.item}
+                      showSpeaker={speakers.has(entry.item.id)}
+                      providerId={entry.item.backendId ?? active?.id ?? 'ollama'}
+                      pendingId={pending?.id}
+                      checkpoint={state.checkpoints?.find((checkpoint) => checkpoint.messageId === entry.item.id)}
+                      onDecide={decide}
+                      onOpenRules={() => dispatch({ type: 'openRules' })}
+                      onRestore={restoreCheckpoint}
+                      onViewImage={(images, index) => setImageViewer({ images, index })}
+                      onNoticeAction={runNoticeAction}
+                    />
+                  )}
+                  {elapsed != null ? <p className="turn-elapsed">{formatWorked(elapsed)}</p> : null}
+                  {cardsAfter(entry)}
+                </Fragment>
+              );
+            })
+          )}
 
-        {state.restoreResult?.undoPointId && !state.restoreResult.aborted ? (
-          <RestoreResultStrip
-            result={state.restoreResult}
-            onUndo={() => undoRestore(state.restoreResult?.undoPointId)}
-          />
-        ) : null}
+          {state.plan && !state.plan.built ? (
+            <PlanSurface
+              plan={state.plan}
+              revising={state.planRevising}
+              rejectConfirmationOpen={state.rejectConfirmationOpen}
+              busy={state.busy}
+              onOpenPlan={openPlan}
+              onBuild={buildPlan}
+              onOpenReject={() => dispatch({ type: 'requestRejectConfirmation' })}
+              onCancelReject={() => dispatch({ type: 'cancelRejectConfirmation' })}
+              onReject={rejectPlan}
+              onRevise={revisePlan}
+            />
+          ) : null}
 
-        {state.busy ? (
-          <div className="typing-dots" role="status" aria-label="SideCode is working">
-            <span />
-            <span />
-            <span />
-          </div>
-        ) : null}
-        <div className="transcript-end" aria-hidden="true" />
-        <BusyCorner busy={backgroundBusy} />
+          {state.busy && state.startingTurn ? (
+            <div className="turn turn--agent">
+              <div className="turn-meta">
+                <span className={`provider-dot provider-dot--${active?.id ?? 'ollama'}`} aria-hidden="true" />
+                <span className="meta-strong">SideCode</span>
+                <span className="stream-status" role="status">
+                  <span className="spinner" aria-hidden="true" />
+                  Starting
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          {state.restoreResult?.undoPointId && !state.restoreResult.aborted ? (
+            <RestoreResultStrip
+              result={state.restoreResult}
+              onUndo={() => undoRestore(state.restoreResult?.undoPointId)}
+            />
+          ) : null}
+
+          {state.busy ? (
+            <div className="typing-dots" role="status" aria-label="SideCode is working">
+              <span />
+              <span />
+              <span />
+            </div>
+          ) : null}
+          <div className="transcript-end" aria-hidden="true" />
+        </div>
+        <BusyCorner busy={backgroundBusy} overlay />
       </div>
 
       <footer className={chatEmpty ? 'composer composer--expanded' : 'composer'}>
@@ -2713,7 +2789,7 @@ export function App(): JSX.Element {
                     controlsLocked
                       ? controlsLockedReason
                       : thinkingLabel
-                        ? `Model settings · ${thinkingLabel}`
+                        ? `Model settings Â· ${thinkingLabel}`
                         : 'Model settings'
                   }
                   disabled={Boolean(pending) || asking || controlsLocked}
@@ -2813,7 +2889,7 @@ export function App(): JSX.Element {
                     aria-label={busyActionLabel}
                     title={
                       queuePending
-                        ? 'Queueing this message…'
+                        ? 'Queueing this messageâ€¦'
                         : busyActionLabel === 'Queue message'
                           ? 'Sends when this turn finishes'
                           : 'Send to this turn'
@@ -2867,3 +2943,4 @@ export function App(): JSX.Element {
     </main>
   );
 }
+

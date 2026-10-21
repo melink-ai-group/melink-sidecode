@@ -84,6 +84,27 @@ test('Zen default allows workspace edits but asks before commands and web access
   assert.deepEqual(unrestricted.config.permission, FULL_ALLOW);
 });
 
+test('Zen ast-grep replace uses the resolved name and follows the turn level', () => {
+  const permission = (level: 'read-only' | 'default' | 'unrestricted', mode: 'agent' | 'ask') =>
+    buildZenOpencodeConfig({
+      modelIds: ['big-pickle'],
+      modelId: 'big-pickle',
+      mode,
+      permissionLevel: level,
+      skillPermissions: { ast_grep_search: 'allow' },
+      astGrepSkill: true,
+      agentNonce: 'fixed'
+    }).config.permission as Record<string, unknown>;
+  assert.equal(permission('read-only', 'agent').ast_grep_replace, 'deny');
+  assert.equal(permission('default', 'ask').ast_grep_replace, 'deny');
+  assert.equal(permission('default', 'agent').ast_grep_replace, 'ask');
+  assert.equal(permission('unrestricted', 'agent').ast_grep_replace, 'allow');
+  assert.equal(permission('default', 'agent').ast_grep_search, 'allow');
+  // The bare tool name never matches OpenCode's resolved `<server>_<tool>` key.
+  assert.equal(permission('default', 'agent').replace, undefined);
+  assert.equal(permission('default', 'agent').ast_grep, undefined);
+});
+
 test('Zen Ask mode defines the read-only custom agent', () => {
   const built = buildZenOpencodeConfig({
     modelIds: ['big-pickle'],

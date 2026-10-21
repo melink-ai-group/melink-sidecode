@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planTurn, type TurnPlanInput } from './plan.ts';
-import type { OrchestrationToggles } from './settings.ts';
+import { resolveOrchestrationSettings, type OrchestrationToggles } from './settings.ts';
 
 const ALL_ON: OrchestrationToggles = {
   testing: true,
@@ -65,6 +65,13 @@ test('planning stays off outside Agent mode while the other passes still run', (
     assert.equal(plan.reviewing, true, mode);
     assert.equal(plan.doubleCheck, true, mode);
   }
+});
+
+test('a fresh profile resolves testing off, so the plan gate starts closed', () => {
+  const plan = planTurn(input({ settings: resolveOrchestrationSettings({}) }));
+  assert.equal(plan.testing, false);
+  assert.equal(plan.doubleCheck, true);
+  assert.equal(plan.reviewing, false);
 });
 
 test('quick detection disabled means the gates stay on', () => {

@@ -30,15 +30,17 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "SideCode works in an untrusted workspace, but the settings that decide where a credential is sent, which binary is spawned, and what the permission default is are read from your user settings only. These settings are ignored when they come from a workspace: melink.ollama.baseUrl, melink.ollamaLocal.baseUrl, melink.ollama.opencode.path, melink.ollama.opencode.cliSource, melink.codex.path, melink.skills.zvecGrep.path, melink.skills.zvecGrep.cliSource, melink.skills.astGrep.path, melink.skills.astGrep.cliSource, melink.defaults.permissionLevel. The application scope of these settings is enforced by SideCode itself, so a workspace value never reaches them, trusted or not. Open the workspace in Restricted Mode to keep the workspace from changing anything at all.",
+      "description": "SideCode works in an untrusted workspace, but the settings that decide where a credential is sent, which binary is spawned, and what the permission default is are read from your user settings only. These settings are ignored when they come from a workspace: melink.ollama.baseUrl, melink.ollamaLocal.baseUrl, melink.ollama.opencode.path, melink.ollama.opencode.cliSource, melink.codex.path, melink.skills.zvecGrep, melink.skills.zvecGrep.path, melink.skills.zvecGrep.cliSource, melink.skills.astGrep, melink.skills.astGrep.path, melink.skills.astGrep.cliSource, melink.defaults.permissionLevel. The application scope of these settings is enforced by SideCode itself, so a workspace value never reaches them, trusted or not. Open the workspace in Restricted Mode to keep the workspace from changing anything at all.",
       "restrictedConfigurations": [
         "melink.ollama.baseUrl",
         "melink.ollamaLocal.baseUrl",
         "melink.ollama.opencode.path",
         "melink.ollama.opencode.cliSource",
         "melink.codex.path",
+        "melink.skills.zvecGrep",
         "melink.skills.zvecGrep.path",
         "melink.skills.zvecGrep.cliSource",
+        "melink.skills.astGrep",
         "melink.skills.astGrep.path",
         "melink.skills.astGrep.cliSource",
         "melink.defaults.permissionLevel"
@@ -348,13 +350,13 @@
         },
         "melink.review.checks.enabled": {
           "type": "boolean",
-          "default": true,
-          "markdownDescription": "Run post-turn checks after a turn that changed files, before the changes are kept. Checks never run in an untrusted workspace."
+          "default": false,
+          "markdownDescription": "Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit user value still wins. Checks never run in an untrusted workspace."
         },
         "melink.orchestration.testing": {
           "type": "boolean",
-          "default": true,
-          "markdownDescription": "Run typecheck or lint and the tests after a turn that changes files. Used as the fallback for `melink.review.checks.enabled`."
+          "default": false,
+          "markdownDescription": "Run typecheck or lint and the tests after a turn that changes files. Default: off. Used as the fallback for `melink.review.checks.enabled`."
         },
         "melink.orchestration.reviewing": {
           "type": "boolean",
@@ -415,7 +417,8 @@
         "melink.skills.zvecGrep": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode (local semantic + keyword + ripgrep search as an MCP tool). Turning it on installs `zg` when missing and writes an absolute-path MCP entry. Turning it off removes that entry and leaves the CLI installed."
+          "scope": "application",
+          "markdownDescription": "Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode (local semantic + keyword + ripgrep search as an MCP tool). Turning it on installs `zg` when missing and writes an absolute-path MCP entry. Turning it off removes that entry and leaves the CLI installed. Read from your user settings only, like the path it runs, so a workspace cannot turn the skill on."
         },
         "melink.skills.zvecGrep.cliSource": {
           "type": "string",
@@ -437,7 +440,8 @@
         "melink.skills.astGrep": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Connect [ast-grep](https://github.com/ast-grep/ast-grep) to OpenCode (syntax-aware structural search and rewrite via a SideCode MCP shim)."
+          "scope": "application",
+          "markdownDescription": "Connect [ast-grep](https://github.com/ast-grep/ast-grep) to OpenCode (syntax-aware structural search and rewrite via a SideCode MCP shim). Read from your user settings only, like the path it runs, so a workspace cannot turn the skill on."
         },
         "melink.skills.astGrep.cliSource": {
           "type": "string",

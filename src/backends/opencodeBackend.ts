@@ -520,7 +520,8 @@ export class OpencodeBackend implements AgentBackend {
       permissionLevel,
       ...(browser ? { browser } : {}),
       ...(skills.mcp ? { skillMcp: skills.mcp } : {}),
-      ...(Object.keys(skills.permissions).length > 0 ? { skillPermissions: skills.permissions } : {})
+      ...(Object.keys(skills.permissions).length > 0 ? { skillPermissions: skills.permissions } : {}),
+      ...(skills.astGrep ? { astGrepSkill: true } : {})
     });
     if (built.reasoningUnsupported) {
       this.events.fire({

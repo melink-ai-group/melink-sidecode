@@ -8,6 +8,9 @@ import { DictationController } from './dictation/controller';
 import { parseDictationTarget } from './dictation/target';
 import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
 import { SettingsService } from './settings';
+import { DeadlineError, SAVE_TIMEOUT_MESSAGE, runSettingsWrite } from './settings/deadline.ts';
+import { runSkillOperation } from './settings/skillOperation.ts';
+import type { SaveResult } from './settings/planWrites.ts';
 import { PlanStore } from './planStore';
 import { ThreadStore } from './backends/threadStore';
 import {
@@ -204,6 +207,8 @@ import { render } from './sidebar/viewHtml';
  * normalized events to the React webview and turns webview intents into
  * registry calls. It holds no provider types.
  */
+/** A save that misses this bound is reported as failed; the host never hangs the footer. */
+const SETTINGS_SAVE_DEADLINE_MS = 15000;
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'melinkAgent.chat';
 
@@ -828,7 +833,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const plan = this.turnPlans.get(turnId);
     const fallback = plan ? undefined : readOrchestrationSettings();
-    const testing = plan?.testing ?? fallback?.testing ?? true;
+    const testing = plan?.testing ?? fallback?.testing ?? false;
     const reviewing = plan?.reviewing ?? fallback?.reviewing ?? false;
     const doubleCheck = plan?.doubleCheck ?? fallback?.doubleCheck ?? true;
     const shouldReview = shouldRunDiffReview(reviewing, set.entries);
@@ -1558,6 +1563,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.type === 'installAstGrep' ||
           message.type === 'upgradeAstGrep' ||
           message.type === 'installZvecGrep' ||
+          message.type === 'skillAction' ||
           message.type === 'openSettings' ||
           message.type === 'startDictation' ||
           message.type === 'stopDictation')
@@ -2035,6 +2041,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       message.type === 'queuedTurns' ||
       message.type === 'showSettings' ||
       message.type === 'settings' ||
+      message.type === 'settingsSave' ||
+      message.type === 'skillAction' ||
       message.type === 'codexVersionCheck' ||
       message.type === 'dictationStatus' ||
       message.type === 'dictationCleaned' ||
@@ -2252,6 +2260,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'settings', settings: await this.settingsSnapshot() });
         break;
       case 'saveSettings':
+        // Posted before the first await so the screen shows its busy state
+        // immediately, even when a CLI probe or model list is slow.
+        this.post({ type: 'settingsSave', pending: true });
         await this.saveSettings(message.patch, message.target);
         break;
       case 'setOpencodeZenToken':
@@ -2307,55 +2318,78 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       case 'upgradeOpencode': {
         this.post({ type: 'opencodeUpgrade', pending: true });
-        const upgraded = await this.settings.upgradeOpencode({
-          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
-          ...(message.path !== undefined ? { path: message.path } : {})
-        });
+        const outcome = await runSkillOperation(() =>
+          this.settings.upgradeOpencode({
+            ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+            ...(message.path !== undefined ? { path: message.path } : {})
+          })
+        );
+        const upgraded = outcome.value;
         this.post({
           type: 'opencodeUpgrade',
           pending: false,
-          ok: upgraded.ok,
-          message: upgraded.message
+          ok: upgraded?.ok ?? false,
+          message: upgraded?.message ?? outcome.message
         });
-        if (upgraded.ok) {
-          this.post({ type: 'settings', settings: await this.settingsSnapshot() });
-          // OpenCode Zen becomes selectable once the shared CLI is present.
-          this.post({ type: 'snapshot', availability: await this.registry.refresh() });
+        if (upgraded?.ok) {
+          try {
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+            // OpenCode Zen becomes selectable once the shared CLI is present.
+            this.post({ type: 'snapshot', availability: await this.registry.refresh() });
+          } catch {
+            // The upgrade result above has already settled the chip.
+          }
         }
         break;
       }
       case 'installOpencode': {
         this.post({ type: 'opencodeInstall', pending: true });
-        const installed = await this.settings.installOpencode({
-          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
-          ...(message.path !== undefined ? { path: message.path } : {})
-        });
-        if (installed.ok && installed.executablePath) {
-          this.post({ type: 'settings', settings: await this.settingsSnapshot() });
-          this.post({ type: 'snapshot', availability: await this.registry.refresh() });
+        const outcome = await runSkillOperation(() =>
+          this.settings.installOpencode({
+            ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+            ...(message.path !== undefined ? { path: message.path } : {})
+          })
+        );
+        const installed = outcome.value;
+        if (installed?.ok && installed.executablePath) {
+          try {
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+            this.post({ type: 'snapshot', availability: await this.registry.refresh() });
+          } catch {
+            // The install result below has already settled the chip.
+          }
         }
         this.post({
           type: 'opencodeInstall',
           pending: false,
-          ok: installed.ok,
-          message: installed.message,
-          ...(installed.executablePath ? { path: installed.executablePath } : {})
+          ok: installed?.ok ?? false,
+          message: installed?.message ?? outcome.message,
+          ...(installed?.executablePath ? { path: installed.executablePath } : {})
         });
         break;
       }
       case 'setZvecGrep': {
         this.post({ type: 'zvecGrep', pending: true, requested: message.enabled });
-        const applied = await this.settings.setZvecGrep(message.enabled, {
-          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
-          ...(message.path !== undefined ? { path: message.path } : {})
-        });
-        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        const outcome = await runSkillOperation(() =>
+          this.settings.setZvecGrep(message.enabled, {
+            ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+            ...(message.path !== undefined ? { path: message.path } : {})
+          })
+        );
+        const applied = outcome.value;
+        if (applied) {
+          try {
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          } catch {
+            // The final result below still settles the toggle.
+          }
+        }
         this.post({
           type: 'zvecGrep',
           pending: false,
-          ok: applied.ok,
-          message: applied.message,
-          ...(applied.fieldError
+          ok: applied?.ok ?? false,
+          message: applied?.message ?? outcome.message,
+          ...(applied?.fieldError
             ? { field: applied.fieldError.field, fieldMessage: applied.fieldError.message }
             : {})
         });
@@ -2363,17 +2397,26 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       case 'setAstGrep': {
         this.post({ type: 'astGrep', pending: true, requested: message.enabled });
-        const applied = await this.settings.setAstGrep(message.enabled, {
-          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
-          ...(message.path !== undefined ? { path: message.path } : {})
-        });
-        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        const outcome = await runSkillOperation(() =>
+          this.settings.setAstGrep(message.enabled, {
+            ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+            ...(message.path !== undefined ? { path: message.path } : {})
+          })
+        );
+        const applied = outcome.value;
+        if (applied) {
+          try {
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          } catch {
+            // The final result below still settles the toggle.
+          }
+        }
         this.post({
           type: 'astGrep',
           pending: false,
-          ok: applied.ok,
-          message: applied.message,
-          ...(applied.fieldError
+          ok: applied?.ok ?? false,
+          message: applied?.message ?? outcome.message,
+          ...(applied?.fieldError
             ? { field: applied.fieldError.field, fieldMessage: applied.fieldError.message }
             : {})
         });
@@ -2381,49 +2424,111 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       case 'installAstGrep': {
         this.post({ type: 'astGrepInstall', pending: true });
-        const installed = await this.settings.installAstGrep({
-          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
-          ...(message.path !== undefined ? { path: message.path } : {})
-        });
-        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        const outcome = await runSkillOperation(() =>
+          this.settings.installAstGrep({
+            ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+            ...(message.path !== undefined ? { path: message.path } : {})
+          })
+        );
+        const installed = outcome.value;
+        if (installed?.ok) {
+          try {
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          } catch {
+            // The install result below has already settled the chip.
+          }
+        }
         this.post({
           type: 'astGrepInstall',
           pending: false,
-          ok: installed.ok,
-          message: installed.message,
-          ...(installed.executablePath ? { path: installed.executablePath } : {})
+          ok: installed?.ok ?? false,
+          message: installed?.message ?? outcome.message,
+          ...(installed?.executablePath ? { path: installed.executablePath } : {})
         });
         break;
       }
       case 'upgradeAstGrep': {
         this.post({ type: 'astGrepInstall', pending: true });
-        const upgraded = await this.settings.upgradeAstGrep({
-          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
-          ...(message.path !== undefined ? { path: message.path } : {})
-        });
-        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        const outcome = await runSkillOperation(() =>
+          this.settings.upgradeAstGrep({
+            ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+            ...(message.path !== undefined ? { path: message.path } : {})
+          })
+        );
+        const upgraded = outcome.value;
+        if (upgraded?.ok) {
+          try {
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          } catch {
+            // The upgrade result below has already settled the chip.
+          }
+        }
         this.post({
           type: 'astGrepInstall',
           pending: false,
-          ok: upgraded.ok,
-          message: upgraded.message,
-          ...(upgraded.executablePath ? { path: upgraded.executablePath } : {})
+          ok: upgraded?.ok ?? false,
+          message: upgraded?.message ?? outcome.message,
+          ...(upgraded?.executablePath ? { path: upgraded.executablePath } : {})
         });
         break;
       }
       case 'installZvecGrep': {
         this.post({ type: 'zvecGrepInstall', pending: true });
-        const installed = await this.settings.installZvecGrep({
-          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
-          ...(message.path !== undefined ? { path: message.path } : {})
-        });
-        this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+        const outcome = await runSkillOperation(() =>
+          this.settings.installZvecGrep({
+            ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+            ...(message.path !== undefined ? { path: message.path } : {})
+          })
+        );
+        const installed = outcome.value;
+        if (installed?.ok) {
+          try {
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          } catch {
+            // The install result below has already settled the chip.
+          }
+        }
         this.post({
           type: 'zvecGrepInstall',
           pending: false,
-          ok: installed.ok,
-          message: installed.message,
-          ...(installed.path ? { path: installed.path } : {})
+          ok: installed?.ok ?? false,
+          message: installed?.message ?? outcome.message,
+          ...(installed?.path ? { path: installed.path } : {})
+        });
+        break;
+      }
+      case 'skillAction': {
+        this.post({
+          type: 'skillAction',
+          skill: message.skill,
+          action: message.action,
+          pending: true
+        });
+        const draft = {
+          ...(message.cliSource ? { cliSource: message.cliSource } : {}),
+          ...(message.path !== undefined ? { path: message.path } : {})
+        };
+        const outcome = await runSkillOperation(() =>
+          message.action === 'index'
+            ? this.settings.buildZvecIndex(draft)
+            : this.settings.testSkill(message.skill, draft)
+        );
+        const result = outcome.value;
+        if (result && message.action === 'index') {
+          try {
+            // The Build action changed the workspace index state in the snapshot.
+            this.post({ type: 'settings', settings: await this.settingsSnapshot() });
+          } catch {
+            // The final result below still settles the action chip.
+          }
+        }
+        this.post({
+          type: 'skillAction',
+          skill: message.skill,
+          action: message.action,
+          pending: false,
+          ok: result?.ok ?? false,
+          message: result?.message ?? outcome.message
         });
         break;
       }
@@ -2729,41 +2834,88 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   /**
    * Persist the settings patch, then echo the fresh read model so the screen
    * reflects exactly what was stored (including any field the host refused).
+   *
+   * Only the write phase is bounded. The echo probes CLIs and lists models, so
+   * racing it against the same deadline reported "Saving took too long" after
+   * every write had already succeeded. The footer settles on the write result;
+   * the echo then runs on its own and can never turn success into failure.
    */
   private async saveSettings(
     patch: import('./protocol').SettingsPatch,
-    target?: 'global' | 'workspace'
+    target?: 'global' | 'workspace' | 'folder'
   ): Promise<void> {
-    const result = await this.settings.save(patch, target ?? 'global');
+    const scope = target ?? 'global';
+    await runSettingsWrite({
+      write: () => this.settings.save(patch, scope),
+      echo: (result) => this.echoSavedSettings(patch, result),
+      settle: (outcome) => {
+        if (outcome.result) {
+          const result = outcome.result;
+          let message: string | undefined;
+          if (!result.ok) {
+            const count = Object.keys(result.errors).length;
+            message =
+              count === 1
+                ? 'One setting was not saved. Check the marked field and try again.'
+                : `${count} settings were not saved. Check the marked fields and try again.`;
+          }
+          this.post({ type: 'settingsSave', pending: false, ok: result.ok, message });
+          return;
+        }
+        this.post({
+          type: 'settingsSave',
+          pending: false,
+          ok: false,
+          message:
+            outcome.error instanceof DeadlineError
+              ? SAVE_TIMEOUT_MESSAGE
+              : 'Settings were not saved. Your draft is still here, so you can retry.'
+        });
+      },
+      timeoutMs: SETTINGS_SAVE_DEADLINE_MS,
+      timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      // The echo is not a save result; a failed refresh is recovered by the
+      // next Settings open, so it must never overwrite the reported outcome.
+      onEchoError: () => {}
+    });
+  }
+
+  /** Echo the snapshot and refresh the dependent surfaces after a save. */
+  private async echoSavedSettings(
+    patch: import('./protocol').SettingsPatch,
+    result: SaveResult | undefined
+  ): Promise<void> {
     // A saved context change must apply to the next turn of an already-open
     // conversation, not just to a new one. The delivery layer holds a rendered
     // snapshot prefix per thread; drop it so the next turn rebuilds from the new
     // include flags, cap, and patterns. Rebuilding from the current settings is
     // correct even if an unrelated field in the same patch was refused, so this
     // is unconditional on a context patch.
-    if (Object.keys(patch).some((key) => key.startsWith('context'))) {
+    const touchesContext = Object.keys(patch).some((key) => key.startsWith('context'));
+    if (touchesContext) {
       this.contextDelivery.invalidateAll();
     }
     // Echo any refused field back on the snapshot so the screen marks it not
-    // saved inline; a refused value was never persisted.
+    // saved inline; a refused value was never persisted. A partial write is
+    // reported the same way, with every field that failed named.
     const snapshot = await this.settingsSnapshot();
-    if (!result.ok) {
+    if (result && !result.ok) {
       snapshot.saveErrors = result.errors;
     }
     // A field that was persisted somewhere other than the requested scope (a
     // trust-sensitive setting saved to the user's own settings during a
     // workspace save) carries a notice, not an error.
-    if (result.notices && Object.keys(result.notices).length > 0) {
+    if (result?.notices && Object.keys(result.notices).length > 0) {
       snapshot.saveNotices = result.notices;
     }
-    if (patch.permissionLevel && result.errors.permissionLevel === undefined) {
+    if (result && patch.permissionLevel && result.errors.permissionLevel === undefined) {
       const backendId = this.activeThread?.backendId ?? this.defaultBackendId();
       await this.rememberPermission(this.resolvePermission(backendId, patch.permissionLevel));
       await this.postPermissions(backendId);
     }
     this.post({ type: 'settings', settings: snapshot });
     this.post({ type: 'snapshot', availability: await this.registry.refresh() });
-    if (Object.keys(patch).some((key) => key.startsWith('context'))) {
+    if (touchesContext) {
       await this.postContextView();
     }
   }
@@ -5924,3 +6076,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 }
+
+
+

@@ -239,7 +239,7 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
 | `melink.review.diffReview` | `false` | Legacy opt-in for the read-only advisory diff review, used only while `melink.orchestration.reviewing` is unset. Application scope, so only a user setting can enable it. |
-| `melink.orchestration.testing` | `true` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. |
+| `melink.orchestration.testing` | `false` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. Default: off. |
 | `melink.orchestration.reviewing` | `false` | Advisory diff review; falls back to `melink.review.diffReview` until saved. |
 | `melink.orchestration.doubleCheck` | `true` | Read diagnostics for the changed files after a turn and post one advisory notice. Never calls a model. |
 | `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for a short single-question Agent turn. |
@@ -477,7 +477,7 @@ picker in the title bar override them for the conversation you are in.
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `melink.review.checks.enabled` | `true` | Run checks after a turn that changed files. Untrusted workspaces always skip. |
+| `melink.review.checks.enabled` | `false` | Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit value still wins; untrusted workspaces always skip. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands; empty auto-detects `typecheck` (or `lint`) and `test` from `package.json`. An explicitly saved empty list runs nothing. |
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout, clamped to 5–600 seconds. |
 

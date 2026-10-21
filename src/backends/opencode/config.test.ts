@@ -9,6 +9,7 @@ import {
   OPENCODE_LOCAL_PROVIDER_ID,
   OPENCODE_PLAN_AGENT,
   OPENCODE_PROVIDER_ID,
+  astGrepReplacePermission,
   buildOpencodeConfig,
   opencodeAgentConfig,
   opencodeAgentForMode,
@@ -124,6 +125,38 @@ test('default auto-allows workspace edits, asks before bash, web access and leav
   assert.equal(opencodeRequiresApproval('read-only', 'agent'), false);
   assert.equal(opencodeRequiresApproval('unrestricted', 'agent'), false);
   assert.equal(opencodeRequiresApproval('unrestricted', 'ask'), false);
+});
+
+test('ast-grep replace uses the resolved tool name and follows the turn level', () => {
+  const build = (level: 'read-only' | 'default' | 'unrestricted', mode: 'agent' | 'plan' | 'ask') =>
+    buildOpencodeConfig({
+      baseUrl: 'https://ollama.com',
+      modelIds: ['m'],
+      modelId: 'm',
+      mode,
+      permissionLevel: level,
+      skillMcp: { ast_grep: { type: 'local', command: ['node', 'x.js'], enabled: true } },
+      skillPermissions: { ast_grep_search: 'allow' },
+      astGrepSkill: true,
+      agentNonce: 'fixed'
+    }).config.permission as Record<string, unknown>;
+
+  for (const mode of ['agent', 'plan', 'ask'] as const) {
+    assert.equal(build('read-only', mode).ast_grep_replace, 'deny', `read-only/${mode}`);
+  }
+  assert.equal(build('default', 'agent').ast_grep_replace, 'ask');
+  assert.equal(build('default', 'plan').ast_grep_replace, 'ask');
+  assert.equal(build('default', 'ask').ast_grep_replace, 'deny');
+  assert.equal(build('unrestricted', 'agent').ast_grep_replace, 'allow');
+  // OpenCode resolves the MCP tool as `<server>_<tool>`; the bare names never
+  // matched and let its permissive default apply.
+  assert.equal(build('default', 'agent').replace, undefined);
+  assert.equal(build('default', 'agent').search, undefined);
+  assert.equal(build('default', 'agent').ast_grep_search, 'allow');
+  // The bare server key is never emitted: it would cover replace.
+  assert.equal(build('default', 'agent').ast_grep, undefined);
+  assert.equal(astGrepReplacePermission('default', 'agent'), 'ask');
+  assert.equal(astGrepReplacePermission('read-only', 'agent'), 'deny');
 });
 
 test('the generated config points at the configured base URL and the live model ids', () => {

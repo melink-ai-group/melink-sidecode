@@ -39,6 +39,26 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | `melink.skills.astGrep.cliSource` | enum, `local` | **Present** — Skills → ast-grep | `resolveAstGrepExecutable` → the MCP command |
 | `melink.defaults.permissionLevel` | enum, `default` | **Present** — Defaults → Default permission level | `readDefaultPermissionLevel()` → `SidebarViewProvider` seeds a new thread; `CodexBackend.startThread` maps it to `approvalPolicy` + `sandbox` |
 
+### Skills keys (T113)
+
+The skill enable flags joined the path/source keys in application scope, so a
+workspace value can never flip a skill back after a reload. A toggle writes
+source, path and enabled only after the apply succeeded.
+
+| Key | Type / default | On the screen | Consumer |
+|---|---|---|---|
+| `melink.skills.zvecGrep` | boolean, `false`, application scope | **Present** - Skills -> zvec-grep -> Use semantic search | `zvecGrepOpencodeServer` is merged into OpenCode turns and the user OpenCode config |
+| `melink.skills.zvecGrep.path` | string, `zg`, application scope | **Present** - Skills -> zvec-grep -> zg path | `resolveZvecGrepExecutable` -> the MCP command; also the CLI `zg status` / `zg index` run |
+| `melink.skills.zvecGrep.cliSource` | enum, `local`, application scope | **Present** - Skills -> zvec-grep -> CLI source | `resolveZvecGrepExecutable` -> the MCP command |
+| `melink.skills.astGrep` | boolean, `false`, application scope | **Present** - Skills -> ast-grep -> Use structural search | `astGrepOpencodeServer` MCP entry |
+| `melink.skills.astGrep.path` | string, `ast-grep`, application scope | **Present** - Skills -> ast-grep -> ast-grep path | `resolveAstGrepExecutable` -> the MCP shim's `AST_GREP_BIN` |
+| `melink.skills.astGrep.cliSource` | enum, `local`, application scope | **Present** - Skills -> ast-grep -> CLI source | `resolveAstGrepExecutable` -> the MCP shim's `AST_GREP_BIN` |
+
+There is no setting for the zvec index: **Build index** is an explicit,
+one-shot action that runs `zg index` in the first workspace folder and writes
+`.zvec-grep/`; nothing indexes automatically. **Test** only starts the CLI/MCP
+server and reads `zg status`.
+
 ### Ordinary keys (workspace scope allowed)
 
 | Key | Type / default | On the screen | Consumer |
@@ -69,8 +89,8 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | `melink.context.repoMapMaxBytes` | number, `131072` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBytes`; stops the build deterministically |
 | `melink.context.repoMapBuildMs` | number, `750` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBuildMs`; per-read timeout also bounds a never-resolving read |
 | `melink.context.repoMapMaxChars` | number, `1200` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxChars`; bounds the rendered per-turn block |
-| `melink.review.checks.enabled` | boolean, `true` | **Legacy fallback** - surfaced in Orchestration -> Testing; read only while `melink.orchestration.testing` is unset | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
-| `melink.orchestration.testing` | boolean, `true` | **Present** - Orchestration -> Testing; falls back to `melink.review.checks.enabled` | `resolveOrchestrationSettings()` -> per-turn plan gate |
+| `melink.review.checks.enabled` | boolean, `false` | **Legacy fallback** - surfaced in Orchestration -> Testing; read only while `melink.orchestration.testing` is unset, and its schema default is not treated as explicit | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
+| `melink.orchestration.testing` | boolean, `false` | **Present** - Orchestration -> Testing, default off; falls back to `melink.review.checks.enabled` | `resolveOrchestrationSettings()` -> per-turn plan gate |
 | `melink.orchestration.reviewing` | boolean, `false` | **Present** - Orchestration -> Reviewing; falls back to `melink.review.diffReview` | `resolveOrchestrationSettings()` -> diff-review gate |
 | `melink.orchestration.doubleCheck` | boolean, `true` | **Present** - Orchestration -> Double-check | `resolveOrchestrationSettings()` -> diagnostics sweep gate |
 | `melink.orchestration.quickTask` | boolean, `true` | **Present** - Orchestration -> Quick tasks | `resolveOrchestrationSettings()` -> quick-task gate |

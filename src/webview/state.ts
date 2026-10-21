@@ -1,4 +1,4 @@
-import { MODE_DESCRIPTORS } from '../backends/modes.ts';
+﻿import { MODE_DESCRIPTORS } from '../backends/modes.ts';
 import type {
   AgentEvent,
   ApprovalDecision,
@@ -189,6 +189,12 @@ export interface AppState {
   /** The settings read model, present once the host has answered `getSettings`. */
   settings?: SettingsSnapshot;
   /**
+   * Busy/result state of the latest settings save. `pending` starts on the
+   * click and ends only when the host settles it (or the webview watchdog
+   * fires), so a slow save is visible and a second click is refused.
+   */
+  settingsSave?: { pending: boolean; ok?: boolean; message?: string };
+  /**
    * The capability descriptor + effective settings for the selected model, as
    * resolved and clamped by the host. Data only: no surface renders it yet.
    */
@@ -232,6 +238,14 @@ export interface AppState {
   };
   astGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   zvecGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
+  /** Latest read-only Test / Build index result for one skill. */
+  skillAction?: {
+    skill: 'zvecGrep' | 'astGrep';
+    action: 'test' | 'index';
+    pending: boolean;
+    ok?: boolean;
+    message?: string;
+  };
   /**
    * The project-context read model the composer renders. Built and pushed by the
    * host; the webview never recomputes it. `undefined` until the first push, so
@@ -382,6 +396,8 @@ export type Action =
   | { type: 'openSettings'; provider?: SettingsSection }
   | { type: 'closeSettings' }
   | { type: 'settings'; settings: SettingsSnapshot }
+  /** Host busy/result for the settings save; pending gates the Save button. */
+  | { type: 'settingsSave'; pending: boolean; ok?: boolean; message?: string }
   | { type: 'permissions'; permissions: PermissionSnapshot }
   | { type: 'modes'; modes: ModeSnapshot }
   | { type: 'modelCapability'; capability: ModelCapabilitySnapshot }
@@ -427,6 +443,14 @@ export type Action =
     }
   | { type: 'astGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   | { type: 'zvecGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
+  | {
+      type: 'skillAction';
+      skill: 'zvecGrep' | 'astGrep';
+      action: 'test' | 'index';
+      pending: boolean;
+      ok?: boolean;
+      message?: string;
+    }
   /** The host's project-context read model, pushed on every relevant change. */
   | {
       type: 'context';
@@ -562,7 +586,7 @@ function upsertTurnChange(turns: readonly TurnChange[], next: TurnChange): TurnC
  * The host reports a refused CLI path as `field` / `fieldMessage`, so the
  * screen can show the refusal on the path field itself. The bridge forwards
  * the message through this one helper, so a field can never be dropped
- * between the host and the reducer — the mistake that silently left the
+ * between the host and the reducer â€” the mistake that silently left the
  * refusal invisible.
  *
  * Pure and exported, so the forwarding is unit-tested rather than inferred
@@ -1028,10 +1052,14 @@ export function reduce(state: AppState, action: Action): AppState {
         zvecGrep: undefined,
         astGrep: undefined,
         astGrepInstall: undefined,
-        zvecGrepInstall: undefined
+        zvecGrepInstall: undefined,
+        skillAction: undefined,
+        settingsSave: undefined
       };
     case 'settings':
       return { ...state, settings: action.settings };
+    case 'settingsSave':
+      return { ...state, settingsSave: { pending: action.pending, ok: action.ok, message: action.message } };
     case 'permissions': {
       const applySelected = action.permissions.epoch >= state.permissionEpoch;
       return {
@@ -1147,6 +1175,17 @@ export function reduce(state: AppState, action: Action): AppState {
           ok: action.ok,
           message: action.message,
           path: action.path
+        }
+      };
+    case 'skillAction':
+      return {
+        ...state,
+        skillAction: {
+          skill: action.skill,
+          action: action.action,
+          pending: action.pending,
+          ok: action.ok,
+          message: action.message
         }
       };
     case 'context':
@@ -1459,7 +1498,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
     case 'thread/status/changed':
       // The provider's own thread status is informational: `active` means a turn
       // is running, so the composer stays locked, but a status flap never clears
-      // a busy state early — only the turn lifecycle does that.
+      // a busy state early â€” only the turn lifecycle does that.
       if (event.status === 'active' && !state.busy) {
         return { ...state, busy: true };
       }
@@ -1904,3 +1943,4 @@ export function createHostBridge(): HostBridge {
     }
   };
 }
+

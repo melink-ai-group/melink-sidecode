@@ -15,7 +15,7 @@ import {
 test('an absent commands value is auto-detect, while an explicit empty list disables checks', () => {
   const auto = readCheckSettingsFrom(
     {
-      enabled: { defaultValue: true },
+      enabled: { globalValue: true },
       commands: { defaultValue: [] },
       timeoutSeconds: { defaultValue: 120 }
     },
@@ -28,13 +28,28 @@ test('an absent commands value is auto-detect, while an explicit empty list disa
 
   const explicitEmpty = readCheckSettingsFrom(
     {
-      enabled: { defaultValue: true },
+      enabled: { globalValue: true },
       commands: { defaultValue: [], globalValue: [] },
       timeoutSeconds: { defaultValue: 120 }
     },
     true
   );
   assert.deepEqual(explicitEmpty.commands, []);
+});
+
+test('a fresh profile is off and the schema default is not an explicit choice', () => {
+  const fresh = readCheckSettingsFrom({}, true);
+  assert.equal(fresh.enabled, false);
+  assert.equal(fresh.commands, undefined);
+
+  // The contributed default (now false) is still only a default: it neither
+  // turns checks on by itself nor looks like a user override.
+  const schemaDefaultOn = readCheckSettingsFrom({ enabled: { defaultValue: true } }, true);
+  assert.equal(schemaDefaultOn.enabled, false);
+
+  assert.equal(readCheckSettingsFrom({ enabled: { globalValue: true } }, true).enabled, true);
+  assert.equal(readCheckSettingsFrom({ enabled: { globalValue: false } }, true).enabled, false);
+  assert.equal(readCheckSettingsFrom({ enabled: { workspaceFolderValue: true } }, true).enabled, true);
 });
 
 test('workspace and folder values override global values, folder first', () => {
@@ -126,7 +141,7 @@ test('package.json contributes the documented check settings and defaults', asyn
   const timeout = properties[`${CHECK_SECTION}.timeoutSeconds`];
 
   assert.equal(enabled?.type, 'boolean');
-  assert.equal(enabled?.default, true);
+  assert.equal(enabled?.default, false);
   assert.equal(commands?.type, 'array');
   assert.deepEqual(commands?.default, []);
   assert.equal(timeout?.type, 'number');

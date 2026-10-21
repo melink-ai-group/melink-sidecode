@@ -1,8 +1,8 @@
 # Visual harness (dev only)
 
 `npm run visual` renders the **built** SideCode webview in headless Chromium,
-seeded with fixed host state, and writes ten PNGs plus a manifest and an index
-under `.melink/reports/visual/`.
+seeded with fixed host state, and writes twelve screens (24 PNGs) plus a
+manifest and an index under `.melink/reports/visual/`.
 
 It is a screenshot tool for reviews, not a product feature. It is excluded from
 the VSIX. The host-free catalog/harness tests (`tools/visual-harness/*.test.mjs`)
@@ -121,9 +121,16 @@ file naming live in `tools/visual-harness/catalog.mjs`.
 | `change-review` | Expanded change review | Completed turn, three changed files, pending review snapshot |
 | `plan-todos` | Plan card with all four steps visible (capture-only expansion) | Conversation plus a pending four-step plan |
 | `settings` | Settings → Defaults | Full settings snapshot, opened through `showSettings` |
+| `settings-orchestration` | Settings → Orchestration | Full settings snapshot, Orchestration tab |
+| `settings-provider-local` | Settings → Providers → Ollama Local | Full settings snapshot with the local provider tab |
+| `settings-save-busy` | Settings footer while saving | Host reports a busy save |
+| `settings-save-success` | Settings footer after a successful save | Host reports the save outcome |
+| `settings-skills-ast` | Settings → Skills → ast-grep | ast-grep enabled, CLI detected, server ready |
+| `settings-skills-zvec` | Settings → Skills → zvec-grep | zvec-grep enabled, server ready, workspace index missing |
+| `chat-queued` | Composer busy with queued turns | One running turn and two queued messages |
 
 Every screen is captured at **1280x800** and **390x844** (DPR 1), so there are
-always 10 expected files. Every navigation, wait, click, text assertion,
+always 24 expected files. Every navigation, wait, click, text assertion,
 row assertion, and screenshot runs inside a per-screen context, so any failure
 starts with the screen and viewport:
 
@@ -168,7 +175,7 @@ The harness fixes:
 - the browser executable used for the run.
 
 With the same OS, fonts, browser build, and harness revision, two consecutive
-runs produced byte-identical PNGs in the ticket verification (all 10 files).
+runs produced byte-identical PNGs in the ticket verification (all 24 files).
 
 Known sources of variation:
 

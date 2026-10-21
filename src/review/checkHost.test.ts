@@ -6,6 +6,7 @@ import { CheckHost, CHECK_PROCESS_OUTPUT_LIMIT, type CheckManifest } from './che
 import { CheckStore, type CheckStoreMemento } from './checkStore.ts';
 import { decisionBlockReason } from './checkGate.ts';
 import type { ResolvedCheckSettings } from './checkSettings.ts';
+import { readCheckSettingsFrom } from './checkSettings.ts';
 import type { CheckProcess, CheckRunView } from './checks.ts';
 
 class FakeMemento implements CheckStoreMemento {
@@ -237,6 +238,15 @@ test('the resolved orchestration value overrides the legacy enabled flag', async
   const legacyOn = harness({ settings: { enabled: true } });
   await startInput(legacyOn.host, legacyOn.updates, 'turn3');
   assert.deepEqual(legacyOn.commands, ['npm run test']);
+});
+
+test('a fresh profile reads testing off, so no checks run without an override', async () => {
+  const fresh = harness({ settings: readCheckSettingsFrom({}, true) });
+  assert.equal(fresh.settings.enabled, false);
+  await startInput(fresh.host, fresh.updates, 'turn');
+
+  assert.equal(fresh.commands.length, 0);
+  assert.equal(fresh.store.get('codex', 'thread', 'turn')?.summary, 'Checks are disabled.');
 });
 
 test('an untrusted workspace stores and posts the untrusted result without spawning', async () => {

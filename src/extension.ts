@@ -7,6 +7,9 @@ import { planStepMarkdownPlugin } from './planStepMarkdown';
 import { SidebarViewProvider } from './sidebarView';
 import { attachBrowserSkill, stopBrowserSkill, syncBrowserSkill, BrowserSkill } from './browser/skill';
 import { SKILLS_SECTION } from './settingsKeys';
+import { migrateLegacyZvecServer } from './backends/opencode/zvecGrep';
+import { migrateLegacyAstGrepEntry } from './backends/astGrep/apply';
+import { astGrepMcpScriptPath } from './skills/opencodeMcp';
 import { MODE_PROMPT_VERSION } from './backends/modes';
 import { createFailureLogHost } from './telemetry/failureLogHost';
 import {
@@ -55,6 +58,24 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
   })().catch(() => {
     // A failed cleanup (for example a read-only user settings file) is not
     // worth interrupting activation; the removed key has no runtime effect.
+  });
+
+  // Older builds wrote `zg --server --stdio` into the user OpenCode config.
+  // Rewrite that one known legacy entry when it is present; the helper is
+  // idempotent, keeps a backup, and leaves an unparsable file untouched.
+  void migrateLegacyZvecServer().catch(() => {
+    // Best-effort: a locked or unparsable config is reported when the user
+    // turns the skill on, not during activation.
+  });
+
+  // Older builds stored ast-grep with the Electron host binary and no
+  // ELECTRON_RUN_AS_NODE. OpenCode launches the stored argv, so repair it to
+  // the Node-runtime entry; idempotent, comments preserved, unparsable configs
+  // untouched.
+  void migrateLegacyAstGrepEntry({
+    mcpScriptPath: astGrepMcpScriptPath(context.extensionPath)
+  }).catch(() => {
+    // Best-effort, same as the zvec entry above.
   });
 
   // Diagnostics only, and never a credential: this records which spawn form

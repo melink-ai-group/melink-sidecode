@@ -35,6 +35,18 @@
 
 /* ---- Transcript ---- */
 
+/* Chat area above the composer. It is the positioned ancestor for the busy
+ * loader, so the overlay is anchored to the full chat container instead of
+ * the scrolling message list. */
+.chat-main {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
 .transcript {
   flex: 1 1 auto;
   min-height: 0;
@@ -87,6 +99,13 @@
   width: 22px;
   height: 22px;
   margin: 0;
+}
+
+/* In the chat the composer sits below `.chat-main`, so bottom 12px clears the
+ * input. The extra right inset clears the transcript's stable scrollbar
+ * gutter instead of drawing the spinner over the scrollbar track. */
+.chat-main > .busy-corner-slot--overlay {
+  right: 20px;
 }
 
 .busy-corner {

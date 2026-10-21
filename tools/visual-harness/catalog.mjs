@@ -69,10 +69,60 @@ export const SCREENS = Object.freeze([
     afterClickText: 'No API key is used'
   }),
   Object.freeze({
+    slug: 'settings-save-busy',
+    title: 'Settings / saving',
+    expectText: 'Saving settings...',
+    waitFor: '.settings-foot[aria-busy="true"]'
+  }),
+  Object.freeze({
+    slug: 'settings-save-success',
+    title: 'Settings / saved',
+    expectText: 'Settings saved.',
+    waitFor: '.settings-foot .save-outcome--ok',
+    // The workspace target is the widest footer (note + Reset + Save user
+    // settings + Save to workspace). Both actions must stay in the 390px
+    // viewport, where the footer wraps.
+    assertInViewport: Object.freeze([
+      '.settings-foot > button',
+      '.settings-foot > button:last-of-type'
+    ])
+  }),
+  Object.freeze({
+    slug: 'settings-skills-ast',
+    title: 'Settings / Skills / ast-grep',
+    expectText: 'Structural search and rewrite by AST pattern.',
+    waitFor: '.settings',
+    clickTabs: Object.freeze(['Skills', 'ast-grep']),
+    afterClickText: 'Use structural search',
+    assertNoOverflow: true,
+    assertInViewport: Object.freeze([
+      '.skill-panel[data-skill="ast-grep"] .skill-enable',
+      '.skill-panel[data-skill="ast-grep"] .skill-actions'
+    ])
+  }),
+  Object.freeze({
+    slug: 'settings-skills-zvec',
+    title: 'Settings / Skills / zvec-grep',
+    expectText: 'Index missing',
+    waitFor: '.settings',
+    clickTabs: Object.freeze(['Skills', 'zvec-grep']),
+    afterClickText: 'Build index',
+    // Representative state: CLI + MCP ready but no workspace index yet.
+    assertNoOverflow: true,
+    assertInViewport: Object.freeze([
+      '.skill-panel[data-skill="zvec-grep"] .skill-enable',
+      '.skill-panel[data-skill="zvec-grep"] .skill-actions',
+      '.skill-panel[data-skill="zvec-grep"] .skill-index-hint'
+    ])
+  }),
+  Object.freeze({
     slug: 'chat-queued',
     title: 'Composer / busy with queued turns',
     expectText: '2 queued',
-    waitFor: '.composer-queue'
+    waitFor: '.composer-queue',
+    // The loader is anchored to the full chat container (above the composer),
+    // so it must stay inside both viewports at 22px.
+    assertInViewport: Object.freeze(['.busy-corner'])
   })
 ]);
 

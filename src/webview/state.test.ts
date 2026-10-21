@@ -1518,3 +1518,23 @@ test('a conversation repaint keeps queued chips for the same chat and clears the
   const switched = reduce(repaint, { type: 'conversation', backendId: 'codex', threadId: 'thread_2', replay: [] });
   assert.deepEqual(switched.queuedTurns, []);
 });
+
+test('settings save state is tracked and cleared when the screen closes', () => {
+  const pending = reduce(initialState, { type: 'settingsSave', pending: true });
+  assert.equal(pending.settingsSave?.pending, true);
+
+  const saved = reduce(pending, { type: 'settingsSave', pending: false, ok: true });
+  assert.deepEqual(saved.settingsSave, { pending: false, ok: true, message: undefined });
+
+  const failed = reduce(pending, {
+    type: 'settingsSave',
+    pending: false,
+    ok: false,
+    message: 'One setting was not saved.'
+  });
+  assert.equal(failed.settingsSave?.ok, false);
+  assert.match(failed.settingsSave?.message ?? '', /not saved/);
+
+  const closed = reduce({ ...saved, settingsOpen: true }, { type: 'closeSettings' });
+  assert.equal(closed.settingsSave, undefined);
+});
