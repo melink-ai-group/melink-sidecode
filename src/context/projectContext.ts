@@ -302,6 +302,12 @@ export interface ProjectContextHost {
   workspaceRoots(): string[];
   /** Reads a UTF-8 text file, or `undefined` when it does not exist. */
   readFile(path: string): Promise<string | undefined>;
+  /**
+   * The repo-map read: identical to `readFile`, except only a genuinely missing
+   * file yields `undefined`. An unreadable file rejects so the map can report
+   * failure. Optional so older fakes keep the tolerant `readFile` behavior.
+   */
+  readFileStrict?(path: string): Promise<string | undefined>;
   /** Lists the immediate children of an absolute directory path. */
   listDirectory(directory: string): Promise<readonly DirectoryEntry[]>;
   /** The git branch of a root, or `null` when unknown/not a repo. */
@@ -420,6 +426,17 @@ export interface ProjectContextReads {
    * need not supply them; an absent read means the documented defaults.
    */
   contextSettings?(): ContextSettings;
+  /**
+   * Reads one workspace file the snapshot already accepted, or `undefined` when
+   * it does not exist. Optional so a test fake from before the repo map existed
+   * keeps working; an absent read makes the map report `unavailable`.
+   */
+  readFile?(path: string): Promise<string | undefined>;
+  /**
+   * The strict repo-map read. When present it is preferred over `readFile`, so
+   * an unreadable file surfaces as `failed` rather than silently as a miss.
+   */
+  readFileStrict?(path: string): Promise<string | undefined>;
   /**
    * The file the user is viewing, read only when that path is safe. Absent when
    * no file is open. The renderer turns this into the per-turn block.
@@ -1130,6 +1147,22 @@ export class ProjectContext implements ProjectContextReads {
    */
   contextSettings(): ContextSettings {
     return this.settingsOrUndefined() ?? DEFAULT_CONTEXT_SETTINGS;
+  }
+
+  /**
+   * One accepted workspace file, read through the strict host seam when the host
+   * provides it. The repo map only passes paths from `shape.files`, so the
+   * snapshot's exclusion and filtering rules already applied before this read.
+   */
+  async readFile(path: string): Promise<string | undefined> {
+    const read = this.host.readFileStrict ?? this.host.readFile;
+    return read.call(this.host, path);
+  }
+
+  /** The strict variant, so a caller can name the repo-map seam explicitly. */
+  async readFileStrict(path: string): Promise<string | undefined> {
+    const read = this.host.readFileStrict ?? this.host.readFile;
+    return read.call(this.host, path);
   }
 
   private settingsOrUndefined(): ContextSettings | undefined {

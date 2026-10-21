@@ -267,6 +267,35 @@
           "minimum": 1024,
           "markdownDescription": "Overall byte cap for a rendered project-context snapshot. When the cap is reached, categories truncate in a documented order (open editors, then instruction documents, then the tree)."
         },
+        "melink.context.repoMap": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Include a bounded per-turn symbol/import map built from the files the snapshot already accepted. Off by default. When on, definitions and imports are ranked against your message and dirty files; a failed, unavailable or over-budget map is a one-line marker, never a blocked turn."
+        },
+        "melink.context.repoMapMaxFiles": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "markdownDescription": "Maximum source files the repository map may read in one build. The build stops deterministically at the cap and says it was limited."
+        },
+        "melink.context.repoMapMaxBytes": {
+          "type": "number",
+          "default": 131072,
+          "minimum": 1024,
+          "markdownDescription": "Maximum bytes the repository map may read in one build."
+        },
+        "melink.context.repoMapBuildMs": {
+          "type": "number",
+          "default": 750,
+          "minimum": 1,
+          "markdownDescription": "Wall-clock budget in milliseconds for one repository-map build. A slow or never-resolving file read times out and is reported as limited."
+        },
+        "melink.context.repoMapMaxChars": {
+          "type": "number",
+          "default": 1200,
+          "minimum": 100,
+          "markdownDescription": "Character cap for the rendered per-turn repository-map block."
+        },
         "melink.context.exclude": {
           "type": "array",
           "items": {

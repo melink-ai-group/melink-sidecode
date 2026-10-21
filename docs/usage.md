@@ -261,6 +261,11 @@ settings (**SideCode: Open settings**).
 | `melink.review.checks.enabled` | `true` | Run post-turn checks after a turn that changed files. Off skips them entirely; an untrusted workspace is always skipped. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands to run. Empty means auto-detect `typecheck` (falling back to `lint`) and `test` from `package.json`; an explicitly saved empty list turns checks off. |
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5–600. A timed-out check is killed and reported as timed out. |
+| `melink.context.repoMap` | `false` (off) | Include a bounded per-turn symbol/import map built from the files the snapshot already accepted. Off sends only an explicit disabled marker. |
+| `melink.context.repoMapMaxFiles` | `200` | Maximum source files the repository map may read in one build. |
+| `melink.context.repoMapMaxBytes` | `131072` | Maximum bytes the repository map may read in one build. |
+| `melink.context.repoMapBuildMs` | `750` | Wall-clock budget for one repository-map build; a slow read times out. |
+| `melink.context.repoMapMaxChars` | `1200` | Character cap for the rendered per-turn repository-map block. |
 
 The `melink.review.checks.*` values are read directly by the post-turn check host.
 The inline settings screen does not yet expose controls for them. The review
