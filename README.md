@@ -57,6 +57,15 @@ pass and never calls a model. Turn reviews are stored per turn and
 restored on reload; a failed or timed-out pass is a visible, non-blocking notice.
 Because the setting is application-scoped, only a user setting can enable it;
 a workspace setting cannot turn it on.
+A turn that changed files can also run **post-turn checks** before you keep it.
+By default SideCode detects `typecheck` (or `lint` when there is no typecheck)
+and `test` in `package.json` and runs them with the manifest's package manager.
+Checks only run in a **trusted** workspace, are killed after a per-check timeout,
+and keep only a bounded tail of their output. They never call a model or
+provider and never keep or reject anything automatically. While checks run,
+**Keep** is disabled; after a failed, timed-out, or errored check, keeping asks
+for an explicit override. Configure them with the `melink.review.checks.*`
+settings below.
 
 ## Requirements
 
@@ -332,6 +341,17 @@ picker in the title bar override them for the conversation you are in.
 |---|---|---|
 | `melink.defaults.permissionLevel` | `default` | Permission level a new conversation runs at (`read-only` / `default` / `unrestricted`). `unrestricted` must be confirmed. |
 | `melink.defaults.mode` | `agent` | Starting mode a new conversation runs in (`agent` / `plan` / `ask`). A mode is applied to the Codex thread at start. |
+
+### Post-turn checks
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `melink.review.checks.enabled` | `true` | Run checks after a turn that changed files. Untrusted workspaces always skip. |
+| `melink.review.checks.commands` | *(empty)* | Explicit commands; empty auto-detects `typecheck` (or `lint`) and `test` from `package.json`. An explicitly saved empty list runs nothing. |
+| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout, clamped to 5–600 seconds. |
+
+These are read directly from `settings.json`; the inline settings screen does not
+yet expose controls for them.
 
 Open the settings screen from the gear in the title bar (it opens inline in the
 sidebar, not a separate window). It also sets the Ollama API key with a masked

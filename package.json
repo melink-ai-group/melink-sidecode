@@ -281,6 +281,26 @@
           "scope": "application",
           "markdownDescription": "Run an opt-in, read-only **diff review** after a turn changes files. It is advisory only: it never edits files, runs shell commands, asks for approvals, or keeps/rejects changes. The first pass is local and deterministic (it flags explicit paths the request named but the turn did not change); a prompt/runner seam is ready for a future model reviewer."
         },
+        "melink.review.checks.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run post-turn checks after a turn that changed files, before the changes are kept. Checks never run in an untrusted workspace."
+        },
+        "melink.review.checks.commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Explicit commands to run after a turn that changed files. Leave empty to auto-detect `typecheck` (or `lint`) and `test` from `package.json`; an explicitly saved empty list turns checks off. Auto-detection uses the manifest's `packageManager` and falls back to `npm`."
+        },
+        "melink.review.checks.timeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 5,
+          "maximum": 600,
+          "markdownDescription": "Per-check timeout in seconds. Values outside 5-600 are clamped. A timed-out check is killed and reported as timed out."
+        },
         "melink.skills.browserCodex": {
           "type": "boolean",
           "default": true,
