@@ -11,6 +11,7 @@ import {
   type BrowserSkillProvider
 } from './policy.ts';
 import { BrowserPage } from './session.ts';
+import { requireWorkspaceRoot, saveScreenshot } from './screenshots.ts';
 import { runBrowserTool, type BrowserActions, type ToolResult } from './tools.ts';
 import { SKILLS_SECTION } from '../settingsKeys';
 
@@ -142,6 +143,12 @@ export class BrowserSkill {
     if (!this.enabled()) {
       return { content: [{ type: 'text', text: 'Browser control is off for this provider.' }], isError: true };
     }
+    if (name === 'browser_assert' && !this.page) {
+      return {
+        content: [{ type: 'text', text: 'The browser is not open; navigate first.' }],
+        isError: true
+      };
+    }
     try {
       const page = await this.ensurePage();
       const actions = this.actions(page);
@@ -164,11 +171,17 @@ export class BrowserSkill {
         await page.restartScreencast((jpeg) => this.panel?.frame(jpeg));
         return size;
       },
-      snapshot: () => page.snapshot(),
+      snapshot: async () => {
+        const shot = await page.snapshot();
+        const root = requireWorkspaceRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+        const path = await saveScreenshot(root, shot.pngBase64, shot.title, shot.url);
+        return { ...shot, path };
+      },
       click: (input) => page.click(input),
       type: (text, selector) => page.type(text, selector),
       press: (key) => page.press(key),
-      console: async () => page.consoleText()
+      console: async () => page.consoleText(),
+      assert: (input) => page.assert(input)
     };
   }
 

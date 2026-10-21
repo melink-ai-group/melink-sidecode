@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { browserPermissionKeys, codexBrowserConfig, mergeOpencodeMcp, type BrowserCommand } from './config.ts';
+import { BROWSER_TOOL_NAMES, browserPermissionKeys, codexBrowserConfig, mergeOpencodeMcp, type BrowserCommand } from './config.ts';
 import { ConsoleBuffer, EMPTY_CONSOLE_TEXT, attachPageDiagnostics, navigatePage } from './consoleBuffer.ts';
 import {
   browserSkillEnabled,
@@ -362,6 +362,10 @@ class FakePage implements PlaywrightPage {
     return 'Page';
   }
 
+  async evaluate<T>(_probe: () => T): Promise<T> {
+    return { state: 'complete', hasBody: true, hasContent: true } as T;
+  }
+
   async setViewportSize(size: { width: number; height: number }): Promise<void> {
     this.size = size;
   }
@@ -377,15 +381,20 @@ class FakePage implements PlaywrightPage {
   locator(_selector: string): {
     ariaSnapshot(): Promise<string>;
     click(options: { timeout: number }): Promise<void>;
+    count(): Promise<number>;
   } {
     return {
       ariaSnapshot: async () => 'button "Save"',
-      click: async () => undefined
+      click: async () => undefined,
+      count: async () => 1
     };
   }
 
-  getByText(_text: string, _options: { exact: boolean }): { first(): { click(options: { timeout: number }): Promise<void> } } {
-    return { first: () => ({ click: async () => undefined }) };
+  getByText(_text: string, _options: { exact: boolean }): {
+    first(): { click(options: { timeout: number }): Promise<void> };
+    count(): Promise<number>;
+  } {
+    return { first: () => ({ click: async () => undefined }), count: async () => 1 };
   }
 
   readonly mouse = { click: async (_x: number, _y: number) => undefined };
@@ -404,7 +413,7 @@ class FakeBrowser {
   readonly pages: FakePage[] = [];
   closed = false;
 
-  async newPage(): Promise<FakePage> {
+  async newPage(): Promise<PlaywrightPage> {
     const page = new FakePage();
     this.pages.push(page);
     return page;
@@ -431,11 +440,152 @@ function fakePlaywright(): { module: PlaywrightModule; browsers: FakeBrowser[] }
   };
 }
 
-function fakeActions(opened: string[]): BrowserActions {
+test('browser_navigate does not imply SideCode runs a localhost app', () => {
+  const tool = BROWSER_TOOLS.find((entry) => entry.name === 'browser_navigate');
+  assert.ok(tool);
+  assert.doesNotMatch(tool.description, /usually localhost/i);
+  assert.match(tool.description, /user provides/);
+  assert.match(tool.description, /already running/);
+});
+
+test('browser_assert is listed with a bounded schema and its permission key', () => {
+  const tool = BROWSER_TOOLS.find((entry) => entry.name === 'browser_assert');
+  assert.ok(tool);
+  assert.match(tool.description, /2 seconds/);
+  const schema = tool.inputSchema as {
+    properties: Record<string, unknown>;
+    additionalProperties: boolean;
+    anyOf: Array<{ required: string[] }>;
+  };
+  assert.deepEqual(Object.keys(schema.properties).sort(), ['selector', 'status', 'text', 'url']);
+  assert.equal(schema.additionalProperties, false);
+  assert.equal(schema.anyOf.length, 4);
+  assert.deepEqual(
+    schema.anyOf.map((entry) => entry.required[0]),
+    ['selector', 'text', 'url', 'status']
+  );
+  assert.ok((BROWSER_TOOL_NAMES as readonly string[]).includes('browser_assert'));
+  assert.equal(browserPermissionKeys().browser_assert, 'allow');
+});
+
+test('an unreachable navigation is an error with the reason in the text', async () => {
+  const actions = fakeActions([], {
+    async navigate(url) {
+      return { ok: false, kind: 'not-reachable', url, reason: 'connection refused' };
+    }
+  });
+  const result = await runBrowserTool(actions, 'browser_navigate', { url: 'http://localhost:9' }, async () => true, new Set());
+  assert.equal(result.isError, true);
+  assert.equal(result.content[0]?.text, 'http://localhost:9 is not reachable: connection refused');
+});
+
+test('a timeout navigation is an error and never reads as opened', async () => {
+  const actions = fakeActions([], {
+    async navigate(url) {
+      return { ok: false, kind: 'timeout', url, reason: 'the page did not become ready within 15s' };
+    }
+  });
+  const result = await runBrowserTool(actions, 'browser_navigate', { url: 'https://example.com' }, async () => true, new Set());
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /is not reachable: the page did not become ready/);
+  assert.doesNotMatch(result.content[0]?.text ?? '', /^Opened/);
+});
+
+test('browser_assert returns pass and mismatch results from the actions', async () => {
+  const calls: unknown[] = [];
+  const passing = fakeActions([], {
+    async assert(input) {
+      calls.push(input);
+      return { ok: true, message: 'Assertion passed: selector "#save", URL "http://localhost:3000/".' };
+    }
+  });
+  const pass = await runBrowserTool(passing, 'browser_assert', { selector: '#save', url: 'http://localhost:3000/' }, async () => true, new Set());
+  assert.equal(pass.isError, undefined);
+  assert.match(pass.content[0]?.text ?? '', /Assertion passed/);
+  assert.deepEqual(calls, [{ selector: '#save', url: 'http://localhost:3000/' }]);
+
+  const failing = fakeActions([], {
+    async assert() {
+      return { ok: false, message: 'Selector not found: #missing at http://localhost:3000/.' };
+    }
+  });
+  const fail = await runBrowserTool(failing, 'browser_assert', { selector: '#missing' }, async () => true, new Set());
+  assert.equal(fail.isError, true);
+  assert.equal(fail.content[0]?.text, 'Selector not found: #missing at http://localhost:3000/.');
+});
+
+test('browser_assert needs at least one criterion', async () => {
+  const result = await runBrowserTool(fakeActions([]), 'browser_assert', {}, async () => true, new Set());
+  assert.equal(result.isError, true);
+  assert.equal(result.content[0]?.text, 'Provide a selector, text, url, or status to assert.');
+});
+
+test('assertion mismatch and unreachable navigation stay distinct', async () => {
+  const actions = fakeActions([], {
+    async navigate(url) {
+      return { ok: false, kind: 'not-reachable', url, reason: 'DNS lookup failed' };
+    },
+    async assert() {
+      return { ok: false, message: 'Text not found: "Dashboard" at http://missing.invalid/.' };
+    }
+  });
+  const navigation = await runBrowserTool(actions, 'browser_navigate', { url: 'http://missing.invalid' }, async () => true, new Set());
+  const assertion = await runBrowserTool(actions, 'browser_assert', { text: 'Dashboard' }, async () => true, new Set());
+  assert.equal(navigation.isError, true);
+  assert.match(navigation.content[0]?.text ?? '', /is not reachable: DNS lookup failed/);
+  assert.equal(assertion.isError, true);
+  assert.equal(assertion.content[0]?.text, 'Text not found: "Dashboard" at http://missing.invalid/.');
+  assert.doesNotMatch(assertion.content[0]?.text ?? '', /not reachable/i);
+});
+
+test('an assertion with no page open says so instead of not-reachable', async () => {
+  const actions = fakeActions([], {
+    async assert() {
+      throw new Error('The browser is not open; navigate first.');
+    }
+  });
+  const result = await runBrowserTool(actions, 'browser_assert', { selector: '#save' }, async () => true, new Set());
+  assert.equal(result.isError, true);
+  assert.equal(result.content[0]?.text, 'The browser is not open; navigate first.');
+  assert.doesNotMatch(result.content[0]?.text ?? '', /not reachable/i);
+});
+
+test('snapshot text carries the saved path and keeps the inline image', async () => {
+  const path = 'C:\\work\\.melink\\reports\\browser\\20261021-123456-789-001-login-page.png';
+  const actions = fakeActions([], {
+    async snapshot() {
+      return {
+        text: 'button "Save"',
+        pngBase64: 'image-bytes',
+        path,
+        url: 'https://example.com/login?token=SECRET',
+        title: 'Login page'
+      };
+    }
+  });
+  const result = await runBrowserTool(actions, 'browser_snapshot', {}, async () => true, new Set());
+  const text = result.content[0]?.text ?? '';
+  assert.match(text, /button "Save"/);
+  assert.match(text, /Screenshot saved to C:\\work\\\.melink\\reports\\browser\\/);
+  assert.match(text, /https:\/\/example\.com\/login\?token=SECRET/);
+  assert.match(text, /Login page/);
+  const image = result.content[1];
+  assert.equal(image?.type, 'image');
+  assert.equal(image?.data, 'image-bytes');
+  assert.equal(image?.mimeType, 'image/png');
+  assert.equal(result.isError, undefined);
+});
+
+test('snapshot text omits the saved path when the action did not write one', async () => {
+  const result = await runBrowserTool(fakeActions([]), 'browser_snapshot', {}, async () => true, new Set());
+  assert.doesNotMatch(result.content[0]?.text ?? '', /Screenshot saved/);
+});
+
+function fakeActions(opened: string[], overrides: Partial<BrowserActions> = {}): BrowserActions {
   return {
     async navigate(url) {
       opened.push(url);
-      return { url, title: 'Page' };
+      return { ok: true, url, title: 'Page', status: 200 };
     },
     async resize(width, height) {
       return { width, height };
@@ -454,6 +604,10 @@ function fakeActions(opened: string[]): BrowserActions {
     },
     async console() {
       return new ConsoleBuffer().format();
-    }
+    },
+    async assert(_input) {
+      return { ok: true, message: 'Assertion passed.' };
+    },
+    ...overrides
   };
 }

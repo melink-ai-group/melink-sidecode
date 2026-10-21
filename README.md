@@ -169,6 +169,10 @@ IME, so these tests do not replace the manual VS Code pass in
 the `styles.css` hex-literal count against the working tree; it does not run any
 suite itself. CI runs it after `npm run typecheck` and `npm test`.
 
+The browser tools (agent-driven page checks) are documented in
+[docs/browser.md](docs/browser.md): this repository has no dev server or base
+URL, so those tools need an external URL.
+
 ## Set up a provider
 
 Open the sidebar (Activity Bar → **SideCode**) once to activate the extension, then
