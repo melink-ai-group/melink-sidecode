@@ -121,7 +121,15 @@ to launch an Extension Development Host. Other scripts:
 npm run typecheck  # tsc --noEmit
 npm run lint       # alias for typecheck
 npm test           # pure unit tests (node --experimental-strip-types)
+npm run visual     # dev-only seeded Chromium screenshots
 ```
+
+`npm run visual` renders the built webview with mocked host state in installed
+Chrome or Edge and writes PNGs, `manifest.json`, and `index.md` under
+`.melink/reports/visual/`. It is not part of the VSIX and does not use a real
+extension host. See the
+[visual harness runbook](docs/visual-harness.md) for prerequisites, screens,
+determinism, and limitations.
 
 ## Set up a provider
 
