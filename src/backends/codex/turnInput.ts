@@ -8,6 +8,7 @@
  */
 
 import type { Attachment, ContextPayload, DefaultMode } from '../types.ts';
+import type { FrontendStack } from '../../context/frontendStack.ts';
 import { modeInstructions } from '../modes.ts';
 import type { UserInput } from '../../../schemas/v2/UserInput.ts';
 
@@ -15,6 +16,8 @@ export interface CodexTurnInput {
   mode: DefaultMode;
   /** The user text, unchanged. */
   text: string;
+  /** Frontend stack from the turn's context, for the acting-mode checklist. */
+  frontendStack?: FrontendStack;
   context?: ContextPayload;
   attachments?: readonly Attachment[];
   /**
@@ -62,7 +65,7 @@ function providerText(input: CodexTurnInput): string {
       `The developer instruction that required ${previous} mode is revoked. It no longer applies, including any rule that prohibited implementation. The active developer instruction for this turn is ${MODE_NAME[input.mode]} mode.`
     );
   }
-  const instructions = modeInstructions(input.mode);
+  const instructions = modeInstructions(input.mode, input.frontendStack);
   if (instructions) {
     parts.push(instructions);
   }

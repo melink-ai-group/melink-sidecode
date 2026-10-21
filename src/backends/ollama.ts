@@ -124,7 +124,7 @@ function opencodePrompt(
     ? context?.snapshot ?? context?.notice
     : context?.delta ?? context?.notice;
   const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
-  const instructions = modeInstructions(mode);
+  const instructions = modeInstructions(mode, request.context?.frontendStack);
   // A fresh session has no memory of the thread. A replacement for a missing
   // session gets the saved chat once. Otherwise the compaction summary is
   // included once; later turns resume the session and do not repeat it.
@@ -1555,7 +1555,7 @@ export class OllamaBackend implements AgentBackend {
       history.unshift(...preface);
     }
     const messages = buildContextMessages(history, text, context);
-    const instructions = modeInstructions(isDefaultMode(mode) ? mode : 'agent');
+    const instructions = modeInstructions(isDefaultMode(mode) ? mode : 'agent', context?.frontendStack);
     if (instructions) {
       messages.unshift({ role: 'system', content: instructions });
     }

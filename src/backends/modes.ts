@@ -1,4 +1,5 @@
 import { DEFAULT_MODES, type DefaultMode, type PermissionLevel } from './types.ts';
+import { frontendChecklist, type FrontendStack } from '../context/frontendStack.ts';
 
 /**
  * The one place the shared `DefaultMode` is translated into Codex's own
@@ -133,9 +134,21 @@ export function isDefaultMode(value: unknown): value is DefaultMode {
   return typeof value === 'string' && (DEFAULT_MODES as readonly string[]).includes(value);
 }
 
-/** The `developerInstructions` for a mode. */
-export function modeInstructions(mode: DefaultMode): string | undefined {
-  return modeDescriptor(mode).developerInstructions;
+/**
+ * The `developerInstructions` for a mode.
+ *
+ * Agent and Plan get the detected frontend checklist appended, because they
+ * act on UI. Ask answers without acting, so its instructions stay exactly as
+ * written. The stored descriptor text is never modified.
+ */
+export function modeInstructions(mode: DefaultMode, frontendStack?: FrontendStack): string | undefined {
+  const descriptor = modeDescriptor(mode);
+  const base = descriptor.developerInstructions;
+  if (!base || (descriptor.mode !== 'agent' && descriptor.mode !== 'plan') || !frontendStack) {
+    return base;
+  }
+  const checklist = frontendChecklist(frontendStack);
+  return checklist ? `${base}\n\n${checklist}` : base;
 }
 
 /** What a mode enforces on the workspace. */

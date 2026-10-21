@@ -264,6 +264,20 @@ test('package script values are capped in count and per-script length', () => {
   assert.equal(fields.scripts, '… 3 more scripts not shown');
 });
 
+test('a package manifest names only the known frontend dependencies it declares', () => {
+  const fields = readManifestFields(
+    'package.json',
+    JSON.stringify({
+      dependencies: { next: '15.0.0', react: '19.0.0', lodash: '4.0.0' },
+      devDependencies: { 'react-dom': '19.0.0', '@angular/core': '19.0.0', '@types/react': '19.0.0' }
+    })
+  );
+  // Fixed order, dependencies and devDependencies merged, unrelated packages left out.
+  assert.equal(fields.frameworks, 'next, react, react-dom, @angular/core');
+  assert.equal(readManifestFields('package.json', JSON.stringify({ dependencies: { lodash: '4.0.0' } })).frameworks, undefined);
+  assert.equal(readManifestFields('package.json', JSON.stringify({ devDependencies: { preact: '10.0.0' } })).frameworks, 'preact');
+});
+
 test('byte truncation never splits a multi-byte character', () => {
   const text = 'héllo wörld';
   const cut = cutToBytes(text, 4);
