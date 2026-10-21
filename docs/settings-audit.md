@@ -51,6 +51,7 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | `melink.context.includeChangedFiles` | boolean, `true` | **Present** — Context → Included by default | `contextSettings()` → `ProjectContext.getDelta`; off omits the changed-files notice |
 | `melink.context.maxBytes` | number, `20480` | **Present** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
 | `melink.context.exclude` | array, *(empty)* | **Present** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
+| `melink.review.diffReview` | boolean, `false`, application scope | **Not on the screen** - opt in through Settings JSON only | `SidebarViewProvider.diffReviewEnabled()` -> `reviewFinishedTurn()` on live turn finish; off means no input is built, no runner is called, and nothing is stored |
 
 ## Credentials
 
@@ -102,6 +103,15 @@ user-facing counterpart.
 | `melink.threadIndex` | workspace | Per-backend thread list for history |
 | `melink.transcripts` | workspace | Rendered items for replay |
 | `melink.lastUsedModel` | global | Last model, so a reload reconnects to it |
+
+## Review state (`src/review/reviewStore.ts`)
+
+| Key | Scope | Purpose |
+|---|---|---|
+| `melink.review.findings` | workspace | Advisory diff-review result per `backendId:threadId:turnId`, bounded to the newest 50 turns. Read on reload; written only for a live turn when `melink.review.diffReview` is on. |
+
+Findings are advisory only: the store never changes a Keep/Reject decision, and
+a failed or timed-out review is stored as a notice rather than blocking the turn.
 
 ## Approval state (`src/backends/approvalStore.ts`)
 

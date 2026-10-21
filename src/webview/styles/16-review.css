@@ -85,6 +85,34 @@
   color: var(--vscode-descriptionForeground);
 }
 
+/* Compact advisory status: stays visible while the file list is collapsed. */
+.changes-review__diff-review {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.changes-review__diff-review--error {
+  color: var(--vscode-errorForeground);
+}
+
+.changes-review__diff-review--warning {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.changes-review__diff-review--ok {
+  color: var(--vscode-testing-iconPassed, var(--vscode-descriptionForeground));
+}
+
 .changes-review__review {
   border-color: var(--melink-primary);
   background: var(--melink-primary);
@@ -188,6 +216,110 @@
 
 .changes-review__sep {
   color: var(--vscode-descriptionForeground);
+}
+
+/* Advisory diff review: text plus icon for severity, never colour alone. */
+.diff-review {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  background: var(--vscode-textBlockQuote-background, transparent);
+}
+
+.diff-review__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.diff-review__head > .ico {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+}
+
+.diff-review__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.diff-review__note {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.diff-review__detail {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
+.diff-review--failed .diff-review__head > .ico,
+.diff-review--warning .diff-review__head > .ico {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.diff-review--error .diff-review__head > .ico {
+  color: var(--vscode-errorForeground);
+}
+
+.diff-review--ok .diff-review__head > .ico {
+  color: var(--vscode-testing-iconPassed, var(--vscode-descriptionForeground));
+}
+
+.diff-review__findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.diff-review__finding {
+  display: grid;
+  grid-template-columns: max-content minmax(5rem, max-content) minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.diff-review__severity {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.diff-review__severity--error {
+  color: var(--vscode-errorForeground);
+}
+
+.diff-review__severity--warning {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.diff-review__severity--info {
+  color: var(--vscode-descriptionForeground);
+}
+
+.diff-review__location {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-descriptionForeground);
+}
+
+.diff-review__message {
+  min-width: 0;
+  color: var(--vscode-foreground);
 }
 
 .changes-review__list {
