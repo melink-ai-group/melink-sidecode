@@ -148,6 +148,7 @@ npm run lint       # alias for typecheck
 npm test           # node unit suite, then the jsdom/RTL webview suite
 npm run test:node  # node --experimental-strip-types --test "src/**/*.test.ts"
 npm run test:dom   # vitest run (src/webview/**/*.dom.test.tsx)
+npm run verify     # docs/manual-test.md version/counts vs the tree (no test run)
 ```
 
 `npm run typecheck` and `npm test` are the required quality gates. CI runs both
@@ -163,6 +164,10 @@ Enter. It is host-free: `acquireVsCodeApi`, `ResizeObserver`,
 `src/webview/domSetup.ts`. jsdom has no editor host, layout, clipboard, or real
 IME, so these tests do not replace the manual VS Code pass in
 `docs/manual-test.md`.
+
+`npm run verify` checks the documented version, node test-file/test counts, and
+the `styles.css` hex-literal count against the working tree; it does not run any
+suite itself. CI runs it after `npm run typecheck` and `npm test`.
 
 ## Set up a provider
 
