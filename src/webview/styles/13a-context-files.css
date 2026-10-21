@@ -1,0 +1,412 @@
+.context-category {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-category--static {
+  gap: 8px;
+}
+
+.context-mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: var(--melink-radius-sm, 4px);
+  color: var(--vscode-foreground);
+}
+
+.context-mark .ico {
+  width: 11px;
+  height: 11px;
+}
+
+.context-mark--on {
+  color: var(--melink-success);
+}
+
+.context-mark--off {
+  color: var(--vscode-descriptionForeground);
+}
+
+/* A warning-toned message, used for the verbatim-selection note. */
+.field-msg--warn {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+/* The overall byte cap is a readable number with a trailing unit. */
+.context-budget-input {
+  flex: 0 0 64px;
+  width: 64px;
+  text-align: right;
+}
+
+.context-unit {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.context-patterns {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.context-pattern {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-textCodeBlock-background, transparent);
+}
+
+.context-pattern__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.context-pattern--builtin .context-pattern__text {
+  color: var(--vscode-descriptionForeground);
+}
+
+.context-pattern--empty {
+  border-style: dashed;
+  background: transparent;
+}
+
+.context-pattern--empty .context-pattern__text {
+  color: var(--vscode-descriptionForeground);
+}
+
+.context-pattern-input {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+
+/* A setting key rendered inline, so a documented key is legible and wraps. */
+code.key {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  padding: 0 3px;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-textCodeBlock-background, transparent);
+  color: var(--vscode-foreground);
+  overflow-wrap: anywhere;
+}
+
+.panel__foot {
+  padding: 6px 10px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* ---- Context strip and floating inspect panel ----
+ *
+ * One compact strip directly above the composer input, in the same control row
+ * family as the model switcher and the mode/permission row. Activating it
+ * opens a bounded floating panel above the composer.
+ * Only tokens: workbench --vscode-* plus brand --melink-* from tokens.css.
+ */
+
+.ctx-region {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.changed-files {
+  position: relative;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.changed-files__panel {
+  position: static;
+  z-index: 1;
+  max-height: min(40vh, 320px);
+  margin: 0 8px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+}
+
+.changed-files__review {
+  min-width: 0;
+  max-height: min(46vh, 440px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.changed-files__panel .changes-review {
+  border: 0;
+  border-radius: 0;
+}
+
+.changed-files__toggle,
+.changed-files__file {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.changed-files__toggle {
+  justify-content: space-between;
+  padding: 7px 12px;
+}
+
+.changed-files__toggle:hover,
+.changed-files__file:hover {
+  background: var(--vscode-list-hoverBackground, transparent);
+  color: var(--vscode-foreground);
+}
+
+.changed-files__hint {
+  color: var(--vscode-descriptionForeground);
+  opacity: .8;
+}
+
+.changed-files__list {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 4px 5px;
+  list-style: none;
+}
+
+.changed-files__file {
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 3px;
+}
+
+.changed-files__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changed-files__stats {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.changed-files__status {
+  color: var(--vscode-descriptionForeground);
+}
+
+.changed-files :is(button):focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.context-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  row-gap: 4px;
+  padding: 6px 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--vscode-descriptionForeground);
+}
+
+.context-meter {
+  position: relative;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vscode-foreground);
+}
+
+.context-meter.is-ok {
+  color: var(--vscode-charts-blue, var(--vscode-progressBar-background));
+}
+
+.context-meter.is-warn {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.context-meter.is-high {
+  color: var(--vscode-errorForeground);
+}
+
+button.context-meter {
+  cursor: pointer;
+}
+
+button.context-meter:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.context-meter.is-busy {
+  opacity: 0.85;
+}
+
+.context-meter__ring {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.context-meter__track,
+.context-meter__value {
+  fill: none;
+  stroke-width: 3;
+}
+
+.context-meter__track {
+  stroke: var(--vscode-widget-border, var(--vscode-editorWidget-border));
+}
+
+.context-meter__value {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 18px 18px;
+}
+
+.context-strip.is-open {
+  background: var(--vscode-editorWidget-background);
+}
+
+.context-strip.is-error {
+  color: var(--vscode-errorForeground);
+}
+
+.context-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.context-toggle:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+.context-toggle:focus-visible,
+.context-path:focus-visible,
+.context-more:focus-visible,
+.context-category__toggle:focus-visible,
+.context-exclude:focus-visible,
+.context-item__toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.context-chevron {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  transition: transform 0.12s ease;
+}
+
+.context-toggle[aria-expanded='true'] .context-chevron,
+.context-category__toggle[aria-expanded='true'] .context-chevron {
+  transform: rotate(180deg);
+}
+
+.context-workspace {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.context-sep {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+
+.context-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.context-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.context-path:hover {
+  background: var(--vscode-list-hoverBackground);
+  text-decoration: underline;
+}
+
+.context-path-text {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

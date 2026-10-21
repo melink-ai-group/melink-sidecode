@@ -1,0 +1,154 @@
+/* ---- Markdown ---- */
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md__p {
+  margin: 0 0 8px;
+}
+
+.md__heading {
+  margin: 12px 0 6px;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.md__list {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.md__list:has(> .md__step):not(:has(> li:not(.md__step))) {
+  padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.md__list:has(> .md__step):not(:has(> li:not(.md__step))) li {
+  margin: 0;
+}
+
+.reply-close {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
+  border-radius: 0 var(--melink-radius-sm, 4px) var(--melink-radius-sm, 4px) 0;
+  background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.reply-close .md__p {
+  margin: 0;
+}
+
+.md__list li {
+  margin: 2px 0;
+}
+
+.md__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  list-style: none;
+}
+
+.md__step-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.melink-step {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.md__quote {
+  margin: 0 0 8px;
+  padding: 0 10px;
+  border-left: 3px solid var(--vscode-panel-border);
+  color: var(--vscode-descriptionForeground);
+}
+
+.md__link {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+
+.md__link:hover {
+  text-decoration: underline;
+}
+
+.md__code {
+  padding: 1px 4px;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-textCodeBlock-background);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 1em;
+  line-height: inherit;
+}
+
+.md__table-wrap {
+  margin: 0 0 8px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.md__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1em;
+  line-height: 1.45;
+}
+
+.md__table th,
+.md__table td {
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.md__table th {
+  font-weight: 600;
+  background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.code-block {
+  margin: 0 0 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-textCodeBlock-background);
+  overflow: hidden;
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 2px 8px;
+  background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.code-block code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 1em;
+  white-space: pre;
+}
+

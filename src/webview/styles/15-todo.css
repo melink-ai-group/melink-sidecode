@@ -1,0 +1,189 @@
+/* ---- Todo list ---- */
+
+.todo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-editorWidget-background);
+  overflow: visible;
+}
+
+.todo--finished {
+  /* Full success green reads as a glow on the dark card. Pull it toward the
+   * surface so a finished plan stays green without the high contrast. */
+  --todo-done: color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background));
+  border-color: color-mix(in srgb, var(--melink-success) 38%, var(--vscode-widget-border, var(--vscode-panel-border)));
+}
+
+.todo--stopped {
+  border-color: var(--vscode-editorWarning-foreground);
+}
+
+.todo__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  min-width: 0;
+}
+
+.todo__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo__toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.todo__toggle:disabled {
+  cursor: default;
+}
+
+.todo__chevron {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+}
+
+.todo__chevron--closed {
+  transform: rotate(-90deg);
+}
+
+.todo__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.todo__progress-icon--done {
+  color: var(--todo-done, color-mix(in srgb, var(--melink-success) 52%, var(--vscode-editorWidget-background)));
+}
+
+.todo__progress-icon--stopped {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.todo__progress-text {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+
+.todo__track {
+  height: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
+  overflow: hidden;
+}
+
+.todo__fill {
+  display: block;
+  height: 100%;
+  background: var(--vscode-descriptionForeground);
+  transition: width 0.2s ease;
+}
+
+.todo--finished .todo__fill {
+  background: var(--todo-done);
+}
+
+.todo--stopped .todo__fill {
+  background: var(--vscode-editorWarning-foreground);
+}
+
+.todo__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 6px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.todo__item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--melink-radius-sm, 4px);
+  min-width: 0;
+}
+
+.todo__item > .status-chip {
+  margin-top: 0;
+}
+
+.todo__item--active {
+  border-color: var(--vscode-widget-border, var(--vscode-panel-border));
+  background: var(--vscode-list-hoverBackground);
+}
+
+/* A denied step never ran. The red cross sits with the label, and the word
+ * stays in the tooltip, so it remains legible without relying on color alone. */
+.todo__item--denied .todo__text {
+  color: var(--vscode-descriptionForeground);
+}
+
+.todo__dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground);
+}
+
+.todo__text {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--vscode-foreground);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.todo__item:not(.todo__item--active):not(.todo__item--done) .todo__text,
+.todo__item--done .todo__text {
+  color: var(--vscode-descriptionForeground);
+}
+
+.todo__resume {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--melink-radius-sm, 4px);
+  border-color: var(--vscode-editorWarning-foreground);
+  background: var(--vscode-editorWarning-foreground);
+  color: var(--vscode-editor-background);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.todo__resume:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, black);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, black);
+  color: var(--vscode-editor-background);
+}
+
+@media (max-width: 340px) {
+  .plan-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+

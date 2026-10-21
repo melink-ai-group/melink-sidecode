@@ -10,8 +10,8 @@ import {
 } from './opencodeMcp.ts';
 import { readAstGrepCliSource, resolveAstGrepExecutable } from '../backends/astGrep/resolve.ts';
 import { readZvecGrepCliSource, resolveZvecGrepExecutable } from '../backends/zvecGrep/resolve.ts';
+import { SKILLS_SECTION } from '../settingsKeys';
 
-const SKILLS_SECTION = 'melink.skills';
 const LEGACY_ZVEC = 'melink.ollama.opencode.zvecGrep';
 
 /**

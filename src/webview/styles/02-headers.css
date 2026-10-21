@@ -1,0 +1,128 @@
+/* ---- Screen headers (settings, rules). The chat model switcher sits in the composer. ---- */
+
+.view-title {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 6px 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.view-title__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.view-title__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 6px;
+  background: var(--vscode-panel-border);
+}
+
+/* Collapsed trigger always shows the current selection. */
+
+.model-trigger {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-md, 6px);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-trigger:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.model-trigger:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.model-trigger .trigger-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.model-trigger .trigger-model {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.model-trigger .trigger-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* ---- Provider identity ---- */
+
+.provider-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  /* brand hue job 1: provider identity */
+  background: color-mix(in srgb, var(--vscode-foreground) 55%, transparent);
+}
+
+.provider-dot--ollama,
+.provider-dot--opencode,
+.provider-dot--codex {
+  background: var(--melink-shell);
+}
+
+.model-free-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  color: var(--vscode-descriptionForeground);
+  background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+}
+
+.provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.provider-badge .provider-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.meta-sep {
+  opacity: 0.6;
+}
+
