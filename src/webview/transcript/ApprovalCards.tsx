@@ -55,7 +55,7 @@ export function ApprovalPrompt({
 
         {request?.command ? (
           <pre className="codeblock" aria-label="Command the agent wants to run">
-            {request.command}
+            {request.displayCommand ?? request.command}
           </pre>
         ) : null}
 

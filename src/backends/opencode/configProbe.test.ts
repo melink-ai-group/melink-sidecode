@@ -59,13 +59,13 @@ test(
   () => {
     const dir = mkdtempSync(join(tmpdir(), 'melink-t69-probe-'));
     const modes = [
-      { mode: 'agent', mutating: 'ask' },
-      { mode: 'plan', mutating: 'ask' },
-      { mode: 'ask', mutating: 'deny' }
+      { mode: 'agent', fileEdit: 'allow', gated: 'ask' },
+      { mode: 'plan', fileEdit: 'allow', gated: 'ask' },
+      { mode: 'ask', fileEdit: 'deny', gated: 'deny' }
     ] as const;
 
     try {
-      const runs = modes.map(({ mode, mutating }) => {
+      const runs = modes.map(({ mode, fileEdit, gated }) => {
         const built = buildOpencodeConfig({
           baseUrl: 'https://ollama.com',
           modelIds: ['m'],
@@ -75,7 +75,7 @@ test(
           agentNonce: 'probe'
         });
         assert.match(built.agent, /^melink-(agent|plan|ask)-probe$/);
-        return { ...built, mode, mutating };
+        return { ...built, mode, fileEdit, gated };
       });
 
       // The hostile workspace tries to disable the exact per-turn agent names
@@ -117,9 +117,9 @@ test(
         // `disable: false`, and permission block win on overlapping keys.
         const resolved = debugAgent(OPENCODE as string, dir, run.agent, env);
         assert.equal(resolved.name, run.agent);
-        assert.equal(actionFor(resolved, 'bash'), run.mutating);
-        assert.equal(actionFor(resolved, 'edit'), run.mutating);
-        assert.equal(actionFor(resolved, 'webfetch'), run.mutating);
+        assert.equal(actionFor(resolved, 'bash'), run.gated);
+        assert.equal(actionFor(resolved, 'edit'), run.fileEdit);
+        assert.equal(actionFor(resolved, 'webfetch'), run.gated);
         assert.equal(actionFor(resolved, 'task'), 'deny');
         assert.equal((resolved.tools as Record<string, unknown>).task, false);
       }

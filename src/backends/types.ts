@@ -367,6 +367,11 @@ export interface ApprovalRequest {
   method: string;
   /** Command the request concerns, when reported. */
   command?: string;
+  /**
+   * Redacted, bounded command safe to show in cards and notices. The raw
+   * `command` stays untouched for rule matching.
+   */
+  displayCommand?: string;
   /** Working directory the command runs in, when reported. */
   cwd?: string;
   /** File paths the request concerns, when reported. */

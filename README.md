@@ -282,10 +282,13 @@ streams chat and does not spawn opencode.
   time into the child's environment (`OLLAMA_API_KEY`); the generated config
   names only that variable, so the secret never appears in the config, on disk,
   in settings, in logs, or in error text.
-- **Streaming.** Each turn runs headless (`opencode run --format json`) and its
-  NDJSON events are parsed incrementally into the same normalized event union
-  the direct adapter uses, so the transcript has one path. A stream that ends
-  without a terminal event is treated as a stream error, not a success.
+- **Streaming.** A turn that cannot ask runs headless (`opencode run --format
+  json`). A turn whose permission level can ask (the `default` bash ask) uses
+  the same short-lived runtime through `opencode serve`, so its `ask` becomes a
+  sidebar decision card instead of being auto-rejected. Both paths parse the
+  same normalized event union the direct adapter uses, so the transcript has one
+  path. A stream that ends without a terminal event is a stream error, not a
+  success.
 - **Sessions.** The runtime's session id is persisted per thread, so a second
   turn in the same thread resumes the same session. A stale id degrades to a
   fresh session with a visible notice.
@@ -301,8 +304,9 @@ streams chat and does not spawn opencode.
   pre-existing concern and are not isolated by this fix. Permission levels map
   onto opencode's own `permission` config: `read-only` and Ask deny edits,
   commands, external directories, webfetch, websearch, and subagent delegation;
-  `default` asks before every edit, write, patch, command, external directory,
-  webfetch, and websearch, and denies delegation; only `unrestricted` (gated
+  `default` auto-allows edits, writes and patches inside the workspace but asks
+  before every command, external directory, webfetch, and websearch, and denies
+  delegation; only `unrestricted` (gated
   behind the labelled confirmation) allows them without asking. Default also
   keeps network access blocked for Codex's sandbox. Plan honors the selected
   permission level. opencode's enforcement is a second gate, not a replacement
@@ -441,9 +445,11 @@ the backend can actually honour:
 
 **Enforcement, not suggestion.** Ask runs at the read-only end of the
 permission machinery. Plan and Agent honor the selected level, so Codex's own
-sandbox controls which writes and commands can run. Ask refuses every approval
-the agent raises, so a question can never become a change. A mode a backend
-cannot enforce is not advertised: Ollama Cloud reports `agent` only,
+sandbox controls which writes and commands can run. In Default, a sandboxed
+command can raise an approval card, and the destructive-command check runs
+before any stored rule. Ask refuses every approval the agent raises, so a
+question can never become a change. A mode a backend cannot enforce is not
+advertised: Ollama Cloud reports `agent` only,
 so Plan/Ask are hidden rather than shown and behaving like Agent.
 
 The generated `CollaborationMode` / `ModeKind` types exist, but this pinned CLI
@@ -673,8 +679,12 @@ capability flag.
 - **Approvals.** Inbound `requestApproval` server requests are held open and
   surfaced as a pending decision; the turn stays blocked until the user chooses
   **Allow once**, **Allow for this conversation**, **Always allow**, or
-  **Reject**. Nothing is auto-decided on a timeout, retry, or reconnect, and a
-  rejection is reported back to the agent so it can adapt. `always` rules go to
+  **Reject**. Nothing is auto-decided on a timeout, retry, or reconnect. A
+  denied notice shows the backend's reason (for a safety block, the risk and
+  bounded command); the agent is told only that the request was denied. Common
+  password/token flags are redacted from that reason. Codex still auto-approves
+  some in-sandbox commands, so not every default command raises a request.
+  `always` rules go to
   `globalState`, `session` rules to `workspaceState` scoped to the thread (and
   cleared when the thread ends), and stored `always` rules are listed and
   revocable in the sidebar.
@@ -693,8 +703,8 @@ that version's `opencode run --help` lists. Notes:
 - The bundled 1.19.x CLI exposes `--auto`, but the sidebar never passes it: the
   turn's permission level is expressed entirely through the generated
   `permission` config, and an `ask` is answered through the sidebar's approval
-  card. That is why `default` never silently writes, runs a command, or fetches
-  the web.
+  card. That is why `default` never silently runs a command or fetches the web;
+  workspace edits are ordinary work and still go through Keep/Reject.
 - A stream that ends without a terminal `step_finish` (`reason: "stop"`) is a
   stream error, not a successful turn.
 - The credential is supplied through the provider's `env` declaration and the

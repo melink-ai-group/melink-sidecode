@@ -20,14 +20,14 @@ import type { AbsolutePathBuf } from '../../schemas/AbsolutePathBuf';
  * | Level          | sandbox             | approvalPolicy |
  * |----------------|---------------------|----------------|
  * | `read-only`    | `read-only`         | `on-request`   |
- * | `default`      | `workspace-write`   | granular auto-allow |
+ * | `default`      | `workspace-write`   | granular, sandbox asks |
  * | `unrestricted` | `danger-full-access`| `never`        |
  *
- * `default` auto-allows ordinary sandboxed work, keeps network access blocked,
- * and still asks before leaving the sandbox. `on-request` stays on `read-only`.
- * The deprecated `untrusted` policy is not used. `never` is intentional only
- * for `unrestricted`, which is gated behind the labelled confirmation in the
- * UI.
+ * `default` keeps the workspace sandbox but lets sandboxed commands raise an
+ * approval request, so the host's destructive-command classifier and the card
+ * can see them. `on-request` stays on `read-only`. The deprecated `untrusted`
+ * policy is not used. `never` is intentional only for `unrestricted`, which is
+ * gated behind the labelled confirmation in the UI.
  */
 export interface CodexPermissionMapping {
   sandbox: SandboxMode;
@@ -35,14 +35,14 @@ export interface CodexPermissionMapping {
 }
 
 /**
- * Default approval: ordinary sandboxed work runs without a prompt. Leaving the
- * sandbox, using a skill, or an MCP elicitation still asks. `sandbox_approval`
- * and `rules` are the "ask for this class" flags, so both are off for normal
- * workspace behaviour.
+ * Default approval: commands in the workspace sandbox may ask, because that is
+ * the only route by which the host can inspect them before they run. Leaving
+ * the sandbox, using a skill, or an MCP elicitation still asks. `rules` stays
+ * off: stored rules are evaluated only after the safety check.
  */
 const CODEX_DEFAULT_APPROVAL: CodexPermissionMapping['approvalPolicy'] = {
   granular: {
-    sandbox_approval: false,
+    sandbox_approval: true,
     rules: false,
     skill_approval: true,
     request_permissions: true,

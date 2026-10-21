@@ -76,7 +76,12 @@ test('every trust-scoped key is application-scoped in the manifest', async () =>
 test('no other contributed setting is application-scoped by accident', async () => {
   // Deliberately application-scoped, but not part of the trust boundary: the
   // review toggle must be chosen by the user, never by a workspace.
-  const otherApplicationScoped = ['melink.review.diffReview'];
+  const otherApplicationScoped = [
+    'melink.review.diffReview',
+    // The destructive-command safety policy is a user decision, not a workspace one.
+    'melink.safety.destructiveCommands',
+    'melink.safety.destructivePatterns'
+  ];
   const pkg = await manifest();
   const properties = pkg.contributes?.configuration?.properties ?? {};
   const applicationScoped = Object.entries(properties)
