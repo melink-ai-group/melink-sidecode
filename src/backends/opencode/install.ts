@@ -4,6 +4,13 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
+import {
+  OPENCODE_MANIFEST,
+  OPENCODE_SHA256,
+  opencodeReleaseUrl,
+  requirePinnedChecksum,
+  verifyArchiveSha256
+} from '../cliManifest.ts';
 
 /**
  * Download the official opencode CLI and install it for the settings screen.
@@ -42,12 +49,16 @@ export interface InstallOpencodeOptions {
    * a fixture install cannot change the machine running the suite.
    */
   persistPath?: boolean;
+  /**
+   * @internal Test-only override for the pinned asset digests. Defaults to
+   * OPENCODE_SHA256; product callers never pass it.
+   */
+  checksums?: Readonly<Record<string, string>>;
 }
 
 /** Hard cap so a bad response cannot fill memory. The release archives are smaller. */
 const MAX_ARCHIVE_BYTES = 120 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 180_000;
-const RELEASE_BASE = 'https://github.com/anomalyco/opencode/releases/latest/download/';
 
 /** Asset file name for one platform, matching the official install script. */
 export function opencodeReleaseFilename(platform: OpencodeInstallPlatform): string {
@@ -88,7 +99,11 @@ export async function installOpencodeRelease(
     const platform = options.platform ?? (await detectOpencodePlatform());
     const installDir = options.installDir ?? join(homedir(), '.opencode', 'bin');
     const filename = opencodeReleaseFilename(platform);
-    const archive = await downloadRelease(filename, options.fetchImpl ?? fetch);
+    const manifest = { ...OPENCODE_MANIFEST, checksums: options.checksums ?? OPENCODE_SHA256 };
+    // Fail before the network for a platform the pinned release does not ship.
+    requirePinnedChecksum(filename, manifest);
+    const archive = await downloadRelease(opencodeReleaseUrl(filename), options.fetchImpl ?? fetch);
+    verifyArchiveSha256(filename, archive, manifest);
     const binary = extractOpencodeBinary(archive);
     const executableName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
     const executablePath = join(installDir, executableName);
@@ -133,10 +148,10 @@ async function detectOpencodePlatform(): Promise<OpencodeInstallPlatform> {
   return { os, arch, baseline, musl };
 }
 
-async function downloadRelease(filename: string, fetchImpl: typeof fetch): Promise<Buffer> {
+async function downloadRelease(url: string, fetchImpl: typeof fetch): Promise<Buffer> {
   let response: Response;
   try {
-    response = await fetchImpl(`${RELEASE_BASE}${filename}`, {
+    response = await fetchImpl(url, {
       redirect: 'follow',
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
       headers: {

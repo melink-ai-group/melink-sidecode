@@ -3,6 +3,13 @@ import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
 import { astGrepExecutableName } from './resolve.ts';
+import {
+  AST_GREP_MANIFEST,
+  AST_GREP_SHA256,
+  astGrepReleaseUrl,
+  requirePinnedChecksum,
+  verifyArchiveSha256
+} from '../cliManifest.ts';
 
 /**
  * Download the official ast-grep CLI release into an install directory.
@@ -25,11 +32,15 @@ export interface InstallAstGrepOptions {
   platform?: AstGrepInstallPlatform;
   installDir: string;
   fetchImpl?: typeof fetch;
+  /**
+   * @internal Test-only override for the pinned asset digests. Defaults to
+   * AST_GREP_SHA256; product callers never pass it.
+   */
+  checksums?: Readonly<Record<string, string>>;
 }
 
 const MAX_ARCHIVE_BYTES = 80 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 180_000;
-const RELEASE_BASE = 'https://github.com/ast-grep/ast-grep/releases/latest/download/';
 
 /** Release zip name for one platform. */
 export function astGrepReleaseFilename(platform: AstGrepInstallPlatform): string {
@@ -61,7 +72,11 @@ export async function installAstGrepRelease(
   try {
     const platform = options.platform ?? detectAstGrepPlatform();
     const filename = astGrepReleaseFilename(platform);
-    const archive = await downloadRelease(filename, options.fetchImpl ?? fetch);
+    const manifest = { ...AST_GREP_MANIFEST, checksums: options.checksums ?? AST_GREP_SHA256 };
+    // Fail before the network for a platform the pinned release does not ship.
+    requirePinnedChecksum(filename, manifest);
+    const archive = await downloadRelease(astGrepReleaseUrl(filename), options.fetchImpl ?? fetch);
+    verifyArchiveSha256(filename, archive, manifest);
     const binary = extractAstGrepBinary(archive);
     const executableName = astGrepExecutableName();
     const executablePath = join(options.installDir, executableName);
@@ -104,10 +119,10 @@ function detectAstGrepPlatform(): AstGrepInstallPlatform {
   return { os, arch };
 }
 
-async function downloadRelease(filename: string, fetchImpl: typeof fetch): Promise<Buffer> {
+async function downloadRelease(url: string, fetchImpl: typeof fetch): Promise<Buffer> {
   let response: Response;
   try {
-    response = await fetchImpl(`${RELEASE_BASE}${filename}`, {
+    response = await fetchImpl(url, {
       redirect: 'follow',
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
       headers: {
@@ -178,10 +193,18 @@ function binaryRank(name: string): number {
   if (!base) {
     return 0;
   }
-  if (base === 'ast-grep.exe' || base === 'sg.exe') {
+  // Release zips list the deprecated `sg` wrapper before the real `ast-grep`
+  // binary. Rank the CLI above the wrapper so both are never tied.
+  if (base === 'ast-grep.exe') {
+    return 4;
+  }
+  if (base === 'ast-grep') {
+    return 3;
+  }
+  if (base === 'sg.exe') {
     return 2;
   }
-  if (base === 'ast-grep' || base === 'sg') {
+  if (base === 'sg') {
     return 1;
   }
   return 0;
