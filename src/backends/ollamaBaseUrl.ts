@@ -1,5 +1,6 @@
 import { trustedSetting, type InspectedSetting } from '../config/trust.ts';
 import { BackendError } from './types.ts';
+import { PROVIDER_PROBE_TIMEOUT_MS, isProbeTimeoutError, probeSignal, withProbeTimeout } from './probeTimeout.ts';
 
 /**
  * Where the Ollama Cloud bearer token is sent, and how the request URL is
@@ -157,6 +158,28 @@ export async function ollamaProbe(options: OllamaRequestOptions): Promise<Respon
  * (the transport seam). The adapter passes the inspected settings and the
  * token; the client resolves the base URL and issues the request.
  */
+
+/**
+ * Put one client request on the provider-probe deadline. A transport that
+ * ignores the signal still cannot hang a probe: the race rejects on the
+ * deadline, and a timeout is reported as unavailable without the token.
+ */
+async function withProbeDeadline(
+  run: Promise<Response>,
+  deadline: { timeoutMs?: number; probeSignal?: AbortSignal }
+): Promise<Response> {
+  const timeoutMs = deadline.timeoutMs ?? PROVIDER_PROBE_TIMEOUT_MS;
+  const signal = deadline.probeSignal ?? probeSignal(timeoutMs);
+  try {
+    return await withProbeTimeout('Ollama Cloud', timeoutMs, signal, run);
+  } catch (error) {
+    if (isProbeTimeoutError(error)) {
+      throw new BackendError('unavailable', (error as Error).message, error);
+    }
+    throw error;
+  }
+}
+
 export class OllamaClient {
   private readonly inspectedBaseUrl: InspectedSetting<string> | undefined;
   private readonly transport: OllamaTransport;
@@ -178,14 +201,20 @@ export class OllamaClient {
   }
 
   /** One authenticated request to the configured host. */
-  async request(path: string, token: string, init?: RequestInit): Promise<Response> {
-    return ollamaRequest({
+  async request(
+    path: string,
+    token: string,
+    init?: RequestInit,
+    deadline?: { timeoutMs?: number; probeSignal?: AbortSignal }
+  ): Promise<Response> {
+    const run = ollamaRequest({
       baseUrl: this.baseUrl,
       path,
       token,
       transport: this.transport,
       ...(init ? { init } : {})
     });
+    return deadline ? withProbeDeadline(run, deadline) : run;
   }
 
   /**
@@ -194,13 +223,19 @@ export class OllamaClient {
    * The settings screen's "Test connection" needs the raw status to tell a
    * rejected key from a host-side failure.
    */
-  async probe(path: string, token: string, init?: RequestInit): Promise<Response> {
-    return ollamaProbe({
+  async probe(
+    path: string,
+    token: string,
+    init?: RequestInit,
+    deadline?: { timeoutMs?: number; probeSignal?: AbortSignal }
+  ): Promise<Response> {
+    const run = ollamaProbe({
       baseUrl: this.baseUrl,
       path,
       token,
       transport: this.transport,
       ...(init ? { init } : {})
     });
+    return deadline ? withProbeDeadline(run, deadline) : run;
   }
 }
