@@ -28,6 +28,7 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | Key | Type / default | On the screen | Consumer |
 |---|---|---|---|
 | `melink.ollama.baseUrl` | string, `https://ollama.com` | **Present** — Providers → Ollama Cloud → Base URL | `OllamaClient.baseUrl` → the request URL; the token is sent only to this host |
+| `melink.ollamaLocal.baseUrl` | string, `http://localhost:11434` | **Present** — Providers → Ollama Local → Base URL | `OllamaClient.baseUrl` (Local profile) → the request and `/v1` URL; no credential is sent |
 | `melink.ollama.opencode.path` | string, `opencode` | **Present** — CLI → opencode CLI path | `resolveOpencodeExecutable` → the spawned command |
 | `melink.ollama.opencode.cliSource` | enum, `local` | **Present** — CLI → Source | `resolveOpencodeExecutable` → the spawned command |
 | `melink.codex.path` | string, `codex` | **Present** — Providers → Codex → Codex CLI path | `readTrustedCodexExecutable` → the spawned app-server command |
@@ -43,6 +44,7 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | Key | Type / default | On the screen | Consumer |
 |---|---|---|---|
 | `melink.ollama.defaultModel` | string, *(empty)* | **Present** — Providers → Ollama Cloud → Default model | `OllamaBackend.defaultModel`, used when no model is selected |
+| `melink.ollamaLocal.defaultModel` | string, *(empty)* | **Present** — Providers → Ollama Local → Default model | `OllamaBackend.defaultModel` (Local); empty resolves to the first `/api/tags` model |
 | `melink.codex.defaultModel` | string, *(empty)* | **Present** — Providers → Codex → Default model | `CodexBackend.defaultModel`, used when no model is selected |
 | `melink.defaults.mode` | enum, `agent` | **Present** — Defaults → Default mode | `readDefaultMode()` → `CodexBackend.startThread` applies `developerInstructions`; `agent` adds none |
 | `melink.safety.destructiveCommands` | enum, `ask` (`off` / `ask` / `block`), application scope | **Not on the screen** — user `settings.json` only, so a workspace cannot turn the check off | `readSafeModeSettings()` → `safeModeDecision()` in `CodexBackend.handleServerRequest`, `OllamaBackend.decideOpencodePermission`, `OpencodeBackend.decideOpencodePermission`, before any stored-rule match |
@@ -55,9 +57,8 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | `melink.context.includeChangedFiles` | boolean, `true` | **Present** — Context → Included by default | `contextSettings()` → `ProjectContext.getDelta`; off omits the changed-files notice |
 | `melink.context.maxBytes` | number, `20480` | **Present** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
 | `melink.context.exclude` | array, *(empty)* | **Present** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
-| `melink.review.diffReview` | boolean, `false`, application scope | **Not on the screen** - opt in through Settings JSON only | `SidebarViewProvider.diffReviewEnabled()` -> `reviewFinishedTurn()` on live turn finish; off means no input is built, no runner is called, and nothing is stored |
+| `melink.review.diffReview` | boolean, `false`, application scope | **Legacy fallback** - surfaced in Orchestration -> Reviewing; read only while `melink.orchestration.reviewing` is unset | `SidebarViewProvider.diffReviewEnabled()` -> `reviewFinishedTurn()` on live turn finish; off means no input is built, no runner is called, and nothing is stored |
 | `melink.opencode.defaultModel` | string, *(empty)* | **Present** - Providers -> OpenCode Zen -> Default model | `buildZenOpencodeConfig` model default; empty uses the first catalog model |
-| `melink.ollama.opencode.enabled` | boolean, `true` | **Present** - CLI -> opencode runtime | `OllamaBackend.opencodeEnabled`; off uses the direct adapter |
 | `melink.ollama.opencode.zvecGrep` | boolean, `false` | **Not on the screen** - legacy | read only when `melink.skills.zvecGrep` is unset |
 | `melink.defaults.dictationModel` | string, *(empty)* | **Present** - Defaults -> Dictation model | dictation cleanup model (`provider / model`); empty disables the microphone |
 | `melink.skills.browserCodex` | boolean, `true` | **Present** - Skills -> Browser -> Codex | Codex browser skill |
@@ -68,7 +69,12 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | `melink.context.repoMapMaxBytes` | number, `131072` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBytes`; stops the build deterministically |
 | `melink.context.repoMapBuildMs` | number, `750` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBuildMs`; per-read timeout also bounds a never-resolving read |
 | `melink.context.repoMapMaxChars` | number, `1200` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxChars`; bounds the rendered per-turn block |
-| `melink.review.checks.enabled` | boolean, `true` | **Pending UI pass** - read directly by `CheckHost`; the review panel will show the state | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
+| `melink.review.checks.enabled` | boolean, `true` | **Legacy fallback** - surfaced in Orchestration -> Testing; read only while `melink.orchestration.testing` is unset | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
+| `melink.orchestration.testing` | boolean, `true` | **Present** - Orchestration -> Testing; falls back to `melink.review.checks.enabled` | `resolveOrchestrationSettings()` -> per-turn plan gate |
+| `melink.orchestration.reviewing` | boolean, `false` | **Present** - Orchestration -> Reviewing; falls back to `melink.review.diffReview` | `resolveOrchestrationSettings()` -> diff-review gate |
+| `melink.orchestration.doubleCheck` | boolean, `true` | **Present** - Orchestration -> Double-check | `resolveOrchestrationSettings()` -> diagnostics sweep gate |
+| `melink.orchestration.quickTask` | boolean, `true` | **Present** - Orchestration -> Quick tasks | `resolveOrchestrationSettings()` -> quick-task gate |
+| `melink.orchestration.planning` | boolean, `true` | **Present** - Orchestration -> Plan autopilot | `resolveOrchestrationSettings()` -> plan-autopilot gate |
 | `melink.review.checks.commands` | array, *(empty)* | **Pending UI pass** - read directly by `CheckHost` | `readCheckSettingsFrom()` -> `detectDefaultChecks` when unset, explicit `[]` means run nothing |
 | `melink.review.checks.timeoutSeconds` | number, `120` | **Pending UI pass** - read directly by `CheckHost` | `clampCheckTimeoutSeconds()` -> `runChecks` per-check timeout, 5-600 |
 
@@ -99,7 +105,7 @@ repository cannot redirect the credential to a host the user never configured.
 
 `package.json` declares `capabilities.untrustedWorkspaces.supported =
 "limited"`, the description names every restricted key, and
-`restrictedConfigurations` lists the same nine keys. The manifest scope and the
+`restrictedConfigurations` lists the same ten keys. The manifest scope and the
 code's read rule are kept in step by a contract test
 (`src/config/packageContract.test.ts`): the application-scoped set in the
 manifest and `TRUST_SCOPED_KEYS` in `src/config/trust.ts` must be the same
@@ -115,7 +121,7 @@ promises.
 A **Save to workspace** action writes a trust-sensitive key to the user's own
 settings instead, and the field carries a short notice saying so. The value is
 persisted — it is not silently dropped — but it lands in the scope that is
-actually read. All nine trust-sensitive fields show that notice; the list
+actually read. All ten trust-sensitive fields show that notice; the list
 lives in `src/config/fieldNotices.ts` and is asserted against the screen's
 source by `src/config/fieldNotices.test.ts`.
 

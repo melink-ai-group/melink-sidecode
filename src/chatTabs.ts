@@ -30,6 +30,11 @@ export interface DraftAttachment {
 }
 
 export interface ChatTabState extends StoredComposer {
+  /**
+   * Stable tab id, so a queue persisted against this chat can find it again
+   * after a reload. Older saved records omit it and get a fresh id.
+   */
+  tabId?: string;
   backendId?: string;
   threadId?: string;
   blank: boolean;
@@ -109,11 +114,13 @@ export function parseChatTabState(state: unknown): ChatTabState {
   const threadId = typeof record.threadId === 'string' && record.threadId ? record.threadId : undefined;
   const backendId = typeof record.backendId === 'string' && record.backendId ? record.backendId : undefined;
   const title = typeof record.title === 'string' && record.title.trim() ? record.title : undefined;
+  const tabId = typeof record.tabId === 'string' && record.tabId ? record.tabId : undefined;
   const draftText = parseDraftText(record.draftText);
   const draftAttachments = parseDraftAttachments(record.draftAttachments);
   const composer = parseStoredComposer(record);
   return {
     blank: !(threadId && backendId),
+    ...(tabId ? { tabId } : {}),
     ...(backendId ? { backendId } : {}),
     ...(threadId ? { threadId } : {}),
     ...(title ? { title } : {}),

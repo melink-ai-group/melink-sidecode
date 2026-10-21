@@ -58,9 +58,10 @@ arm64 and Linux arm64 are not published.
 
 ## Providers
 
-The sidebar can talk to three providers, independently:
+The sidebar can talk to four providers, independently:
 
 - **Ollama Cloud** — hosted models, needs a token.
+- **Ollama Local** — a local Ollama server; no key, but it must expose `/v1`.
 - **OpenAI Codex CLI** — the local `codex` CLI, needs the CLI installed and signed in.
 - **OpenCode Zen** — the shared `opencode` CLI; free models need no key, and paid
   models need a Zen API key.
@@ -72,7 +73,7 @@ There are four possible states per provider:
 | **available** | Usable now; its models appear in the picker. OpenCode Zen is available with free models even when no key is stored. |
 | **unauthenticated** | Runs, but has no usable credential. Ollama Cloud shows a **Set token** action; Codex jumps to settings. A missing OpenCode Zen key does not make Zen unauthenticated: it only blocks paid models per turn, while free models stay selectable. |
 | **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0–0.163.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
-| **unavailable** | Cannot run at all (e.g. the Codex CLI is not installed). Hidden entirely — never rendered as broken. |
+| **unavailable** | Cannot run at all (e.g. the Codex CLI is not installed, or a local Ollama server is stopped or has no `/v1`). Hidden entirely — never rendered as broken. The provider page shows the actionable reason. |
 
 **Providers are isolated.** If one provider is missing, unauthenticated, or
 incompatible, it cannot block the other and produces no error noise in the
@@ -80,32 +81,33 @@ transcript. When at least one provider is available, only available providers ar
 listed in the picker; the others are surfaced only when they are the whole story,
 so the picker is never empty.
 
-### opencode agentic runtime
+### Shared OpenCode runtime
 
-Ollama Cloud runs through [opencode](https://opencode.ai) by default, so those
-models can read the project, edit files, and run commands. Turning
-**`melink.ollama.opencode.enabled`** off uses the direct streaming adapter
-instead: it answers in the transcript but cannot edit files, run commands, or
-keep a tool-driven session. **Settings → CLI** chooses a CLI source: **Local machine**
+Every Ollama Cloud, Ollama Local, and OpenCode Zen turn runs through
+[opencode](https://opencode.ai), so those models can read the project, edit
+files, and run commands. There is no direct turn adapter and no toggle: the
+direct `/api/chat` API remains only for context compaction and dictation
+cleanup. **Settings → CLI** chooses a CLI source: **Local machine**
 (path / PATH) or **Bundled** (extension global storage; survives closing VS Code).
 When the CLI is not detected, **Install opencode** downloads the current GitHub
 release into that source's install directory. When opencode is already connected,
 **Update opencode** re-downloads the same way (it does not run `opencode upgrade`,
 which can leave a custom install on an old version).
 
-- **Identity is unchanged.** There is still one **Ollama Cloud** provider with
-  the same badge and dot; opencode is a runtime behind it, not a fourth
-  provider. (OpenCode Zen is its own provider and uses the same shared CLI.)
+- **Two Ollama providers, one runtime.** Ollama Cloud and Ollama Local keep
+  separate identities, settings and dots; both use the same OpenCode binary.
 - **Models are the same list.** The runtime is pointed at exactly the models
-  `GET /api/tags` returns, against the configured `melink.ollama.baseUrl`.
+  `GET /api/tags` returns, against the configured base URL
+  (`melink.ollama.baseUrl` or `melink.ollamaLocal.baseUrl`). A local turn sends
+  no Authorization header; the generated config uses a fixed `local-no-key`
+  placeholder in the child environment.
 - **Streaming is the same experience.** Events are parsed as they arrive into
   the same transcript. (The installed opencode version emits whole message parts
   rather than token deltas, so a part appears when it completes.)
 - **Sessions resume.** A second message in the same conversation continues the
   same opencode session. If that session is gone, a fresh one starts and a
   notice says so.
-- **Modes and permissions.** With the runtime on, all three modes and all three
-  permission levels become available. Each turn defines a freshly named,
+- **Modes and permissions.** Both Ollama providers and OpenCode Zen expose all three modes and all three permission levels. Each turn defines a freshly named,
   generated opencode agent with `disable: false`, the `task` tool off, and the
   selected permission as an agent property. A workspace `opencode.json` is still
   loaded for its MCP servers, skills, and other project settings, but the inline
@@ -124,27 +126,38 @@ which can leave a custom install on an old version).
   the sidebar pauses on its approval card until you decide; a rejection is
   reported back to the agent instead of being silently auto-allowed. If no
   decision arrives within 120 seconds the request is refused (`APPROVAL_WAIT_MS`).
-- **Turn it off to fall back.** With the setting off, the direct `/api/chat`
-  adapter is used unchanged and no opencode process is started.
+- **No fallback.** Every LLM turn uses this runtime; nothing silently switches
+  back to a direct adapter.
 
 If the `opencode` CLI is not installed (or `melink.ollama.opencode.path` does
 not resolve), the turn reports a distinct, actionable notice — the missing CLI,
 a spawn failure, a rejected generated config, and a rejected token each read
-differently — and never blocks the direct path.
+differently.
 
-You can set all of this from **SideCode: Open settings** without editing JSON: the
-Ollama region carries a **Use opencode as the agentic runtime** switch (off by
-default) and, while it is on, an **opencode CLI path** field. The status line
-shows one of three distinct states — detected (with the CLI version), missing or
-not runnable, and off — and an invalid path is refused inline without
-overwriting a previously stored valid one. While the runtime is on, the
-**Skills** tab configures **ast-grep** (structural search/rewrite) and
-**zvec-grep** (semantic + keyword search). Each skill has a local or bundled
-CLI source (bundled lives under extension global storage, like opencode).
-Turning a skill on installs the CLI when needed, writes an absolute-path MCP
-entry into your user OpenCode config, and injects that server into SideCode
-turns. Turning it off removes the MCP entry and leaves the CLI installed.
+You can set all of this from **SideCode: Open settings** without editing JSON:
+the CLI tab carries the **opencode CLI source** and path fields. The status line
+shows one of three distinct states — detected (with the CLI version), missing, or
+not runnable — and an invalid path is refused inline without overwriting a
+previously stored valid one. The **Skills** tab configures **ast-grep**
+(structural search/rewrite) and **zvec-grep** (semantic + keyword search). Each
+skill has a local or bundled CLI source (bundled lives under extension global
+storage, like opencode). Turning a skill on installs the CLI when needed, writes
+an absolute-path MCP entry into your user OpenCode config, and injects that
+server into SideCode turns. Turning it off removes the MCP entry and leaves the
+CLI installed.
 
+
+### Ollama Local
+
+**Settings → Providers → Ollama Local** points SideCode at a local server.
+The default base URL is `http://localhost:11434`. Start Ollama with
+`ollama serve`, pull at least one model, then press **Test connection**. The
+status chip reads **Running** only when both the native `/api/tags` API and the
+OpenAI-compatible `/v1/models` endpoint answer; otherwise it reads **Not
+reachable** with the actionable reason (server stopped, timeout, an endpoint
+that rejects keys, a non-Ollama response, or an Ollama build without `/v1`).
+No API key is stored or sent. The default model is the first model the local
+server reports when `melink.ollamaLocal.defaultModel` is empty.
 
 ## Choosing a model
 
@@ -152,10 +165,10 @@ Click the **Model** trigger in the title bar. This opens a floating panel over
 the chat with a bounded height and its own scrolling list. It contains:
 
 - **One group per available provider**, each with its own provider badge and dot.
-- **A live model list** fetched from that provider. For Ollama Cloud this is
-  exactly `GET /api/tags` — no hardcoded fallback. Codex lists the models the
-  local CLI reports. OpenCode Zen lists the live Zen catalog (free and, when a
-  key is stored, paid models).
+- **A live model list** fetched from that provider. For Ollama Cloud and
+  Ollama Local this is exactly `GET /api/tags` -- no hardcoded fallback. Codex
+  lists the models the local CLI reports. OpenCode Zen lists the live Zen
+  catalog (free and, when a key is stored, paid models).
 - **A filter box** to narrow long lists by name.
 - **Per-provider entries** for a provider that is not signed in, with a **Set
   token** button.
@@ -173,9 +186,25 @@ instead of spinning forever.
 - **Shift+Enter** inserts a newline.
 - The composer is disabled while restoring a conversation or when no backend is
   available (the placeholder reads *"No backend available"*).
-- While a reply streams, **Send** is replaced by **Stop**, which cancels the
-  in-flight turn. A canceled turn keeps whatever was already generated and is
-  marked *Stopped*, not as an error.
+- While a reply streams, **Stop** cancels the in-flight turn. A canceled turn
+  keeps whatever was already generated and is marked *Stopped*, not as an error.
+- You can still write and attach files while a turn runs. Press **Enter** or the
+  **Send** action and the busy composer shows **Queue message**: the message is
+  sent when the current turn finishes. A text-only message on a provider that
+  can steer is sent into the running turn instead.
+- The composer keeps the queued text and attachments until the host confirms
+  them, then shows **N queued** above the input with a short preview and any
+  file names. Remove one with its **Remove** button, or press **Stop** to
+  discard the queue with the turn.
+- Queued turns run in order, apply the mode, permission level and model they
+  were queued with, and start automatically after the current turn;
+  orchestration still applies. The provider, model and permission controls are
+  locked until the turn and queue finish.
+- The queue is stored in workspace state, so reloading the window or restarting
+  the extension restores accepted messages; a restored chat sends them when it
+  is shown idle. If another window on the same workspace owns the queue, this
+  window leaves it alone until that window closes. Removing a message or
+  pressing **Stop** deletes it from the stored queue.
 
 An empty chat shows the SideCode logo and the name **SideCode**. The composer
 opens tall so the first message has room to be written.
@@ -270,8 +299,9 @@ settings (**SideCode: Open settings**).
 |---|---|---|
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. The token is sent only to this host. |
 | `melink.ollama.defaultModel` | *(empty)* | Default Ollama model; empty uses the first model reported. |
+| `melink.ollamaLocal.baseUrl` | `http://localhost:11434` | Local Ollama server address. Application scope: a workspace cannot redirect local prompts. |
+| `melink.ollamaLocal.defaultModel` | *(empty)* | Default local model; empty uses the first model the local server reports. |
 | `melink.opencode.defaultModel` | *(empty)* | Default OpenCode Zen model; empty uses the first model in the catalog the app can show (free list without a key, full list with one). |
-| `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the opencode agentic runtime (tool execution, file edits, session resume). Off uses the direct `/api/chat` adapter and spawns no opencode process. |
 | `melink.ollama.opencode.cliSource` | `local` | Shared opencode CLI source: `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`; a bare name is resolved from `PATH`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy zvec-grep switch, read only when `melink.skills.zvecGrep` is unset. Prefer the skills key. |
@@ -293,6 +323,11 @@ settings (**SideCode: Open settings**).
 | `melink.review.checks.enabled` | `true` | Run post-turn checks after a turn that changed files. Off skips them entirely; an untrusted workspace is always skipped. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands to run. Empty means auto-detect `typecheck` (falling back to `lint`) and `test` from `package.json`; an explicitly saved empty list turns checks off. |
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5–600. A timed-out check is killed and reported as timed out. |
+| `melink.orchestration.testing` | `true` | Post-turn typecheck/lint and tests. Falls back to `melink.review.checks.enabled` when unset. |
+| `melink.orchestration.reviewing` | `false` | Advisory read-only diff review. Falls back to `melink.review.diffReview` when unset. |
+| `melink.orchestration.doubleCheck` | `true` | Sweep changed files for VS Code errors after a turn. |
+| `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for short single-question Agent turns. |
+| `melink.orchestration.planning` | `true` | Continue a built plan after a clean Agent turn. |
 | `melink.context.repoMap` | `false` (off) | Include a bounded per-turn symbol/import map built from the files the snapshot already accepted. Off sends only an explicit disabled marker. |
 | `melink.context.repoMapMaxFiles` | `200` | Maximum source files the repository map may read in one build. |
 | `melink.context.repoMapMaxBytes` | `131072` | Maximum bytes the repository map may read in one build. |
@@ -308,19 +343,21 @@ settings (**SideCode: Open settings**).
 | `melink.skills.astGrep.cliSource` | `local` | `local` or `bundled` (extension global storage). |
 | `melink.skills.astGrep.path` | `ast-grep` | Path to `ast-grep` when `cliSource` is local. |
 
-The `melink.review.checks.*` values are read directly by the post-turn check host.
-The inline settings screen does not yet expose controls for them. The review
-panel's collapsed header shows the run summary and expanding it lists one row per
-check with its status word, duration, and any bounded failure detail or skipped
-reason.
+The `melink.review.checks.*` values are read directly by the post-turn check host
+for the explicit command list and timeout. Whether the pass runs at all is the
+**Orchestration -> Testing** toggle (`melink.orchestration.testing`), which falls
+back to `melink.review.checks.enabled` until you save it. The review panel's
+collapsed header shows the run summary and expanding it lists one row per check
+with its status word, duration, and any bounded failure detail or skipped reason.
 
 The same settings are reachable from the in-product **settings screen**
 (gear icon in the title bar), which opens inline in the sidebar rather than as a
-separate window. It groups **Providers** (Ollama Cloud and OpenCode Zen base /
-key fields, Codex CLI path and login state) above **Defaults** (default models,
-dictation, permission level, mode), with **CLI**, **Context**, and **Skills**
-tabs, and offers **Test connection** per provider. A value that fails validation
-shows an inline message and is not saved.
+separate window. It groups **Providers** (Ollama Cloud, Ollama Local, and
+OpenCode Zen fields plus the Codex CLI path and login state) above **Defaults**
+(default models, dictation, permission level, mode), with **CLI**,
+**Orchestration**, **Context**, and **Skills** tabs, and offers **Test
+connection** per provider. A value that fails validation shows an inline message
+and is not saved.
 
 ### Which settings a workspace may set
 
@@ -333,6 +370,7 @@ that would make opening a folder a security problem, so those settings are
 | Setting | Why it is user-scope only |
 |---|---|
 | `melink.ollama.baseUrl` | The Ollama Cloud bearer token is sent to this host. A workspace must not be able to redirect it. |
+| `melink.ollamaLocal.baseUrl` | The destination of local prompts. A workspace must not redirect them. |
 | `melink.ollama.opencode.path`, `melink.ollama.opencode.cliSource` | The binary a turn spawns. The child runs with the workspace as its working directory. |
 | `melink.codex.path` | The Codex CLI binary a turn spawns. |
 | `melink.skills.zvecGrep.path`, `melink.skills.zvecGrep.cliSource` | The `zg` binary the search skill spawns. |
@@ -341,7 +379,7 @@ that would make opening a folder a security problem, so those settings are
 
 A workspace value for one of these is ignored even if it was written before
 this restriction, and the **Save to workspace** action writes these to your
-user settings instead, with a short note on the field. Every one of the nine
+user settings instead, with a short note on the field. Every one of the ten
 fields shows that note. Every other SideCode setting (model names, context
 toggles, skill flags) keeps its normal workspace-scope behaviour.
 
@@ -365,7 +403,7 @@ probe either.
 
 The extension also declares `capabilities.untrustedWorkspaces` as `limited`, so
 VS Code can mark a workspace as untrusted and warn before a repository's
-settings reach an extension at all. The same nine keys are listed in
+settings reach an extension at all. The same ten keys are listed in
 `restrictedConfigurations`, so an untrusted workspace does not hand VS Code a
 workspace-defined value for them at all.
 
@@ -382,6 +420,8 @@ floating popover — and groups the settings as **Providers** above **Defaults**
   chip so you can tell whether a key exists without the value ever being shown.
   **Save key** writes a new value, **Clear key** removes it, and both go only to
   VS Code secret storage (see [Credentials](#credentials)).
+- **Ollama Local** — base URL and default model, with **Test connection** and a
+  **Running** / **Not reachable** chip. No API key exists for this provider.
 - **Codex** — the CLI path override and the current login state, one sentence
   each about what they affect.
 - **OpenCode Zen** — the default Zen model, and an optional masked Zen API key
@@ -392,9 +432,9 @@ floating popover — and groups the settings as **Providers** above **Defaults**
   read differently, so a wrong key is distinguishable from a wrong base URL. A
   failure never prints a raw stack trace or the key.
 
-**CLI** — the shared `opencode` binary used by OpenCode Zen and the optional
-Ollama runtime: **local** or **bundled**, the local path, and Install / Update.
-The **Use opencode for Ollama turns** switch is `melink.ollama.opencode.enabled`.
+**CLI** — the shared `opencode` binary used by Ollama Cloud, Ollama Local, and
+OpenCode Zen: **local** or **bundled**, the local path, and Install / Update.
+Every Ollama turn uses it; there is no opt-out switch.
 
 **Defaults** — the default models (Ollama, OpenCode Zen, Codex), the dictation
 model, permission level, and mode for a new conversation. The app-level thinking
@@ -446,11 +486,17 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.review.checks.commands` | *(empty)* | Not yet on the screen - explicit commands; empty means auto-detect |
 | `melink.review.checks.timeoutSeconds` | `120` | Not yet on the screen - per-check timeout, clamped 5-600 |
 | `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
+| `melink.orchestration.testing` | `true` | Orchestration -> Testing |
+| `melink.orchestration.reviewing` | `false` | Orchestration -> Reviewing |
+| `melink.orchestration.doubleCheck` | `true` | Orchestration -> Double-check |
+| `melink.orchestration.quickTask` | `true` | Orchestration -> Quick tasks |
+| `melink.orchestration.planning` | `true` | Orchestration -> Plan autopilot |
 | `melink.telemetry.failureLog` | `false` | Settings JSON only (application scope): opt-in local missed-issue log; nothing is sent over the network |
 | `melink.ollama.baseUrl` | `https://ollama.com` | Providers -> Ollama Cloud -> Base URL |
 | `melink.ollama.defaultModel` | *(empty)* | Defaults -> Default model |
+| `melink.ollamaLocal.baseUrl` | `http://localhost:11434` | Providers -> Ollama Local -> Base URL |
+| `melink.ollamaLocal.defaultModel` | *(empty)* | Providers -> Ollama Local -> Default model |
 | `melink.opencode.defaultModel` | *(empty)* | Defaults -> Default model (OpenCode Zen) |
-| `melink.ollama.opencode.enabled` | `true` | CLI -> opencode runtime |
 | `melink.ollama.opencode.cliSource` | `local` | CLI -> Source |
 | `melink.ollama.opencode.path` | `opencode` | CLI -> opencode CLI path |
 | `melink.ollama.opencode.zvecGrep` | `false` | Settings JSON only (legacy zvec-grep switch) |
@@ -541,16 +587,15 @@ per-turn cost stays flat.
 
 | Provider | Where the snapshot goes | Where a delta goes |
 |---|---|---|
-| **Ollama Cloud (direct)** | A `system`-role message before the first user turn. | A `system`-role message immediately before the new user turn. |
+| **Ollama Cloud / Ollama Local (OpenCode)** | Primed into the turn text; the child is spawned in the workspace root. | Only the delta is primed. |
 | **Codex app-server** | The native `developerInstructions` field on `thread/start` and `thread/resume`. Codex is also started with the workspace root as its `cwd`, so its own file access and `AGENTS.md` discovery work from the right place. | Codex's own file access (the pinned app-server has no per-turn instructions field on `turn/start`). |
-| **opencode runtime** (Ollama, `melink.ollama.opencode.enabled`) | Primed into the turn text. opencode's `run` command exposes no system/instructions flag, so this is a deliberate prompt-priming fallback, not an oversight; the child is still spawned in the workspace root. | Only the delta is primed on later turns. |
+| **opencode runtime** | Primed into the turn text. opencode's `run` command exposes no system/instructions flag, so this is a deliberate prompt-priming fallback, not an oversight; the child is still spawned in the workspace root. | Only the delta is primed on later turns. |
 
 Two rules hold on every path:
 
-- **Context is system/provider input only.** On the direct Ollama path it is a
-  `system` message; it is never folded into a user turn, so the transcript you
-  see is unchanged and the synthetic context can never be persisted as transcript
-  content.
+- **Context is system/provider input only.** It is never folded into a user
+  turn, so the transcript you see is unchanged and the synthetic context can
+  never be persisted as transcript content.
 - **A failure degrades.** A snapshot that cannot be built (or a category over its
   budget) becomes a plain-language notice in place of the block, and the turn is
   never blocked.
@@ -693,12 +738,11 @@ than sandboxing you more loosely; it is never enabled as a side effect of any
 other action. The choice is saved for the next turn and for new conversations.
 
 The picker is shown for every backend that exposes an approval channel: Codex,
-OpenCode Zen, and Ollama Cloud while `melink.ollama.opencode.enabled` is on.
-OpenCode Zen and that runtime enforce all three levels; each uses `opencode
+OpenCode Zen, Ollama Cloud, and Ollama Local (`hasApprovalChannel` is true for
+every Ollama and OpenCode turn). Every Ollama and OpenCode turn
+enforces all three levels; each uses `opencode
 serve` for a turn that can raise an `ask` and `opencode run` only when no `ask`
-exists. The direct `/api/chat` adapter reports only the single `default` level
-and never raises an approval card (`hasApprovalChannel` is `opencodeEnabled`), so
-it has no level picker and nothing to approve.
+exists.
 
 When the agent needs a decision, the turn is **paused** and a card appears above
 the composer. You choose:
@@ -737,11 +781,13 @@ read its inline diff. A turn that changed nothing shows no panel at all.
 
 ### Opt-in diff review
 
-`melink.review.diffReview` is **off by default**. When you enable it, a live
-turn that changed files gets one additional advisory pass before the review
-panel is repainted. It is read-only: it never edits files, runs shell commands,
-asks for approvals, or keeps/rejects changes. **Keep** and **Reject** remain the
-only actions, and they are unchanged.
+The review is controlled by **Orchestration -> Reviewing**
+(`melink.orchestration.reviewing`), which is **off by default**. Until you save
+that key, it falls back to the older `melink.review.diffReview` value. When it is
+on, a live turn that changed files gets one additional advisory pass before the
+review panel is repainted. It is read-only: it never edits files, runs shell
+commands, asks for approvals, or keeps/rejects changes. **Keep** and **Reject**
+remain the only actions, and they are unchanged.
 
 The default first pass is local and deterministic. It reads the request that
 opened the turn and the changed paths, and reports explicit paths the request
@@ -753,9 +799,10 @@ change the advisory contract.
 
 A review is stored per turn and restored on reload; **no reviewer runs again on
 reload**. If the pass throws or misses its 15-second deadline, the section shows
-a visible, non-blocking notice and the change decisions stay available. The
-setting is **application-scoped**, so only your user setting can enable it; a
-workspace setting cannot.
+a visible, non-blocking notice and the change decisions stay available. The new
+orchestration key is window-scoped; the legacy `melink.review.diffReview`
+fallback stays application-scoped, so a workspace cannot turn it on through the
+old key.
 
 The panel owns a decision per file (and, from the row's actions, per hunk); it
 never decides anything for you. A decision is only made when you click:
@@ -808,6 +855,41 @@ decision:
   when its checks are red.
 - **No auto-keep.** A green run does not keep anything; the panel still waits for
   your decision.
+
+### Orchestration
+
+The **Orchestration** tab in the settings screen decides what SideCode does once a
+reply finishes. Changes apply from the **next turn**; the summary at the top of
+the tab spells out the current policy. Every pass is advisory and none of them
+changes the reply, the tools, or the permission level.
+
+- **Testing** (`melink.orchestration.testing`, default on) runs the project's
+  typecheck/lint and tests through the post-turn check runner described above.
+- **Reviewing** (`melink.orchestration.reviewing`, default off) adds the advisory
+  diff review. It falls back to `melink.review.diffReview` until saved.
+- **Double-check** (`melink.orchestration.doubleCheck`, default on) waits 1.5
+  seconds for VS Code to publish diagnostics, then reads only the files the turn
+  changed and posts at most one notice: a clean info line, or a warning with up to
+  three file names and the error count. It never calls a model, never blocks Keep,
+  and a failed diagnostics read is ignored. A background tab's completed turn gets
+  the same sweep; its notice is held and shown when you switch to that tab.
+- **Quick tasks** (`melink.orchestration.quickTask`, default on) skips all of the
+  above for a short single-question turn: Agent mode, a user send, no attachments,
+  no active plan, at most 120 characters and 20 words, one line, no list or
+  multi-step wording, no code-change/action verb, and a question or explanation
+  opening (or a trailing `?`). A quick turn that changed files posts one info
+  notice saying post-turn orchestration was skipped for that turn. The detector
+  never changes the selected mode.
+- **Plan autopilot** (`melink.orchestration.planning`, default on) lets a built
+  plan continue step by step after a clean Agent turn. It is always off outside
+  Agent mode. Turning it off does not stop the turn-end settle: a step the
+  provider left running still returns to pending, so no spinner is left behind.
+
+Quick tasks is disabled while Testing, Reviewing, and Double-check are all off;
+enable at least one pass first. In that state the toggle is off and is saved as
+off, because there is no pass left to skip. A value that came from an older
+review key shows its source in the field help until you save the orchestration
+key.
 
 ### Conflicts
 

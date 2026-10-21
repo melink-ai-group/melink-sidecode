@@ -46,6 +46,7 @@ import type {
   ModelSettingField,
   ModelSettingOverrides,
   PermissionOption,
+  QueuedTurnEntryView,
   SettingsPatch,
   ThinkingLevel
 } from '../protocol';
@@ -69,14 +70,12 @@ import { entryContains } from './transcript/shared';
 import { TranscriptRow } from './transcript/TranscriptRow';
 import { ActivityGroup, NarrationRow } from './transcript/ActivityCards';
 import { AttachmentList, ImageViewer, readClipboardFile, type ViewableImage } from './composer/attachments';
+import { QueuedTurns } from './composer/QueuedTurns';
 import { ModeMenu, ModeTrigger, PermissionPanel, PermissionTrigger } from './composer/Controls';
 import { ModelSettingsPanel } from './composer/ModelSettingsPanel';
 import { ModeSwitchModal, RestoreConfirmation, UnrestrictedConfirmation } from './dialogs/ConfirmDialogs';
-
-/** Codex steers in place. Ollama and its opencode runtime continue the same turn. */
-function acceptsSteer(backendId: string | undefined): boolean {
-  return backendId === 'codex' || backendId === 'ollama';
-}
+import { acceptsSteer } from './steer';
+import { queuedEntryMatches, sameAttachmentIds, sendIntent } from './queue';
 
 /**
  * One live region for every reasoning item in the transcript. It stays mounted
@@ -107,6 +106,8 @@ export function App(): JSX.Element {
   const [state, dispatch] = useReducer(reduce, initialState);
   setPrettyPathRoots(state.workspaceRoots);
   const [draft, setDraft] = useState('');
+  /** True between queueing a message and the host's `queuedTurns` echo. */
+  const [queuePending, setQueuePending] = useState(false);
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [modelFilter, setModelFilter] = useState('');
   const [modePanelOpen, setModePanelOpen] = useState(false);
@@ -163,6 +164,19 @@ export function App(): JSX.Element {
    * pick is ignored, so an old response cannot repopulate cleared chips.
    */
   const attachRequestRef = useRef<string | undefined>(undefined);
+  /**
+   * The text and chips posted as a queued turn. The composer keeps showing them
+   * until the host's `queuedTurns` echo contains this message, so a rejected
+   * queue never loses the draft.
+   */
+  const queueAwaitRef = useRef<{ text: string; attachments: Attachment[] } | undefined>(undefined);
+  const queueTimerRef = useRef<number | undefined>(undefined);
+  const onQueuedTurnsRef = useRef<(entries: QueuedTurnEntryView[]) => void>(() => {});
+  const onUserMessageSentRef = useRef<
+    (message: Extract<HostToWebviewMessage, { type: 'userMessageSent' }>) => void
+  >(() => {});
+  /** The host refused the queue: keep the draft and let the user retry. */
+  const onQueueRejectedRef = useRef<() => void>(() => {});
   /** The mode-switch dialog on screen, so a replacement can decline the one it covers. */
   const modeSwitchRequestRef = useRef<string | undefined>(undefined);
   const attachCounterRef = useRef(0);
@@ -465,7 +479,23 @@ export function App(): JSX.Element {
           dispatch({ type: 'addAttachments', attachments: message.attachments });
           break;
         case 'attachmentError':
+          onQueueRejectedRef.current();
           dispatch({ type: 'attachmentError', message: message.message });
+          break;
+        case 'queuedTurns':
+          onQueuedTurnsRef.current(message.entries);
+          break;
+        case 'userMessageSent':
+          dispatch({
+            type: 'userMessageSent',
+            backendId: message.backendId,
+            threadId: message.threadId,
+            messageId: message.messageId,
+            text: message.text,
+            attachments: message.attachments,
+            sentAt: message.sentAt
+          });
+          onUserMessageSentRef.current(message);
           break;
         case 'dictationCleaned':
         case 'dictationError':
@@ -1174,21 +1204,87 @@ export function App(): JSX.Element {
     };
   }, [state.settingsOpen, state.rulesOpen, fitComposerInput]);
 
-  const send = (): void => {
-    const text = draft.trim();
-    if (
-      (!text && state.attachments.length === 0) ||
-      state.restoring ||
-      pending ||
-      state.pendingQuestion ||
-      state.modeSwitch
-    ) {
+  useEffect(
+    () => () => {
+      if (queueTimerRef.current !== undefined) {
+        window.clearTimeout(queueTimerRef.current);
+      }
+    },
+    []
+  );
+
+  // A busy turn or a queued message pins the provider, model and permission
+  // controls: queued turns snapshot those values when they are enqueued, so
+  // changing them now would dispatch the next turn on a provider this chat no
+  // longer shows. Closing an open panel avoids leaving a stale picker on screen.
+  useEffect(() => {
+    if (!state.busy && state.queuedTurns.length === 0) {
       return;
     }
-    if (state.busy) {
-      if (!text || state.attachments.length > 0 || !acceptsSteer(active?.id)) return;
+    setModePanelOpen(false);
+    setPermissionPanelOpen(false);
+    setModelPanelOpen(false);
+    setModelSettingsOpen(false);
+  }, [state.busy, state.queuedTurns.length]);
+
+  const send = (): void => {
+    const text = draft.trim();
+    const intent = sendIntent({
+      busy: state.busy,
+      backendId: active?.id,
+      backendStatus: active?.status,
+      text,
+      attachmentCount: state.attachments.length,
+      restoring: state.restoring,
+      pendingApproval: Boolean(pending),
+      askingQuestion: Boolean(state.pendingQuestion),
+      modeSwitch: Boolean(state.modeSwitch)
+    });
+    // The queued message stays in the composer until the host echoes it back;
+    // a second Enter in that window must not enqueue the same text twice.
+    if (intent === 'blocked' || (state.busy && queuePending)) {
+      return;
+    }
+    const attachments = state.attachments;
+    const backendId = state.selectedBackendId;
+    const model = state.selectedModel;
+    const permissionLevel = state.permissionLevel;
+    if (intent === 'queue') {
+      queueAwaitRef.current = {
+        text,
+        attachments: attachments.map((attachment) => ({ ...attachment }))
+      };
+      setQueuePending(true);
+      if (queueTimerRef.current !== undefined) {
+        window.clearTimeout(queueTimerRef.current);
+      }
+      queueTimerRef.current = window.setTimeout(() => {
+        // No echo arrived. Release the duplicate-send guard and keep the draft
+        // so the user can retry instead of being stuck with a disabled Send.
+        queueTimerRef.current = undefined;
+        queueAwaitRef.current = undefined;
+        setQueuePending(false);
+        dispatch({
+          type: 'notice',
+          level: 'warning',
+          message:
+            'Queue confirmation timed out. Your message stays in the composer; check the queued list before sending again.'
+        });
+      }, 4000);
+      dispatch({ type: 'dismissAttachmentError' });
+      bridge.post({
+        type: 'sendTurn',
+        text,
+        backendId,
+        model,
+        permissionLevel,
+        attachments,
+        queue: true
+      });
+      return;
+    }
+    if (intent === 'steer') {
       followSentMessage();
-      const attachments = state.attachments;
       setDraft('');
       startTransition(() => {
         dispatch({ type: 'localUserMessage', text, opensTurn: false });
@@ -1199,10 +1295,6 @@ export function App(): JSX.Element {
       return;
     }
     followSentMessage();
-    const attachments = state.attachments;
-    const backendId = state.selectedBackendId;
-    const model = state.selectedModel;
-    const permissionLevel = state.permissionLevel;
     setDraft('');
     setHistoryStale(true);
     startTransition(() => {
@@ -1234,6 +1326,11 @@ export function App(): JSX.Element {
   const removeAttachment = (id: string): void => {
     markComposerEdited();
     dispatch({ type: 'removeAttachment', id });
+  };
+
+  const cancelQueuedTurn = (id: string): void => {
+    dispatch({ type: 'cancelQueuedTurn', id });
+    bridge.post({ type: 'cancelQueuedTurn', id });
   };
 
   // A paste the webview can fully read is turned into a local attachment and the
@@ -1357,24 +1454,26 @@ export function App(): JSX.Element {
   // While an approval is pending the turn is blocked at the backend, so the
   // composer and Send are locked until a decision arrives.
   const asking = Boolean(state.pendingQuestion);
-  const canSteer =
-    state.busy &&
-    acceptsSteer(active?.id) &&
-    active?.status === 'available' &&
-    Boolean(draft.trim()) &&
-    state.attachments.length === 0 &&
-    !state.restoring &&
-    !pending &&
-    !asking &&
-    !state.modeSwitch;
-  const canSend =
-    (Boolean(draft.trim()) || state.attachments.length > 0) &&
-    !state.restoring &&
-    !pending &&
-    !asking &&
-    !state.modeSwitch &&
-    active?.status === 'available' &&
-    (!state.busy || canSteer);
+  const composerIntent = sendIntent({
+    busy: state.busy,
+    backendId: active?.id,
+    backendStatus: active?.status,
+    text: draft,
+    attachmentCount: state.attachments.length,
+    restoring: state.restoring,
+    pendingApproval: Boolean(pending),
+    askingQuestion: asking,
+    modeSwitch: Boolean(state.modeSwitch)
+  });
+  // A busy send is labelled for what it will do once content exists. Queueing
+  // is the only option when a chip is attached or the provider cannot steer.
+  const busyActionLabel =
+    state.attachments.length > 0 || !acceptsSteer(active?.id) ? 'Queue message' : 'Send';
+  const canSend = composerIntent !== 'blocked' && !(state.busy && queuePending);
+  // Queued turns keep the backend/model/permission snapshot they were accepted
+  // with, so those controls stay locked until the turn and the queue finish.
+  const controlsLocked = state.busy || state.queuedTurns.length > 0;
+  const controlsLockedReason = 'Available when the current turn and queued messages finish.';
 
   const dictationModel = state.settings?.defaults.dictationModel?.trim() ?? '';
   const micPhase = dictationVisual(dictationStatus, listening, cleaning);
@@ -1920,6 +2019,76 @@ export function App(): JSX.Element {
   };
 
 
+  onQueueRejectedRef.current = (): void => {
+    queueAwaitRef.current = undefined;
+    if (queueTimerRef.current !== undefined) {
+      window.clearTimeout(queueTimerRef.current);
+      queueTimerRef.current = undefined;
+    }
+    setQueuePending(false);
+  };
+
+  onQueuedTurnsRef.current = (entries): void => {
+    dispatch({ type: 'queuedTurns', entries });
+    const queued = queueAwaitRef.current;
+    if (!queued || !queuedEntryMatches(entries, queued.text, queued.attachments.length)) {
+      return;
+    }
+    // The host accepted the message. Clear the composer only if it still holds
+    // exactly what was queued; text typed in the meantime must survive.
+    if (
+      draftMirrorRef.current.trim() === queued.text &&
+      sameAttachmentIds(attachmentsMirrorRef.current, queued.attachments)
+    ) {
+      setDraft('');
+      dispatch({ type: 'setAttachments', attachments: [] });
+      publishComposer(activeChatTabIdRef.current, '', []);
+    }
+    queueAwaitRef.current = undefined;
+    if (queueTimerRef.current !== undefined) {
+      window.clearTimeout(queueTimerRef.current);
+      queueTimerRef.current = undefined;
+    }
+    setQueuePending(false);
+  };
+
+  // A `queue:true` send can race the end of the host turn: the host dispatches it
+  // normally and posts its stored row instead of a queue echo. The same draft
+  // rules apply, so the composer clears (and its timeout is cancelled) rather
+  // than later claiming the message was never queued.
+  onUserMessageSentRef.current = (message): void => {
+    const queued = queueAwaitRef.current;
+    if (!queued) {
+      return;
+    }
+    if (message.backendId !== selectedBackendIdRef.current) {
+      return;
+    }
+    if (activeThreadIdRef.current && message.threadId !== activeThreadIdRef.current) {
+      return;
+    }
+    if (message.text.trim() !== queued.text) {
+      return;
+    }
+    if ((message.attachments?.length ?? 0) !== queued.attachments.length) {
+      return;
+    }
+    if (
+      draftMirrorRef.current.trim() === queued.text &&
+      sameAttachmentIds(attachmentsMirrorRef.current, queued.attachments)
+    ) {
+      setDraft('');
+      dispatch({ type: 'setAttachments', attachments: [] });
+      publishComposer(activeChatTabIdRef.current, '', []);
+    }
+    queueAwaitRef.current = undefined;
+    if (queueTimerRef.current !== undefined) {
+      window.clearTimeout(queueTimerRef.current);
+      queueTimerRef.current = undefined;
+    }
+    setQueuePending(false);
+  };
+
   const previousChatTabRef = useRef(activeChatTabId);
   onComposerDraftRef.current = (message) => {
     if (
@@ -1954,6 +2123,16 @@ export function App(): JSX.Element {
   useEffect(() => {
     const previous = previousChatTabRef.current;
     const nextId = activeChatTabId;
+    if (previous !== nextId) {
+      // A queue echo belongs to the chat that was visible when it was posted.
+      // The host republishes this tab's queue after the switch.
+      queueAwaitRef.current = undefined;
+      if (queueTimerRef.current !== undefined) {
+        window.clearTimeout(queueTimerRef.current);
+        queueTimerRef.current = undefined;
+      }
+      setQueuePending(false);
+    }
     if (!nextId) {
       previousChatTabRef.current = nextId;
       return;
@@ -2367,6 +2546,9 @@ export function App(): JSX.Element {
           />
         ) : null}
         <div className="composer-box">
+          {state.queuedTurns.length > 0 ? (
+            <QueuedTurns entries={state.queuedTurns} onCancel={cancelQueuedTurn} />
+          ) : null}
           {state.attachments.length > 0 ? (
             <AttachmentList
               attachments={state.attachments}
@@ -2420,7 +2602,8 @@ export function App(): JSX.Element {
                 <ModeTrigger
                   snapshot={modeSnapshot}
                   open={modePanelOpen}
-                  disabled={Boolean(pending) || asking || state.busy}
+                  disabled={Boolean(pending) || asking || controlsLocked}
+                  title={controlsLocked ? controlsLockedReason : undefined}
                   onToggle={() => {
                     setModePanelOpen((value) => !value);
                     setPermissionPanelOpen(false);
@@ -2431,7 +2614,7 @@ export function App(): JSX.Element {
                 {modePanelOpen ? (
                   <ModeMenu
                     snapshot={modeSnapshot}
-                    disabled={state.busy}
+                    disabled={controlsLocked}
                     onSelect={(mode) => {
                       setModePanelOpen(false);
                       dispatch({ type: 'selectMode', mode });
@@ -2450,7 +2633,8 @@ export function App(): JSX.Element {
                   options={permissionOptions}
                   selected={state.permissionLevel}
                   open={permissionPanelOpen}
-                  disabled={Boolean(pending) || asking}
+                  disabled={Boolean(pending) || asking || controlsLocked}
+                  title={controlsLocked ? controlsLockedReason : undefined}
                   onToggle={() => {
                     setPermissionPanelOpen((value) => !value);
                     setModePanelOpen(false);
@@ -2480,7 +2664,8 @@ export function App(): JSX.Element {
                 aria-expanded={modelPanelOpen}
                 aria-controls="model-panel"
                 aria-label={`Model: ${triggerLabel}`}
-                title={triggerLabel}
+                title={controlsLocked ? controlsLockedReason : triggerLabel}
+                disabled={Boolean(pending) || controlsLocked}
                 onClick={() => {
                   setModePanelOpen(false);
                   setPermissionPanelOpen(false);
@@ -2525,8 +2710,14 @@ export function App(): JSX.Element {
                   aria-expanded={modelSettingsOpen}
                   aria-controls="model-settings-panel"
                   aria-label={thinkingLabel ? `Model settings, thinking ${thinkingLabel}` : 'Model settings'}
-                  title={thinkingLabel ? `Model settings · ${thinkingLabel}` : 'Model settings'}
-                  disabled={Boolean(pending) || asking}
+                  title={
+                    controlsLocked
+                      ? controlsLockedReason
+                      : thinkingLabel
+                        ? `Model settings · ${thinkingLabel}`
+                        : 'Model settings'
+                  }
+                  disabled={Boolean(pending) || asking || controlsLocked}
                   onClick={() => {
                     setModelSettingsOpen((value) => !value);
                     setModePanelOpen(false);
@@ -2606,16 +2797,35 @@ export function App(): JSX.Element {
                   <MicSolidIcon />
                 </button>
               ) : null}
-              {state.busy && !canSteer ? (
-                <button
-                  className={`icon-btn composer-action composer-action--stop ${composerModeClass}`}
-                  type="button"
-                  aria-label="Stop"
-                  title="Stop"
-                  onClick={cancel}
-                >
-                  <StopSolidIcon />
-                </button>
+              {state.busy ? (
+                <>
+                  <button
+                    className={`icon-btn composer-action composer-action--stop ${composerModeClass}`}
+                    type="button"
+                    aria-label="Stop"
+                    title="Stop"
+                    onClick={cancel}
+                  >
+                    <StopSolidIcon />
+                  </button>
+                  <button
+                    className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}
+                    type="button"
+                    aria-label={busyActionLabel}
+                    title={
+                      queuePending
+                        ? 'Queueing this message…'
+                        : busyActionLabel === 'Queue message'
+                          ? 'Sends when this turn finishes'
+                          : 'Send to this turn'
+                    }
+                    aria-busy={queuePending || undefined}
+                    disabled={!canSend}
+                    onClick={send}
+                  >
+                    <SendSolidIcon />
+                  </button>
+                </>
               ) : showMic ? null : (
                 <button
                   className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}

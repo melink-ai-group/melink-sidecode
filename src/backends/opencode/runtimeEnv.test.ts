@@ -19,6 +19,21 @@ test('buildEnv defaults the credential to OLLAMA_API_KEY for the Ollama runtime'
   assert.equal(env.OPENCODE_DISABLE_PROJECT_CONFIG, undefined);
 });
 
+test('buildEnv can place the local placeholder under OLLAMA_LOCAL_API_KEY', () => {
+  const env = buildEnv({
+    executable: 'opencode',
+    cwd: '.',
+    config: { share: 'disabled' },
+    modelRef: 'melink-ollama-local/m',
+    agent: 'build',
+    prompt: 'hi',
+    token: 'local-no-key',
+    apiKeyEnv: 'OLLAMA_LOCAL_API_KEY'
+  });
+  assert.equal(env.OLLAMA_LOCAL_API_KEY, 'local-no-key');
+  assert.equal(env.OLLAMA_API_KEY, undefined);
+});
+
 test('buildEnv can place the credential under OPENCODE_API_KEY for Zen', () => {
   const env = buildEnv({
     executable: 'opencode',

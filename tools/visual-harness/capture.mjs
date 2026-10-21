@@ -118,6 +118,11 @@ export async function captureScreen({ browser, baseUrl, screen, viewport, outDir
     if (screen.click) {
       await step(label, `click ${screen.click}`, () => page.locator(screen.click).first().click());
     }
+    for (const tab of screen.clickTabs ?? []) {
+      await step(label, `click tab ${tab}`, () =>
+        page.getByRole('tab', { name: tab, exact: true }).first().click()
+      );
+    }
     if (screen.clickTab) {
       await step(label, `click tab ${screen.clickTab}`, () =>
         page.getByRole('tab', { name: screen.clickTab, exact: true }).first().click()

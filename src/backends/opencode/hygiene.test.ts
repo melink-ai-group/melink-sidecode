@@ -22,8 +22,8 @@ test('the config module never writes a file, logs, or touches the host', async (
   assert.equal(/\boutputChannel\b/i.test(text), false);
   // Only the credential variable's name appears, and no `apiKey` field is set
   // to a template or a value; opencode reads the variable from the child env.
-  assert.match(text, /env: \[OPENCODE_API_KEY_ENV\]/);
-  assert.equal(/\bapiKey\b/.test(text), false);
+  assert.match(text, /env: \[apiKeyEnv\]/);
+  assert.equal(/\bapiKey\s*:/.test(text), false);
 });
 
 test('the runtime hands the credential over only through the child environment', async () => {
@@ -46,22 +46,29 @@ test('the registry registers the OpenCode Zen backend', async () => {
   assert.match(text, /new OpencodeBackend\(/);
 });
 
-test('the ollama adapter imports the runtime only inside the enabled branch', async () => {
+test('the ollama adapter runs every turn through the opencode runtime', async () => {
   const text = await source('backends/ollama.ts');
-  // No static value import of the runtime: the fallback path must not load it.
+  // No static value import of the runtime: it is loaded per turn.
   assert.equal(/import\s+[^;]*runOpencodeTurn[^;]*from\s+['"]\.\/opencode\/runtime['"]/.test(text), false);
   assert.match(text, /await import\('\.\/opencode\/runtime\.ts'\)/);
   assert.match(text, /await import\('\.\/opencode\/config\.ts'\)/);
-  // The setting gates the branch before any runtime import.
-  assert.match(text, /if \(this\.opencodeEnabled\)/);
+  // There is no toggle: the only turn path calls sendOpencodeTurn.
+  assert.equal(text.includes('opencodeEnabled'), false);
+  assert.match(text, /await this\.sendOpencodeTurn\(handle, request, token\);/);
 });
 
-test('the README and usage docs cover the opencode pass and the fallback', async () => {
+test('the README and usage docs cover the shared OpenCode runtime', async () => {
   const readme = await source('../README.md');
-  assert.match(readme, /opencode/);
-  assert.match(readme, /melink\.ollama\.opencode\.enabled/);
+  assert.match(readme, /Shared OpenCode runtime/);
+  assert.match(readme, /no direct turn fallback/i);
   const usage = await source('../docs/usage.md');
-  assert.match(usage, /melink\.ollama\.opencode\.enabled/);
-  const manual = await source('../docs/manual-test.md');
-  assert.match(manual, /opencode-enabled/i);
+  assert.match(usage, /Shared OpenCode runtime/);
+  // The old opt-in key is gone from the docs and the manual script.
+  for (const [name, text] of [
+    ['README.md', readme],
+    ['docs/usage.md', usage],
+    ['docs/manual-test.md', await source('../docs/manual-test.md')]
+  ] as const) {
+    assert.equal(/melink\.ollama\.opencode\.enabled/.test(text), false, `${name} still names the removed key`);
+  }
 });

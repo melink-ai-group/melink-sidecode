@@ -77,17 +77,6 @@
             </div>
 
             <div class="opencode">
-              <label class="check" for="opencode-enabled">
-                <input class="check-input" type="checkbox" id="opencode-enabled" checked>
-                <span class="check-box" aria-hidden="true">
-                  <svg class="ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 13l4 4 10-10"/></svg>
-                </span>
-                <span class="check-body">
-                  <span class="check-label">Use opencode as the agentic runtime</span>
-                  <span class="check-desc">Runs agent turns through the opencode CLI instead of the built-in loop.</span>
-                </span>
-              </label>
-
               <div class="field" id="opencode-path-field">
                 <label class="field-label" for="opencode-path">opencode CLI path</label>
                 <div class="field-row">
@@ -159,8 +148,7 @@
 
   <main class="editor" aria-hidden="true">
     <div class="editor-body">
-      <div class="editor-line"><span class="ln">1</span><span>// Settings writes the runtime switch straight to settings.json.</span></div>
-      <div class="editor-line"><span class="ln">2</span><span>// melink.ollama.opencode.enabled defaults to off.</span></div>
+      <div class="editor-line"><span class="ln">1</span><span>// Settings writes the shared opencode CLI path straight to settings.json.</span></div>
     </div>
   </main>
 

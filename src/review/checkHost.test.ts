@@ -192,6 +192,53 @@ test('checks are skipped without changes, for an unknown turn, or when already o
   assert.equal(duplicate.updates.filter((view) => view.status === 'running').length, 1);
 });
 
+test('the orchestration gate can disable a run without spawning or storing anything', async () => {
+  const { host, store, updates, commands } = harness();
+  await host.startTurnChecks({
+    backendId: 'codex',
+    threadId: 'thread',
+    turnId: 'turn',
+    hasChanges: true,
+    shouldRun: false
+  });
+
+  assert.equal(commands.length, 0);
+  assert.equal(store.get('codex', 'thread', 'turn'), undefined);
+  assert.deepEqual(updates, []);
+});
+
+test('the resolved orchestration value overrides the legacy enabled flag', async () => {
+  // New true + legacy false: the takeover the Orchestration screen promises.
+  const takeover = harness({ settings: { enabled: false } });
+  await takeover.host.startTurnChecks({
+    backendId: 'codex',
+    threadId: 'thread',
+    turnId: 'turn1',
+    hasChanges: true,
+    enabledOverride: true
+  });
+  assert.deepEqual(takeover.commands, ['npm run test']);
+  assert.equal(takeover.store.get('codex', 'thread', 'turn1')?.status, 'passed');
+
+  // New false + legacy true: the new explicit value still wins.
+  const newOff = harness({ settings: { enabled: true } });
+  await newOff.host.startTurnChecks({
+    backendId: 'codex',
+    threadId: 'thread',
+    turnId: 'turn2',
+    hasChanges: true,
+    enabledOverride: false
+  });
+  assert.equal(newOff.commands.length, 0);
+  assert.equal(newOff.store.get('codex', 'thread', 'turn2')?.status, 'skipped');
+  assert.equal(newOff.store.get('codex', 'thread', 'turn2')?.summary, 'Checks are disabled.');
+
+  // No override: the legacy reader (true here) still runs the checks.
+  const legacyOn = harness({ settings: { enabled: true } });
+  await startInput(legacyOn.host, legacyOn.updates, 'turn3');
+  assert.deepEqual(legacyOn.commands, ['npm run test']);
+});
+
 test('an untrusted workspace stores and posts the untrusted result without spawning', async () => {
   let manifestReads = 0;
   const { host, store, updates, commands } = harness({

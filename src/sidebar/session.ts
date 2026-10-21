@@ -9,6 +9,7 @@ import type {
 } from '../backends/types';
 import type { QuestionRequest } from '../questions';
 import type { HostToWebviewMessage } from '../protocol';
+import type { TurnPlan } from '../orchestration/plan.ts';
 
 /** A notice message without its discriminant, so a session can carry it. */
 export type NoticeView = Omit<Extract<HostToWebviewMessage, { type: 'notice' }>, 'type'>;
@@ -49,6 +50,8 @@ export interface ChatSession {
   /** Continuations already used since the provider last stopped. A user send resets this. */
   stopContinueAttempts: number;
   pendingTurnMessage?: { messageId: string; backendId: string; threadId: string };
+  /** Policy decided once for the send in flight; `turn/started` moves it to the turn. */
+  turnPlan?: TurnPlan;
   /** No conversation has been bound to this tab yet. */
   blank: boolean;
   /** Unsent composer text. Restored with the tab. */

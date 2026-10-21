@@ -325,6 +325,13 @@
   white-space: nowrap;
 }
 
+.orchestration-summary {
+  display: block;
+  white-space: normal;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
 .chip--stored,
 .chip--signedin {
   background: color-mix(in srgb, var(--melink-success) 22%, var(--vscode-badge-background));
