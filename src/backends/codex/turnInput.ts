@@ -81,6 +81,9 @@ function providerText(input: CodexTurnInput): string {
   if (context?.delta) {
     parts.push(context.delta);
   }
+  if (context?.repoMap) {
+    parts.push(context.repoMap);
+  }
   if (context?.attachedFile) {
     parts.push(context.attachedFile);
   }

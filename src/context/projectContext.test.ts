@@ -37,6 +37,8 @@ class FakeHost implements ProjectContextHost {
   userPatterns: string[] = [];
   /** Records every path that was actually read or enumerated. */
   readPaths: string[] = [];
+  /** Paths that exist but cannot be read, to distinguish a failure from a miss. */
+  unreadable = new Set<string>();
   time = 1_000;
 
   constructor(roots: string[]) {
@@ -87,6 +89,16 @@ class FakeHost implements ProjectContextHost {
   async readFile(path: string): Promise<string | undefined> {
     const normalized = normalize(path);
     this.readPaths.push(normalized);
+    // Snapshot reads tolerate an unreadable file as an empty contribution.
+    return this.unreadable.has(normalized) ? undefined : this.files.get(normalized);
+  }
+
+  async readFileStrict(path: string): Promise<string | undefined> {
+    const normalized = normalize(path);
+    this.readPaths.push(normalized);
+    if (this.unreadable.has(normalized)) {
+      throw new Error(`unreadable: ${normalized}`);
+    }
     return this.files.get(normalized);
   }
 
@@ -180,6 +192,28 @@ function fixture(): FakeHost {
   host.addFile('/work/app/id_rsa', 'PRIVATE-KEY-MATERIAL');
   return host;
 }
+
+test('an unreadable ancillary snapshot read is skipped while the strict repo-map seam still throws', async () => {
+  const host = fixture();
+  host.addFile('/work/app/AGENTS.md', 'Always run the tests.');
+  host.unreadable.add('/work/app/AGENTS.md');
+  host.addFile('/work/app/src/unreadable.ts', 'export const broken = 1;');
+  host.unreadable.add('/work/app/src/unreadable.ts');
+  const context = new ProjectContext({ host });
+
+  // The tolerant snapshot read skips the unreadable document and keeps going.
+  const snapshot = await context.getSnapshot();
+  assert.deepEqual(snapshot.workspace.names, ['app']);
+  assert.equal(snapshot.instructions.documents.some((document) => document.path === 'AGENTS.md'), false);
+  assert.ok(snapshot.instructions.documents.some((document) => document.path === 'README.md'));
+
+  // The repo-map seam is strict: a miss stays undefined, an unreadable file throws.
+  assert.equal(await context.readFile('/work/app/src/missing.ts'), undefined);
+  await assert.rejects(
+    () => context.readFile('/work/app/src/unreadable.ts'),
+    /unreadable/
+  );
+});
 
 /* -------------------------------------------------------------------------- */
 /* Glob + classification                                                      */

@@ -37,6 +37,17 @@ import type {
 } from './projectContext.ts';
 import { applyContextExclusions, buildContextView, snapshotForDelivery, type ContextView } from './contextView.ts';
 import { detectFrontendStack } from './frontendStack.ts';
+import {
+  buildRepoMap,
+  queryRepoMap,
+  DEFAULT_REPO_MAP_CAPS,
+  REPO_MAP_DISABLED,
+  REPO_MAP_FAILED,
+  REPO_MAP_UNAVAILABLE,
+  type RepoMapCaps,
+  type RepoMapIndex
+} from './repoMap.ts';
+import type { ContextSettings } from './contextSettings.ts';
 
 export interface ContextDeliveryOptions {
   /** The reads the snapshot service exposes. Never a workspace-root getter. */
@@ -69,6 +80,11 @@ export class ContextDelivery {
   private readonly reads: ProjectContextReads;
   private readonly budget?: RenderBudget;
   private readonly states = new Map<string, ThreadContextState>();
+  /**
+   * Repo-map indexes per workspace snapshot. The key includes the accepted file
+   * list, so a file added or removed rebuilds the map; typing alone reuses it.
+   */
+  private readonly repoMaps = new Map<string, RepoMapIndex>();
   /**
    * Per-turn exclusion keys. Empty by default; the host sets them from the
    * panel and clears them after a turn is sent, so an exclusion is for the next
@@ -144,6 +160,7 @@ export class ContextDelivery {
 
   /** Drop each thread's rendered prefix and raw baseline, re-arming priming. */
   private resetRendered(): void {
+    this.repoMaps.clear();
     for (const [key, state] of this.states) {
       state.last = undefined;
       state.snapshotText = undefined;
@@ -234,7 +251,11 @@ export class ContextDelivery {
    * first turn of a session. A stateless adapter re-sends the prefix every turn;
    * a stateful one consumes it once.
    */
-  async forTurn(threadKey: string, input: GetSnapshotInput = {}): Promise<ContextPayload> {
+  async forTurn(
+    threadKey: string,
+    input: GetSnapshotInput = {},
+    requestText = ''
+  ): Promise<ContextPayload> {
     const state = this.states.get(threadKey) ?? { needPrime: true };
     const delta = await this.buildDelta(threadKey, state, input);
     const priming = state.needPrime;
@@ -251,9 +272,52 @@ export class ContextDelivery {
       ...(!state.snapshotText && state.notice ? { notice: state.notice } : {}),
       ...(state.last ? { workspaceRoot: state.last.workspace.roots[0] } : {}),
       ...(frontendStack ? { frontendStack } : {}),
+      repoMap: await this.repoMapForTurn(state, requestText),
       attachedFile: await this.viewedFileTurnBlock(),
       priming
     };
+  }
+
+  /**
+   * Build (or reuse) the bounded symbol/import map and render this turn's slice.
+   * Off by default. A missing seam, failed snapshot or failed read becomes a
+   * marker; it never blocks or throws into the turn.
+   */
+  private async repoMapForTurn(
+    state: ThreadContextState,
+    requestText: string
+  ): Promise<string> {
+    const settings = this.reads.contextSettings?.();
+    if (settings?.repoMap !== true) {
+      return REPO_MAP_DISABLED;
+    }
+    const readFile = this.reads.readFileStrict ?? this.reads.readFile;
+    const root = state.last?.workspace.roots[0];
+    if (!readFile || !state.last || !root) {
+      return REPO_MAP_UNAVAILABLE;
+    }
+    const caps = repoMapCaps(settings);
+    const cacheKey = `${root}\u0000${state.last.shape.files.join('\u0000')}`;
+    try {
+      let index = this.repoMaps.get(cacheKey);
+      if (!index) {
+        index = await buildRepoMap({
+          root,
+          files: state.last.shape.files,
+          readFile: (path) => readFile.call(this.reads, path),
+          caps
+        });
+        // Only a complete map is cacheable. A failed read or an exhausted cap
+        // is retried next turn, so a transient failure can recover and a
+        // time-limited build does not stay stale.
+        if (index.status === 'ok') {
+          this.repoMaps.set(cacheKey, index);
+        }
+      }
+      return queryRepoMap(index, requestText, state.last.editor.dirtyFiles, caps).text;
+    } catch {
+      return REPO_MAP_FAILED;
+    }
   }
 
   /**
@@ -277,6 +341,8 @@ export class ContextDelivery {
    * snapshot. Called by the manual-refresh protocol message.
    */
   async refresh(threadKey: string, input: GetSnapshotInput = {}): Promise<ContextPayload> {
+    // A manual refresh re-reads the workspace, so the cached map is stale too.
+    this.repoMaps.clear();
     const prime = await this.snapshot(input);
     const state = this.states.get(threadKey) ?? { needPrime: true };
     state.last = prime.snapshot;
@@ -344,4 +410,21 @@ export class ContextDelivery {
       return undefined;
     }
   }
+}
+
+/** The map caps from settings, with the documented defaults for anything absent. */
+function repoMapCaps(settings: ContextSettings | undefined): RepoMapCaps {
+  return {
+    ...DEFAULT_REPO_MAP_CAPS,
+    maxFiles: positive(settings?.repoMapMaxFiles, DEFAULT_REPO_MAP_CAPS.maxFiles),
+    maxBytes: positive(settings?.repoMapMaxBytes, DEFAULT_REPO_MAP_CAPS.maxBytes),
+    maxBuildMs: positive(settings?.repoMapBuildMs, DEFAULT_REPO_MAP_CAPS.maxBuildMs),
+    maxChars: positive(settings?.repoMapMaxChars, DEFAULT_REPO_MAP_CAPS.maxChars)
+  };
+}
+
+function positive(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
 }

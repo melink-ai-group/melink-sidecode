@@ -35,6 +35,24 @@ test('the delta is sent as system-role input only', () => {
   assert.equal(delta!.role, 'system');
 });
 
+test('the repo map is per-turn system input alongside the delta', () => {
+  const messages = buildContextMessages([{ role: 'user', content: 'first' }], 'second', {
+    snapshot: 'SNAPSHOT',
+    delta: 'DELTA',
+    repoMap: 'Repo map: src/auth.ts: login'
+  });
+  assert.deepEqual(
+    messages.map((message) => `${message.role}:${message.content}`),
+    [
+      'system:SNAPSHOT',
+      'user:first',
+      'system:DELTA',
+      'system:Repo map: src/auth.ts: login',
+      'user:second'
+    ]
+  );
+});
+
 test('a notice primes when no snapshot was built', () => {
   const messages = buildContextMessages([], 'hi', { notice: 'no context', priming: true });
   assert.equal(messages[0].role, 'system');

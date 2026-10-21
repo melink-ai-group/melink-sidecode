@@ -30,6 +30,20 @@ export interface ContextSettings {
   maxBytes: number;
   /** Extra glob patterns excluded from the snapshot, additive to the built-ins. */
   exclude: string[];
+  /**
+   * Optional bounded symbol/import map queried per turn. Optional so a host or
+   * fake from before the map existed stays off rather than silently enabling a
+   * new read. The documented default is `false`.
+   */
+  repoMap?: boolean;
+  /** Files the map may read per build. */
+  repoMapMaxFiles?: number;
+  /** Bytes the map may read per build. */
+  repoMapMaxBytes?: number;
+  /** Wall-clock budget for one map build. */
+  repoMapBuildMs?: number;
+  /** Character cap for the rendered per-turn map block. */
+  repoMapMaxChars?: number;
 }
 
 /** The documented defaults, mirrored in `package.json`. */
@@ -40,7 +54,12 @@ export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
   includeSelection: true,
   includeChangedFiles: true,
   maxBytes: 20_480,
-  exclude: []
+  exclude: [],
+  repoMap: false,
+  repoMapMaxFiles: 200,
+  repoMapMaxBytes: 131_072,
+  repoMapBuildMs: 750,
+  repoMapMaxChars: 1_200
 };
 
 /**
