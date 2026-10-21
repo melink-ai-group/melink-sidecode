@@ -18,6 +18,40 @@ test('every offered mode has a descriptor and is recognised', () => {
   assert.deepEqual([...DEFAULT_MODES], ['agent', 'plan', 'ask']);
 });
 
+test('agent and plan carry the engineering definition of done', () => {
+  const agent = modeInstructions('agent') ?? '';
+  const plan = modeInstructions('plan') ?? '';
+  for (const text of [agent, plan]) {
+    assert.match(text, /definition of done/i);
+    assert.match(text, /`package\.json` scripts/);
+    assert.match(text, /README or contributor docs/);
+    assert.match(text, /lint/);
+    assert.match(text, /typecheck/);
+    assert.match(text, /test/);
+    assert.match(text, /run\/dev/);
+    assert.match(text, /never assume another repository/i);
+  }
+  // Agent runs the checks and reports each result before it closes.
+  assert.match(agent, /run every applicable check/i);
+  assert.match(agent, /console, runtime, and network errors/i);
+  assert.match(agent, /report each check\u2019s result or failure before your closing sentence/i);
+  assert.match(agent, /never claim a check passed without running it/i);
+  // Plan names verification and puts it in the plan, without running it.
+  assert.match(plan, /name the verification commands this plan depends on/i);
+  assert.match(plan, /include verification with its expected result/i);
+  assert.match(plan, /do not run those commands while planning/i);
+  assert.match(plan, /do not implement the plan/i);
+});
+
+test('ask is answer-only and carries no engineering definition of done', () => {
+  const ask = modeInstructions('ask') ?? '';
+  assert.match(ask, /do not run commands/i);
+  assert.doesNotMatch(ask, /definition of done/i);
+  assert.doesNotMatch(ask, /run\s+(the\s+)?(lint|typecheck|tests?)/i);
+  assert.doesNotMatch(ask, /`package\.json`/);
+  assert.doesNotMatch(ask, /console, runtime, and network errors/i);
+});
+
 test('every mode carries the shared plan-document contract', () => {
   const agent = modeInstructions('agent') ?? '';
   const plan = modeInstructions('plan') ?? '';
