@@ -26,7 +26,6 @@
 import {
   ATTACHED_FILE_REFERENT,
   ATTACHED_FILE_SNAPSHOT_LINE,
-  VIEWED_FILE_NONE_OPEN,
   VIEWED_FILE_NOT_ATTACHED
 } from './providerCopy.ts';
 import {

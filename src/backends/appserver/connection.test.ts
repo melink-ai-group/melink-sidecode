@@ -104,6 +104,11 @@ test('a rejected --listen form is retried with the bare command and succeeds', a
   await connection.dispose();
 });
 
+function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+  return key ? env[key] : undefined;
+}
+
 test('the spawned child env has inherited credentials scrubbed and keeps auth.json discoverable', async () => {
   const originalKey = process.env.OPENAI_API_KEY;
   const originalHome = process.env.CODEX_HOME;
@@ -123,7 +128,10 @@ test('the spawned child env has inherited credentials scrubbed and keeps auth.js
     await connection.start();
     assert.equal(childEnv?.OPENAI_API_KEY, undefined);
     assert.equal(childEnv?.CODEX_HOME, 'C:\\Users\\x\\.codex');
-    assert.equal(childEnv?.PATH, process.env.PATH);
+    // Windows exposes the inherited variable as `Path`, not `PATH`; compare
+    // case-insensitively so the assertion holds on every platform.
+    assert.equal(envValue(childEnv ?? {}, 'PATH'), envValue(process.env, 'PATH'));
+    assert.notEqual(envValue(childEnv ?? {}, 'PATH'), undefined);
     await connection.dispose();
   } finally {
     if (originalKey === undefined) {

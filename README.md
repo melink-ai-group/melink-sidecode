@@ -47,7 +47,9 @@ effects, and the storage/pruning behaviour are documented in
 ## Requirements
 
 - VS Code **1.93.0** or newer, or an Open VSX host (Cursor, VSCodium, …).
-- **Node.js 20+** only if you build from source.
+- **Node.js 20+** to build from source. Tests and typecheck need **Node.js 22.6+
+  (22.x)** because `npm test` runs with `--experimental-strip-types`; CI uses
+  Node **22.12**.
 - At least one provider:
   - **Ollama Cloud:** an API token from <https://ollama.com>.
   - **Codex CLI:** install the `codex` CLI and sign in (`codex login`). The
@@ -122,6 +124,11 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # alias for typecheck
 npm test           # pure unit tests (node --experimental-strip-types)
 ```
+
+`npm run typecheck` and `npm test` are the required quality gates. CI runs both
+on every pull request to `main` and again before a release; a failure blocks the
+release. Use Node **22.6+** (CI uses **22.12**) for these commands. Building and
+packaging only need Node **20+**.
 
 ## Set up a provider
 

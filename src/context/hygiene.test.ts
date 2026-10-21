@@ -56,7 +56,7 @@ test('the codex adapter delivers context through native instructions, not a synt
   // The snapshot is the native developerInstructions field. Mode is not stored
   // there: Codex keeps that field for the life of the loaded thread, so a Plan
   // instruction written at start would still block Build.
-  assert.match(text, /developerInstructions: options\?\.context\?\.snapshot \?\? null/);
+  assert.match(text, /developerInstructions: instructionsWithHandover\(options\?\.context\?\.snapshot, options\?\.handover\)/);
   assert.equal(/developerInstructions: combineInstructions\(modeInstructions/.test(text), false);
   // No fabricated user turn carries the context.
   assert.equal(/context\?\.snapshot[\s\S]{0,80}type: 'text'/.test(text), false);
