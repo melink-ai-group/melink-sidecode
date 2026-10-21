@@ -71,6 +71,20 @@ const QUESTION_BLOCK =
 const ARTIFACT_HOME =
   'When you write a report, investigation, design note, or other generated document to disk, save it under `.melink/reports/` and nowhere else. Do not create or write those files in `docs/` or `reports/`. A documentation file the project already keeps stays where it is when the user asks you to edit that file. Do not create a plan file yourself. The host saves the one plan from your reply at `.melink/plans/<kebab-case title>.md`. Never create a second plan file, and never name a plan after a thread id or uuid.';
 
+/**
+ * The shared engineering definition of done for the modes that may act. It
+ * names the checks by role, never by this repository's commands, so the model
+ * reads the project it is in rather than assuming another project's scripts.
+ */
+const ENGINEERING_DEFINITION_OF_DONE =
+  'Definition of done: read the project\u2019s `package.json` scripts and its README or contributor docs to identify the actual install/build, lint, typecheck, test, and run/dev commands; never assume another repository\u2019s commands.';
+
+/** Agent must run the checks it found, not just name them. */
+const AGENT_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Run every applicable check from that set, and when the target is a web page or app also inspect its console, runtime, and network errors. Report each check\u2019s result or failure before your closing sentence; never claim a check passed without running it.`;
+
+/** Plan names its verification and puts it in the plan; it still does not run it. */
+const PLAN_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Name the verification commands this plan depends on, include verification with its expected result in the plan body and steps, and do not run those commands while planning.`;
+
 export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
   {
     mode: 'agent',
@@ -78,7 +92,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent acts on the workspace.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
+      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${AGENT_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
   },
   {
     mode: 'plan',
@@ -86,7 +100,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent writes a plan document that ends in a todo list, and waits for approval before changing anything.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Investigate what the task requires, then answer with one markdown plan: a title, the plan body (approach, files, and risks), and a final "## Steps" section whose items are a checkbox list, one step per line ("- [ ] ..."). Do not implement the plan. If a plan already exists, leave that document unchanged unless the user asked you to update or revise it. When the user answers your questions, rewrite that same document so the body, a "## Decisions" section, and the steps reflect those answers. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps. If you need a decision before the plan can be written, do not write the plan yet. ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK}`
+      `Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Investigate what the task requires, then answer with one markdown plan: a title, the plan body (approach, files, and risks), and a final "## Steps" section whose items are a checkbox list, one step per line ("- [ ] ..."). Do not implement the plan. If a plan already exists, leave that document unchanged unless the user asked you to update or revise it. When the user answers your questions, rewrite that same document so the body, a "## Decisions" section, and the steps reflect those answers. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps. If you need a decision before the plan can be written, do not write the plan yet. ${PLAN_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK}`
   },
   {
     mode: 'ask',
