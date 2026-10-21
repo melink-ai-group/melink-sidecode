@@ -14,6 +14,9 @@ out/
 .vscode-test/
 coverage/
 
+# Generated eval reports (the committed baseline lives in evals/baseline.md)
+evals/eval-report.md
+
 # Local editor and agent state
 .melink/
 .melink-verify.json
