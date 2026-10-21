@@ -1,4 +1,17 @@
-import type { ConnectionTestResult, SettingsPatch, SettingsSnapshot } from '../../protocol';
+import type { ConnectionTestResult, SettingsPatch, SettingsSection, SettingsSnapshot } from '../../protocol';
+
+export type ProviderTab = 'provider-ollama' | 'provider-local' | 'provider-opencode' | 'provider-codex';
+
+/** Map the section a failure action asked for to the Providers nested tab. */
+export function providerTabForSection(section: SettingsSection | undefined): ProviderTab {
+  if (section === 'codex') {
+    return 'provider-codex';
+  }
+  if (section === 'ollama-local') {
+    return 'provider-local';
+  }
+  return 'provider-ollama';
+}
 
 export interface SettingsScreenProps {
   settings?: SettingsSnapshot;
@@ -13,8 +26,8 @@ export interface SettingsScreenProps {
     backendId: string,
     draft?: { cliSource: 'local' | 'bundled'; path: string }
   ) => void;
-  /** Set when the protocol warning opened settings, so the Codex page is selected. */
-  settingsProvider?: 'codex';
+  /** Set when a failure action opened settings, so that provider page is selected. */
+  settingsProvider?: SettingsSection;
   codexVersionCheck?: { pending: boolean; ok?: boolean; message?: string };
   onValidateCodexVersion: () => void;
   opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };

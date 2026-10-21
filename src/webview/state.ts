@@ -36,7 +36,9 @@ import type {
   ModelSettingField,
   PermissionSnapshot,
   PlanArtifact,
+  QueuedTurnEntryView,
   QuestionRequest,
+  SettingsSection,
   SettingsSnapshot,
   WebviewToHostMessage
 } from '../protocol';
@@ -171,11 +173,17 @@ export interface AppState {
    * file path or content; dismissed when the user acts or removes a chip.
    */
   attachmentError?: string;
+  /**
+   * User turns the host has accepted for later, for the visible chat only.
+   * Oldest first; replaced by every `queuedTurns` echo and cleared on a chat
+   * switch or clear. No paths or bytes, so a chip is safe to render.
+   */
+  queuedTurns: QueuedTurnEntryView[];
   notice?: { level: 'info' | 'warning' | 'error'; message: string; action?: NoticeAction };
   /** True while the settings screen is open (inline surface, never a popover). */
   settingsOpen: boolean;
-  /** Provider page to select when settings opens from the protocol warning. */
-  settingsProvider?: 'codex';
+  /** Provider page to select when settings opens from a failure action. */
+  settingsProvider?: SettingsSection;
   /** Result of Validate version, or a pending marker while the checks run. */
   codexVersionCheck?: { pending: boolean; ok?: boolean; message?: string };
   /** The settings read model, present once the host has answered `getSettings`. */
@@ -297,6 +305,19 @@ export type Action =
   | { type: 'selectModel'; model: string }
   | { type: 'agentEvent'; event: AgentEvent }
   | { type: 'localUserMessage'; text: string; attachments?: Attachment[]; opensTurn?: boolean }
+  /**
+   * A queued turn started in the host. The user typed it earlier, so the
+   * composer is untouched; only the transcript gains the stored message.
+   */
+  | {
+      type: 'userMessageSent';
+      backendId: string;
+      threadId: string;
+      messageId: string;
+      text: string;
+      attachments?: Attachment[];
+      sentAt?: number;
+    }
   /** Replace the optimistic user bubble id with the host message id. */
   | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string; sentAt?: number }
   /** Remove the optimistic user bubble when the host did not accept the send. */
@@ -353,8 +374,12 @@ export type Action =
   /** Surface an attach/paste failure inline in the composer. */
   | { type: 'attachmentError'; message: string }
   | { type: 'dismissAttachmentError' }
+  /** Replace the visible chat's queued turns with the host's view. */
+  | { type: 'queuedTurns'; entries: QueuedTurnEntryView[] }
+  /** Remove one queued turn immediately, before the host echoes the list. */
+  | { type: 'cancelQueuedTurn'; id: string }
   | { type: 'refresh' }
-  | { type: 'openSettings'; provider?: 'codex' }
+  | { type: 'openSettings'; provider?: SettingsSection }
   | { type: 'closeSettings' }
   | { type: 'settings'; settings: SettingsSnapshot }
   | { type: 'permissions'; permissions: PermissionSnapshot }
@@ -483,6 +508,7 @@ export const initialState: AppState = {
   planRevising: false,
   rejectConfirmationOpen: false,
   attachments: [],
+  queuedTurns: [],
   modelCapabilityStatus: 'idle',
   contextSettingsEnabled: true,
   workspaceRoots: [],
@@ -715,6 +741,49 @@ export function reduce(state: AppState, action: Action): AppState {
       transcript.splice(index, 1);
       return { ...state, transcript, contextUsedTokens: estimateConversationTokens(transcript) };
     }
+    case 'userMessageSent': {
+      if (state.activeThreadId && state.activeThreadId !== action.threadId) {
+        return state;
+      }
+      if (state.selectedBackendId && state.selectedBackendId !== action.backendId) {
+        return state;
+      }
+      // A replay may already carry this stored row; the id is authoritative.
+      if (state.transcript.some((item) => item.id === action.messageId)) {
+        return state;
+      }
+      const sent: TranscriptItemView = {
+        id: action.messageId,
+        kind: 'message',
+        backendId: action.backendId,
+        threadId: action.threadId,
+        role: 'user',
+        attachments: action.attachments,
+        text: action.text,
+        status: 'completed',
+        ...(action.sentAt != null ? { sentAt: action.sentAt } : {})
+      };
+      // A webview that already showed an optimistic bubble for this text gets
+      // it adopted rather than duplicated.
+      let localIndex = -1;
+      for (let cursor = state.transcript.length - 1; cursor >= 0; cursor -= 1) {
+        const item = state.transcript[cursor];
+        if (item?.kind === 'message' && item.role === 'user' && item.id.startsWith('local_') && item.text === action.text) {
+          localIndex = cursor;
+          break;
+        }
+      }
+      if (localIndex !== -1) {
+        const transcript = state.transcript.slice();
+        transcript[localIndex] = { ...transcript[localIndex], ...sent };
+        return { ...state, transcript };
+      }
+      return {
+        ...state,
+        transcript: [...state.transcript, sent],
+        contextUsedTokens: (state.contextUsedTokens ?? 0) + tokensFromText(action.text)
+      };
+    }
     case 'localUserMessage':
       return {
         ...state,
@@ -804,6 +873,9 @@ export function reduce(state: AppState, action: Action): AppState {
         // Pending chips belong to the composer draft, which the view restores
         // per tab. A repaint of the open chat must not drop them.
         attachmentError: undefined,
+        // Queued chips belong to the thread on screen. A repaint or snapshot of
+        // this same chat keeps them; only a thread/provider switch clears them.
+        queuedTurns: sameChat ? state.queuedTurns : [],
         // A revision belongs to the plan that was on screen; a switch resets it.
         planRevising: false,
         rejectConfirmationOpen: false,
@@ -925,6 +997,13 @@ export function reduce(state: AppState, action: Action): AppState {
       return { ...state, attachmentError: action.message };
     case 'dismissAttachmentError':
       return { ...state, attachmentError: undefined };
+    case 'queuedTurns':
+      return { ...state, queuedTurns: action.entries };
+    case 'cancelQueuedTurn':
+      return {
+        ...state,
+        queuedTurns: state.queuedTurns.filter((entry) => entry.id !== action.id)
+      };
     case 'refresh':
       // Drop cached model lists so the live `/api/tags` result repopulates the
       // picker; a model removed server-side disappears on the next fetch.

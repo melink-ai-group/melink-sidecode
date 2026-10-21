@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  LOCAL_OPENCODE_API_KEY,
   OPENCODE_AGENT_AGENT,
   OPENCODE_API_KEY_ENV,
   OPENCODE_ASK_AGENT,
+  OPENCODE_LOCAL_API_KEY_ENV,
+  OPENCODE_LOCAL_PROVIDER_ID,
   OPENCODE_PLAN_AGENT,
   OPENCODE_PROVIDER_ID,
   buildOpencodeConfig,
@@ -153,6 +156,45 @@ test('the provider id is namespaced so a user opencode auth entry cannot overrid
     permissionLevel: 'default'
   });
   assert.deepEqual(Object.keys(built.config.provider as Record<string, unknown>), [OPENCODE_PROVIDER_ID]);
+});
+
+test('the local provider gets its own id, env var, name, and /v1 base URL', () => {
+  const built = buildOpencodeConfig({
+    baseUrl: 'http://localhost:11434',
+    modelIds: ['qwen2.5-coder:7b'],
+    modelId: 'qwen2.5-coder:7b',
+    mode: 'agent',
+    permissionLevel: 'default',
+    providerId: OPENCODE_LOCAL_PROVIDER_ID,
+    providerName: 'Ollama Local',
+    apiKeyEnv: OPENCODE_LOCAL_API_KEY_ENV
+  });
+  const provider = (built.config.provider as Record<string, Record<string, unknown>>)[
+    OPENCODE_LOCAL_PROVIDER_ID
+  ];
+  assert.equal(provider.name, 'Ollama Local');
+  assert.deepEqual(provider.env, [OPENCODE_LOCAL_API_KEY_ENV]);
+  assert.equal((provider.options as Record<string, unknown>).baseURL, 'http://localhost:11434/v1');
+  assert.equal(built.modelRef, `${OPENCODE_LOCAL_PROVIDER_ID}/qwen2.5-coder:7b`);
+  assert.equal(built.config.small_model, `${OPENCODE_LOCAL_PROVIDER_ID}/qwen2.5-coder:7b`);
+  // The Cloud provider entry is not generated as well.
+  assert.deepEqual(Object.keys(built.config.provider as Record<string, unknown>), [OPENCODE_LOCAL_PROVIDER_ID]);
+  // The placeholder is a runtime env value, never part of the generated config.
+  assert.equal(JSON.stringify(built.config).includes(LOCAL_OPENCODE_API_KEY), false);
+});
+
+test('the cloud output is unchanged by the optional provider parameters', () => {
+  const cloud = buildOpencodeConfig({
+    baseUrl: 'https://ollama.com',
+    modelIds: ['m'],
+    modelId: 'm',
+    mode: 'agent',
+    permissionLevel: 'default'
+  });
+  const provider = (cloud.config.provider as Record<string, Record<string, unknown>>)[OPENCODE_PROVIDER_ID];
+  assert.equal(provider.name, 'Ollama Cloud');
+  assert.deepEqual(provider.env, [OPENCODE_API_KEY_ENV]);
+  assert.equal((provider.options as Record<string, unknown>).baseURL, 'https://ollama.com/v1');
 });
 
 test('the config names the credential env var and never carries the token value', () => {

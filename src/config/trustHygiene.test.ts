@@ -331,7 +331,12 @@ test('the skill toggle refusal reaches the screen on the path field', async () =
 
 test('the trust-sensitive read sites use the trusted reader', async () => {
   const ollama = await source('backends/ollama.ts');
-  assert.match(ollama, /inspect<string>\('melink\.ollama\.baseUrl'\)/);
+  // Both Ollama profiles read the base URL through the shared profile key and
+  // `inspect()`, so Cloud and Local share one trusted rule.
+  assert.match(ollama, /inspect<string>\(this\.profile\.baseUrlKey\)/);
+  const profiles = await source('backends/ollamaProfile.ts');
+  assert.match(profiles, /baseUrlKey: 'melink\.ollama\.baseUrl'/);
+  assert.match(profiles, /baseUrlKey: 'melink\.ollamaLocal\.baseUrl'/);
   const codex = await source('backends/codex.ts');
   assert.match(codex, /readTrustedCodexExecutable\(\)/);
   const opencode = await source('backends/opencodeBackend.ts');
@@ -347,6 +352,7 @@ test('the trust-sensitive read sites use the trusted reader', async () => {
 test('the settings service reads the trust-sensitive keys from the trusted reader', async () => {
   const settings = await source('settings.ts');
   assert.match(settings, /readTrustedBaseUrl\(\)/);
+  assert.match(settings, /readTrustedOllamaLocalBaseUrl\(\)/);
   assert.match(settings, /readTrustedCodexPath\(\)/);
   assert.match(settings, /readTrustedOpencodeCliSource\(\)/);
   assert.match(settings, /readTrustedOpencodePath\(\)/);
@@ -359,6 +365,7 @@ test('the settings service writes a trust-sensitive key to the user settings onl
   // Every trust-sensitive write goes through `targetForKey`, which forces the
   // global target for those keys.
   assert.match(settings, /targetForKey\(`\$\{OLLAMA_SECTION\}\.baseUrl`/);
+  assert.match(settings, /targetForKey\(`\$\{OLLAMA_LOCAL_SECTION\}\.baseUrl`/);
   assert.match(settings, /targetForKey\(`\$\{CODEX_SECTION\}\.path`/);
   assert.match(settings, /targetForKey\(`\$\{DEFAULTS_SECTION\}\.permissionLevel`/);
   assert.match(settings, /targetForKey\(`\$\{OLLAMA_OPENCODE_SECTION\}\.cliSource`/);

@@ -1,7 +1,7 @@
 # SideCode
 
-One agent chat sidebar for VS Code and Open VSX hosts, driving three providers:
-Ollama Cloud, the OpenAI Codex CLI, and OpenCode Zen.
+One agent chat sidebar for VS Code and Open VSX hosts, driving four providers:
+Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.
 
 - **Install and set up:** see below.
 - **How to use it and what it can do:** [docs/usage.md](docs/usage.md).
@@ -11,11 +11,12 @@ Ollama Cloud, the OpenAI Codex CLI, and OpenCode Zen.
 
 ## What it is
 
-A single chat view in the Activity Bar that talks to three providers:
+A single chat view in the Activity Bar that talks to four providers:
 
 | Provider | What it needs | Badge |
 |---|---|---|
 | **Ollama Cloud** | An `ollama.com` bearer token in secret storage | Ollama |
+| **Ollama Local** | A local Ollama server (`ollama serve`) with the OpenAI-compatible `/v1` endpoint; no key | Ollama |
 | **OpenAI Codex CLI** | The `codex` CLI installed and signed in (ChatGPT login; an API-key login is reported as a mismatch) | Codex |
 | **OpenCode Zen** | The shared `opencode` CLI; free models need no key, paid models need a Zen API key in secret storage | OpenCode |
 
@@ -47,17 +48,17 @@ effects, and the storage/pruning behaviour are documented in
 
 ### Opt-in diff review
 
-`melink.review.diffReview` (default **off**, application scope) adds an advisory
-second pass to the **Changes this turn** panel. It is strictly read-only: it
-never edits files, runs shell commands, requests approvals, or keeps/rejects
-anything, and **Keep** / **Reject** behave exactly as before. The first pass is
-local and deterministic: it flags explicit paths the request named but the turn
-did not change. It does not claim to find semantic regressions. The prompt/runner
-seam is ready for a future model reviewer, but this release runs only the local
-pass and never calls a model. Turn reviews are stored per turn and
-restored on reload; a failed or timed-out pass is a visible, non-blocking notice.
-Because the setting is application-scoped, only a user setting can enable it;
-a workspace setting cannot turn it on.
+**Orchestration → Reviewing** (`melink.orchestration.reviewing`, default **off**)
+adds an advisory second pass to the **Changes this turn** panel. Until that key
+is saved it falls back to the older application-scoped
+`melink.review.diffReview`. The review is strictly read-only: it never edits
+files, runs shell commands, requests approvals, or keeps/rejects anything, and
+**Keep** / **Reject** behave exactly as before. The first pass is local and
+deterministic: it flags explicit paths the request named but the turn did not
+change. It does not claim to find semantic regressions. The prompt/runner seam is
+ready for a future model reviewer, but this release runs only the local pass and
+never calls a model. Turn reviews are stored per turn and restored on reload; a
+failed or timed-out pass is a visible, non-blocking notice.
 A turn that changed files can also run **post-turn checks** before you keep it.
 By default SideCode detects `typecheck` (or `lint` when there is no typecheck)
 and `test` in `package.json` and runs them with the manifest's package manager.
@@ -234,11 +235,15 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 |---|---|---|
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. |
 | `melink.ollama.defaultModel` | *(empty)* | Default model; empty uses the first one the backend reports. |
-| `melink.ollama.opencode.enabled` | `true` | Run Ollama Cloud turns through the **opencode** agentic runtime. Turn it off to use the direct adapter. |
 | `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
-| `melink.review.diffReview` | `false` | Opt-in, read-only advisory diff review after a turn changes files. Never edits, runs commands, asks for approvals, or keeps/rejects. Application scope, so only a user setting can enable it. |
+| `melink.review.diffReview` | `false` | Legacy opt-in for the read-only advisory diff review, used only while `melink.orchestration.reviewing` is unset. Application scope, so only a user setting can enable it. |
+| `melink.orchestration.testing` | `true` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. |
+| `melink.orchestration.reviewing` | `false` | Advisory diff review; falls back to `melink.review.diffReview` until saved. |
+| `melink.orchestration.doubleCheck` | `true` | Read diagnostics for the changed files after a turn and post one advisory notice. Never calls a model. |
+| `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for a short single-question Agent turn. |
+| `melink.orchestration.planning` | `true` | Continue a built plan step by step after a clean Agent turn. |
 | `melink.skills.browserCodex` | `true` | Let Codex open a browser tab in the editor. |
 | `melink.skills.browserOpencode` | `true` | Let OpenCode open a browser tab in the editor. |
 | `melink.skills.zvecGrep` | `false` | Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode (semantic + keyword + ripgrep MCP). |
@@ -251,16 +256,32 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 `Ollama Cloud` lists exactly the models the live server returns from
 `GET /api/tags` — there is no hardcoded fallback list.
 
-#### Optional opencode agentic runtime
+### Ollama Local
 
-By default Ollama Cloud runs through [opencode](https://opencode.ai), a terminal
-coding agent that can read the project, edit files, and run commands. This
-runtime keeps the **Ollama** identity: it adds no fourth provider, badge, or dot
-behind Ollama Cloud. (OpenCode Zen is the separate provider that also uses the
-shared opencode CLI.) Turning
-**`melink.ollama.opencode.enabled`** off uses the direct HTTP adapter instead
-(`GET /api/tags` for models and `POST /api/chat` with `stream: true`), which
-streams chat and does not spawn opencode.
+1. Install Ollama and start it with `ollama serve`.
+2. Pull at least one model (`ollama pull qwen2.5-coder:7b`).
+3. In **Settings → Providers → Ollama Local**, keep the default
+   `http://localhost:11434` (or enter another address) and press **Test
+   connection**.
+
+The page reports **Running** only when the server answers both `/api/tags` and
+the OpenAI-compatible `/v1/models` endpoint; otherwise it says **Not reachable**
+with the reason (server stopped, timeout, or an Ollama version without `/v1`).
+No API key is stored or sent for this provider.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `melink.ollamaLocal.baseUrl` | `http://localhost:11434` | Local server address. Application scope: a workspace cannot redirect local prompts. |
+| `melink.ollamaLocal.defaultModel` | *(empty)* | Default model; empty uses the first model the local server reports. |
+
+#### Shared OpenCode runtime
+
+Every Ollama Cloud and Ollama Local turn runs through
+[opencode](https://opencode.ai), a terminal coding agent that can read the
+project, edit files, and run commands. This is always on; there is no direct
+`/api/chat` turn path. The direct API remains only for context compaction and
+dictation cleanup. Ollama Cloud, Ollama Local and OpenCode Zen share the same
+OpenCode binary, and each keeps its own provider identity and dot in the picker.
 
 - **CLI source.** Configure under **Settings → CLI**. `melink.ollama.opencode.cliSource`
   is `local` (path / PATH) or `bundled` (SideCode download in extension global
@@ -299,7 +320,7 @@ streams chat and does not spawn opencode.
   json`). A turn whose permission level can ask (the `default` bash ask) uses
   the same short-lived runtime through `opencode serve`, so its `ask` becomes a
   sidebar decision card instead of a silent refusal. Both paths parse the
-  same normalized event union the direct adapter uses, so the transcript has one
+  same normalized event union every backend uses, so the transcript has one
   path. A stream that ends without a terminal event is a stream error, not a
   success.
 - **Sessions.** The runtime's session id is persisted per thread, so a second
@@ -325,9 +346,9 @@ streams chat and does not spawn opencode.
   permission level. opencode's enforcement is a second gate, not a replacement
   for ours. The bundled 1.19.x CLI exposes `--auto`, but the sidebar never passes
   it; an `ask` is answered through the sidebar's approval card.
-- **Fallback is exact.** With the setting off, the direct `/api/chat` adapter
-  runs unchanged: no opencode module is loaded on that path and no child process
-  is spawned.
+- **No direct turn fallback.** Every Ollama Cloud and Ollama Local LLM turn uses
+  this runtime. Direct `/api/chat` requests are used only for context compaction
+  and dictation cleanup.
 
 ## Project context
 
@@ -371,13 +392,11 @@ How each provider receives it:
 
 | Provider | Snapshot | Per-turn delta |
 |---|---|---|
-| **Ollama Cloud (direct)** | A `system`-role message before the first user turn. | A `system`-role message immediately before the new user turn. |
+| **Ollama Cloud / Ollama Local (OpenCode)** | Primed into the turn text; the child is spawned in the workspace root. | Only the delta is primed. |
 | **Codex app-server** | The native `developerInstructions` field on `thread/start` and `thread/resume`; the thread's `cwd` is the workspace root, so Codex's own file access and `AGENTS.md` discovery work from the right place. | Codex's own file access (the pinned app-server exposes no per-turn instructions field on `turn/start`). |
 | **opencode runtime** | Primed into the turn text; the child is spawned in the workspace root. | Only the delta is primed. |
 
-`melink.ollama.opencode.enabled` **off** leaves the direct `/api/chat` request
-body unchanged apart from the context messages, and spawns no child process. The
-opencode and Codex paths were verified against the versions below.
+The OpenCode and Codex paths were verified against the versions below.
 
 ### Versions the priming path was verified against
 
@@ -462,8 +481,9 @@ picker in the title bar override them for the conversation you are in.
 | `melink.review.checks.commands` | *(empty)* | Explicit commands; empty auto-detects `typecheck` (or `lint`) and `test` from `package.json`. An explicitly saved empty list runs nothing. |
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout, clamped to 5–600 seconds. |
 
-These are read directly from `settings.json`; the inline settings screen does not
-yet expose controls for them.
+The command list and timeout are read directly from `settings.json`. The
+**Orchestration** tab controls whether the pass runs, plus the review,
+double-check, quick-task, and plan-autopilot policy.
 
 Open the settings screen from the gear in the title bar (it opens inline in the
 sidebar, not a separate window). It also sets the Ollama API key with a masked
@@ -487,11 +507,10 @@ sandbox controls which writes and commands can run. In Default, a sandboxed
 command can raise an approval card, and the destructive-command check runs
 before any stored rule. Ask refuses every approval the agent raises, so a
 question can never become a change. A backend that cannot enforce a mode does
-not advertise it; with the agentic runtime on, all three backends advertise
-`agent`, `plan`, and `ask` on every provider.
+not advertise it; `agent`, `plan`, and `ask` on every provider.
 
 A request is only shown as an approval card when the backend exposes an
-approval channel (`hasApprovalChannel`); the direct adapter reports none. An
+approval channel (`hasApprovalChannel`); every Ollama and OpenCode turn does. An
 unanswered request is refused after 120 seconds (`APPROVAL_WAIT_MS` in
 `src/backends/approvalWait.ts`).
 
@@ -754,9 +773,10 @@ capability flag.
   cleared when the thread ends), and stored `always` rules are listed and
   revocable in the sidebar.
 
-### Optional opencode runtime
+### Shared OpenCode runtime
 
-The Ollama opencode runtime is a per-turn, short-lived child process. It runs
+The Ollama (Cloud and Local) OpenCode runtime is a per-turn, short-lived child
+process. It runs
 whatever `opencode` the installer resolved (the installer tracks
 `releases/latest`; the T69 regression used 1.19.x); the flags used (`run`,
 `--format json`, `--model`, `--agent`, `--session`, `--variant`) are the ones
@@ -774,7 +794,9 @@ that version's `opencode run --help` lists. Notes:
   stream error, not a successful turn.
 - The credential is supplied through the provider's `env` declaration and the
   child's environment; `OPENCODE_CONFIG_CONTENT` is the only config transport,
-  so nothing is written into the workspace or the repository.
+  so nothing is written into the workspace or the repository. Ollama Local has
+  no credential: its generated provider reads a fixed `local-no-key` placeholder
+  that is never sent as a user secret.
 
 When the installed CLI is newer than this pin, re-check `opencode run --help`
 and the JSON event shapes before relying on these assumptions.
@@ -788,11 +810,11 @@ src/
   protocol.ts           typed host <-> webview message contract
   backends/
     types.ts            provider-neutral seam every backend implements
-    registry.ts         owns both adapters, publishes availability
+    registry.ts         owns every adapter, publishes availability
     modes.ts            mode enum translation, enforcement policy, refusal copy
     plan.ts             pure per-thread plan path + markdown render/parse
     permissions.ts      permission-level -> Codex sandbox/approval mapping
-    ollama.ts           Ollama Cloud adapter (direct HTTP + optional opencode runtime)
+    ollama.ts           Ollama Cloud + Ollama Local adapter (OpenCode runtime)
     opencode/           generated config + NDJSON event parsing + per-turn runner
     codex.ts            Codex adapter
     appserver/          JSON-RPC transport for `codex app-server`

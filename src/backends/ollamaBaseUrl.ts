@@ -77,33 +77,47 @@ export interface OllamaRequestOptions {
   baseUrl: string;
   /** The API path, e.g. `/api/tags`. */
   path: string;
-  /** The bearer credential. Never logged, never put in the URL. */
-  token: string;
+  /** The bearer credential. Never logged, never put in the URL. Omitted for Local. */
+  token?: string;
+  /** The provider name used in user-facing error copy. */
+  providerLabel?: string;
   /** Extra request options merged under the credential headers. */
   init?: RequestInit;
   /** The transport seam; the platform fetch when absent. */
   transport?: OllamaTransport;
 }
 
+/** The provider name to name in copy. */
+function providerLabelOf(options: OllamaRequestOptions): string {
+  return options.providerLabel ?? 'Ollama Cloud';
+}
+
+/** The headers for one request; no Authorization header when there is no token. */
+function requestHeaders(options: OllamaRequestOptions): Record<string, string> {
+  return {
+    ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+    'Content-Type': 'application/json',
+    ...((options.init?.headers as Record<string, string> | undefined) ?? {})
+  };
+}
+
 /**
- * One authenticated request to the configured host.
+ * One request to the configured host.
  *
- * The credential travels in the `Authorization` header only. The URL is built
- * from the resolved base URL, so the host that receives the token is exactly
- * the host the user configured.
+ * The credential, when there is one, travels in the `Authorization` header
+ * only. The URL is built from the resolved base URL, so the host that receives
+ * the token is exactly the host the user configured. A Local request carries no
+ * credential and sends no Authorization header at all.
  */
 export async function ollamaRequest(options: OllamaRequestOptions): Promise<Response> {
   const transport = options.transport ?? defaultOllamaTransport();
   const url = ollamaRequestUrl(options.baseUrl, options.path);
+  const label = providerLabelOf(options);
   let response: Response;
   try {
     response = await transport(url, {
       ...options.init,
-      headers: {
-        Authorization: `Bearer ${options.token}`,
-        'Content-Type': 'application/json',
-        ...(options.init?.headers ?? {})
-      }
+      headers: requestHeaders(options)
     });
   } catch (cause) {
     // An aborted request is not a host failure: the caller turns it into a
@@ -113,15 +127,17 @@ export async function ollamaRequest(options: OllamaRequestOptions): Promise<Resp
     }
     throw new BackendError(
       'unavailable',
-      `Cannot reach Ollama Cloud at ${normalizeOllamaBaseUrl(options.baseUrl)}. Check the network or the base URL setting.`,
+      `Cannot reach ${label} at ${normalizeOllamaBaseUrl(options.baseUrl)}. Check the network or the base URL setting.`,
       cause
     );
   }
   if (response.status === 401 || response.status === 403) {
-    throw new BackendError('unauthenticated', 'Your Ollama Cloud token was rejected. It may be expired or revoked.');
+    throw new BackendError('unauthenticated', label === 'Ollama Cloud'
+      ? 'Your Ollama Cloud token was rejected. It may be expired or revoked.'
+      : 'This endpoint requires an API key. Ollama Local does not support keys; use Ollama Cloud instead.');
   }
   if (!response.ok) {
-    throw new BackendError('provider', `Ollama Cloud returned ${response.status} ${response.statusText}.`);
+    throw new BackendError('provider', `${label} returned ${response.status} ${response.statusText}.`);
   }
   return response;
 }
@@ -142,11 +158,7 @@ export async function ollamaProbe(options: OllamaRequestOptions): Promise<Respon
   const url = ollamaRequestUrl(options.baseUrl, options.path);
   return transport(url, {
     ...options.init,
-    headers: {
-      Authorization: `Bearer ${options.token}`,
-      'Content-Type': 'application/json',
-      ...(options.init?.headers ?? {})
-    }
+    headers: requestHeaders(options)
   });
 }
 
@@ -166,12 +178,13 @@ export async function ollamaProbe(options: OllamaRequestOptions): Promise<Respon
  */
 async function withProbeDeadline(
   run: Promise<Response>,
-  deadline: { timeoutMs?: number; probeSignal?: AbortSignal }
+  deadline: { timeoutMs?: number; probeSignal?: AbortSignal },
+  label = 'Ollama Cloud'
 ): Promise<Response> {
   const timeoutMs = deadline.timeoutMs ?? PROVIDER_PROBE_TIMEOUT_MS;
   const signal = deadline.probeSignal ?? probeSignal(timeoutMs);
   try {
-    return await withProbeTimeout('Ollama Cloud', timeoutMs, signal, run);
+    return await withProbeTimeout(label, timeoutMs, signal, run);
   } catch (error) {
     if (isProbeTimeoutError(error)) {
       throw new BackendError('unavailable', (error as Error).message, error);
@@ -184,58 +197,63 @@ export class OllamaClient {
   private readonly inspectedBaseUrl: InspectedSetting<string> | undefined;
   private readonly transport: OllamaTransport;
   private readonly fallback: string;
+  private readonly label: string;
 
   constructor(
     inspectedBaseUrl: InspectedSetting<string> | undefined,
     transport: OllamaTransport = defaultOllamaTransport(),
-    fallback: string = DEFAULT_OLLAMA_BASE_URL
+    fallback: string = DEFAULT_OLLAMA_BASE_URL,
+    label: string = 'Ollama Cloud'
   ) {
     this.inspectedBaseUrl = inspectedBaseUrl;
     this.transport = transport;
     this.fallback = fallback;
+    this.label = label;
   }
 
-  /** The host the bearer token is sent to. */
+  /** The host the requests go to. */
   get baseUrl(): string {
     return resolveOllamaBaseUrl(this.inspectedBaseUrl, this.fallback);
   }
 
-  /** One authenticated request to the configured host. */
+  /** One request to the configured host. A Local client passes no token. */
   async request(
     path: string,
-    token: string,
+    token?: string,
     init?: RequestInit,
     deadline?: { timeoutMs?: number; probeSignal?: AbortSignal }
   ): Promise<Response> {
     const run = ollamaRequest({
       baseUrl: this.baseUrl,
       path,
-      token,
+      ...(token ? { token } : {}),
+      providerLabel: this.label,
       transport: this.transport,
       ...(init ? { init } : {})
     });
-    return deadline ? withProbeDeadline(run, deadline) : run;
+    return deadline ? withProbeDeadline(run, deadline, this.label) : run;
   }
 
   /**
-   * One authenticated request whose status the caller classifies.
+   * One request whose status the caller classifies.
    *
    * The settings screen's "Test connection" needs the raw status to tell a
    * rejected key from a host-side failure.
    */
   async probe(
     path: string,
-    token: string,
+    token?: string,
     init?: RequestInit,
     deadline?: { timeoutMs?: number; probeSignal?: AbortSignal }
   ): Promise<Response> {
     const run = ollamaProbe({
       baseUrl: this.baseUrl,
       path,
-      token,
+      ...(token ? { token } : {}),
+      providerLabel: this.label,
       transport: this.transport,
       ...(init ? { init } : {})
     });
-    return deadline ? withProbeDeadline(run, deadline) : run;
+    return deadline ? withProbeDeadline(run, deadline, this.label) : run;
   }
 }

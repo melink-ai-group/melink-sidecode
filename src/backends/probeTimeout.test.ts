@@ -231,5 +231,5 @@ test('both probe fetch paths pass an abort signal and no bare probe fetch remain
   assert.match(ollama, /probeSignal as createProbeSignal/);
 
   const client = await readFile('src/backends/ollamaBaseUrl.ts', 'utf8');
-  assert.match(client, /withProbeTimeout\('Ollama Cloud', timeoutMs, signal, run\)/);
+  assert.match(client, /withProbeTimeout\(label, timeoutMs, signal, run\)/);
 });

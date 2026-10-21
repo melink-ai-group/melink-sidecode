@@ -5,21 +5,22 @@ import { WORKSPACE_SAVE_REFUSED_MESSAGE } from './trust.ts';
  * The trust-sensitive fields the settings screen exposes, and the notice each
  * one shows when a "Save to workspace" could not be honoured.
  *
- * Nine fields decide where a credential is sent, which binary is spawned, or
- * what the permission default is. They are read from the user's own settings
- * only, so a "Save to workspace" writes them to the user settings instead.
- * The value *is* persisted, so the message is a notice rather than an error —
- * but it must appear on every one of the nine fields. A field that silently
- * saved somewhere else than the button said is a lie.
+ * Ten fields decide where a credential or prompt is sent, which binary is
+ * spawned, or what the permission default is. They are read from the user's
+ * own settings only, so a "Save to workspace" writes them to the user settings
+ * instead. The value *is* persisted, so the message is a notice rather than an
+ * error -- but it must appear on every one of the ten fields. A field that
+ * silently saved somewhere else than the button said is a lie.
  *
  * The mapping lives here, host-free, so the screen and the tests read the
  * same list: a trust-sensitive field that is missing from this table fails
  * the test rather than quietly saving to the wrong scope.
  */
 
-/** The nine trust-sensitive field names used by `SettingsPatch`. */
+/** The ten trust-sensitive field names used by `SettingsPatch`. */
 export const TRUST_SENSITIVE_FIELDS = [
   'ollamaBaseUrl',
+  'ollamaLocalBaseUrl',
   'opencodeCliSource',
   'opencodePath',
   'codexPath',
@@ -36,6 +37,7 @@ export type TrustSensitiveField = (typeof TRUST_SENSITIVE_FIELDS)[number];
 /** The setting key each trust-sensitive field writes. */
 export const TRUST_SENSITIVE_FIELD_KEYS: Readonly<Record<TrustSensitiveField, string>> = {
   ollamaBaseUrl: 'melink.ollama.baseUrl',
+  ollamaLocalBaseUrl: 'melink.ollamaLocal.baseUrl',
   opencodeCliSource: 'melink.ollama.opencode.cliSource',
   opencodePath: 'melink.ollama.opencode.path',
   codexPath: 'melink.codex.path',

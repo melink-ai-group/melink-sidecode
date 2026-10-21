@@ -13,12 +13,14 @@ export function PermissionTrigger({
   selected,
   open,
   disabled,
+  title,
   onToggle
 }: {
   options: PermissionOption[];
   selected: PermissionLevel;
   open: boolean;
   disabled: boolean;
+  title?: string;
   onToggle: () => void;
 }): JSX.Element {
   const current = options.find((option) => option.level === selected) ?? options[0];
@@ -31,7 +33,7 @@ export function PermissionTrigger({
       aria-expanded={open}
       aria-controls="permission-panel"
       aria-label={`Permission level: ${current?.label ?? selected}`}
-      title={current?.label ?? selected}
+      title={title ?? current?.label ?? selected}
       disabled={disabled}
       onClick={onToggle}
     >
@@ -117,11 +119,13 @@ export function ModeTrigger({
   snapshot,
   open,
   disabled,
+  title,
   onToggle
 }: {
   snapshot: ModeSnapshot;
   open: boolean;
   disabled: boolean;
+  title?: string;
   onToggle: () => void;
 }): JSX.Element {
   const current = snapshot.options.find((option) => option.mode === snapshot.selected) ?? snapshot.options[0];
@@ -134,6 +138,7 @@ export function ModeTrigger({
       aria-expanded={open}
       aria-controls="mode-menu"
       aria-label={`Mode: ${current?.label ?? snapshot.selected}`}
+      title={title}
       disabled={disabled}
       onClick={onToggle}
     >
