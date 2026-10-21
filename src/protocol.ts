@@ -186,6 +186,13 @@ export interface SettingsSnapshot {
    * accepted; a field with a message was never persisted.
    */
   saveErrors?: Partial<Record<keyof SettingsPatch, string>>;
+  /**
+   * Field-keyed notices for a field that was saved somewhere other than the
+   * requested scope — for example a trust-sensitive setting written to the
+   * user's own settings during a "Save to workspace". The value *was*
+   * persisted, so this is a notice, not an error.
+   */
+  saveNotices?: Partial<Record<keyof SettingsPatch, string>>;
 }
 
 /** One SideCode-managed skill CLI (local path or bundled download). */
@@ -422,9 +429,29 @@ export type HostToWebviewMessage =
   /**
    * Result of turning zvec-grep on or off. `requested` is the choice still in
    * flight while `pending` is true, so the checkbox can follow the click.
+   *
+   * `field` / `fieldMessage` carry a refused path: the toggle writes outside
+   * the settings patch, so the refusal is reported on the path field rather
+   * than only in the result strip.
    */
-  | { type: 'zvecGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
-  | { type: 'astGrep'; pending: boolean; requested?: boolean; ok?: boolean; message?: string }
+  | {
+      type: 'zvecGrep';
+      pending: boolean;
+      requested?: boolean;
+      ok?: boolean;
+      message?: string;
+      field?: 'zvecGrepPath' | 'astGrepPath';
+      fieldMessage?: string;
+    }
+  | {
+      type: 'astGrep';
+      pending: boolean;
+      requested?: boolean;
+      ok?: boolean;
+      message?: string;
+      field?: 'zvecGrepPath' | 'astGrepPath';
+      fieldMessage?: string;
+    }
   | { type: 'astGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   | { type: 'zvecGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   /** The capability descriptor + effective settings for one provider+model. */

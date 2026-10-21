@@ -21,9 +21,25 @@ export interface SettingsScreenProps {
   onUpgradeOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   onInstallOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  zvecGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
+  zvecGrep?: {
+    pending: boolean;
+    requested?: boolean;
+    ok?: boolean;
+    message?: string;
+    /** The field a refused path belongs to, when the host refused one. */
+    field?: 'zvecGrepPath' | 'astGrepPath';
+    fieldMessage?: string;
+  };
   onSetZvecGrep: (enabled: boolean, draft?: { cliSource: 'local' | 'bundled'; path: string }) => void;
-  astGrep?: { pending: boolean; requested?: boolean; ok?: boolean; message?: string };
+  astGrep?: {
+    pending: boolean;
+    requested?: boolean;
+    ok?: boolean;
+    message?: string;
+    /** The field a refused path belongs to, when the host refused one. */
+    field?: 'zvecGrepPath' | 'astGrepPath';
+    fieldMessage?: string;
+  };
   onSetAstGrep: (enabled: boolean, draft?: { cliSource: 'local' | 'bundled'; path: string }) => void;
   astGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   onInstallAstGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;

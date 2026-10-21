@@ -13,7 +13,6 @@ import { installOpencodeRelease, type OpencodeInstallResult } from './backends/o
 import {
   bundledOpencodeExecutable,
   opencodeInstallDirFor,
-  readOpencodeCliSource,
   resolveOpencodeExecutable,
   type OpencodeCliSource
 } from './backends/opencode/resolve';
@@ -28,14 +27,12 @@ import { installAstGrepRelease, type AstGrepInstallResult } from './backends/ast
 import {
   astGrepInstallDirFor,
   bundledAstGrepExecutable,
-  readAstGrepCliSource,
   resolveAstGrepExecutable,
   type AstGrepCliSource
 } from './backends/astGrep/resolve.ts';
 import {
   bundledZvecGrepExecutable,
   bundledZvecGrepPrefix,
-  readZvecGrepCliSource,
   resolveZvecGrepExecutable,
   type ZvecGrepCliSource
 } from './backends/zvecGrep/resolve.ts';
@@ -44,7 +41,21 @@ import { browserLaunchError } from './browser/skill.ts';
 import { validateInstalledCodex, type CodexVersionCheckResult } from './backends/codex/versionCheckRun.ts';
 import { browserSkillEnabledFor, configuredSettingValue } from './browser/policy.ts';
 import type { OpencodeCliProbe, SkillCliSnapshot } from './protocol';
-import { readSkillCliSource } from './backends/skillCli.ts';
+import { readSkillCliSource, skillCliPathError } from './backends/skillCli.ts';
+import { executablePathError, resolveExecutableCommand, resolveProbedExecutable } from './backends/executables.ts';
+import { keyAllowsWorkspaceScope } from './config/trust.ts';
+import { fieldSaveOutcome } from './config/settingsScope.ts';
+import {
+  readTrustedAstGrepCliSource,
+  readTrustedAstGrepPath,
+  readTrustedBaseUrl,
+  readTrustedCodexExecutable,
+  readTrustedCodexPath,
+  readTrustedOpencodeCliSource,
+  readTrustedOpencodePath,
+  readTrustedZvecGrepCliSource,
+  readTrustedZvecGrepPath
+} from './config/settings.ts';
 import {
   CONTEXT_SECTION,
   DEFAULT_CONTEXT_SETTINGS,
@@ -62,9 +73,15 @@ import {
  * state, output channels, logs, or error text — `snapshot()` reports only
  * `hasToken`, so a stored value can never be rendered back into the DOM.
  *
- * Reads use VS Code's normal merge (workspace overrides user). The primary Save
- * always writes user (global) settings; when any workspace override exists, the
- * screen can also Save to workspace.
+ * ## Scope
+ *
+ * Ordinary settings use VS Code's normal merge (workspace overrides user).
+ * The trust-sensitive settings — the ones that decide where a credential is
+ * sent, which binary is spawned, and what the permission default is — are
+ * read from the user's own settings only and are only ever written to the
+ * user's own settings. A workspace override for one of them is ignored, and
+ * a workspace save for one of them is refused with a per-key message instead
+ * of silently doing nothing.
  */
 
 const OLLAMA_SECTION = 'melink.ollama';
@@ -115,11 +132,30 @@ export { DEFAULT_MODES };
 /** Where a settings patch is written. */
 export type SettingsSaveTarget = 'global' | 'workspace';
 
+/**
+ * A refused field, named by the screen's own field key.
+ *
+ * The skill toggles (`setZvecGrep` / `setAstGrep`) write outside the settings
+ * patch, so a refused path is reported here instead of in `SaveResult.errors`.
+ * The screen shows it on the path field, exactly as it shows a refused save.
+ */
+export interface SkillFieldError {
+  /** The `SettingsPatch` field the error belongs to. */
+  field: 'zvecGrepPath' | 'astGrepPath';
+  /** The message to show on the field. */
+  message: string;
+}
+
 /** Outcome of validating and writing one patch. */
 export interface SaveResult {
   ok: boolean;
   /** Field-keyed messages; a field with a message is never persisted. */
   errors: Partial<Record<keyof SettingsPatch, string>>;
+  /**
+   * Field-keyed notices: the field was persisted, but somewhere other than the
+   * requested scope (a trust-sensitive setting during a workspace save).
+   */
+  notices?: Partial<Record<keyof SettingsPatch, string>>;
 }
 
 export class SettingsService {
@@ -129,9 +165,13 @@ export class SettingsService {
   ) {}
 
   /**
-   * Effective scope for the header: `workspace` when any SideCode key is set in
-   * workspace (or folder) settings — those values win on read — otherwise
-   * `global`. Primary Save always writes global regardless.
+   * Effective scope for the header: `workspace` when any SideCode key that
+   * honours workspace scope is set in workspace (or folder) settings — those
+   * values win on read — otherwise `global`. Primary Save always writes global
+   * regardless.
+   *
+   * A trust-sensitive key never counts: its workspace value is ignored, so
+   * the screen must not claim the workspace is in charge of it.
    */
   private targetName(config: vscode.WorkspaceConfiguration): 'workspace' | 'global' {
     return this.hasWorkspaceSettings(config) ? 'workspace' : 'global';
@@ -140,6 +180,9 @@ export class SettingsService {
   /** True when any managed key has a workspace or folder override. */
   private hasWorkspaceSettings(config: vscode.WorkspaceConfiguration): boolean {
     for (const key of SETTINGS_KEYS) {
+      if (!keyAllowsWorkspaceScope(key)) {
+        continue;
+      }
       const inspected = config.inspect(key);
       if (inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined) {
         return true;
@@ -152,6 +195,40 @@ export class SettingsService {
     return scope === 'workspace'
       ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global;
+  }
+
+  /**
+   * The target one key is written to.
+   *
+   * A trust-sensitive key is always written to the user's own settings, even
+   * when the screen asked for a workspace save: the value would be ignored on
+   * the next read, so writing it to the workspace would look like it worked
+   * and change nothing.
+   */
+  private targetForKey(key: string, scope: SettingsSaveTarget): vscode.ConfigurationTarget {
+    return fieldSaveOutcome(key, scope).scope === 'global'
+      ? vscode.ConfigurationTarget.Global
+      : vscode.ConfigurationTarget.Workspace;
+  }
+
+  /**
+   * Record a notice when a trust-sensitive field was redirected to the user's
+   * own settings during a workspace save.
+   *
+   * The value *was* persisted, so this is a notice rather than an error: the
+   * screen tells the user where the value went instead of pretending the
+   * workspace write succeeded.
+   */
+  private noticeForScope(
+    field: keyof SettingsPatch,
+    key: string,
+    scope: SettingsSaveTarget,
+    notices: Partial<Record<keyof SettingsPatch, string>>
+  ): void {
+    const outcome = fieldSaveOutcome(key, scope);
+    if (outcome.redirected && outcome.notice) {
+      notices[field] = outcome.notice;
+    }
   }
 
   /** The settings screen's read model. Async because the token check is. */
@@ -167,7 +244,9 @@ export class SettingsService {
     return {
       target: this.targetName(config),
       ollama: {
-        baseUrl: config.get<string>(`${OLLAMA_SECTION}.baseUrl`, 'https://ollama.com'),
+        // The base URL is trust-sensitive: it is where the bearer token goes,
+        // so only the user's own value is shown.
+        baseUrl: readTrustedBaseUrl(),
         defaultModel: config.get<string>(`${OLLAMA_SECTION}.defaultModel`, ''),
         hasToken,
         status: ollamaStatus.status,
@@ -180,7 +259,8 @@ export class SettingsService {
         detail: opencodeStatus.detail
       },
       codex: {
-        path: config.get<string>(`${CODEX_SECTION}.path`, 'codex'),
+        // The CLI path is trust-sensitive: it is the binary that is spawned.
+        path: readTrustedCodexPath(),
         defaultModel: config.get<string>(`${CODEX_SECTION}.defaultModel`, ''),
         status: codexStatus.status,
         detail: codexStatus.detail,
@@ -205,9 +285,15 @@ export class SettingsService {
    * an invalid value is never written; every control maps to a real write.
    * Defaults to user (global) settings; pass `workspace` only when the screen's
    * Save to workspace action runs.
+   *
+   * A trust-sensitive key (base URL, CLI path, CLI source, permission level)
+   * is always written to the user's own settings: a workspace write would be
+   * ignored on the next read, so it would look like it worked and change
+   * nothing. The screen learns the outcome from the echoed snapshot.
    */
   async save(patch: SettingsPatch, scope: SettingsSaveTarget = 'global'): Promise<SaveResult> {
     const errors: Partial<Record<keyof SettingsPatch, string>> = {};
+    const notices: Partial<Record<keyof SettingsPatch, string>> = {};
     const config = vscode.workspace.getConfiguration();
     const target = this.configurationTarget(scope);
 
@@ -216,16 +302,27 @@ export class SettingsService {
       if (!isHttpUrl(value)) {
         errors.ollamaBaseUrl = 'Enter a full URL, like https://ollama.com. This value was not saved.';
       } else {
-        await config.update(`${OLLAMA_SECTION}.baseUrl`, value, target);
+        await config.update(
+          `${OLLAMA_SECTION}.baseUrl`,
+          value,
+          this.targetForKey(`${OLLAMA_SECTION}.baseUrl`, scope)
+        );
+        this.noticeForScope('ollamaBaseUrl', `${OLLAMA_SECTION}.baseUrl`, scope, notices);
       }
     }
 
     if (patch.codexPath !== undefined) {
       const value = patch.codexPath.trim();
-      if (!value) {
-        errors.codexPath = 'Enter the CLI path or name. This value was not saved.';
+      const pathError = codexPathError(value);
+      if (pathError) {
+        errors.codexPath = pathError;
       } else {
-        await config.update(`${CODEX_SECTION}.path`, value, target);
+        await config.update(
+          `${CODEX_SECTION}.path`,
+          value,
+          this.targetForKey(`${CODEX_SECTION}.path`, scope)
+        );
+        this.noticeForScope('codexPath', `${CODEX_SECTION}.path`, scope, notices);
       }
     }
 
@@ -257,7 +354,12 @@ export class SettingsService {
       if (!PERMISSION_LEVELS.includes(patch.permissionLevel)) {
         errors.permissionLevel = 'Pick one of the listed permission levels. This value was not saved.';
       } else {
-        await config.update(`${DEFAULTS_SECTION}.permissionLevel`, patch.permissionLevel, target);
+        await config.update(
+          `${DEFAULTS_SECTION}.permissionLevel`,
+          patch.permissionLevel,
+          this.targetForKey(`${DEFAULTS_SECTION}.permissionLevel`, scope)
+        );
+        this.noticeForScope('permissionLevel', `${DEFAULTS_SECTION}.permissionLevel`, scope, notices);
       }
     }
 
@@ -289,7 +391,12 @@ export class SettingsService {
       if (patch.opencodeCliSource !== 'local' && patch.opencodeCliSource !== 'bundled') {
         errors.opencodeCliSource = 'Pick local machine or bundled. This value was not saved.';
       } else {
-        await config.update(`${OLLAMA_OPENCODE_SECTION}.cliSource`, patch.opencodeCliSource, target);
+        await config.update(
+          `${OLLAMA_OPENCODE_SECTION}.cliSource`,
+          patch.opencodeCliSource,
+          this.targetForKey(`${OLLAMA_OPENCODE_SECTION}.cliSource`, scope)
+        );
+        this.noticeForScope('opencodeCliSource', `${OLLAMA_OPENCODE_SECTION}.cliSource`, scope, notices);
       }
     }
 
@@ -301,7 +408,12 @@ export class SettingsService {
       if (pathError) {
         errors.opencodePath = pathError;
       } else {
-        await config.update(`${OLLAMA_OPENCODE_SECTION}.path`, patch.opencodePath.trim(), target);
+        await config.update(
+          `${OLLAMA_OPENCODE_SECTION}.path`,
+          patch.opencodePath.trim(),
+          this.targetForKey(`${OLLAMA_OPENCODE_SECTION}.path`, scope)
+        );
+        this.noticeForScope('opencodePath', `${OLLAMA_OPENCODE_SECTION}.path`, scope, notices);
       }
     }
 
@@ -358,24 +470,53 @@ export class SettingsService {
       await config.update(
         `${SKILLS_SECTION}.zvecGrep.cliSource`,
         readSkillCliSource(patch.zvecGrepCliSource),
-        target
+        this.targetForKey(`${SKILLS_SECTION}.zvecGrep.cliSource`, scope)
       );
+      this.noticeForScope('zvecGrepCliSource', `${SKILLS_SECTION}.zvecGrep.cliSource`, scope, notices);
     }
-    if (patch.zvecGrepPath !== undefined && (patch.zvecGrepCliSource ?? this.zvecCliSource(config)) === 'local') {
-      await config.update(`${SKILLS_SECTION}.zvecGrep.path`, patch.zvecGrepPath.trim() || 'zg', target);
+    if (patch.zvecGrepPath !== undefined && (patch.zvecGrepCliSource ?? this.zvecCliSource()) === 'local') {
+      // The same rule the codex and opencode paths use: a relative path (with
+      // a separator, or in the Windows drive-relative form) would name a file
+      // inside the repository, so the value is refused and never persisted.
+      const pathError = skillCliPathError(patch.zvecGrepPath, 'zg', 'zg CLI');
+      if (pathError) {
+        errors.zvecGrepPath = pathError;
+      } else {
+        await config.update(
+          `${SKILLS_SECTION}.zvecGrep.path`,
+          patch.zvecGrepPath.trim() || 'zg',
+          this.targetForKey(`${SKILLS_SECTION}.zvecGrep.path`, scope)
+        );
+        this.noticeForScope('zvecGrepPath', `${SKILLS_SECTION}.zvecGrep.path`, scope, notices);
+      }
     }
     if (patch.astGrepCliSource !== undefined) {
       await config.update(
         `${SKILLS_SECTION}.astGrep.cliSource`,
         readSkillCliSource(patch.astGrepCliSource),
-        target
+        this.targetForKey(`${SKILLS_SECTION}.astGrep.cliSource`, scope)
       );
+      this.noticeForScope('astGrepCliSource', `${SKILLS_SECTION}.astGrep.cliSource`, scope, notices);
     }
-    if (patch.astGrepPath !== undefined && (patch.astGrepCliSource ?? this.astCliSource(config)) === 'local') {
-      await config.update(`${SKILLS_SECTION}.astGrep.path`, patch.astGrepPath.trim() || 'ast-grep', target);
+    if (patch.astGrepPath !== undefined && (patch.astGrepCliSource ?? this.astCliSource()) === 'local') {
+      const pathError = skillCliPathError(patch.astGrepPath, 'ast-grep', 'ast-grep CLI');
+      if (pathError) {
+        errors.astGrepPath = pathError;
+      } else {
+        await config.update(
+          `${SKILLS_SECTION}.astGrep.path`,
+          patch.astGrepPath.trim() || 'ast-grep',
+          this.targetForKey(`${SKILLS_SECTION}.astGrep.path`, scope)
+        );
+        this.noticeForScope('astGrepPath', `${SKILLS_SECTION}.astGrep.path`, scope, notices);
+      }
     }
 
-    return { ok: Object.keys(errors).length === 0, errors };
+    return {
+      ok: Object.keys(errors).length === 0,
+      errors,
+      ...(Object.keys(notices).length > 0 ? { notices } : {})
+    };
   }
 
   /** Skills read model. Per-provider browser flags fall back to the legacy key. */
@@ -436,12 +577,12 @@ export class SettingsService {
   }
 
   /** Stored local path; ignored for spawns when `cliSource` is bundled. */
-  private opencodePathSetting(config: vscode.WorkspaceConfiguration): string {
-    return config.get<string>(`${OLLAMA_OPENCODE_SECTION}.path`, 'opencode') || 'opencode';
+  private opencodePathSetting(): string {
+    return readTrustedOpencodePath();
   }
 
-  private opencodeCliSource(config: vscode.WorkspaceConfiguration): OpencodeCliSource {
-    return readOpencodeCliSource(config.get<unknown>(`${OLLAMA_OPENCODE_SECTION}.cliSource`));
+  private opencodeCliSource(): OpencodeCliSource {
+    return readTrustedOpencodeCliSource();
   }
 
   private opencodeRoots(): { extensionPath: string; globalStoragePath: string } {
@@ -461,12 +602,12 @@ export class SettingsService {
     config: vscode.WorkspaceConfiguration
   ): Promise<SettingsSnapshot['opencode']> {
     const enabled = this.opencodeEnabled(config);
-    const cliSource = this.opencodeCliSource(config);
-    const localPath = this.opencodePathSetting(config);
+    const cliSource = this.opencodeCliSource();
+    const localPath = this.opencodePathSetting();
     const bundledPath = bundledOpencodeExecutable(this.opencodeRoots());
     const [local, bundled] = await Promise.all([
-      this.probeCli(localPath),
-      this.probeCli(bundledPath)
+      this.probeCli(localPath, 'opencode'),
+      this.probeCli(bundledPath, 'opencode')
     ]);
     const active = cliSource === 'bundled' ? bundled : local;
     const zvecGrep = await this.zvecGrepStatus();
@@ -482,11 +623,20 @@ export class SettingsService {
     };
   }
 
-  private async probeCli(executable: string): Promise<OpencodeCliProbe> {
-    const result = await probeOpencode(executable);
+  /**
+   * Probe one CLI path.
+   *
+   * The value is resolved through the shared executable rules first, so a
+   * relative path with a separator — or a Windows drive-relative path — is
+   * never spawned from the workspace. The probe reports the bare command name
+   * instead, and the screen shows that as the effective path.
+   */
+  private async probeCli(executable: string, fallback: string): Promise<OpencodeCliProbe> {
+    const command = resolveProbedExecutable(executable, fallback);
+    const result = await probeOpencode(command);
     return result.version !== undefined
-      ? { path: executable, status: result.status, version: result.version }
-      : { path: executable, status: result.status };
+      ? { path: command, status: result.status, version: result.version }
+      : { path: command, status: result.status };
   }
 
   private skillRoots(): { extensionPath: string; globalStoragePath: string } {
@@ -496,12 +646,12 @@ export class SettingsService {
     };
   }
 
-  private zvecCliSource(config: vscode.WorkspaceConfiguration): ZvecGrepCliSource {
-    return readZvecGrepCliSource(config.get<unknown>(`${SKILLS_SECTION}.zvecGrep.cliSource`));
+  private zvecCliSource(): ZvecGrepCliSource {
+    return readTrustedZvecGrepCliSource();
   }
 
-  private zvecPathSetting(config: vscode.WorkspaceConfiguration): string {
-    return config.get<string>(`${SKILLS_SECTION}.zvecGrep.path`, 'zg') || 'zg';
+  private zvecPathSetting(): string {
+    return readTrustedZvecGrepPath();
   }
 
   private zvecEnabled(config: vscode.WorkspaceConfiguration): boolean {
@@ -516,21 +666,24 @@ export class SettingsService {
     return config.get<boolean>(`${OLLAMA_OPENCODE_SECTION}.zvecGrep`, false) === true;
   }
 
-  private astCliSource(config: vscode.WorkspaceConfiguration): AstGrepCliSource {
-    return readAstGrepCliSource(config.get<unknown>(`${SKILLS_SECTION}.astGrep.cliSource`));
+  private astCliSource(): AstGrepCliSource {
+    return readTrustedAstGrepCliSource();
   }
 
-  private astPathSetting(config: vscode.WorkspaceConfiguration): string {
-    return config.get<string>(`${SKILLS_SECTION}.astGrep.path`, 'ast-grep') || 'ast-grep';
+  private astPathSetting(): string {
+    return readTrustedAstGrepPath();
   }
 
   private async zvecSkillSnapshot(config: vscode.WorkspaceConfiguration): Promise<SkillCliSnapshot> {
-    const cliSource = this.zvecCliSource(config);
-    const localPath = this.zvecPathSetting(config);
+    const cliSource = this.zvecCliSource();
+    const localPath = this.zvecPathSetting();
     const bundledPath = bundledZvecGrepExecutable(this.skillRoots());
+    // The `zg` shim is a `.cmd` on Windows, so the fallback the probe uses
+    // when a value is refused matches the resolver's own fallback.
+    const fallback = process.platform === 'win32' ? 'zg.cmd' : 'zg';
     const [local, bundled, detected] = await Promise.all([
-      this.probeSkillCli(localPath),
-      this.probeSkillCli(bundledPath),
+      this.probeSkillCli(localPath, fallback),
+      this.probeSkillCli(bundledPath, fallback),
       detectZvecGrep({
         source: cliSource,
         path: localPath,
@@ -552,12 +705,12 @@ export class SettingsService {
   }
 
   private async astSkillSnapshot(config: vscode.WorkspaceConfiguration): Promise<SkillCliSnapshot> {
-    const cliSource = this.astCliSource(config);
-    const localPath = this.astPathSetting(config);
+    const cliSource = this.astCliSource();
+    const localPath = this.astPathSetting();
     const bundledPath = bundledAstGrepExecutable(this.skillRoots());
     const [local, bundled, detected] = await Promise.all([
-      this.probeSkillCli(localPath),
-      this.probeSkillCli(bundledPath),
+      this.probeSkillCli(localPath, 'ast-grep'),
+      this.probeSkillCli(bundledPath, 'ast-grep'),
       detectAstGrep({
         source: cliSource,
         path: localPath,
@@ -578,18 +731,25 @@ export class SettingsService {
     };
   }
 
-  private async probeSkillCli(executable: string): Promise<OpencodeCliProbe> {
-    const result = await probeOpencode(executable);
+  /**
+   * Probe one skill CLI path.
+   *
+   * The value is resolved through the shared executable rules first, so a
+   * relative path with a separator — or a Windows drive-relative path — is
+   * never spawned from the workspace.
+   */
+  private async probeSkillCli(executable: string, fallback: string): Promise<OpencodeCliProbe> {
+    const command = resolveProbedExecutable(executable, fallback);
+    const result = await probeOpencode(command);
     return result.version !== undefined
-      ? { path: executable, status: result.status, version: result.version }
-      : { path: executable, status: result.status };
+      ? { path: command, status: result.status, version: result.version }
+      : { path: command, status: result.status };
   }
 
   private async zvecGrepStatus(): Promise<{ enabled: boolean; cli: 'missing' | 'installed' }> {
-    const config = vscode.workspace.getConfiguration();
     return detectZvecGrep({
-      source: this.zvecCliSource(config),
-      path: this.zvecPathSetting(config),
+      source: this.zvecCliSource(),
+      path: this.zvecPathSetting(),
       roots: this.skillRoots()
     });
   }
@@ -598,18 +758,34 @@ export class SettingsService {
    * Turn zvec-grep's OpenCode integration on or off. The stored flag is global,
    * matching the user OpenCode config the installer edits, and it is written
    * only after the CLI succeeds.
+   *
+   * The draft path is validated with the same rule the save path applies
+   * before it is persisted: a relative path — with a separator, or in the
+   * Windows drive-relative form — would name a file inside the repository, so
+   * the value is refused and never stored. The refusal is surfaced on the
+   * path field, not only in the result strip.
    */
   async setZvecGrep(
     enabled: boolean,
     draft?: { cliSource?: ZvecGrepCliSource; path?: string }
-  ): Promise<ZvecGrepApplyResult> {
+  ): Promise<ZvecGrepApplyResult & { fieldError?: SkillFieldError }> {
     const config = vscode.workspace.getConfiguration();
-    const source = draft?.cliSource ?? this.zvecCliSource(config);
-    const path = draft?.path ?? this.zvecPathSetting(config);
+    const source = draft?.cliSource ?? this.zvecCliSource();
+    const path = draft?.path ?? this.zvecPathSetting();
     if (draft?.cliSource !== undefined) {
       await config.update(`${SKILLS_SECTION}.zvecGrep.cliSource`, source, vscode.ConfigurationTarget.Global);
     }
     if (draft?.path !== undefined && source === 'local') {
+      const pathError = skillCliPathError(draft.path, 'zg', 'zg CLI');
+      if (pathError) {
+        return {
+          ok: false,
+          enabled: false,
+          cli: 'missing',
+          message: pathError,
+          fieldError: { field: 'zvecGrepPath', message: pathError }
+        };
+      }
       await config.update(`${SKILLS_SECTION}.zvecGrep.path`, path.trim() || 'zg', vscode.ConfigurationTarget.Global);
     }
     const result = await applyZvecGrep(enabled, {
@@ -624,17 +800,34 @@ export class SettingsService {
     return result;
   }
 
+  /**
+   * Turn ast-grep's OpenCode integration on or off.
+   *
+   * The draft path is validated with the same rule the save path applies
+   * before it is persisted, and a refusal is surfaced on the path field.
+   */
   async setAstGrep(
     enabled: boolean,
     draft?: { cliSource?: AstGrepCliSource; path?: string }
-  ): Promise<AstGrepApplyResult> {
+  ): Promise<AstGrepApplyResult & { fieldError?: SkillFieldError }> {
     const config = vscode.workspace.getConfiguration();
-    const source = draft?.cliSource ?? this.astCliSource(config);
-    const path = draft?.path ?? this.astPathSetting(config);
+    const source = draft?.cliSource ?? this.astCliSource();
+    const path = draft?.path ?? this.astPathSetting();
     if (draft?.cliSource !== undefined) {
       await config.update(`${SKILLS_SECTION}.astGrep.cliSource`, source, vscode.ConfigurationTarget.Global);
     }
     if (draft?.path !== undefined && source === 'local') {
+      const pathError = skillCliPathError(draft.path, 'ast-grep', 'ast-grep CLI');
+      if (pathError) {
+        return {
+          ok: false,
+          enabled: false,
+          cli: 'missing',
+          path,
+          message: pathError,
+          fieldError: { field: 'astGrepPath', message: pathError }
+        };
+      }
       await config.update(
         `${SKILLS_SECTION}.astGrep.path`,
         path.trim() || 'ast-grep',
@@ -658,8 +851,8 @@ export class SettingsService {
     path?: string;
   }): Promise<AstGrepInstallResult> {
     const config = vscode.workspace.getConfiguration();
-    const source = draft?.cliSource ?? this.astCliSource(config);
-    const path = draft?.path ?? this.astPathSetting(config);
+    const source = draft?.cliSource ?? this.astCliSource();
+    const path = draft?.path ?? this.astPathSetting();
     const installDir = astGrepInstallDirFor({ source, path, roots: this.skillRoots() });
     const executable = resolveAstGrepExecutable({ source, path, roots: this.skillRoots() });
     const probe = await probeOpencode(executable);
@@ -681,9 +874,8 @@ export class SettingsService {
     cliSource?: AstGrepCliSource;
     path?: string;
   }): Promise<AstGrepInstallResult> {
-    const config = vscode.workspace.getConfiguration();
-    const source = draft?.cliSource ?? this.astCliSource(config);
-    const path = draft?.path ?? this.astPathSetting(config);
+    const source = draft?.cliSource ?? this.astCliSource();
+    const path = draft?.path ?? this.astPathSetting();
     const installDir = astGrepInstallDirFor({ source, path, roots: this.skillRoots() });
     return installAstGrepRelease({ installDir });
   }
@@ -692,9 +884,8 @@ export class SettingsService {
     cliSource?: ZvecGrepCliSource;
     path?: string;
   }): Promise<{ ok: boolean; message: string; path?: string }> {
-    const config = vscode.workspace.getConfiguration();
-    const source = draft?.cliSource ?? this.zvecCliSource(config);
-    const path = draft?.path ?? this.zvecPathSetting(config);
+    const source = draft?.cliSource ?? this.zvecCliSource();
+    const path = draft?.path ?? this.zvecPathSetting();
     const roots = this.skillRoots();
     const executable = resolveZvecGrepExecutable({ source, path, roots });
     const probe = await probeOpencode(executable);
@@ -753,7 +944,7 @@ export class SettingsService {
     path?: string;
   }): Promise<OpencodeInstallResult> {
     const config = vscode.workspace.getConfiguration();
-    const target = this.opencodeActionTarget(config, draft);
+    const target = this.opencodeActionTarget(draft);
     const probe = await probeOpencode(target.executable);
     if (probe.status === 'detected') {
       return { ok: true, message: 'opencode is already installed.' };
@@ -771,7 +962,7 @@ export class SettingsService {
     path?: string;
   }): Promise<OpencodeUpgradeResult> {
     const config = vscode.workspace.getConfiguration();
-    const target = this.opencodeActionTarget(config, draft);
+    const target = this.opencodeActionTarget(draft);
     const before = await probeOpencode(target.executable);
     if (before.status !== 'detected') {
       return { ok: false, message: 'opencode is not connected. Check the path, then try again.' };
@@ -798,14 +989,13 @@ export class SettingsService {
 
   /** Resolve which CLI location Install/Update should write. */
   private opencodeActionTarget(
-    config: vscode.WorkspaceConfiguration,
     draft?: { cliSource?: OpencodeCliSource; path?: string }
   ): { source: OpencodeCliSource; path: string; executable: string } {
-    const source = draft?.cliSource ?? this.opencodeCliSource(config);
+    const source = draft?.cliSource ?? this.opencodeCliSource();
     const path =
       draft?.path !== undefined && draft.path.trim().length > 0
         ? draft.path.trim()
-        : this.opencodePathSetting(config);
+        : this.opencodePathSetting();
     const executable = resolveOpencodeExecutable({
       source,
       path,
@@ -870,7 +1060,9 @@ export class SettingsService {
    * Never throws, and never returns a credential.
    */
   async validateCodexVersion(): Promise<CodexVersionCheckResult> {
-    const executable = vscode.workspace.getConfiguration(CODEX_SECTION).get<string>('path', 'codex') || 'codex';
+    // The CLI path is trust-sensitive: it is the binary that is spawned, so
+    // only the user's own value is used.
+    const executable = readTrustedCodexExecutable();
     const folder = vscode.workspace.workspaceFolders?.[0];
     try {
       const result = await validateInstalledCodex({
@@ -991,4 +1183,23 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The inline message for a refused Codex CLI path, or `undefined` when the
+ * value may be stored.
+ *
+ * A relative path with a separator is refused: the child process runs with
+ * the workspace as its working directory, so such a value would name a file
+ * inside the repository. A Windows drive-relative value (`C:evil.exe`) is
+ * refused for the same reason: Windows resolves it against the current
+ * directory of that drive.
+ */
+function codexPathError(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Enter the CLI path or name. This value was not saved.';
+  }
+  const resolved = resolveExecutableCommand(trimmed, 'codex');
+  return resolved.ok ? undefined : executablePathError(resolved.reason, 'Codex CLI');
 }

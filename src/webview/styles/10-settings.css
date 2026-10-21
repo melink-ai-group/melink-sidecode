@@ -233,6 +233,14 @@
   color: var(--vscode-errorForeground);
 }
 
+.field-msg--notice {
+  color: var(--vscode-descriptionForeground);
+}
+
+.field-msg--notice .ico {
+  color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-descriptionForeground));
+}
+
 .field-msg--ok .ico {
   color: var(--melink-success);
 }
