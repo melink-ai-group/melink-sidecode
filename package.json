@@ -316,6 +316,7 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
+    "check:hex": "node scripts/check-no-hex.mjs",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "schemas:generate": "codex app-server generate-ts --out ./schemas",
     "vscode:prepublish": "npm run build",

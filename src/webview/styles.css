@@ -843,7 +843,7 @@ html body {
   border-radius: 999px;
   background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
   color: var(--vscode-foreground);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 1px 3px var(--vscode-widget-shadow, transparent);
 }
 
 .busy-corner .spinner {
@@ -883,7 +883,7 @@ html body {
   font: inherit;
   text-align: left;
   cursor: pointer;
-  box-shadow: 0 10px 16px color-mix(in srgb, var(--vscode-sideBar-background, #000) 55%, transparent);
+  box-shadow: 0 10px 16px color-mix(in srgb, var(--vscode-widget-shadow, transparent) 55%, transparent);
   animation: user-pin-in 180ms ease;
 }
 
@@ -892,7 +892,7 @@ html body {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
-  color: white;
+  color: var(--melink-on-primary);
   font-size: 13px;
   line-height: 1.5;
   padding: 10px 12px;
@@ -902,8 +902,8 @@ html body {
 }
 
 .user-pin__text--fade {
-  -webkit-mask-image: linear-gradient(to bottom, #000 70%, #000 88%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 70%, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, var(--melink-mask) 70%, var(--melink-mask) 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, var(--melink-mask) 70%, var(--melink-mask) 88%, transparent 100%);
 }
 
 .user-pin:hover .user-pin__text {
@@ -1016,12 +1016,12 @@ html body {
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-lg, 8px);
   background: color-mix(in srgb, var(--vscode-list-hoverBackground) 75%, transparent);
-  color: white;
+  color: var(--melink-on-primary);
 }
 
 .turn-user-box > .turn-body {
   flex: 1 1 auto;
-  color: white;
+  color: var(--melink-on-primary);
 }
 
 .turn--user .turn-body .md,
@@ -1029,7 +1029,7 @@ html body {
 .turn--user .turn-body .md__heading,
 .turn--user .turn-body .md__list,
 .turn--user .turn-body .md__quote {
-  color: white;
+  color: var(--melink-on-primary);
 }
 
 .turn--user .turn-body .md > * {
@@ -1990,8 +1990,8 @@ html body {
 }
 
 .btn--primary:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
-  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  border-color: color-mix(in srgb, var(--melink-primary) 85%, var(--melink-scrim));
+  background: color-mix(in srgb, var(--melink-primary) 85%, var(--melink-scrim));
 }
 
 .btn--danger {
@@ -2046,7 +2046,7 @@ html body {
 }
 
 .icon-btn.icon-btn--primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  background: color-mix(in srgb, var(--melink-primary) 85%, var(--melink-scrim));
   color: var(--melink-surface);
 }
 
@@ -2066,7 +2066,7 @@ html body {
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
   background: var(--vscode-editorWidget-background);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow, #000) 35%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow, transparent) 35%, transparent);
   overflow: hidden;
 }
 
@@ -2367,7 +2367,7 @@ html body {
 }
 
 .composer-row .icon-btn.icon-btn--primary.composer-action:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--composer-mode) 85%, black);
+  background: color-mix(in srgb, var(--composer-mode) 85%, var(--melink-scrim));
   color: var(--composer-mode-ink);
 }
 
@@ -2566,7 +2566,7 @@ html body {
   border: 0;
   border-radius: var(--melink-radius-sm, 4px);
   background: var(--melink-yellow);
-  color: #1a1604;
+  color: var(--melink-on-accent);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -2574,7 +2574,7 @@ html body {
 }
 
 .question-card__continue:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--melink-yellow) 85%, black);
+  background: color-mix(in srgb, var(--melink-yellow) 85%, var(--melink-scrim));
 }
 
 .question-card__continue:disabled {
@@ -2656,8 +2656,8 @@ html body {
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, #000 62%, transparent);
-  color: #fff;
+  background: color-mix(in srgb, var(--melink-scrim) 62%, transparent);
+  color: var(--melink-on-primary);
   cursor: pointer;
 }
 
@@ -2667,7 +2667,7 @@ html body {
 }
 
 .attachment-remove:hover {
-  background: color-mix(in srgb, #000 80%, transparent);
+  background: color-mix(in srgb, var(--melink-scrim) 80%, transparent);
 }
 
 .attachment-remove:focus-visible {
@@ -2683,7 +2683,7 @@ html body {
   align-items: center;
   justify-content: center;
   padding: 28px;
-  background: color-mix(in srgb, #000 72%, transparent);
+  background: color-mix(in srgb, var(--melink-scrim) 72%, transparent);
 }
 
 .image-viewer__dialog {
@@ -2711,8 +2711,8 @@ html body {
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, #000 62%, transparent);
-  color: #fff;
+  background: color-mix(in srgb, var(--melink-scrim) 62%, transparent);
+  color: var(--melink-on-primary);
   cursor: pointer;
 }
 
@@ -2744,7 +2744,7 @@ html body {
 
 .image-viewer__close:hover,
 .image-viewer__nav:hover {
-  background: color-mix(in srgb, #000 80%, transparent);
+  background: color-mix(in srgb, var(--melink-scrim) 80%, transparent);
 }
 
 .image-viewer__close:focus-visible,
@@ -4340,8 +4340,8 @@ html body {
 }
 
 .decision--primary:hover {
-  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
-  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  border-color: color-mix(in srgb, var(--melink-primary) 85%, var(--melink-scrim));
+  background: color-mix(in srgb, var(--melink-primary) 85%, var(--melink-scrim));
 }
 
 .decision--reject {
@@ -4577,7 +4577,7 @@ html body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: color-mix(in srgb, #000 72%, transparent);
+  background: color-mix(in srgb, var(--melink-scrim) 72%, transparent);
 }
 
 .restore-modal__dialog {
@@ -4662,7 +4662,7 @@ html body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: color-mix(in srgb, #000 72%, transparent);
+  background: color-mix(in srgb, var(--melink-scrim) 72%, transparent);
 }
 
 .mode-modal__dialog {
@@ -4675,7 +4675,7 @@ html body {
   border-radius: var(--melink-radius-md, 6px);
   background: var(--vscode-editorWidget-background);
   color: var(--vscode-foreground);
-  box-shadow: 0 12px 40px color-mix(in srgb, #000 45%, transparent);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--melink-scrim) 45%, transparent);
 }
 
 .mode-modal__title {
@@ -5667,8 +5667,8 @@ button.context-meter:hover {
 }
 
 .plan-card__build:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
-  background: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
+  border-color: color-mix(in srgb, var(--melink-primary-blue) 85%, var(--melink-scrim));
+  background: color-mix(in srgb, var(--melink-primary-blue) 85%, var(--melink-scrim));
 }
 
 .plan-revising {
@@ -5992,8 +5992,8 @@ button.context-meter:hover {
 }
 
 .todo__resume:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, black);
-  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, black);
+  border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, var(--melink-scrim));
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 85%, var(--melink-scrim));
   color: var(--vscode-editor-background);
 }
 
@@ -6094,14 +6094,14 @@ button.context-meter:hover {
 .changes-review__review {
   border-color: var(--melink-primary);
   background: var(--melink-primary);
-  color: #fff;
+  color: var(--melink-on-primary);
   font-weight: 600;
 }
 
 .changes-review__review:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
-  background: color-mix(in srgb, var(--melink-primary) 85%, black);
-  color: #fff;
+  border-color: color-mix(in srgb, var(--melink-primary) 85%, var(--melink-scrim));
+  background: color-mix(in srgb, var(--melink-primary) 85%, var(--melink-scrim));
+  color: var(--melink-on-primary);
 }
 
 /* The spacer pushes the file actions right; narrow sidebars wrap instead of clipping. */
