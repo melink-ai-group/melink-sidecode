@@ -14,6 +14,7 @@
  */
 
 import type { ContextSettings } from './contextSettings.ts';
+import type { ConventionSummary } from './conventions.ts';
 import type {
   ActiveEditorState,
   EditorState,
@@ -197,6 +198,20 @@ function shapeItem(shape: ProjectShape, excluded: boolean): ContextItemView {
   };
 }
 
+/**
+ * Conventions are part of the shape category: they are derived from the same
+ * bounded walk, so turning shape off for a turn drops them too.
+ */
+function conventionsItem(conventions: ConventionSummary, excluded: boolean): ContextItemView {
+  return {
+    id: 'conventions',
+    label: 'Coding conventions',
+    meta: `${conventions.facts.length} facts`,
+    excerpt: conventions.text,
+    excluded
+  };
+}
+
 function editorItem(active: ActiveEditorState, attached: boolean, excluded: boolean): ContextItemView {
   const label = active.relativePath ?? active.absolutePath;
   if (active.excluded) {
@@ -346,10 +361,13 @@ export function buildContextView(
   );
 
   const shapeExcluded = has(exclusions, categoryExclusionKey('shape'));
-  const shapeItems =
-    shape.tree.length > 0 || shape.files.length > 0
-      ? [shapeItem(shape, excludedIn('shape', 'tree'))]
-      : [];
+  const shapeItems: ContextItemView[] = [];
+  if (shape.tree.length > 0 || shape.files.length > 0) {
+    shapeItems.push(shapeItem(shape, excludedIn('shape', 'tree')));
+  }
+  if (snapshot.conventions) {
+    shapeItems.push(conventionsItem(snapshot.conventions, excludedIn('shape', 'conventions')));
+  }
 
   const editorExcluded = has(exclusions, categoryExclusionKey('editor'));
   const activeItemExcluded = editorExcluded || has(exclusions, itemExclusionKey('editor', 'active'));
@@ -520,16 +538,6 @@ function filterInstructions(
   return { ...snapshot.instructions, documents, noneFound: documents.length === 0 };
 }
 
-function filterShape(
-  snapshot: ProjectSnapshot,
-  exclusions: ReadonlySet<string> | readonly string[]
-): ProjectShape {
-  if (!keepItem(exclusions, 'shape', 'tree')) {
-    return EMPTY_SHAPE;
-  }
-  return snapshot.shape;
-}
-
 /**
  * Apply the per-turn exclusion set to a snapshot, so the text the delivery layer
  * sends is exactly the reduced set the strip and panel showed. Excluding a file
@@ -565,10 +573,17 @@ export function applyContextExclusions(
     return snapshot;
   }
   const editor = filterEditor(snapshot.editor ?? EMPTY_EDITOR, exclusions);
+  const shapeOff = has(exclusions, categoryExclusionKey('shape'));
+  const shape = shapeOff || !keepItem(exclusions, 'shape', 'tree') ? EMPTY_SHAPE : snapshot.shape;
+  // Conventions follow the shape category, but not the tree row: excluding only
+  // the tree row keeps the conventions row (and its block) exactly as the view
+  // shows it. Excluding the category drops both.
+  const keepConventions = !shapeOff && keepItem(exclusions, 'shape', 'conventions');
   return {
     ...snapshot,
     instructions: filterInstructions(snapshot, exclusions),
-    shape: filterShape(snapshot, exclusions),
+    shape,
+    conventions: keepConventions ? snapshot.conventions : undefined,
     editor
   };
 }

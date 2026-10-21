@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ContextDelivery } from './delivery.ts';
+import { categoryExclusionKey } from './contextView.ts';
+import type { ConventionSummary } from './conventions.ts';
 import type {
   GetSnapshotInput,
   ProjectContextReads,
@@ -333,4 +335,31 @@ test('no snapshot at all means no frontend stack', async () => {
   const turn = await delivery.forTurn('ollama:no-context');
   assert.equal(turn.frontendStack, undefined);
   assert.equal(turn.delta, undefined);
+});
+
+function conventions(): ConventionSummary {
+  const text = 'Conventions:\n- Formatter: Prettier (.prettierrc)';
+  return {
+    text,
+    facts: [{ label: 'Formatter', value: 'Prettier', source: '.prettierrc' }],
+    truncated: false,
+    bytes: Buffer.byteLength(text, 'utf8'),
+    samplesRead: 1
+  };
+}
+
+class ConventionsReads extends FakeReads {
+  override async getSnapshot(input?: GetSnapshotInput): Promise<ProjectSnapshot> {
+    return { ...(await super.getSnapshot(input)), conventions: conventions() };
+  }
+}
+
+test('excluding the shape category removes the conventions block from delivery', async () => {
+  const delivery = new ContextDelivery({ reads: new ConventionsReads() });
+  const plain = await delivery.snapshot();
+  assert.match(plain.payload.snapshot!, /Conventions:/);
+
+  delivery.setExclusions([categoryExclusionKey('shape')]);
+  const excluded = await delivery.snapshot();
+  assert.doesNotMatch(excluded.payload.snapshot!, /Conventions:/);
 });
