@@ -31,6 +31,27 @@ Steps 44–46 repeat the project-awareness pass for the opencode off/on paths.
 Steps 47–58 (§4c) cover change review, conflict handling, checkpoint restore,
 reload mid-review, approval interaction, and journal pruning, on both providers.
 
+### Browser tools (optional skill)
+
+There is **no dev/serve/start script**, no root `index.html`, and no base URL in
+this repository; the sidebar is a webview that only renders inside VS Code.
+Browser verification here uses an **external URL** (or a server you started
+yourself), never a presumed localhost app. See [browser.md](browser.md) for the
+readiness rules, assertion tool, and screenshot storage.
+
+- [ ] B1. Unit checks: `npm test` covers navigation readiness (ready after N
+      attempts; connection refused, DNS, and deadline outcomes), screenshot
+      naming/writes, and the assertion tool without VS Code or network.
+- [ ] B2. Extension loop: `npm run watch` + `F5`, then point the agent at an
+      external URL. A reachable page reports `Opened <url>`; an unreachable page
+      reports `<url> is not reachable: <reason>` (never a successful open).
+- [ ] B3. Assertions: `browser_assert` passes for a present selector/text and
+      the exact URL/status, and fails with an explicit mismatch otherwise. With
+      no page open it says the browser is not open; navigate first.
+- [ ] B4. Screenshots: `browser_snapshot` keeps the inline image and writes a
+      PNG under `.melink/reports/browser/` (gitignored, local only). The text
+      shows the absolute path plus the URL/title.
+
 ---
 
 ## 0. Setup
