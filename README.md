@@ -182,6 +182,7 @@ npm test           # node unit suite, then the jsdom/RTL webview suite
 npm run test:node  # node --experimental-strip-types --test "src/**/*.test.ts"
 npm run test:dom   # vitest run (src/webview/**/*.dom.test.tsx)
 npm run verify     # docs/manual-test.md version/counts vs the tree (no test run)
+npm run visual     # dev-only seeded Chromium screenshots
 ```
 
 `npm run typecheck` and `npm test` are the required quality gates. CI runs both
@@ -205,6 +206,12 @@ suite itself. CI runs it after `npm run typecheck` and `npm test`.
 The browser tools (agent-driven page checks) are documented in
 [docs/browser.md](docs/browser.md): this repository has no dev server or base
 URL, so those tools need an external URL.
+
+`npm run visual` renders the built webview with mocked host state in installed
+Chrome or Edge and writes PNGs, `manifest.json`, and `index.md` under
+`.melink/reports/visual/`. It is not part of the VSIX and does not use a real
+extension host. See the [visual harness runbook](docs/visual-harness.md) for
+prerequisites, screens, determinism, and limitations.
 
 ## Set up a provider
 

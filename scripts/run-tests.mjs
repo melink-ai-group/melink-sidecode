@@ -10,9 +10,16 @@ const nodeSuite = spawnSync(
   { cwd: root, stdio: 'inherit' }
 );
 
+const toolsSuite = spawnSync(
+  process.execPath,
+  ['--test', 'tools/**/*.test.mjs'],
+  { cwd: root, stdio: 'inherit' }
+);
+
 const domSuite = spawnSync(process.execPath, [join(root, 'node_modules', 'vitest', 'vitest.mjs'), 'run'], {
   cwd: root,
   stdio: 'inherit'
 });
 
-process.exitCode = nodeSuite.status === 0 && domSuite.status === 0 ? 0 : 1;
+process.exitCode =
+  nodeSuite.status === 0 && toolsSuite.status === 0 && domSuite.status === 0 ? 0 : 1;
