@@ -116,6 +116,7 @@ export function renderSnapshot(
     renderLanguages(snapshot, lines, budget);
     renderEntryPoints(snapshot, lines);
     renderManifests(snapshot, lines);
+    renderConventions(snapshot, lines);
     renderLayout(snapshot, lines, budget);
     renderEditor(snapshot, lines);
     renderInstructions(snapshot, lines, budget);
@@ -317,6 +318,17 @@ function renderManifests(snapshot: ProjectSnapshot, lines: string[]): void {
           .join(', ')
       : '';
     lines.push(`- ${manifest.path}${fields ? ` (${fields})` : ''}`);
+  }
+}
+
+/** The compact conventions block, emitted only when the snapshot carries it. */
+function renderConventions(snapshot: ProjectSnapshot, lines: string[]): void {
+  const text = snapshot.conventions?.text.trim();
+  if (!text) {
+    return;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    lines.push(line);
   }
 }
 

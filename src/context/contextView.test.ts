@@ -9,6 +9,21 @@ import {
   itemExclusionKey
 } from './contextView.ts';
 import type { ProjectSnapshot } from './projectContext.ts';
+import type { ConventionSummary } from './conventions.ts';
+
+function conventions(): ConventionSummary {
+  const text = 'Conventions:\n- Formatter: Prettier (.prettierrc)\n- Test runner: node:test (package.json)';
+  return {
+    text,
+    facts: [
+      { label: 'Formatter', value: 'Prettier', source: '.prettierrc' },
+      { label: 'Test runner', value: 'node:test', source: 'package.json' }
+    ],
+    truncated: false,
+    bytes: Buffer.byteLength(text, 'utf8'),
+    samplesRead: 2
+  };
+}
 
 function snapshot(overrides: Partial<ProjectSnapshot> = {}): ProjectSnapshot {
   const base: ProjectSnapshot = {
@@ -127,6 +142,48 @@ test('the panel carries one row per category with counts and truncation state', 
   const shape = view.categories.find((entry) => entry.id === 'shape');
   assert.equal(shape?.count, 1);
   assert.match(shape?.items[0].excerpt ?? '', /src\/a\.ts/);
+});
+
+test('conventions are listed and counted inside the shape category', () => {
+  const view = buildContextView(snapshot({ conventions: conventions() }));
+  const shape = view.categories.find((entry) => entry.id === 'shape');
+  assert.equal(shape?.count, 2);
+  const item = shape?.items.find((entry) => entry.id === 'conventions');
+  assert.equal(item?.excluded, false);
+  assert.match(item?.excerpt ?? '', /Conventions:/);
+  assert.equal(item?.meta, '2 facts');
+});
+
+test('turning shape off drops conventions from the view and the filtered snapshot', () => {
+  const source = snapshot({ conventions: conventions() });
+  const view = buildContextView(source, { exclusions: [categoryExclusionKey('shape')] });
+  const shape = view.categories.find((entry) => entry.id === 'shape');
+  assert.equal(shape?.excluded, true);
+  assert.ok(shape?.items.every((entry) => entry.excluded));
+
+  const filtered = applyContextExclusions(source, [categoryExclusionKey('shape')]);
+  assert.equal(filtered.conventions, undefined);
+  assert.equal(filtered.shape.files.length, 0);
+});
+
+test('excluding only the conventions row keeps shape but drops the block', () => {
+  const source = snapshot({ conventions: conventions() });
+  const filtered = applyContextExclusions(source, [itemExclusionKey('shape', 'conventions')]);
+  assert.equal(filtered.shape.files.length, 2);
+  assert.equal(filtered.conventions, undefined);
+});
+
+test('excluding only the tree row keeps the conventions row and block in agreement', () => {
+  const source = snapshot({ conventions: conventions() });
+  const view = buildContextView(source, { exclusions: [itemExclusionKey('shape', 'tree')] });
+  const shape = view.categories.find((entry) => entry.id === 'shape');
+  assert.equal(shape?.excluded, false);
+  assert.equal(shape?.items.find((entry) => entry.id === 'tree')?.excluded, true);
+  assert.equal(shape?.items.find((entry) => entry.id === 'conventions')?.excluded, false);
+
+  const filtered = applyContextExclusions(source, [itemExclusionKey('shape', 'tree')]);
+  assert.equal(filtered.shape.files.length, 0);
+  assert.ok(filtered.conventions, 'the block the view shows included is still sent');
 });
 
 test('a category can be excluded for one turn and the strip counts drop', () => {

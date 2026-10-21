@@ -12,6 +12,7 @@ import {
   renderSnapshotResult
 } from './render.ts';
 import type { ProjectDelta, ProjectSnapshot } from './projectContext.ts';
+import type { ConventionSummary } from './conventions.ts';
 
 /**
  * A minimal, well-formed snapshot. Every field is populated so the renderer's
@@ -246,4 +247,41 @@ test('a delivery snapshot does not name the viewed file unless it is attached', 
   );
   assert.match(detached, /not attached/);
   assert.doesNotMatch(detached, /Active file: src\/index\.ts/);
+});
+
+function conventions(): ConventionSummary {
+  const text = [
+    'Conventions:',
+    '- Formatter: Prettier (.prettierrc)',
+    '- Linter: ESLint (eslint.config.js)',
+    '- Test runner: node:test (package.json)',
+    '- Test files: colocated *.test.ts (src/render.test.ts)',
+    '- Indentation: 2 spaces (src/render.ts)',
+    '- Quotes: single quotes (src/render.ts)',
+    '- Semicolons: yes (src/render.ts)',
+    '- File naming: kebab-case (src/render.ts)'
+  ].join('\n');
+  return { text, facts: [], truncated: false, bytes: Buffer.byteLength(text, 'utf8'), samplesRead: 8 };
+}
+
+test('a conventions summary renders once inside the project-context block', () => {
+  const text = renderSnapshot(snapshot({ conventions: conventions() }));
+  assert.match(text, /^Conventions:$/m);
+  assert.match(text, /- Formatter: Prettier \(\.prettierrc\)/);
+  assert.equal(text.split('Conventions:').length - 1, 1);
+  assert.ok(text.indexOf('Conventions:') < text.indexOf('</project-context>'));
+});
+
+test('a snapshot without conventions renders no conventions block', () => {
+  const text = renderSnapshot(snapshot());
+  assert.doesNotMatch(text, /Conventions:/);
+});
+
+test('a conventions block stays inside the overall render budget', () => {
+  const long = conventions();
+  const text = renderSnapshot(
+    snapshot({ conventions: { ...long, text: `${long.text}\n- ${'x'.repeat(2_000)}` } }),
+    { budget: { ...DEFAULT_RENDER_BUDGET, snapshot: 1_200 } }
+  );
+  assert.ok(Buffer.byteLength(text, 'utf8') <= 1_200);
 });
