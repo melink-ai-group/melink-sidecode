@@ -78,6 +78,10 @@
         "command": "melink.openSettings",
         "title": "SideCode: Open settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "melink.recordMissedIssue",
+        "title": "SideCode: Record a missed issue locally"
       }
     ],
     "markdown.previewStyles": [
@@ -252,6 +256,12 @@
           },
           "default": [],
           "markdownDescription": "Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. An excluded path is never read, and a selection inside one is reported as excluded rather than quoted."
+        },
+        "melink.telemetry.failureLog": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Opt-in local missed-issue log, off by default. When on, the **SideCode: Record a missed issue locally** command appends one short entry (timestamp, issue class, model, provider, prompt version, summary) to `failure-log.jsonl` in the extension's global storage. Nothing is ever sent over the network, and project content, code, prompts, and secrets are never accepted. Turn it off to stop writing; existing entries stay on this machine."
         },
         "melink.skills.browserCodex": {
           "type": "boolean",

@@ -425,6 +425,46 @@ any pattern you add to `melink.context.exclude`, is honored.
 No project-derived content from the picture is written to disk, logs, output
 channels, telemetry, or error text.
 
+### Optional local missed-issue log
+
+SideCode has **no network telemetry**. The only log the extension can write is
+an opt-in, local-only missed-issue log. It is **off by default**, uses the
+application-scoped `melink.telemetry.failureLog` setting (a workspace cannot
+enable it), and never sends, uploads, or shares anything.
+
+Enable that setting, then run **SideCode: Record a missed issue locally** to
+append one JSON line to:
+
+`<VS Code user data>/User/globalStorage/melink.melink-sidecode/failure-log.jsonl`
+
+For example, on Windows that is
+`%APPDATA%\Code\User\globalStorage\melink.melink-sidecode\failure-log.jsonl`;
+on macOS it is under
+`~/Library/Application Support/Code/User/globalStorage/melink.melink-sidecode/`;
+on Linux it is under
+`~/.config/Code/User/globalStorage/melink.melink-sidecode/`.
+
+Each entry has exactly six fields: `timestamp`, `issueClass`, `modelId`,
+`providerId`, `promptVersion`, and `summary`. The issue class is one of the
+fixed taxonomy: `missed-fe-detail`, `missed-requirement`, `wrong-command`,
+`bad-decision`, `tool-misuse`, `other`. The entry records the current
+mode-prompt version (bumped whenever the mode prompts change), the active
+provider and model (or `unknown` when no chat is open), and the short summary
+you type.
+
+The file is append-only JSONL: one compact object per line, never read back or
+rewritten by the extension, and the directory and file are created only on the
+first enabled write. The summary is treated as untrusted metadata: newlines and
+control characters are stripped, secret-like values (`sk-...`, `ghp_...`,
+`Bearer ...`, `token=...`, `password=...`, `AKIA...`) become `<redacted>`, and
+the summary is capped at about 200 characters. The logger accepts no content,
+code, prompt, stderr, or arbitrary fields.
+
+Turn `melink.telemetry.failureLog` off to stop the command from writing; this
+does not delete entries already on disk. The guarantee above still holds: no
+project-derived content from the context picture is written to this log, and no
+log path has any network call.
+
 ## Permission levels and approvals
 
 The permission level governs **when Codex asks you**; the sandbox Codex enforces
