@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { SearchIcon } from '../Icons';
+import { isSubmitEnter } from '../keys';
 import type { HistoryEntry } from '../historyEntries';
 import type { AppState } from '../state';
 
@@ -39,7 +40,7 @@ export function HistoryPanel({
           autoFocus
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && visible[0]) {
+            if (isSubmitEnter(event) && visible[0]) {
               event.preventDefault();
               onSelect(visible[0].backendId, visible[0].threadId);
             }

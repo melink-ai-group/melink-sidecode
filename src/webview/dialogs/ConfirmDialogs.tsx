@@ -3,6 +3,7 @@ import type { DefaultMode } from '../../backends/types';
 import { modeDescriptor } from '../../backends/modes.ts';
 import type { RestorePreview } from '../../protocol';
 import { AlertIcon } from '../Icons';
+import { isSubmitEnter } from '../keys';
 
 /** The labelled confirmation before the unrestricted level can be applied. */
 export function UnrestrictedConfirmation({
@@ -69,7 +70,7 @@ export function ModeSwitchModal({
       }
       // Enter on a dialog button activates that button. Enter from the composer
       // would otherwise insert a newline under the dialog, so it confirms instead.
-      if (event.key === 'Enter' && !(event.target instanceof HTMLButtonElement)) {
+      if (isSubmitEnter(event) && !(event.target instanceof HTMLButtonElement)) {
         event.preventDefault();
         event.stopPropagation();
         acceptRef.current();
