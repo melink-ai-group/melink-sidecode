@@ -252,10 +252,12 @@ export function opencodePermission(
       return { ...UNRESTRICTED_PERMISSION };
     case 'default':
     default:
-      // No silent edits, commands, or outbound web requests: opencode cannot
-      // sandbox a process, so the safe default is to surface each one as an
-      // approval instead of running it.
-      return { ...DEFAULT_PERMISSION };
+      // Edits stay ordinary workspace work, but a shell command always asks so
+      // the host's destructive-command classifier and the approval card get a
+      // chance to see it. Leaving the project directory and the network tools
+      // ask too, and subagent delegation stays denied. Only `unrestricted`
+      // allows bash, network access and delegation without an approval path.
+      return { ...DEFAULT_PERMISSION, edit: 'allow', write: 'allow', patch: 'allow' };
   }
 }
 

@@ -1505,12 +1505,18 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         )
       };
     }
-    case 'approval/denied':
-      // The agent was told explicitly, so the turn does not stall silently.
+    case 'approval/denied': {
+      // Show the backend's own reason (for a safety block, the risk and the
+      // command) so the user sees what was refused. The agent is told only that
+      // the request was denied, so do not claim it received this sentence.
+      const reason = event.reason?.trim();
       return placeNotice(state, {
         level: 'info',
-        message: `${event.subject ? `${event.subject}: ` : ''}the request was denied and the agent was told.`
+        message: reason
+          ? `${reason} The agent was told it was denied.`
+          : `${event.subject ? `${event.subject}: ` : ''}the request was denied and the agent was told.`
       });
+    }
     case 'error': {
       // A backend the user is not currently driving must never surface a status
       // or error: a failed Codex auth attempt stays invisible while Ollama is
@@ -1602,8 +1608,10 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
 /** The pending-card sentence for a request, in the user's terms. */
 export function requestMessage(request: ApprovalRequest): string {
   switch (request.kind) {
-    case 'command':
-      return request.command ? `The agent wants to run: ${request.command}` : 'The agent wants to run a command.';
+    case 'command': {
+      const command = request.displayCommand ?? request.command;
+      return command ? `The agent wants to run: ${command}` : 'The agent wants to run a command.';
+    }
     case 'file-change':
       return request.paths && request.paths.length > 0
         ? `The agent wants to change files under: ${request.paths.join(', ')}`

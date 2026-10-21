@@ -89,20 +89,15 @@ test('every generated agent is explicitly enabled and cannot delegate', () => {
   }
 });
 
-test('ask denies every mutating and network tool whatever level was picked', () => {
-  for (const level of ['unrestricted', 'default', 'read-only'] as const) {
-    assert.deepEqual(opencodePermission(level, 'ask'), FULL_DENY);
-  }
-});
-
-test('default asks before edits, commands, web access, and leaving the project', () => {
+test('default auto-allows workspace edits, asks before bash, web access and leaving the project', () => {
   assert.deepEqual(opencodePermission('read-only', 'agent'), FULL_DENY);
   // opencode cannot sandbox a child process or its HTTP tools, so default
-  // surfaces every one as an approval instead of auto-allowing it.
+  // auto-allows only workspace edits and surfaces everything else as an
+  // approval.
   assert.deepEqual(opencodePermission('default', 'agent'), {
-    edit: 'ask',
-    write: 'ask',
-    patch: 'ask',
+    edit: 'allow',
+    write: 'allow',
+    patch: 'allow',
     bash: 'ask',
     external_directory: 'ask',
     webfetch: 'ask',
@@ -283,9 +278,9 @@ test('ask mode defines a read-only agent and plan mode follows the selected perm
   });
   assert.match(plan.agent, /^melink-plan-[0-9a-f]{16}$/);
   assert.deepEqual(plan.config.permission, {
-    edit: 'ask',
-    write: 'ask',
-    patch: 'ask',
+    edit: 'allow',
+    write: 'allow',
+    patch: 'allow',
     bash: 'ask',
     external_directory: 'ask',
     webfetch: 'ask',

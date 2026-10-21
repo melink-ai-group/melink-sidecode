@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildZenOpencodeConfig, ZEN_API_KEY_ENV, ZEN_PROVIDER_ID } from './zenConfig.ts';
 import { OPENCODE_AGENT_AGENT, OPENCODE_PLAN_AGENT } from './config.ts';
@@ -42,7 +42,7 @@ test('Zen config uses a namespaced provider and OPENCODE_API_KEY env name', () =
   assert.match(serialized, /OPENCODE_API_KEY/);
 });
 
-test('Zen default asks before edits, commands, and web access, like the Ollama runtime', () => {
+test('Zen default allows workspace edits but asks before commands and web access, like the Ollama runtime', () => {
   const expectedAgent = { agent: OPENCODE_AGENT_AGENT, plan: OPENCODE_PLAN_AGENT } as const;
   for (const mode of ['agent', 'plan'] as const) {
     const built = buildZenOpencodeConfig({
@@ -53,9 +53,9 @@ test('Zen default asks before edits, commands, and web access, like the Ollama r
     });
     assert.match(built.agent, new RegExp(`^${expectedAgent[mode]}-[0-9a-f]{16}$`));
     assert.deepEqual(built.config.permission, {
-      edit: 'ask',
-      write: 'ask',
-      patch: 'ask',
+      edit: 'allow',
+      write: 'allow',
+      patch: 'allow',
       bash: 'ask',
       external_directory: 'ask',
       webfetch: 'ask',

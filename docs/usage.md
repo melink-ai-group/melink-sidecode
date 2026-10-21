@@ -112,10 +112,10 @@ which can leave a custom install on an old version).
   are not isolated by this fix. `plan` still honors the selected level; `ask`
   uses a read-only agent that cannot run commands, write, fetch the web, or
   delegate. Read-only and Ask deny edits, commands, external directories,
-  webfetch, websearch, and subagent delegation. `default` asks before every edit,
-  write, patch, command, external directory, webfetch, and websearch, and denies
-  delegation; `unrestricted` (which the UI gates behind a labelled confirmation)
-  allows them. opencode's own enforcement backs ours; it never replaces it. When
+  webfetch, websearch, and subagent delegation. `default` auto-allows edits,
+  writes and patches inside the workspace but asks before every command, external
+  directory, webfetch, and websearch, and denies delegation; `unrestricted`
+  (which the UI gates behind a labelled confirmation) allows them. opencode's own enforcement backs ours; it never replaces it. When
   a `default` turn hits an `ask`, the sidebar pauses and shows its approval card
   until you decide; a rejection is reported back to the agent instead of being
   silently auto-allowed.
@@ -269,6 +269,8 @@ settings (**SideCode: Open settings**).
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
 | `melink.codex.defaultModel` | *(empty)* | Default model for Codex; empty uses the CLI default. |
 | `melink.defaults.permissionLevel` | `default` | Permission level for a new conversation (`read-only` / `default` / `unrestricted`). A per-conversation choice overrides it; `unrestricted` must be confirmed. |
+| `melink.safety.destructiveCommands` | `ask` | What to do with a recognised destructive command (`off` / `ask` / `block`). This runs before stored approval rules. |
+| `melink.safety.destructivePatterns` | *(empty)* | Extra case-insensitive regular expressions that mark a command as destructive, using the same action as the built-in checks. Invalid or blank patterns are ignored. |
 | `melink.defaults.mode` | `agent` | Starting mode for a new conversation (`agent` / `plan` / `ask`). `plan` and `ask` are applied to the Codex thread as developer instructions at thread start; `agent` leaves the CLI default. |
 | `melink.defaults.thinking` | *(empty)* | App-level thinking level when a model has no reported default; model-level overrides take precedence. |
 | `melink.context.includeInstructions` | `true` | Include instruction documents (`AGENTS.md`, `README.md`, `.github/copilot-instructions.md`) in the snapshot. |
@@ -424,6 +426,8 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.defaults.thinking` | *(empty)* | Defaults → Default thinking level |
 | `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
 | `melink.ollama.token` (secret, not a setting) | *(none)* | Providers → Ollama Cloud → API key (Save / Clear) |
+| `melink.safety.destructiveCommands` | `ask` | Not on the settings screen (application scope, user `settings.json`) |
+| `melink.safety.destructivePatterns` | *(empty)* | Not on the settings screen (application scope, user `settings.json`) |
 
 Codex has no stored credential of its own: it signs in through its own CLI, and
 the screen reports that login state rather than holding a secret.
@@ -569,8 +573,9 @@ touch. Approval is not the sandbox.
 At **Default**, Codex uses `workspaceWrite` with `networkAccess: false`: sandboxed
 commands run without a prompt, but a command that needs the network fails rather
 than quietly opening it. The opencode runtime has no OS sandbox for a child
-process or its HTTP tools, so it instead asks before every edit, shell command,
-webfetch, and websearch at **Default**, and before an external directory.
+process or its HTTP tools, so at **Default** it allows workspace edits but asks
+before every shell command, webfetch, and websearch, and before an external
+directory.
 Read-only and Ask deny edits, commands, external directories, webfetch, and
 websearch outright; **Unrestricted** allows them all. At Read-only, Default, and
 Ask, opencode also denies the `task` tool, so a workspace-defined subagent cannot
