@@ -428,6 +428,7 @@
     "verify": "node scripts/verify.mjs",
     "eval": "node --experimental-strip-types src/evals/run.ts",
     "eval:report": "node --experimental-strip-types src/evals/run.ts --report evals/eval-report.md",
+    "check:hex": "node scripts/check-no-hex.mjs",
     "schemas:generate": "codex app-server generate-ts --out ./schemas",
     "vscode:prepublish": "npm run build",
     "verify:dictation": "node scripts/verify-dictation.mjs",

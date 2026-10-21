@@ -141,7 +141,7 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-  box-shadow: 0 10px 16px color-mix(in srgb, var(--vscode-sideBar-background, #000) 55%, transparent);
+  box-shadow: 0 10px 16px color-mix(in srgb, var(--vscode-sideBar-background, var(--melink-scrim)) 55%, transparent);
   animation: user-pin-in 180ms ease;
 }
 
@@ -160,8 +160,8 @@
 }
 
 .user-pin__text--fade {
-  -webkit-mask-image: linear-gradient(to bottom, #000 70%, #000 88%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 70%, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, var(--melink-mask) 70%, var(--melink-mask) 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, var(--melink-mask) 70%, var(--melink-mask) 88%, transparent 100%);
 }
 
 .user-pin:hover .user-pin__text {

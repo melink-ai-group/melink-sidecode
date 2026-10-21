@@ -116,14 +116,14 @@
 .changes-review__review {
   border-color: var(--melink-primary);
   background: var(--melink-primary);
-  color: #fff;
+  color: var(--melink-on-primary);
   font-weight: 600;
 }
 
 .changes-review__review:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
   background: color-mix(in srgb, var(--melink-primary) 85%, black);
-  color: #fff;
+  color: var(--melink-on-primary);
 }
 
 /* The spacer pushes the file actions right; narrow sidebars wrap instead of clipping. */
