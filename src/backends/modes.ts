@@ -85,6 +85,14 @@ const AGENT_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Run every ap
 /** Plan names its verification and puts it in the plan; it still does not run it. */
 const PLAN_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Name the verification commands this plan depends on, include verification with its expected result in the plan body and steps, and do not run those commands while planning.`;
 
+/**
+ * The one git-safety rule for every mode that can act. Git writes can discard
+ * user work and can bypass the host's Keep/Reject/checkpoint flow, so the model
+ * asks first even when a general task sounds like permission to commit.
+ */
+export const GIT_SAFETY =
+  'Git safety. Never run `git commit`, `git push`, `git reset`, `git clean`, or any other git operation that rewrites history or discards work unless the user explicitly requested that exact action in this conversation; a general request such as "fix the bug" or "clean this up" is not permission. Before running ANY git write, including `git add`, `git commit`, `git push`, `git reset`, `git clean`, `git checkout -f`, `git rebase`, `git tag`, `git branch -D`, `git stash drop`, or a force push, state the exact command and ask for the user\u2019s approval. Read-only git (`git status`, `git diff`, `git log`, `git show`) needs no extra approval. Never use git to undo or bypass the host\u2019s Keep, Reject, or checkpoint flow.';
+
 export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
   {
     mode: 'agent',
@@ -92,7 +100,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent acts on the workspace.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${AGENT_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
+      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${AGENT_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${GIT_SAFETY} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
   },
   {
     mode: 'plan',
@@ -100,7 +108,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent writes a plan document that ends in a todo list, and waits for approval before changing anything.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Investigate what the task requires, then answer with one markdown plan: a title, the plan body (approach, files, and risks), and a final "## Steps" section whose items are a checkbox list, one step per line ("- [ ] ..."). Do not implement the plan. If a plan already exists, leave that document unchanged unless the user asked you to update or revise it. When the user answers your questions, rewrite that same document so the body, a "## Decisions" section, and the steps reflect those answers. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps. If you need a decision before the plan can be written, do not write the plan yet. ${PLAN_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK}`
+      `Work in Plan mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Investigate what the task requires, then answer with one markdown plan: a title, the plan body (approach, files, and risks), and a final "## Steps" section whose items are a checkbox list, one step per line ("- [ ] ..."). Do not implement the plan. If a plan already exists, leave that document unchanged unless the user asked you to update or revise it. When the user answers your questions, rewrite that same document so the body, a "## Decisions" section, and the steps reflect those answers. The selected permission level controls which workspace actions are available. Present the plan and wait for the user to approve it before implementing its steps. If you need a decision before the plan can be written, do not write the plan yet. ${PLAN_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${GIT_SAFETY} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK}`
   },
   {
     mode: 'ask',
