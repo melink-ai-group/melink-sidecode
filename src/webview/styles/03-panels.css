@@ -224,8 +224,14 @@
 }
 
 .model-group-notice .notice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  margin-top: 1px;
+  width: 16px;
+  height: 16px;
+  margin-top: 0;
+  line-height: 0;
   color: var(--vscode-editorWarning-foreground);
 }
 
@@ -236,6 +242,7 @@
 .model-group-notice .notice-title {
   color: var(--vscode-foreground);
   font-weight: 600;
+  line-height: 16px;
 }
 
 .model-group-notice .notice-text {
@@ -262,8 +269,14 @@
 }
 
 .model-group-error .error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  margin-top: 1px;
+  width: 16px;
+  height: 16px;
+  margin-top: 0;
+  line-height: 0;
   color: var(--vscode-errorForeground);
 }
 
@@ -274,6 +287,7 @@
 .model-group-error .error-title {
   color: var(--vscode-foreground);
   font-weight: 600;
+  line-height: 16px;
 }
 
 .model-group-error .error-text {

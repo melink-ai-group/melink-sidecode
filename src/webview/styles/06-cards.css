@@ -343,16 +343,21 @@
   opacity: 0.4;
 }
 
-/* ---- Banners: interrupted + error ---- */
+/* ---- Banners: quiet confirmation, warning, error ---- */
 
 .banner {
   display: flex;
   gap: 8px;
   align-items: flex-start;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
+}
+
+.banner--ok {
+  border-left: 3px solid var(--melink-success);
+  background: color-mix(in srgb, var(--melink-success) 10%, var(--vscode-sideBar-background));
 }
 
 .banner--interrupted {
@@ -361,15 +366,11 @@
 }
 
 .banner--status {
-  align-items: center;
-}
-
-.banner--status .banner-icon {
-  margin-top: 0;
+  align-items: flex-start;
+  padding: 4px 8px;
 }
 
 .banner--status .banner-text {
-  margin-top: 0;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -385,8 +386,23 @@
 }
 
 .banner-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  margin-top: 1px;
+  width: 16px;
+  height: 18px;
+  margin: 0;
+  line-height: 0;
+}
+
+.banner-icon .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.banner--ok .banner-icon {
+  color: var(--melink-success);
 }
 
 .banner--error .banner-icon {
@@ -398,14 +414,22 @@
 }
 
 .banner-title {
+  margin: 0;
   font-size: 13px;
   font-weight: 600;
+  line-height: 18px;
   color: var(--vscode-foreground);
 }
 
 .banner-text {
-  margin-top: 2px;
+  margin: 0;
   font-size: 13px;
+  line-height: 18px;
+  color: var(--vscode-foreground);
+}
+
+.banner-title + .banner-text {
+  margin-top: 2px;
   color: var(--vscode-descriptionForeground);
 }
 

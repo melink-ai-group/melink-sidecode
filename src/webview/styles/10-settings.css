@@ -215,12 +215,15 @@
   gap: 5px;
   min-width: 0;
   font-size: 11px;
+  line-height: 16px;
   color: var(--vscode-descriptionForeground);
   overflow-wrap: anywhere;
 }
 
 .field-msg .ico {
   flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
   margin-top: 2px;
 }
 
@@ -238,7 +241,7 @@
 }
 
 .field-msg--notice .ico {
-  color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-descriptionForeground));
+  color: var(--vscode-descriptionForeground);
 }
 
 .field-msg--ok .ico {
@@ -351,10 +354,13 @@
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-sm, 4px);
   font-size: 11px;
+  line-height: 16px;
 }
 
 .test-result .ico {
   flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
   margin-top: 1px;
 }
 
@@ -390,6 +396,7 @@
 
 .test-result .test-title {
   font-weight: 600;
+  line-height: 16px;
   color: var(--vscode-foreground);
 }
 
@@ -596,6 +603,8 @@
 
 .runtime-result .ico {
   flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
   margin-top: 1px;
 }
 
