@@ -20,7 +20,6 @@ import type {
   CompactRequest,
   CompactResult,
   ConnectionTestResult,
-  ContextPayload,
   DefaultMode,
   Disposable,
   ErrorEventCode,
@@ -40,7 +39,6 @@ import {
   readProbeJson,
   timeoutMessage
 } from './probeTimeout';
-import { buildContextMessages } from './contextMessages';
 import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './modes';
 // Type-only imports are erased at compile time, so the off path loads neither
 // the runtime module nor any child-process code; the runtime is dynamically
@@ -49,7 +47,6 @@ import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './mod
 import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
 import { resolveOpencodeExecutable } from './opencode/resolve';
 import { readTrustedOpencodeCliSource, readTrustedOpencodePath } from '../config/settings.ts';
-import { ollamaContextUsed } from './contextUsage';
 import {
   COMPACTION_INSTRUCTIONS,
   compactedTranscript,
@@ -71,6 +68,9 @@ import {
   isHttpOllamaUrl,
   type OllamaTransport
 } from './ollamaBaseUrl.ts';
+import { OLLAMA_CLOUD_PROFILE, type OllamaProfile } from './ollamaProfile.ts';
+import { probeOllamaLocal } from './ollamaLocalHealth.ts';
+import { LOCAL_OPENCODE_API_KEY, OPENCODE_LOCAL_API_KEY_ENV, OPENCODE_LOCAL_PROVIDER_ID } from './opencode/config.ts';
 
 interface OllamaTagsResponse {
   models?: Array<{ name?: string; model?: string; details?: { parameter_size?: string } }>;
@@ -153,18 +153,6 @@ function opencodePrompt(
 }
 
 /**
- * Context for a steered continuation of a direct `/api/chat` turn.
- * The snapshot stays the stable prefix. The per-turn delta was already sent
- * with the original request, so it is not repeated.
- */
-function steerContext(context?: ContextPayload): ContextPayload | undefined {
-  if (!context?.snapshot && !context?.notice) {
-    return undefined;
-  }
-  return { snapshot: context.snapshot, notice: context.notice };
-}
-
-/**
  * Whether a transport failure names the host (DNS failure, connection refused)
  * rather than the network (offline, timed out).
  *
@@ -203,35 +191,36 @@ function causeCode(error: unknown): string | undefined {
 }
 
 /**
- * Ollama Cloud adapter. Talks to the hosted native HTTP API with a bearer token
- * held in VS Code's secret storage; no local daemon and no Ollama SDK types
- * cross this boundary.
+ * Ollama adapter for both Cloud and Local. Talks to the native HTTP API (with a
+ * bearer token for Cloud; no credential at all for Local) and runs every LLM
+ * turn through the shared OpenCode runtime; no Ollama SDK types cross this
+ * boundary.
  *
  * Model identifiers are passed through exactly as `/api/tags` returns them —
  * the adapter never rewrites a name (in particular it never adds or strips the
  * `:cloud` suffix the app/CLI uses).
  */
 export class OllamaBackend implements AgentBackend {
-  readonly id = 'ollama';
-  readonly label = 'Ollama Cloud';
-  readonly badge = 'Ollama';
+  readonly id: string;
+  readonly label: string;
+  readonly badge: string;
+
+  private readonly profile: OllamaProfile;
 
   /**
-   * The direct `/api/chat` path cannot ask the user for a decision. With the
-   * opencode runtime enabled, `ask` permissions are held open and surfaced, so
-   * the channel exists only on that path.
+   * Every Ollama turn runs through the opencode runtime, which can ask the user
+   * for a decision and enforce all three permission levels.
    */
   get hasApprovalChannel(): boolean {
-    return this.opencodeEnabled;
+    return true;
   }
 
   /**
-   * Permission levels this path can serve. The direct `/api/chat` adapter serves
-   * a single level; the opencode runtime can enforce all three, so they are
-   * reported only while it is enabled.
+   * Permission levels this path can serve. The shared OpenCode runtime can
+   * enforce all three, so they are reported for both providers.
    */
   get permissionLevels(): readonly PermissionLevel[] {
-    return this.opencodeEnabled ? ['read-only', 'default', 'unrestricted'] : ['default'];
+    return ['read-only', 'default', 'unrestricted'];
   }
 
   /**
@@ -319,18 +308,22 @@ export class OllamaBackend implements AgentBackend {
     context: vscode.ExtensionContext,
     store?: ThreadStore,
     approvals?: ApprovalStore,
-    transport?: OllamaTransport
+    transport?: OllamaTransport,
+    profile: OllamaProfile = OLLAMA_CLOUD_PROFILE
   ) {
     this.context = context;
     this.store = store;
     this.approvals = approvals;
     this.transport = transport;
+    this.profile = profile;
+    this.id = profile.id;
+    this.label = profile.label;
+    this.badge = profile.badge;
   }
 
   private get baseUrl(): string {
-    // The host the bearer token is sent to. Read from the user's own settings
-    // only: a workspace `.vscode/settings.json` must not be able to redirect
-    // the credential to a host of the repository's choosing.
+    // The host the requests go to. Read from the user's own settings only: a
+    // workspace `.vscode/settings.json` must not be able to redirect them.
     return this.client.baseUrl;
   }
 
@@ -338,18 +331,20 @@ export class OllamaBackend implements AgentBackend {
    * The client that talks to the configured host.
    *
    * It owns the base-URL rule (user scope only) and the transport seam, so
-   * the adapter never re-derives which host receives the credential.
+   * the adapter never re-derives which host receives the request.
    */
   private get client(): OllamaClient {
     return new OllamaClient(
-      vscode.workspace.getConfiguration().inspect<string>('melink.ollama.baseUrl'),
-      this.transport ?? defaultOllamaTransport()
+      vscode.workspace.getConfiguration().inspect<string>(this.profile.baseUrlKey),
+      this.transport ?? defaultOllamaTransport(),
+      this.profile.defaultBaseUrl,
+      this.profile.label
     );
   }
 
-  /** Whether the opencode agentic runtime is enabled. Default `true`. */
-  private get opencodeEnabled(): boolean {
-    return vscode.workspace.getConfiguration('melink.ollama.opencode').get<boolean>('enabled', true) !== false;
+  /** Whether this provider has a credential at all. */
+  private get tokenless(): boolean {
+    return this.profile.credential === 'none';
   }
 
   /**
@@ -390,14 +385,27 @@ export class OllamaBackend implements AgentBackend {
   }
 
   private get defaultModel(): string {
-    return vscode.workspace.getConfiguration('melink.ollama').get<string>('defaultModel', '');
+    return vscode.workspace.getConfiguration().get<string>(this.profile.defaultModelKey, '');
   }
 
   private async token(): Promise<string | undefined> {
+    if (this.tokenless) {
+      return undefined;
+    }
     return this.context.secrets.get(OLLAMA_TOKEN_SECRET_KEY);
   }
 
   async isAuthenticated(): Promise<boolean> {
+    if (this.tokenless) {
+      // A local server has no credential: reachability *and* the OpenAI-
+      // compatible `/v1` path are the availability signal. A failure carries
+      // the actionable reason so the picker never says "No usable credential".
+      const probe = await this.testConnection();
+      if (probe.outcome === 'ok') {
+        return true;
+      }
+      throw new BackendError('unavailable', probe.message);
+    }
     const token = await this.token();
     if (!token) {
       return false;
@@ -423,6 +431,20 @@ export class OllamaBackend implements AgentBackend {
    * is the user's own base URL, never a workspace-supplied one.
    */
   async testConnection(timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS): Promise<ConnectionTestResult> {
+    if (this.tokenless) {
+      if (!isHttpOllamaUrl(this.baseUrl)) {
+        return {
+          backendId: this.id,
+          outcome: 'host',
+          message: 'The base URL is not a full http or https address. Fix it, then test again.'
+        };
+      }
+      return probeOllamaLocal({
+        baseUrl: this.baseUrl,
+        timeoutMs,
+        request: (path, init) => this.client.probe(path, undefined, init, { timeoutMs })
+      });
+    }
     if (!isHttpOllamaUrl(this.baseUrl)) {
       return {
         backendId: this.id,
@@ -451,7 +473,7 @@ export class OllamaBackend implements AgentBackend {
         return {
           backendId: this.id,
           outcome: 'unavailable',
-          message: timeoutMessage('Ollama Cloud', timeoutMs)
+          message: timeoutMessage(this.label, timeoutMs)
         };
       }
       // A transport failure is the only place the network and the host differ.
@@ -507,7 +529,7 @@ export class OllamaBackend implements AgentBackend {
    */
   private async request(
     path: string,
-    token: string,
+    token: string | undefined,
     init?: RequestInit,
     timeoutMs?: number,
     probeSignal?: AbortSignal
@@ -535,14 +557,14 @@ export class OllamaBackend implements AgentBackend {
 
   async listModels(timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS): Promise<BackendModel[]> {
     const token = await this.token();
-    if (!token) {
-      throw new BackendError('unauthenticated', 'Set an Ollama Cloud token to list models.');
+    if (!token && !this.tokenless) {
+      throw new BackendError('unauthenticated', `Set an ${this.label} token to list models.`);
     }
     // One deadline covers the tag list and every per-model capability read, so
     // a stalled `/api/show` cannot leave the picker half-loaded past the probe.
     const signal = createProbeSignal(timeoutMs);
     const response = await this.request('/api/tags', token, undefined, timeoutMs, signal);
-    const body = await readProbeJson<OllamaTagsResponse>(response, 'Ollama Cloud', timeoutMs, signal);
+    const body = await readProbeJson<OllamaTagsResponse>(response, this.label, timeoutMs, signal);
     // No hardcoded array and no fallback list: the picker is exactly what the
     // live server reports, so removing a model server-side removes it here.
     const names = this.tagNamesFromBody(body);
@@ -566,8 +588,8 @@ export class OllamaBackend implements AgentBackend {
   /** The live model ids from `/api/tags`, with no per-model metadata read. */
   private async tagNames(): Promise<string[]> {
     const token = await this.token();
-    if (!token) {
-      throw new BackendError('unauthenticated', 'Set an Ollama Cloud token to list models.');
+    if (!token && !this.tokenless) {
+      throw new BackendError('unauthenticated', `Set an ${this.label} token to list models.`);
     }
     const response = await this.request('/api/tags', token);
     return this.tagNamesFromBody((await response.json()) as OllamaTagsResponse);
@@ -597,7 +619,7 @@ export class OllamaBackend implements AgentBackend {
     probeSignal?: AbortSignal
   ): Promise<ModelCapabilities | undefined> {
     const token = await this.token();
-    if (!token) {
+    if (!token && !this.tokenless) {
       return undefined;
     }
     const timed = timeoutMs !== undefined || probeSignal !== undefined;
@@ -616,7 +638,7 @@ export class OllamaBackend implements AgentBackend {
         deadline
       );
       show = deadline
-        ? await readProbeJson<unknown>(response, 'Ollama Cloud', deadlineMs, deadline)
+        ? await readProbeJson<unknown>(response, this.label, deadlineMs, deadline)
         : await response.json();
     } catch (error) {
       // A metadata failure is not a list failure: the model is simply unknown.
@@ -632,7 +654,17 @@ export class OllamaBackend implements AgentBackend {
   async startThread(options?: StartThreadOptions): Promise<ThreadHandle> {
     const threadId = createId('ollama_thread');
     this.threads.add(threadId);
-    const model = options?.model ?? this.defaultModel;
+    let model = options?.model ?? this.defaultModel;
+    // Local has no app-level model until one is chosen, so an empty default
+    // resolves to the first model the running server reports. A failed read is
+    // not fatal here: the first turn reports the real provider error.
+    if (!model && this.tokenless) {
+      try {
+        model = (await this.tagNames())[0] ?? '';
+      } catch {
+        model = '';
+      }
+    }
     const handle: ThreadHandle = { backendId: this.id, threadId, model: model || undefined };
     this.events.fire({ type: 'thread/started', backendId: this.id, threadId, model: model || undefined });
     return handle;
@@ -759,12 +791,12 @@ export class OllamaBackend implements AgentBackend {
    */
   async summarize(request: CompactRequest): Promise<string> {
     const token = await this.token();
-    if (!token) {
-      throw new BackendError('unauthenticated', 'Set an Ollama Cloud token before compacting context.');
+    if (!token && !this.tokenless) {
+      throw new BackendError('unauthenticated', `Set an ${this.label} token before compacting context.`);
     }
     const model = request.model ?? this.defaultModel;
     if (!model) {
-      throw new BackendError('provider', 'No Ollama Cloud model selected.');
+      throw new BackendError('provider', `No ${this.label} model selected.`);
     }
     const source = fitCompactionSource(
       compactionSource(request.transcript),
@@ -835,8 +867,8 @@ export class OllamaBackend implements AgentBackend {
       throw new BackendError('provider', 'Choose a dictation model in Settings.');
     }
     const token = await this.token();
-    if (!token) {
-      throw new BackendError('unauthenticated', 'Set an Ollama Cloud token before using dictation.');
+    if (!token && !this.tokenless) {
+      throw new BackendError('unauthenticated', `Set an ${this.label} token before using dictation.`);
     }
     const response = await this.request('/api/chat', token, {
       method: 'POST',
@@ -862,117 +894,13 @@ export class OllamaBackend implements AgentBackend {
 
   async sendTurn(handle: ThreadHandle, request: SendTurnRequest): Promise<void> {
     const token = await this.token();
-    if (!token) {
-      throw new BackendError('unauthenticated', 'Set an Ollama Cloud token before sending a turn.');
+    if (!token && !this.tokenless) {
+      throw new BackendError('unauthenticated', `Set an ${this.label} token before sending a turn.`);
     }
-
-    // Fallback is exact: with the setting off, the direct `/api/chat` adapter
-    // runs and no opencode child is ever spawned. The runtime is imported
-    // statically, but nothing on this branch constructs or launches it.
-    if (this.opencodeEnabled) {
-      await this.sendOpencodeTurn(handle, request, token);
-      return;
-    }
-
-    const turnId = createId('ollama_turn');
-    let itemId = createId('ollama_item');
-    let controller = this.beginFlight(handle.threadId);
-
-    this.events.fire({ type: 'turn/started', backendId: this.id, threadId: handle.threadId, turnId });
-
-    const model = request.model ?? this.defaultModel;
-    if (!model) {
-      this.endFlight(handle.threadId, controller);
-      const failure = new BackendError('provider', 'No Ollama Cloud model selected.');
-      this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId: handle.threadId, turnId, reason: failure.message });
-      throw failure;
-    }
-
-    const startItem = (): void => {
-      this.events.fire({
-        type: 'item/started',
-        backendId: this.id,
-        threadId: handle.threadId,
-        item: { id: itemId, kind: 'message', role: 'assistant', title: model }
-      });
-    };
-    startItem();
-
-    let text = request.text;
-    let steered = false;
-    const followSteer = (next: string): void => {
-      this.events.fire({ type: 'item/completed', backendId: this.id, threadId: handle.threadId, itemId, status: 'completed' });
-      text = next;
-      steered = true;
-      itemId = createId('ollama_item');
-      controller = this.beginFlight(handle.threadId);
-      startItem();
-    };
-
-    try {
-      for (;;) {
-        let response: Response;
-        try {
-          response = await this.request('/api/chat', token, {
-            method: 'POST',
-            signal: controller.signal,
-            body: JSON.stringify({
-              model,
-              stream: true,
-              messages: this.messagesFor(
-                handle.threadId,
-                text,
-                steered ? steerContext(request.context) : request.context,
-                request.mode
-              ),
-              // The adapter is the only place that knows Ollama spells the context
-              // window `options.num_ctx` and reasoning effort `think`; the mapping is
-              // the pure, unit-tested `ollamaNativeRequest`.
-              ...ollamaNativeRequest(request.modelSettings)
-            })
-          });
-        } catch (error) {
-          const next = this.categorize(error).code === 'canceled' ? this.drainSteers(handle.threadId) : undefined;
-          if (!next) {
-            this.failTurn(handle, itemId, turnId, this.categorize(error));
-            throw error;
-          }
-          followSteer(next);
-          continue;
-        }
-
-        try {
-          await this.streamChunks(response, handle, itemId, controller);
-          if (controller.signal.aborted) {
-            throw new StreamError('canceled', 'Turn canceled.');
-          }
-        } catch (error) {
-          const next = this.categorize(error).code === 'canceled' ? this.drainSteers(handle.threadId) : undefined;
-          if (!next) {
-            this.failTurn(handle, itemId, turnId, this.categorize(error));
-            throw error;
-          }
-          followSteer(next);
-          continue;
-        }
-
-        this.events.fire({ type: 'item/completed', backendId: this.id, threadId: handle.threadId, itemId, status: 'completed' });
-        const next = this.drainSteers(handle.threadId);
-        if (next) {
-          text = next;
-          steered = true;
-          itemId = createId('ollama_item');
-          controller = this.beginFlight(handle.threadId);
-          startItem();
-          continue;
-        }
-        this.events.fire({ type: 'turn/completed', backendId: this.id, threadId: handle.threadId, turnId });
-        return;
-      }
-    } finally {
-      this.endFlight(handle.threadId, controller);
-      this.steerQueues.delete(handle.threadId);
-    }
+    // Every LLM turn goes through the shared OpenCode runtime, for both Ollama
+    // Cloud and Ollama Local. The direct `/api/chat` API remains only for
+    // compaction/summarize and dictation cleanup.
+    await this.sendOpencodeTurn(handle, request, token);
   }
 
   /**
@@ -984,12 +912,12 @@ export class OllamaBackend implements AgentBackend {
    * failure, invalid config, unauthenticated, stream error) and no error text
    * ever carries the token or a raw stack.
    */
-  private async sendOpencodeTurn(handle: ThreadHandle, request: SendTurnRequest, token: string): Promise<void> {
+  private async sendOpencodeTurn(handle: ThreadHandle, request: SendTurnRequest, token?: string): Promise<void> {
     const turnId = createId('ollama_turn');
     const model = request.model ?? this.defaultModel;
     this.events.fire({ type: 'turn/started', backendId: this.id, threadId: handle.threadId, turnId });
     if (!model) {
-      const failure = new BackendError('provider', 'No Ollama Cloud model selected.');
+      const failure = new BackendError('provider', `No ${this.label} model selected.`);
       this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId: handle.threadId, turnId, reason: failure.message });
       throw failure;
     }
@@ -1013,21 +941,21 @@ export class OllamaBackend implements AgentBackend {
     if (!modelIds.includes(model)) {
       // A model the live server no longer reports cannot be sent; this is the
       // same degradation the direct adapter's model resolution relies on.
-      const failure = new BackendError('provider', `Ollama Cloud no longer reports the model "${model}".`);
+      const failure = new BackendError('provider', `${this.label} no longer reports the model "${model}".`);
       this.failTurn(handle, '', turnId, this.categorize(failure));
       throw failure;
     }
     const capabilities = await this.modelCapabilities(model);
 
-    // Dynamically imported so the direct `/api/chat` path never loads the
-    // runtime module at all: with the setting off there is no opencode code on
-    // the path and no child process is ever spawned.
+    // Dynamically imported so the module graph stays small; the runtime is the
+    // only LLM turn path for both Ollama Cloud and Ollama Local.
     const { buildOpencodeConfig, opencodeRequiresApproval } = await import('./opencode/config.ts');
     const { runOpencodeTurn } = await import('./opencode/runtime.ts');
     const { browserCommand } = await import('../browser/skill.ts');
     const browser = await browserCommand('opencode');
     const skills = await this.skillMcpForTurn();
 
+    const local = this.tokenless;
     const built = buildOpencodeConfig({
       baseUrl: this.baseUrl,
       modelIds,
@@ -1036,6 +964,13 @@ export class OllamaBackend implements AgentBackend {
       capabilities,
       mode: request.mode ?? 'agent',
       permissionLevel,
+      ...(local
+        ? {
+            providerId: OPENCODE_LOCAL_PROVIDER_ID,
+            providerName: this.label,
+            apiKeyEnv: OPENCODE_LOCAL_API_KEY_ENV
+          }
+        : {}),
       ...(browser ? { browser } : {}),
       ...(skills.mcp ? { skillMcp: skills.mcp } : {}),
       ...(Object.keys(skills.permissions).length > 0 ? { skillPermissions: skills.permissions } : {})
@@ -1117,7 +1052,8 @@ export class OllamaBackend implements AgentBackend {
               agent: built.agent,
               prompt,
               sessionId: resumeId,
-              token,
+              token: local ? LOCAL_OPENCODE_API_KEY : (token ?? ''),
+              ...(local ? { apiKeyEnv: OPENCODE_LOCAL_API_KEY_ENV } : {}),
               signal: controller.signal,
               decidePermission: opencodeRequiresApproval(permissionLevel, request.mode ?? 'agent')
                 ? (ask, signal) => this.decideOpencodePermission(handle.threadId, ask, signal)
@@ -1568,7 +1504,7 @@ export class OllamaBackend implements AgentBackend {
       case 'invalid-config':
         return { code: 'invalid-config', message: 'The generated opencode config was rejected. Nothing was sent.' };
       case 'unauthenticated':
-        return { code: 'unauthenticated', message: 'Your Ollama Cloud token was rejected. It may be expired or revoked.' };
+        return { code: 'unauthenticated', message: `${this.label} token was rejected. It may be expired or revoked.` };
       case 'permission':
         return {
           code: 'provider',
@@ -1600,53 +1536,8 @@ export class OllamaBackend implements AgentBackend {
   }
 
   /**
-   * Build the `/api/chat` message list. `/api/chat` is stateless, so a resumed
-   * thread is sent as its stored user/assistant turns followed by the new turn —
-   * the same interface, with the conversation's context replayed in.
-   *
-   * Project context is layered in as `system`-role input by the shared, pure
-   * `buildContextMessages`: the snapshot first (once per session), then the
-   * per-turn delta immediately before the user turn. The stored history is read
-   * but never mutated, so a delta can never be persisted as user content.
-   * A provider switch keeps the earlier chat in the transcript for display and
-   * sends the summary in its place.
+   * Emit the failed item + interruption pair that leaves the transcript coherent.
    */
-  private messagesFor(
-    threadId: string,
-    text: string,
-    context?: ContextPayload,
-    mode?: DefaultMode
-  ): Array<{ role: string; content: string }> {
-    const ref = this.store?.listThreads(this.id).find((entry) => entry.threadId === threadId);
-    const skip = ref?.handoverHistoryCount ?? 0;
-    const history = (this.store?.getTranscript(this.id, threadId) ?? [])
-      .slice(skip)
-      .filter((item) => item.kind === 'message' && (item.role === 'user' || item.role === 'assistant'))
-      .map((item) => ({ role: item.role as 'user' | 'assistant', content: item.text ?? '' }))
-      .filter((message) => message.content.length > 0);
-    // The host appends the current turn to the render cache before invoking us,
-    // so the trailing user message is this turn: drop it and re-add it exactly
-    // once at the end rather than sending it twice.
-    const last = history[history.length - 1];
-    if (last && last.role === 'user' && last.content === text) {
-      history.pop();
-    }
-    const summary = skip > 0 ? ref?.handoverSummary?.trim() : undefined;
-    if (summary) {
-      const preface = compactedTranscript(summary)
-        .filter((item) => item.kind === 'message' && (item.role === 'user' || item.role === 'assistant') && item.text)
-        .map((item) => ({ role: item.role as 'user' | 'assistant', content: item.text ?? '' }));
-      history.unshift(...preface);
-    }
-    const messages = buildContextMessages(history, text, context);
-    const instructions = modeInstructions(isDefaultMode(mode) ? mode : 'agent', context?.frontendStack);
-    if (instructions) {
-      messages.unshift({ role: 'system', content: instructions });
-    }
-    return messages;
-  }
-
-  /** Emit the failed item + interruption pair that leaves the transcript coherent. */
   private failTurn(handle: ThreadHandle, itemId: string, turnId: string, error: CategorizedError): void {
     if (error.code === 'canceled') {
       // A cancel is not a failure: keep the partial message, no error treatment.
@@ -1690,86 +1581,7 @@ export class OllamaBackend implements AgentBackend {
     if (isAbortError(error)) {
       return { code: 'canceled', message: 'Turn canceled.' };
     }
-    return { code: 'provider', message: 'Ollama Cloud request failed.' };
-  }
-
-  private async streamChunks(
-    response: Response,
-    handle: ThreadHandle,
-    itemId: string,
-    controller: AbortController
-  ): Promise<void> {
-    if (!response.body) {
-      throw new StreamError('stream', 'Ollama Cloud returned an empty response stream.');
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      for (;;) {
-        if (controller.signal.aborted) {
-          throw new StreamError('canceled', 'Turn canceled.');
-        }
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        let newline = buffer.indexOf('\n');
-        while (newline >= 0) {
-          const line = buffer.slice(0, newline).trim();
-          buffer = buffer.slice(newline + 1);
-          if (line) {
-            this.handleChunk(line, handle, itemId);
-          }
-          newline = buffer.indexOf('\n');
-        }
-      }
-      if (buffer.trim()) {
-        this.handleChunk(buffer.trim(), handle, itemId);
-      }
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw new StreamError('canceled', 'Turn canceled.', error);
-      }
-      if (error instanceof StreamError) {
-        throw error;
-      }
-      // The socket dropped after the response began: a distinct, recoverable state.
-      throw new StreamError('network', 'The connection to Ollama Cloud dropped mid-stream.', error);
-    } finally {
-      try {
-        reader.releaseLock();
-      } catch {
-        // The reader may already be released after an abort; nothing to do.
-      }
-    }
-  }
-
-  private handleChunk(line: string, handle: ThreadHandle, itemId: string): void {
-    let chunk: OllamaChatChunk;
-    try {
-      chunk = JSON.parse(line) as OllamaChatChunk;
-    } catch {
-      throw new StreamError('stream', 'Ollama Cloud sent a chunk that could not be read.');
-    }
-    if (chunk.error) {
-      throw new StreamError('provider', chunk.error);
-    }
-    const delta = chunk.message?.content;
-    if (delta) {
-      this.events.fire({ type: 'item/delta', backendId: this.id, threadId: handle.threadId, itemId, delta });
-    }
-    const used = ollamaContextUsed(chunk.prompt_eval_count, chunk.eval_count);
-    if (used !== undefined) {
-      this.events.fire({
-        type: 'context/usage',
-        backendId: this.id,
-        threadId: handle.threadId,
-        usedTokens: used
-      });
-    }
+    return { code: 'provider', message: `${this.label} request failed.` };
   }
 
   onEvent(listener: (event: AgentEvent) => void): Disposable {

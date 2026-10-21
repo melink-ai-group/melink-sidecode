@@ -101,6 +101,8 @@ export function trustedBoolean(
 export const TRUST_SCOPED_KEYS: readonly string[] = [
   // Where the Ollama Cloud bearer token is sent.
   'melink.ollama.baseUrl',
+  // Where local Ollama prompts are sent (no credential, but still user-scoped).
+  'melink.ollamaLocal.baseUrl',
   // Which binary is spawned for a turn.
   'melink.ollama.opencode.path',
   'melink.ollama.opencode.cliSource',

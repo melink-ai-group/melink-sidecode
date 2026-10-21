@@ -34,18 +34,22 @@ function validManifest() {
   };
 }
 
-test('the visual catalog has stable unique slugs and ten expected files', () => {
-  assert.equal(SCREENS.length, 5);
+test('the visual catalog has stable unique slugs and sixteen expected files', () => {
+  assert.equal(SCREENS.length, 8);
   assert.equal(new Set(SCREENS.map((screen) => screen.slug)).size, SCREENS.length);
   assert.equal(VIEWPORTS.length, 2);
   for (const screen of SCREENS) {
     assert.match(screen.slug, SLUG_PATTERN);
   }
   const files = expectedFiles().map((entry) => entry.file);
-  assert.equal(files.length, 10);
-  assert.equal(new Set(files).size, 10);
+  assert.equal(files.length, 16);
+  assert.equal(new Set(files).size, 16);
   for (const file of files) {
     assert.match(file, FILE_PATTERN);
+  }
+  // The provider, orchestration and queued-composer surfaces are permanent.
+  for (const slug of ['settings-orchestration', 'settings-provider-local', 'chat-queued']) {
+    assert.equal(SCREENS.some((screen) => screen.slug === slug), true, slug);
   }
   assert.equal(fileName('chat-idle', { width: 1280, height: 800 }), 'chat-idle-1280x800.png');
 });

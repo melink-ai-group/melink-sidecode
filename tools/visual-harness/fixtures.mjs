@@ -34,6 +34,20 @@ const MODELS = {
       capabilities: CAPABILITIES
     }
   ],
+  'ollama-local': [
+    {
+      id: 'qwen2.5-coder:7b',
+      label: 'qwen2.5-coder:7b',
+      description: 'Local coding model.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'llama3.2:3b',
+      label: 'llama3.2:3b',
+      description: 'Small local assistant.',
+      capabilities: CAPABILITIES
+    }
+  ],
   codex: [
     {
       id: 'gpt-5-codex',
@@ -55,6 +69,7 @@ const MODELS = {
 
 const AVAILABILITY = [
   { id: 'ollama', label: 'Ollama Cloud', badge: 'Ollama', status: 'available' },
+  { id: 'ollama-local', label: 'Ollama Local', badge: 'Ollama', status: 'available' },
   { id: 'codex', label: 'OpenAI Codex CLI', badge: 'Codex', status: 'available' },
   { id: 'opencode', label: 'OpenCode Zen', badge: 'Zen', status: 'available' }
 ];
@@ -193,6 +208,11 @@ function settingsSnapshot() {
       hasToken: true,
       status: 'available'
     },
+    ollamaLocal: {
+      baseUrl: 'http://localhost:11434',
+      defaultModel: 'qwen2.5-coder:7b',
+      status: 'available'
+    },
     codex: {
       path: 'codex',
       defaultModel: 'gpt-5-codex',
@@ -206,7 +226,6 @@ function settingsSnapshot() {
       detail: 'Free models are available without a key.'
     },
     opencode: {
-      enabled: true,
       cliSource: 'local',
       path: 'opencode',
       status: 'detected',
@@ -232,6 +251,15 @@ function settingsSnapshot() {
       minMaxBytes: 1024,
       maxMaxBytes: 204800,
       exclude: []
+    },
+    orchestration: {
+      testing: true,
+      reviewing: false,
+      doubleCheck: true,
+      quickTask: true,
+      planning: true,
+      legacyTesting: false,
+      legacyReviewing: false
     },
     skills: {
       browserCodex: true,
@@ -265,6 +293,7 @@ function baseMessages({ title, threadId, model = 'qwen3-coder:480b', replay = []
   return [
     { type: 'snapshot', availability: AVAILABILITY },
     { type: 'models', backendId: 'ollama', models: MODELS.ollama },
+    { type: 'models', backendId: 'ollama-local', models: MODELS['ollama-local'] },
     { type: 'models', backendId: 'codex', models: MODELS.codex },
     { type: 'models', backendId: 'opencode', models: MODELS.opencode },
     { type: 'settings', settings: settingsSnapshot() },
@@ -498,7 +527,62 @@ export function screenMessages(slug) {
         }
       ];
     }
-    case 'settings': {
+    case 'chat-queued': {
+      const messages = baseMessages({
+        title: 'Refactor the auth guard',
+        threadId: THREAD_ID,
+        replay: [
+          userItem('Refactor the auth guard and keep the audit log intact.'),
+          assistantItem(
+            'I extracted the guard into `requireSession`. I am running the focused tests now.'
+          )
+        ]
+      });
+      return [
+        ...messages,
+        {
+          type: 'busy',
+          value: true,
+          backendId: 'ollama',
+          threadId: THREAD_ID
+        },
+        {
+          type: 'composerDraft',
+          tabId: `tab-${THREAD_ID}`,
+          text: 'Also update the deny-path screenshot after this.',
+          attachments: [
+            {
+              id: 'attach-visual-1',
+              name: 'login-screen.png',
+              mimeType: 'image/png',
+              size: 2048,
+              kind: 'image',
+              dataUrl:
+                'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+            }
+          ]
+        },
+        {
+          type: 'queuedTurns',
+          entries: [
+            {
+              id: 'queued-1',
+              textPreview: 'Run the focused guard test and paste the log.',
+              attachmentCount: 0
+            },
+            {
+              id: 'queued-2',
+              textPreview: 'Then refresh the docs screenshot.',
+              attachmentCount: 1,
+              attachmentNames: ['audit-log.txt']
+            }
+          ]
+        }
+      ];
+    }
+    case 'settings':
+    case 'settings-orchestration':
+    case 'settings-provider-local': {
       const messages = baseMessages({ title: 'New chat' });
       return [...messages, { type: 'showSettings' }];
     }

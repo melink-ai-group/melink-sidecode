@@ -13,21 +13,22 @@ import { TRUST_SCOPED_KEYS } from './trust.ts';
 /**
  * The scope notices on the trust-sensitive fields.
  *
- * Nine fields decide where a credential is sent, which binary is spawned, or
- * what the permission default is. They are read from the user's own settings
- * only, so a "Save to workspace" writes them to the user settings instead.
- * The value *is* persisted, so the screen shows a notice rather than an
- * error — but the notice has to appear on every one of the nine. A field
+ * Ten fields decide where a credential or prompt is sent, which binary is
+ * spawned, or what the permission default is. They are read from the user's
+ * own settings only, so a "Save to workspace" writes them to the user settings
+ * instead. The value *is* persisted, so the screen shows a notice rather than an
+ * error — but the notice has to appear on every one of the ten. A field
  * that silently saved somewhere else than the button said is a lie.
  */
 
-test('the notice table covers exactly the nine trust-sensitive fields', () => {
-  assert.equal(TRUST_SENSITIVE_FIELDS.length, 9);
+test('the notice table covers exactly the ten trust-sensitive fields', () => {
+  assert.equal(TRUST_SENSITIVE_FIELDS.length, 10);
   assert.deepEqual([...TRUST_SENSITIVE_FIELDS].sort(), [
     'astGrepCliSource',
     'astGrepPath',
     'codexPath',
     'ollamaBaseUrl',
+    'ollamaLocalBaseUrl',
     'opencodeCliSource',
     'opencodePath',
     'permissionLevel',
@@ -38,7 +39,7 @@ test('the notice table covers exactly the nine trust-sensitive fields', () => {
 
 test('every trust-sensitive field maps to a trust-scoped key', () => {
   const mapped = Object.values(TRUST_SENSITIVE_FIELD_KEYS);
-  assert.equal(mapped.length, 9);
+  assert.equal(mapped.length, 10);
   for (const key of mapped) {
     assert.equal(TRUST_SCOPED_KEYS.includes(key), true, key);
   }
@@ -69,7 +70,7 @@ test('every trust-sensitive field has a notice for a workspace save', () => {
 });
 
 /**
- * The screen must actually render the notice for each of the nine fields.
+ * The screen must actually render the notice for each of the ten fields.
  *
  * A pure-logic test proves the wording exists; this reads the screen source
  * to prove every field renders one, so a field that is redirected but shows
@@ -89,7 +90,7 @@ test('the screen renders a notice for every trust-sensitive field', async () => 
 });
 
 /**
- * The host must produce a notice for each of the nine, so the screen has
+ * The host must produce a notice for each of the ten, so the screen has
  * something truthful to show.
  */
 test('the settings service produces a notice for every trust-sensitive field', async () => {

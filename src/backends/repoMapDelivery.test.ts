@@ -14,11 +14,11 @@ async function source(relative: string): Promise<string> {
   return readFile(join(process.cwd(), 'src', ...relative.split('/')), 'utf8');
 }
 
-test('both ollama paths include the repo map next to the per-turn delta', async () => {
+test('the ollama turn prompt includes the repo map next to the per-turn delta', async () => {
   const text = await source('backends/ollama.ts');
-  // Direct /api/chat goes through the shared message builder.
-  assert.match(text, /buildContextMessages\(history, text, context\)/);
-  // The nested OpenCode runtime primes the turn text and includes the map.
+  // Every Ollama turn uses the OpenCode prompt, which primes the turn text and
+  // includes the map. There is no direct /api/chat turn builder any more.
+  assert.equal(/buildContextMessages\(/.test(text), false);
   assert.match(text, /block, context\?\.repoMap, context\?\.attachedFile, request\.text/);
 });
 

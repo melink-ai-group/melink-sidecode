@@ -63,6 +63,14 @@ export interface StartTurnChecksInput {
   threadId: string;
   turnId: string;
   hasChanges: boolean;
+  /** The orchestration testing gate; false starts nothing at all. */
+  shouldRun?: boolean;
+  /**
+   * The already-resolved orchestration testing value. When present it replaces
+   * the legacy `enabled` reader, so a new explicit value always wins; trust,
+   * commands, and the timeout still come from `readSettings`.
+   */
+  enabledOverride?: boolean;
   onUpdate?: (view: CheckRunView) => void;
 }
 
@@ -108,7 +116,7 @@ export class CheckHost {
    * offered a run is ignored.
    */
   async startTurnChecks(input: StartTurnChecksInput): Promise<void> {
-    if (!input.hasChanges) {
+    if (!input.hasChanges || input.shouldRun === false) {
       return;
     }
     if (!this.isKnownTurn(input.backendId, input.threadId, input.turnId)) {
@@ -152,10 +160,11 @@ export class CheckHost {
 
     try {
       const settings = this.readSettings();
+      const enabled = input.enabledOverride ?? settings.enabled;
       const root = this.workspace.workspaceRoot();
       const mayRun =
         settings.trusted &&
-        settings.enabled &&
+        enabled &&
         (settings.commands === undefined || settings.commands.length > 0) &&
         root !== undefined;
 
@@ -176,7 +185,7 @@ export class CheckHost {
       }
 
       let manifest: CheckManifest | undefined;
-      if (settings.trusted && settings.enabled && settings.commands === undefined) {
+      if (settings.trusted && enabled && settings.commands === undefined) {
         try {
           manifest = root ? await this.workspace.readManifest(root) : undefined;
         } catch {
@@ -188,7 +197,7 @@ export class CheckHost {
       }
 
       const coreSettings: CheckSettings = {
-        enabled: settings.enabled,
+        enabled,
         timeoutMs: settings.timeoutMs,
         ...(settings.commands !== undefined ? { commands: settings.commands } : {})
       };

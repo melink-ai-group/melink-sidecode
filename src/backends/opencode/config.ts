@@ -57,6 +57,18 @@ export const OPENCODE_PROVIDER_ID = 'melink-ollama-cloud';
 /** The environment variable the generated config reads the token from. */
 export const OPENCODE_API_KEY_ENV = 'OLLAMA_API_KEY';
 
+/**
+ * The local Ollama provider id and credential variable.
+ *
+ * A local server has no credential. OpenCode's OpenAI-compatible adapter still
+ * expects the declared env variable to be present, so the adapter supplies a
+ * fixed placeholder that is never a user secret and never sent anywhere that
+ * validates it.
+ */
+export const OPENCODE_LOCAL_PROVIDER_ID = 'melink-ollama-local';
+export const OPENCODE_LOCAL_API_KEY_ENV = 'OLLAMA_LOCAL_API_KEY';
+export const LOCAL_OPENCODE_API_KEY = 'local-no-key';
+
 /** The inline runtime override variable carrying the generated config. */
 export const OPENCODE_CONFIG_ENV = 'OPENCODE_CONFIG_CONTENT';
 
@@ -137,6 +149,12 @@ export interface OpencodeConfigInput {
   skillPermissions?: Record<string, 'allow'>;
   /** Test seam only; production generates a fresh random nonce per turn. */
   agentNonce?: string;
+  /** Provider id in the generated config. Defaults to the Cloud provider. */
+  providerId?: string;
+  /** Provider display name in the generated config. */
+  providerName?: string;
+  /** Environment variable the generated provider reads its key from. */
+  apiKeyEnv?: string;
 }
 
 /**
@@ -361,6 +379,9 @@ export function opencodeAgentConfig(
  */
 export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigResult {
   const { baseUrl, modelIds, modelId, settings, capabilities, mode, permissionLevel, browser } = input;
+  const providerId = input.providerId ?? OPENCODE_PROVIDER_ID;
+  const providerName = input.providerName ?? 'Ollama Cloud';
+  const apiKeyEnv = input.apiKeyEnv ?? OPENCODE_API_KEY_ENV;
   const resolvedMode: DefaultMode = isDefaultMode(mode) ? mode : 'agent';
   const nonce = opencodeAgentSuffix(input.agentNonce);
 
@@ -403,12 +424,12 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
   const config: Record<string, unknown> = {
     $schema: 'https://opencode.ai/config.json',
     provider: {
-      [OPENCODE_PROVIDER_ID]: {
+      [providerId]: {
         npm: '@ai-sdk/openai-compatible',
-        name: 'Ollama Cloud',
+        name: providerName,
         // The provider reads this variable from its environment; only the name
         // is named here, so the token itself never appears in the config.
-        env: [OPENCODE_API_KEY_ENV],
+        env: [apiKeyEnv],
         options: {
           baseURL: opencodeBaseUrl(baseUrl)
         },
@@ -417,7 +438,7 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
     },
     // Keep even the lightweight internal calls on the same model, so `opencode
     // run` never reaches for a different provider the user did not choose.
-    small_model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
+    small_model: `${providerId}/${modelId}`,
     // The sidebar has its own transcript; run opencode without sharing or
     // self-updating as a side effect of a turn.
     share: 'disabled',
@@ -442,7 +463,7 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
 
   return {
     config,
-    modelRef: `${OPENCODE_PROVIDER_ID}/${modelId}`,
+    modelRef: `${providerId}/${modelId}`,
     agent: opencodeAgentForMode(resolvedMode, nonce),
     contextApplied,
     reasoningApplied,

@@ -26,3 +26,27 @@ test('a send with no model still follows the requested provider', () => {
     'codex'
   );
 });
+
+test('a requested Ollama Local provider routes the turn to it', () => {
+  assert.equal(
+    backendForTurn({
+      requestedBackendId: 'ollama-local',
+      threadBackendId: 'ollama',
+      availableBackendId: 'ollama'
+    }),
+    'ollama-local'
+  );
+});
+
+test('a local model pick beats the stale Cloud thread', () => {
+  assert.equal(
+    backendForTurn({
+      requestedBackendId: 'ollama',
+      requestedModel: 'qwen2.5-coder:7b',
+      composerBackendId: 'ollama-local',
+      composerModelId: 'qwen2.5-coder:7b',
+      threadBackendId: 'ollama'
+    }),
+    'ollama-local'
+  );
+});

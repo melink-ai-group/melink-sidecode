@@ -35,6 +35,8 @@ const URGENT_HOST_MESSAGES = new Set([
   'notice',
   'attachmentError',
   'attachmentsPicked',
+  'queuedTurns',
+  'userMessageSent',
   'userMessageId'
 ]);
 
