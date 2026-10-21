@@ -2,6 +2,7 @@ import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, use
 import type { ApprovalDecision, ApprovalRule } from '../backends/types';
 import { historyEntries, historyLoading } from './historyEntries';
 import { pinnedUserMessage, userMessagePinText, type UserMessageFrame } from './pinnedUserMessage';
+import { isSubmitEnter } from './keys';
 import { acceptComposerRestore, hostAttachments, switchComposerDraft, type ComposerDraft } from './composerDraft';
 import {
   AlertIcon,
@@ -2350,7 +2351,7 @@ export function App(): JSX.Element {
             }}
             onPaste={onComposerPaste}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (isSubmitEnter(event)) {
                 event.preventDefault();
                 send();
               }

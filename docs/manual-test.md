@@ -239,6 +239,14 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
       being sent. In an expanded reasoning card, select body text and release
       the mouse: the card stays open. Click a link, button, or inline code: the
       card stays open; click plain body text: it collapses.
+- [ ] 14i-b. **IME-safe Enter.** Switch the OS input method to Japanese (e.g.
+      Microsoft IME) or Chinese. In the composer, start typing a reading so the
+      candidate list is open, then press Enter.
+      - **Expected:** the candidate is committed into the draft and **no turn is
+        sent**.
+      - Press Enter again after the composition has ended: the turn sends
+        **once**.
+      - Press Shift+Enter: a newline is added to the draft.
 - [ ] 14j. **Cancel.** Start a long turn and press **Stop**. Confirm the
       transcript keeps the partial output, shows *Stopped* (not an error), the
       input is usable again, and no `opencode` process survives (`tasklist /FI

@@ -6,6 +6,7 @@ import { AlertIcon, BackIcon, CheckIcon, CrossIcon, InfoIcon } from './Icons';
 import { opencodeRuntimeView } from './runtimeStatus';
 import { contextPatternError } from '../context/contextSettings';
 import { executablePathError, resolveExecutableCommand } from '../backends/executables.ts';
+import { isSubmitEnter } from './keys';
 import { noticeForField } from '../config/fieldNotices.ts';
 import { TabList, TabPanel, type TabItem } from './Tabs';
 import { CONTEXT_BUILTIN_PATTERNS } from './settings/constants';
@@ -706,7 +707,7 @@ export function SettingsScreen({
                     setTokenSaved(false);
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
+                    if (isSubmitEnter(event)) {
                       event.preventDefault();
                       saveToken();
                     }
@@ -820,7 +821,7 @@ export function SettingsScreen({
                     setZenTokenSaved(false);
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
+                    if (isSubmitEnter(event)) {
                       event.preventDefault();
                       saveZenToken();
                     }
@@ -1370,7 +1371,7 @@ export function SettingsScreen({
                   autoComplete="off"
                   onChange={(event) => setPatternDraft(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
+                    if (isSubmitEnter(event)) {
                       event.preventDefault();
                       addPattern();
                     }
