@@ -90,10 +90,9 @@ export function approvalFromOpencode(ask: OpencodePermissionAsk, origin: string)
   };
   if (kind === 'command') {
     request.command = command ?? ask.patterns.filter((pattern) => pattern !== '*').join(', ');
-    const prefix = commandPrefixOf(request.command);
-    if (prefix.length > 0) {
-      request.execPolicyAmendment = prefix;
-    }
+    // No native exec-policy amendment is proposed here: opencode offers none,
+    // and a synthetic first-token prefix would be broader than the command the
+    // user was shown. `ruleFor` derives the command family instead.
   } else if (kind === 'file-change') {
     request.paths = paths;
   } else {
@@ -242,11 +241,6 @@ function pathsOf(ask: OpencodePermissionAsk): string[] {
     return [];
   }
   return ask.patterns.map(stripGlob).filter((entry) => entry.length > 0);
-}
-
-function commandPrefixOf(command: string | undefined): string[] {
-  const token = command?.trim().split(/\s+/)[0];
-  return token ? [token] : [];
 }
 
 function stripGlob(value: string): string {
