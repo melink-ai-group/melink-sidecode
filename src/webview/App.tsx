@@ -9,6 +9,8 @@ import type {
 } from '../backends/types';
 import logoUrl from '../../media/melink-logo.png';
 import { Markdown } from './Markdown';
+import { trapTab } from './focusTrap';
+import { reasoningTransition } from './reasoningStatus';
 import { splitReplyClose } from './replyClose';
 import { plainRowText } from './plainRowText';
 import { visibleTranscriptText } from './visibleTranscript';
@@ -2266,6 +2268,7 @@ export function App(): JSX.Element {
   return (
     <main className={chatEmpty ? 'app app--chat-empty' : 'app'}>
       {tabStrip}
+      <ReasoningAnnouncements items={state.transcript} />
       <div
         className="transcript"
         ref={transcriptRef}
@@ -3851,6 +3854,32 @@ function ReasoningWaitDots(): JSX.Element {
   );
 }
 
+/**
+ * One live region for every reasoning item in the transcript. It stays mounted
+ * while reasoning is collapsed inside an activity group or narration row, where
+ * the reasoning card itself is not rendered. Streamed text never enters it.
+ */
+function ReasoningAnnouncements({ items }: { items: TranscriptItemView[] }): JSX.Element {
+  const [announcement, setAnnouncement] = useState('');
+  const previous = useRef<Map<string, ItemStatus>>(new Map());
+  const signature = items
+    .filter((item) => item.kind === 'reasoning')
+    .map((item) => `${item.id}:${item.status}`)
+    .join('|');
+  useEffect(() => {
+    const next = reasoningTransition(previous.current, items);
+    previous.current = next.statuses;
+    if (next.announcement) {
+      setAnnouncement(next.announcement);
+    }
+  }, [signature]);
+  return (
+    <p className="sr-only" role="status">
+      {announcement}
+    </p>
+  );
+}
+
 function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const text = item.text.trim();
@@ -3865,7 +3894,10 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
   const toggle = (): void => setExpanded((value) => !value);
 
   return (
-    <article className={`turn turn--reasoning${expanded ? '' : ' turn--reasoning--collapsed'}`} aria-live="polite">
+    <article
+      className={`turn turn--reasoning${expanded ? '' : ' turn--reasoning--collapsed'}`}
+      aria-live="off"
+    >
       <button
         type="button"
         className="reasoning-toggle"
@@ -3887,7 +3919,7 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
             {preview}
           </span>
         ) : null}
-        <span className="status-slot">
+        <span className="status-slot" aria-hidden="true">
           {item.status === 'streaming' ? <StatusMark tone="running" label="Thinking" /> : null}
         </span>
         <span
@@ -3906,7 +3938,7 @@ function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Element {
           ) : null}
           {item.status === 'streaming' && text ? <span className="caret" aria-hidden="true" /> : null}
           {incomplete ? (
-            <p className="reasoning-incomplete" role="status">
+            <p className="reasoning-incomplete">
               Thinking stopped early; this section may be incomplete.
             </p>
           ) : null}
@@ -4581,16 +4613,28 @@ function ImageViewer({
   onClose: () => void;
 }): JSX.Element {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
   const current = images[Math.min(Math.max(index, 0), images.length - 1)];
   const several = images.length > 1;
 
   useEffect(() => {
+    const invoking = document.activeElement;
+    restoreRef.current = invoking instanceof HTMLElement ? invoking : null;
     closeRef.current?.focus();
+    return () => {
+      const target = restoreRef.current;
+      if (target?.isConnected) {
+        target.focus();
+      }
+    };
   }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Tab') {
+        trapTab(event, dialogRef.current);
+      } else if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
       } else if (event.key === 'ArrowLeft' && several) {
@@ -4612,6 +4656,7 @@ function ImageViewer({
         role="dialog"
         aria-modal="true"
         aria-label={current?.name ?? 'Image'}
+        ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
       >
         {several ? (

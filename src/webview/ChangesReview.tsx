@@ -22,6 +22,7 @@ import {
   TrashIcon
 } from './Icons';
 import { prettyPath } from './prettyPath.ts';
+import { confirmRestoreTarget, focusableControls, trapTab } from './focusTrap.ts';
 
 /**
  * The change review surface: what a turn changed, with per-file keep/reject.
@@ -104,6 +105,14 @@ function ChangesReviewView({
    */
   const [outcomeMemory, setOutcomeMemory] = useState<Map<string, ChangeDecisionResult>>(() => new Map());
   const outcomeTurnRef = useRef<string | undefined>(undefined);
+  const sectionRef = useRef<HTMLElement>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const confirmTriggerRef = useRef<HTMLElement | null>(null);
+  const restoreFrameRef = useRef<number | undefined>(undefined);
+  const cancelRejectRef = useRef(onCancelReject);
+  cancelRejectRef.current = onCancelReject;
+  const confirmOpen = rejectConfirm !== undefined;
+  const confirmKey = rejectConfirm ? `${rejectConfirm.scope}:${rejectConfirm.paths.join('|')}` : '';
   useEffect(() => {
     setVisibleFileCount(24);
     setExpanded(false);
@@ -120,6 +129,65 @@ function ChangesReviewView({
       return next;
     });
   }, [review.turnId, decisionResults]);
+
+  // The destructive confirmation is a modal step: capture what opened it, put
+  // focus on its first choice, and keep Tab inside. Re-capture when the confirm
+  // target changes while it stays open.
+  useEffect(() => {
+    if (!confirmOpen) {
+      return;
+    }
+    if (restoreFrameRef.current !== undefined) {
+      cancelAnimationFrame(restoreFrameRef.current);
+      restoreFrameRef.current = undefined;
+    }
+    const invoking = document.activeElement;
+    if (
+      invoking instanceof HTMLElement &&
+      invoking !== document.body &&
+      !confirmRef.current?.contains(invoking)
+    ) {
+      confirmTriggerRef.current = invoking;
+    }
+    const first = focusableControls(confirmRef.current)[0];
+    (first ?? confirmRef.current)?.focus();
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelRejectRef.current();
+        return;
+      }
+      trapTab(event, confirmRef.current);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [confirmOpen, confirmKey]);
+
+  // Restore only after the decision has repainted the review. A confirmed
+  // reject disables the row trigger, so the frame checks usability and falls
+  // back to the still-enabled panel header instead of focusing a dead button.
+  useEffect(() => {
+    if (!confirmOpen) {
+      return;
+    }
+    return () => {
+      if (restoreFrameRef.current !== undefined) {
+        cancelAnimationFrame(restoreFrameRef.current);
+      }
+      restoreFrameRef.current = requestAnimationFrame(() => {
+        restoreFrameRef.current = undefined;
+        const trigger = confirmTriggerRef.current;
+        const triggerUsable =
+          trigger?.isConnected === true && !('disabled' in trigger && trigger.disabled);
+        if (confirmRestoreTarget(triggerUsable) === 'trigger' && trigger) {
+          trigger.focus();
+          return;
+        }
+        sectionRef.current?.querySelector<HTMLElement>('.changes-review__collapse')?.focus();
+      });
+    };
+  }, [confirmOpen]);
 
   // A row still `pending` shows its remembered conflict or failure marker; a row
   // that has resolved clears it, because the decision took effect and the host
@@ -151,6 +219,7 @@ function ChangesReviewView({
 
   return (
     <section
+      ref={sectionRef}
       className={`changes-review${expanded ? ' is-open' : ''}${allKept ? ' changes-review--kept' : ''}`}
       aria-labelledby={`changes-review-title-${review.turnId}`}
       aria-busy={busy}
@@ -253,7 +322,14 @@ function ChangesReviewView({
       ) : null}
 
       {rejectConfirm ? (
-        <div className="changes-review__confirm" role="alertdialog" aria-label="Confirm rejecting changes">
+        <div
+          ref={confirmRef}
+          className="changes-review__confirm"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Confirm rejecting changes"
+          tabIndex={-1}
+        >
           <AlertIcon className="ico ico--xs" />
           <div className="changes-review__confirm-body">
             <span>
