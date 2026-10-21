@@ -1,11 +1,34 @@
 /**
  * Which addresses the editor browser may open without asking.
  *
- * Localhost is the app the user is already running. Anything else is a
- * different site, so the user has to allow that origin once for the session.
+ * Nothing is allowed by default, including localhost. An http(s) origin opens
+ * only after the user allowed that exact scheme, host and port for the session.
  */
 
 export type NavigationDecision = 'allow' | 'ask' | 'invalid';
+
+/**
+ * The exact origins the user allowed for the current browser session.
+ *
+ * Host-free so it can be tested without VS Code. `add` only records the origin;
+ * the caller decides which user choice grants it.
+ */
+export class SessionOrigins {
+  private readonly origins = new Set<string>();
+
+  has(origin: string): boolean {
+    return this.origins.has(origin);
+  }
+
+  add(origin: string): this {
+    this.origins.add(origin);
+    return this;
+  }
+
+  clear(): void {
+    this.origins.clear();
+  }
+}
 
 /** True unless the stored value is explicitly off. An unset setting stays on. */
 export function browserSkillEnabled(value: unknown): boolean {
@@ -55,8 +78,18 @@ export function configuredSettingValue<T>(
   return undefined;
 }
 
-/** `allow` for localhost, `ask` for another http(s) origin, `invalid` otherwise. */
-export function navigationDecision(url: string, allowedOrigins: ReadonlySet<string>): NavigationDecision {
+/**
+ * `allow` only for an exact granted origin, `ask` for any other `http(s)`
+ * address, `invalid` otherwise. Localhost has no special case.
+ *
+ * The comparison uses `URL.origin`, so scheme, host alias and port all count:
+ * granting `http://localhost:3000` does not grant port 5173, `127.0.0.1`,
+ * `[::1]`, or `https://localhost:3000`.
+ */
+export function navigationDecision(
+  url: string,
+  grantedOrigins: { has(origin: string): boolean }
+): NavigationDecision {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -66,10 +99,7 @@ export function navigationDecision(url: string, allowedOrigins: ReadonlySet<stri
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return 'invalid';
   }
-  if (isLocalHost(parsed.hostname)) {
-    return 'allow';
-  }
-  if (allowedOrigins.has(parsed.origin)) {
+  if (grantedOrigins.has(parsed.origin)) {
     return 'allow';
   }
   return 'ask';
@@ -84,7 +114,21 @@ export function navigationOrigin(url: string): string | undefined {
   }
 }
 
-function isLocalHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+/**
+ * The body of the origin approval prompt.
+ *
+ * Says exactly what each choice covers and that allowing an origin also opens
+ * the ungated click/type/press/snapshot tools in the tab the user is watching.
+ */
+export function originApprovalCopy(origin: string): string {
+  return [
+    `SideCode browser wants to open ${origin}.`,
+    '',
+    'Allowing this origin also lets the agent use browser_click, browser_type, browser_press and browser_snapshot in the browser tab you are watching.',
+    'Redirects and in-page link or form navigation are not re-prompted; navigate explicitly to be asked again.',
+    '',
+    'Allow once: one navigation only; nothing is remembered.',
+    `Allow for this session: later navigations to ${origin} until the browser is stopped.`,
+    'Deny: the address is not opened.'
+  ].join('\n');
 }

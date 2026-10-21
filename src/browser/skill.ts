@@ -8,11 +8,13 @@ import { BrowserPanel, type BrowserTabState } from './panel.ts';
 import {
   browserSkillEnabledFor,
   configuredSettingValue,
+  originApprovalCopy,
+  SessionOrigins,
   type BrowserSkillProvider
 } from './policy.ts';
 import { BrowserPage } from './session.ts';
 import { requireWorkspaceRoot, saveScreenshot } from './screenshots.ts';
-import { runBrowserTool, type BrowserActions, type ToolResult } from './tools.ts';
+import { runBrowserTool, type BrowserActions, type OriginApproval, type ToolResult } from './tools.ts';
 import { SKILLS_SECTION } from '../settingsKeys';
 
 /**
@@ -30,7 +32,7 @@ export class BrowserSkill {
   private endpointFile = '';
   private starting?: Promise<void>;
   private stopped = false;
-  private readonly allowedOrigins = new Set<string>();
+  private readonly sessionOrigins = new SessionOrigins();
   private launchErrorListener?: () => void;
   launchError?: string;
 
@@ -91,7 +93,7 @@ export class BrowserSkill {
     this.opening = undefined;
     this.starting = undefined;
     this.launchError = undefined;
-    this.allowedOrigins.clear();
+    this.sessionOrigins.clear();
     const page = this.page;
     this.page = undefined;
     await page?.close();
@@ -152,7 +154,7 @@ export class BrowserSkill {
     try {
       const page = await this.ensurePage();
       const actions = this.actions(page);
-      const result = await runBrowserTool(actions, name, args, (origin) => this.askOrigin(origin), this.allowedOrigins);
+      const result = await runBrowserTool(actions, name, args, (origin) => this.askOrigin(origin), this.sessionOrigins);
       await this.pushState(page);
       return result;
     } catch (error) {
@@ -250,18 +252,22 @@ export class BrowserSkill {
     });
   }
 
-  private async askOrigin(origin: string): Promise<boolean> {
+  private async askOrigin(origin: string): Promise<OriginApproval> {
     const choice = await vscode.window.showWarningMessage(
-      `SideCode browser wants to open ${origin}.`,
+      originApprovalCopy(origin),
       { modal: true },
       'Allow once',
+      'Allow for this session',
       'Deny'
     );
     if (choice === 'Allow once') {
-      this.allowedOrigins.add(origin);
-      return true;
+      return 'once';
     }
-    return false;
+    if (choice === 'Allow for this session') {
+      this.sessionOrigins.add(origin);
+      return 'session';
+    }
+    return 'deny';
   }
 }
 
