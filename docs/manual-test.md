@@ -1236,6 +1236,12 @@ completed and signed by a tester: all of §1 (provider matrix), §2 (reload),
 awareness, which needs a live model), §4c (change review and checkpoints, which
 need a live model plus a git workspace), and §5 (per-host).
 
+Rendering itself is not blocked on a GUI host: `npm run visual` renders the
+built webview in Chromium with seeded fixtures and writes the key screens to
+`.melink/reports/visual/` (see [visual-harness.md](visual-harness.md)). Those
+images are a seeded render, not a real extension-host capture, so the behavioral
+checks above still need a GUI host.
+
 ---
 
 ## 7. Known limitations
@@ -1267,6 +1273,9 @@ need a live model plus a git workspace), and §5 (per-host).
 - **Plain VS Code not available in the authoring environment** (only an Open VSX
   consumer, Cursor 3.21.18). The `Per-host pass` for VS Code stable remains
   unverified here and must be run by the tester.
-- **GUI-only.** View resolution, theme inheritance, and process lifetime on editor
-  quit cannot be observed from a headless shell; the corresponding steps are marked
-  as requiring a GUI host.
+- **GUI-only behavior.** View resolution, host theme inheritance, CSP, and process
+  lifetime on editor quit cannot be observed from a headless shell; the
+  corresponding steps are marked as requiring a GUI host. The screenshot gap is
+  covered by `npm run visual`, which renders the built webview in Chromium with
+  mocked host state; it does not start an extension host and therefore cannot
+  prove host-only behavior. See [visual-harness.md](visual-harness.md).
