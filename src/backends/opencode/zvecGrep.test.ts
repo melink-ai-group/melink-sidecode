@@ -11,6 +11,7 @@ import {
   npmGlobalInstallArgs,
   npmPrefixInstallArgs,
   zgGlobalBin,
+  zvecVersionSupported,
   opencodeConfigCandidates,
   opencodeConfigHasZvecGrep,
   rejectsIntegrationVerb,
@@ -20,13 +21,18 @@ import {
   type ZvecGrepIO
 } from './zvecGrep.ts';
 import type { OpencodeUserConfigIO } from './userConfig.ts';
-import { bundledZvecGrepExecutable, bundledZvecGrepPrefix } from '../zvecGrep/resolve.ts';
+import {
+  bundledZvecGrepExecutable,
+  bundledZvecGrepPrefix,
+  resolveZvecGrepExecutable
+} from '../zvecGrep/resolve.ts';
+import { windowsCommandCandidates } from '../launch.ts';
 
 const CONFIGURED = `{
   // "zvec_grep": { "command": "ignored" }
   "mcp": {
     "other": { "command": "echo" },
-    "zvec_grep": { "type": "local", "command": ["zg", "--server", "--stdio"] }
+    "zvec_grep": { "type": "local", "command": ["zg", "server", "--stdio"] }
   }
 }`;
 
@@ -34,6 +40,14 @@ test('node major is read from a version line', () => {
   assert.equal(nodeMajor('v22.14.0'), 22);
   assert.equal(nodeMajor('v21.0.0\n'), 21);
   assert.equal(nodeMajor('not a version'), undefined);
+});
+
+test('only zg 0.2 or newer supports the server subcommand', () => {  assert.equal(zvecVersionSupported('0.2.2'), true);
+  assert.equal(zvecVersionSupported('0.3.0'), true);
+  assert.equal(zvecVersionSupported('1.0.0'), true);
+  assert.equal(zvecVersionSupported('0.1.9'), false);
+  assert.equal(zvecVersionSupported('0.0.1'), false);
+  assert.equal(zvecVersionSupported(undefined), true);
 });
 
 test('integration args use the current installer form and never force', () => {
@@ -53,6 +67,31 @@ test('integration args use the current installer form and never force', () => {
     rejectsIntegrationVerb({ code: 1, stdout: '', stderr: 'Error: Unknown command: --install.' }, 'install'),
     true
   );
+});
+
+test('a bare zg resolves to the Windows cmd shim', () => {
+  const roots = { extensionPath: '/ext' };
+  assert.equal(
+    resolveZvecGrepExecutable({ source: 'local', path: 'zg', roots, platform: 'win32' }),
+    'zg.cmd'
+  );
+  assert.equal(
+    resolveZvecGrepExecutable({ source: 'local', path: 'zg', roots, platform: 'linux' }),
+    'zg'
+  );
+  assert.equal(
+    resolveZvecGrepExecutable({ source: 'local', path: 'C:\\tools\\zg.exe', roots, platform: 'win32' }),
+    'C:\\tools\\zg.exe'
+  );
+  assert.deepEqual(windowsCommandCandidates('ast-grep', 'win32'), [
+    'ast-grep.exe',
+    'ast-grep.cmd',
+    'ast-grep'
+  ]);
+  assert.deepEqual(windowsCommandCandidates('C:\\tools\\ast-grep.exe', 'win32'), [
+    'C:\\tools\\ast-grep.exe'
+  ]);
+  assert.deepEqual(windowsCommandCandidates('ast-grep', 'linux'), ['ast-grep']);
 });
 
 test('config candidates follow zg path rules', () => {
@@ -284,6 +323,67 @@ test('detection requires both the CLI and the server entry', async () => {
   assert.deepEqual(noCli, { enabled: false, cli: 'missing' });
 });
 
+test('detection verifies the MCP handshake, not only --version', async () => {
+  const store = memoryConfig(CONFIGURED);
+  let seen: string[] = [];
+  const ready = await detectZvecGrep({
+    io: io(
+      'linux',
+      async () => ok('0.2.2'),
+      async () => store.text,
+      async (server) => {
+        seen = server.command;
+        return { ok: true, tools: ['zvec_grep_search'], calls: [] };
+      }
+    ),
+    userConfig: store.io
+  });
+  assert.deepEqual(seen, ['zg', 'server', '--stdio']);
+  assert.equal(ready.enabled, true);
+  assert.equal(ready.server, 'ready');
+
+  const broken = await detectZvecGrep({
+    io: io(
+      'linux',
+      async () => ok('0.2.2'),
+      async () => store.text,
+      async () => ({ ok: false, tools: [], calls: [], message: 'Error: Unknown command: --server.' })
+    ),
+    userConfig: store.io
+  });
+  assert.deepEqual(broken, {
+    enabled: false,
+    cli: 'installed',
+    server: 'failed',
+    message: 'Error: Unknown command: --server.'
+  });
+});
+
+test('a failed enable reports the reason and rolls the new entry back', async () => {
+  const original = `{
+  // keep this comment
+  "theme": "dark",
+  "mcp": {
+    "other": { "command": "echo" },
+  },
+}`;
+  const store = memoryConfig(original);
+  const result = await applyZvecGrep(true, {
+    io: io(
+      'linux',
+      async (_command, args) => (args[0] === '--version' ? ok('0.2.2') : ok('ok')),
+      async () => store.text,
+      async () => ({ ok: false, tools: [], calls: [], message: 'The server exited before answering.' })
+    ),
+    userConfig: store.io
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.enabled, false);
+  assert.match(result.message, /exited before answering/);
+  assert.equal(store.text, original);
+  assert.equal(opencodeConfigHasZvecGrep(store.text ?? ''), false);
+});
+
 test('Windows starts cmd shims through cmd.exe', () => {
   assert.deepEqual(commandLaunch('win32', 'npm.cmd', ['install', '-g', '@zvec/zvec-grep']), {
     command: 'cmd.exe',
@@ -471,9 +571,15 @@ function memoryConfig(initial?: string): { text: string | undefined; io: Opencod
 function io(
   platform: NodeJS.Platform,
   run: CommandRunner,
-  readConfig: () => Promise<string | undefined>
+  readConfig: () => Promise<string | undefined>,
+  probeServer?: (server: { command: string[] }) => Promise<{
+    ok: boolean;
+    tools: string[];
+    calls: { ok: boolean; text?: string; error?: string }[];
+    message?: string;
+  }>
 ): ZvecGrepIO {
-  return { platform, run, readConfig };
+  return { platform, run, readConfig, ...(probeServer ? { probeServer } : {}) };
 }
 
 function ok(stdout: string): SpawnOutcome {

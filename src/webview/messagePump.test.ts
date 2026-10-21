@@ -86,6 +86,9 @@ test('draft and dictation messages are urgent; transcript events are not', () =>
   assert.equal(isUrgentHostMessage('composerDraft'), true);
   assert.equal(isUrgentHostMessage('dictationStatus'), true);
   assert.equal(isUrgentHostMessage('notice'), true);
+  // The save result gates the footer's disabled state; coalescing could leave
+  // "Saving..." on screen after the host already settled.
+  assert.equal(isUrgentHostMessage('settingsSave'), true);
   assert.equal(isUrgentHostMessage('agentEvent'), false);
   assert.equal(isUrgentHostMessage('changes/decisionResult'), false);
 });

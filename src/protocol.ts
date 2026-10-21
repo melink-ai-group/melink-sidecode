@@ -1,4 +1,4 @@
-import type { ContextView } from './context/contextView';
+﻿import type { ContextView } from './context/contextView';
 import type {
   ChangeDecisionResult,
   ChangeHunkView,
@@ -86,12 +86,14 @@ export interface OpencodeCliProbe {
  */
 export interface SettingsSnapshot {
   /**
-   * Effective read scope for the header: `workspace` when any SideCode key is
-   * set in workspace settings (those values win on load), otherwise `global`.
-   * Primary Save always writes user settings; when this is `workspace`, the
-   * screen also offers Save to workspace.
+   * Effective write target for the primary save: `folder` when a workspace
+   * folder override controls at least one value, otherwise `workspace` when a
+   * workspace override does, otherwise `global`. The primary save writes that
+   * scope, and each field resolves to its nearest override (folder > workspace).
+   * Trust-sensitive fields are always written to the user's own settings and
+   * carry an inline notice.
    */
-  target: 'workspace' | 'global';
+  target: 'folder' | 'workspace' | 'global';
   ollama: {
     baseUrl: string;
     defaultModel: string;
@@ -209,7 +211,7 @@ export interface SettingsSnapshot {
   saveErrors?: Partial<Record<keyof SettingsPatch, string>>;
   /**
    * Field-keyed notices for a field that was saved somewhere other than the
-   * requested scope — for example a trust-sensitive setting written to the
+   * requested scope â€” for example a trust-sensitive setting written to the
    * user's own settings during a "Save to workspace". The value *was*
    * persisted, so this is a notice, not an error.
    */
@@ -229,6 +231,13 @@ export interface SkillCliSnapshot {
   /** True when the CLI runs and the user OpenCode config has this MCP server. */
   connected: boolean;
   cli: 'missing' | 'installed';
+  /**
+   * zvec-grep only: workspace index state read from `zg status`. `undefined`
+   * for ast-grep, which has no index.
+   */
+  index?: 'ready' | 'missing' | 'building' | 'unknown';
+  /** Plain-language reason the configured MCP server did not become ready. */
+  detail?: string;
 }
 
 /**
@@ -284,10 +293,8 @@ export interface SettingsPatch {
   browserCodex?: boolean;
   /** Browser control for OpenCode (Ollama) turns. */
   browserOpencode?: boolean;
-  zvecGrepEnabled?: boolean;
   zvecGrepCliSource?: 'local' | 'bundled';
   zvecGrepPath?: string;
-  astGrepEnabled?: boolean;
   astGrepCliSource?: 'local' | 'bundled';
   astGrepPath?: string;
 }
@@ -479,6 +486,10 @@ export type HostToWebviewMessage =
     }
   | { type: 'settings'; settings: SettingsSnapshot }
   /**
+   * Busy/result state for the settings save. The host posts `pending: true`\r\n   * before it awaits any write or probe, then settles it in a finally block,\r\n   * so a slow or failed save can never leave the screen in a permanent\r\n   * Saving... state. `ok` is absent while pending; `message` is a plain\r\n   * sentence safe to render.
+   */
+  | { type: 'settingsSave'; pending: boolean; ok?: boolean; message?: string }
+  /**
    * Open the inline settings screen. Sent from the view-title gear.
    * `section` selects a provider page (used by protocol/failure actions).
    */
@@ -525,6 +536,19 @@ export type HostToWebviewMessage =
     }
   | { type: 'astGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
   | { type: 'zvecGrepInstall'; pending: boolean; ok?: boolean; message?: string; path?: string }
+  /**
+   * Read-only Test probe or the explicit Build index action. `pending` is
+   * posted before any await, so the panel can show a spinner and disable the
+   * buttons. A test never writes; an index build only runs when the user asks.
+   */
+  | {
+      type: 'skillAction';
+      skill: 'zvecGrep' | 'astGrep';
+      action: 'test' | 'index';
+      pending: boolean;
+      ok?: boolean;
+      message?: string;
+    }
   /** The capability descriptor + effective settings for one provider+model. */
   | { type: 'modelCapability'; capability: ModelCapabilitySnapshot }
   /**
@@ -775,8 +799,11 @@ export type WebviewToHostMessage =
   | {
       type: 'saveSettings';
       patch: SettingsPatch;
-      /** Defaults to user (global) settings. */
-      target?: 'global' | 'workspace';
+      /**
+       * Defaults to user (global) settings. `workspace`/`folder` save to the
+       * scope that controls the shown values, field by field.
+       */
+      target?: 'global' | 'workspace' | 'folder';
     }
   | { type: 'setOllamaToken'; value: string }
   | { type: 'clearOllamaToken' }
@@ -808,6 +835,14 @@ export type WebviewToHostMessage =
   | { type: 'installAstGrep'; cliSource?: 'local' | 'bundled'; path?: string }
   | { type: 'upgradeAstGrep'; cliSource?: 'local' | 'bundled'; path?: string }
   | { type: 'installZvecGrep'; cliSource?: 'local' | 'bundled'; path?: string }
+  /** Probe a skill (test) or build its workspace index (zvec-grep only). */
+  | {
+      type: 'skillAction';
+      skill: 'zvecGrep' | 'astGrep';
+      action: 'test' | 'index';
+      cliSource?: 'local' | 'bundled';
+      path?: string;
+    }
   /** A decision on a pending approval. Never sent by a timer or a retry. */
   | { type: 'decideApproval'; backendId: string; threadId: string; requestId: string; decision: ApprovalDecision }
   /**
@@ -1040,3 +1075,6 @@ export type {
   ProjectSnapshot,
   WorkspaceIdentity
 } from './context/projectContext';
+
+
+

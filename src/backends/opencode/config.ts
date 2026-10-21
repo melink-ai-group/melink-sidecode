@@ -10,6 +10,7 @@ import { isKnown } from '../capabilities.ts';
 import { isDefaultMode, modeForcesReadOnly } from '../modes.ts';
 import type { BrowserCommand } from '../../browser/config.ts';
 import { browserPermissionKeys, mergeOpencodeMcp } from '../../browser/config.ts';
+import { AST_GREP_REPLACE_PERMISSION } from '../../skills/opencodeMcp.ts';
 
 /**
  * The one home for the generated opencode config.
@@ -145,8 +146,10 @@ export interface OpencodeConfigInput {
    * Absolute command paths keep bundled installs working without PATH.
    */
   skillMcp?: Record<string, unknown>;
-  /** Permission allows for enabled skill MCP servers/tools. */
-  skillPermissions?: Record<string, 'allow'>;
+  /** Read-only permissions for enabled skill tools; eplace is derived from the turn level below. */
+  skillPermissions?: Record<string, 'allow' | 'ask' | 'deny'>;
+  /** ast-grep is on: its file-writing eplace must follow the turn's level. */
+  astGrepSkill?: boolean;
   /** Test seam only; production generates a fresh random nonce per turn. */
   agentNonce?: string;
   /** Provider id in the generated config. Defaults to the Cloud provider. */
@@ -321,6 +324,24 @@ export function opencodeRequiresApproval(level: PermissionLevel, mode: DefaultMo
 }
 
 /**
+ * Permission for ast-grep's `replace` (the only skill tool that writes files).
+ *
+ * The MCP `approve: true` argument is supplied by the model, so it is not a
+ * user approval. Read-only and Ask deny the tool; Default and Plan surface an
+ * OpenCode approval at call time; only Unrestricted auto-allows it, matching
+ * `edit`/`write` at that level.
+ */
+export function astGrepReplacePermission(
+  level: PermissionLevel,
+  mode: DefaultMode
+): 'allow' | 'ask' | 'deny' {
+  if (modeForcesReadOnly(mode) || level === 'read-only') {
+    return 'deny';
+  }
+  return level === 'unrestricted' ? 'allow' : 'ask';
+}
+
+/**
  * The custom agent definition for a mode.
  *
  * Each turn uses an unpredictable name and sets `disable: false` and an
@@ -448,7 +469,13 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
     permission: {
       ...opencodePermission(permissionLevel, resolvedMode),
       ...(browser ? browserPermissionKeys() : {}),
-      ...(input.skillPermissions ?? {})
+      ...(input.skillPermissions ?? {}),
+      // Even when a skill map is injected, a write tool can never inherit an
+      // `allow` from it: the level decides (deny in read-only/Ask, ask in
+      // Default/Plan, allow only in Unrestricted).
+      ...(input.astGrepSkill
+        ? { [AST_GREP_REPLACE_PERMISSION]: astGrepReplacePermission(permissionLevel, resolvedMode) }
+        : {})
     }
   };
   const mcp = mergeOpencodeMcp(input.skillMcp, browser);

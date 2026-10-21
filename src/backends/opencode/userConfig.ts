@@ -2,13 +2,18 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { parseOpencodeConfig, stripJsonComments } from './jsonc.ts';
+import { removeMcpServerText, upsertMcpServerText } from './opencodeConfigText.ts';
+
+export { parseOpencodeConfig, stripJsonComments, stripTrailingCommas } from './jsonc.ts';
 
 /**
  * Read and update the user's OpenCode config MCP map.
  *
- * Candidate paths match zvec-grep's installer. Writes are JSON (comments are
- * dropped on rewrite) so absolute-path MCP entries stay reliable for bundled
- * binaries.
+ * Candidate paths match zvec-grep's installer. JSONC is accepted (comments and
+ * trailing commas), unrelated keys are preserved, and the previous file is
+ * kept as `<path>.bak` before a rewrite. A file that cannot be parsed is never
+ * written: it is reported instead of being replaced by an MCP-only object.
  */
 
 export function opencodeConfigCandidates(input: {
@@ -34,55 +39,6 @@ export function firstExisting(
   exists: (path: string) => boolean
 ): string | undefined {
   return candidates.find((candidate) => exists(candidate));
-}
-
-/** Drop `//` and block comments, leaving string contents in place. */
-export function stripJsonComments(text: string): string {
-  let out = '';
-  let i = 0;
-  while (i < text.length) {
-    const current = text[i] ?? '';
-    const next = text[i + 1] ?? '';
-    if (current === '"' || current === "'") {
-      const quote = current;
-      out += current;
-      i += 1;
-      while (i < text.length) {
-        const ch = text[i] ?? '';
-        out += ch;
-        if (ch === '\\') {
-          const escaped = text[i + 1];
-          if (escaped !== undefined) {
-            out += escaped;
-          }
-          i += 2;
-          continue;
-        }
-        i += 1;
-        if (ch === quote) {
-          break;
-        }
-      }
-      continue;
-    }
-    if (current === '/' && next === '/') {
-      while (i < text.length && text[i] !== '\n') {
-        i += 1;
-      }
-      continue;
-    }
-    if (current === '/' && next === '*') {
-      i += 2;
-      while (i + 1 < text.length && !(text[i] === '*' && text[i + 1] === '/')) {
-        i += 1;
-      }
-      i = Math.min(text.length, i + 2);
-      continue;
-    }
-    out += current;
-    i += 1;
-  }
-  return out;
 }
 
 /** True when the config names an MCP server key (not a string mention). */
@@ -133,22 +89,66 @@ export async function resolveOpencodeConfigPath(io: OpencodeUserConfigIO): Promi
 
 export async function readOpencodeUserConfig(
   io: OpencodeUserConfigIO = createOpencodeUserConfigIO()
-): Promise<{ path: string; text: string | undefined; data: Record<string, unknown> }> {
+): Promise<{
+  path: string;
+  text: string | undefined;
+  data: Record<string, unknown>;
+  /** Set when the file exists but cannot be read as JSONC; never write then. */
+  error?: string;
+}> {
   const path = await resolveOpencodeConfigPath(io);
   if (!io.exists(path)) {
     return { path, text: undefined, data: {} };
   }
+  let text: string;
   try {
-    const text = await io.readFile(path);
-    const parsed = JSON.parse(stripJsonComments(text)) as unknown;
-    const data =
-      parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
-    return { path, text, data };
-  } catch {
-    return { path, text: undefined, data: {} };
+    text = await io.readFile(path);
+  } catch (error) {
+    return {
+      path,
+      text: undefined,
+      data: {},
+      error: error instanceof Error ? error.message : 'the file could not be read'
+    };
   }
+  const parsed = parseOpencodeConfig(text);
+  if (parsed.error) {
+    return { path, text, data: {}, error: parsed.error };
+  }
+  return { path, text, data: parsed.data };
+}
+
+/**
+ * Write the new config, keeping the previous file as `<path>.bak`.
+ *
+ * The backup is written first. If it fails, the target is left untouched, so
+ * a partially written config can never replace the user's own settings.
+ */
+async function writeConfig(
+  io: OpencodeUserConfigIO,
+  path: string,
+  previous: string | undefined,
+  text: string
+): Promise<void> {
+  await io.mkdir(dirname(path));
+  if (previous !== undefined && previous !== text) {
+    await io.writeFile(`${path}.bak`, previous);
+  }
+  await io.writeFile(path, text);
+}
+
+/**
+ * Write an already-prepared config text, keeping the previous file as
+ * `<path>.bak` first. Used by the textual migration, which must not round-trip
+ * the document through `JSON.stringify` and lose comments or formatting.
+ */
+export async function replaceOpencodeConfigText(
+  io: OpencodeUserConfigIO,
+  path: string,
+  previous: string | undefined,
+  text: string
+): Promise<void> {
+  await writeConfig(io, path, previous, text);
 }
 
 /** Upsert one MCP server entry and write the config file. */
@@ -158,14 +158,26 @@ export async function upsertOpencodeMcpServer(
   io: OpencodeUserConfigIO = createOpencodeUserConfigIO()
 ): Promise<{ path: string }> {
   const current = await readOpencodeUserConfig(io);
+  if (current.error) {
+    throw new Error(unreadableMessage(current.path, current.error));
+  }
+  const edited = current.text === undefined ? { status: 'not-found' as const } : upsertMcpServerText(current.text, serverName, server);
+  if (edited.status === 'edited') {
+    await writeConfig(io, current.path, current.text, edited.text);
+    return { path: current.path };
+  }
+  if (edited.status === 'ambiguous' || edited.status === 'invalid') {
+    throw new Error(`${edited.message} The file was left unchanged.`);
+  }
+  // A missing or empty file has no text to preserve; the parsed shape is the
+  // only thing that can be written.
   const mcp =
     current.data.mcp && typeof current.data.mcp === 'object' && !Array.isArray(current.data.mcp)
       ? { ...(current.data.mcp as Record<string, unknown>) }
       : {};
   mcp[serverName] = { ...server };
   const next = { ...current.data, mcp };
-  await io.mkdir(dirname(current.path));
-  await io.writeFile(current.path, `${JSON.stringify(next, null, 2)}\n`);
+  await writeConfig(io, current.path, current.text, `${JSON.stringify(next, null, 2)}\n`);
   return { path: current.path };
 }
 
@@ -175,25 +187,28 @@ export async function removeOpencodeMcpServer(
   io: OpencodeUserConfigIO = createOpencodeUserConfigIO()
 ): Promise<{ path: string; removed: boolean }> {
   const current = await readOpencodeUserConfig(io);
+  if (current.error) {
+    throw new Error(unreadableMessage(current.path, current.error));
+  }
   if (!current.text) {
     return { path: current.path, removed: false };
   }
-  const mcp =
-    current.data.mcp && typeof current.data.mcp === 'object' && !Array.isArray(current.data.mcp)
-      ? { ...(current.data.mcp as Record<string, unknown>) }
-      : undefined;
-  if (!mcp || !(serverName in mcp)) {
+  const edited = removeMcpServerText(current.text, serverName);
+  if (edited.status === 'edited') {
+    await writeConfig(io, current.path, current.text, edited.text);
+    return { path: current.path, removed: true };
+  }
+  if (edited.status === 'not-found') {
     return { path: current.path, removed: false };
   }
-  delete mcp[serverName];
-  const next = { ...current.data };
-  if (Object.keys(mcp).length === 0) {
-    delete next.mcp;
-  } else {
-    next.mcp = mcp;
+  if (edited.status === 'ambiguous' || edited.status === 'invalid') {
+    throw new Error(`${edited.message} The file was left unchanged.`);
   }
-  await io.writeFile(current.path, `${JSON.stringify(next, null, 2)}\n`);
-  return { path: current.path, removed: true };
+  return { path: current.path, removed: false };
+}
+
+function unreadableMessage(path: string, error: string): string {
+  return `The OpenCode config at ${path} could not be read (${error}). It was left unchanged, so no settings were lost. Fix the JSON syntax and try again.`;
 }
 
 export async function opencodeUserConfigHasServer(

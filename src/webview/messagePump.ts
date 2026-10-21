@@ -18,6 +18,8 @@ const URGENT_HOST_MESSAGES = new Set([
   'restoring',
   'chatTabs',
   'settings',
+  'settingsSave',
+  'skillAction',
   'models',
   'threads',
   'permissions',

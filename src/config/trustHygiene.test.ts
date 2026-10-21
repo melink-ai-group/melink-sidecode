@@ -294,12 +294,12 @@ test('the connection test goes through the observable client', async () => {
  * opencode paths are, so a save must apply the same validation: a relative
  * path is refused and never persisted.
  */
-test('the settings service validates the skill CLI paths before saving them', async () => {
-  const settings = await source('settings.ts');
-  assert.match(settings, /skillCliPathError\(patch\.zvecGrepPath/);
-  assert.match(settings, /skillCliPathError\(patch\.astGrepPath/);
-  assert.match(settings, /errors\.zvecGrepPath = pathError/);
-  assert.match(settings, /errors\.astGrepPath = pathError/);
+test('the settings write plan validates the skill CLI paths before saving them', async () => {
+  const plan = await source('settings/planWrites.ts');
+  assert.match(plan, /skillCliPathError\(patch\.zvecGrepPath/);
+  assert.match(plan, /skillCliPathError\(patch\.astGrepPath/);
+  assert.match(plan, /errors\.zvecGrepPath = pathError/);
+  assert.match(plan, /errors\.astGrepPath = pathError/);
 });
 
 /**
@@ -360,16 +360,41 @@ test('the settings service reads the trust-sensitive keys from the trusted reade
   assert.match(settings, /readTrustedAstGrepCliSource\(\)/);
 });
 
-test('the settings service writes a trust-sensitive key to the user settings only', async () => {
-  const settings = await source('settings.ts');
-  // Every trust-sensitive write goes through `targetForKey`, which forces the
-  // global target for those keys.
-  assert.match(settings, /targetForKey\(`\$\{OLLAMA_SECTION\}\.baseUrl`/);
-  assert.match(settings, /targetForKey\(`\$\{OLLAMA_LOCAL_SECTION\}\.baseUrl`/);
-  assert.match(settings, /targetForKey\(`\$\{CODEX_SECTION\}\.path`/);
-  assert.match(settings, /targetForKey\(`\$\{DEFAULTS_SECTION\}\.permissionLevel`/);
-  assert.match(settings, /targetForKey\(`\$\{OLLAMA_OPENCODE_SECTION\}\.cliSource`/);
-  assert.match(settings, /targetForKey\(`\$\{OLLAMA_OPENCODE_SECTION\}\.path`/);
+test('the settings write plan sends every trust-sensitive write to user settings', async () => {
+  const plan = await import('../settings/planWrites.ts');
+  const planned = plan.planSettingsWrites(
+    {
+      ollamaBaseUrl: 'https://ollama.com',
+      ollamaLocalBaseUrl: 'http://localhost:11434',
+      opencodeCliSource: 'local',
+      opencodePath: 'opencode',
+      codexPath: 'codex',
+      permissionLevel: 'default',
+      zvecGrepCliSource: 'local',
+      zvecGrepPath: 'zg',
+      astGrepCliSource: 'local',
+      astGrepPath: 'ast-grep'
+    },
+    'workspace'
+  );
+  for (const field of [
+    'ollamaBaseUrl',
+    'ollamaLocalBaseUrl',
+    'opencodeCliSource',
+    'opencodePath',
+    'codexPath',
+    'permissionLevel',
+    'zvecGrepCliSource',
+    'zvecGrepPath',
+    'astGrepCliSource',
+    'astGrepPath'
+  ] as const) {
+    assert.equal(
+      planned.writes.find((write) => write.field === field)?.scope,
+      'global',
+      `${field} is not forced to user settings`
+    );
+  }
 });
 
 test('the approval prefix matching and the opencode sandbox defaults are untouched', async () => {

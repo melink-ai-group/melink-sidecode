@@ -13,7 +13,7 @@ export const LEGACY_TESTING_KEY = 'melink.review.checks.enabled';
 export const LEGACY_REVIEWING_KEY = 'melink.review.diffReview';
 
 export const ORCHESTRATION_DEFAULTS = {
-  testing: true,
+  testing: false,
   reviewing: false,
   doubleCheck: true,
   quickTask: true,

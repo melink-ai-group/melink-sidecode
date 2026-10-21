@@ -18,7 +18,9 @@ import { isKnown } from '../capabilities.ts';
 import { isDefaultMode } from '../modes.ts';
 import type { BrowserCommand } from '../../browser/config.ts';
 import { browserPermissionKeys, mergeOpencodeMcp } from '../../browser/config.ts';
+import { AST_GREP_REPLACE_PERMISSION } from '../../skills/opencodeMcp.ts';
 import {
+  astGrepReplacePermission,
   opencodeAgentConfig,
   opencodeAgentForMode,
   opencodeAgentSuffix,
@@ -46,7 +48,8 @@ export interface ZenConfigInput {
   permissionLevel: PermissionLevel;
   browser?: BrowserCommand;
   skillMcp?: Record<string, unknown>;
-  skillPermissions?: Record<string, 'allow'>;
+  skillPermissions?: Record<string, 'allow' | 'ask' | 'deny'>;
+  astGrepSkill?: boolean;
   /** Test seam only; production generates a fresh random nonce per turn. */
   agentNonce?: string;
 }
@@ -56,8 +59,18 @@ export interface ZenConfigInput {
  * free subset); the selected model carries limit/reasoning when known.
  */
 export function buildZenOpencodeConfig(input: ZenConfigInput): OpencodeConfigResult {
-  const { modelIds, modelId, settings, capabilities, mode, permissionLevel, browser, skillMcp, skillPermissions } =
-    input;
+  const {
+    modelIds,
+    modelId,
+    settings,
+    capabilities,
+    mode,
+    permissionLevel,
+    browser,
+    skillMcp,
+    skillPermissions,
+    astGrepSkill
+  } = input;
   const resolvedMode: DefaultMode = isDefaultMode(mode) ? mode : 'agent';
   const nonce = opencodeAgentSuffix(input.agentNonce);
 
@@ -112,7 +125,10 @@ export function buildZenOpencodeConfig(input: ZenConfigInput): OpencodeConfigRes
     permission: {
       ...opencodePermission(permissionLevel, resolvedMode),
       ...(browser ? browserPermissionKeys() : {}),
-      ...(skillPermissions ?? {})
+      ...(skillPermissions ?? {}),
+      ...(astGrepSkill
+        ? { [AST_GREP_REPLACE_PERMISSION]: astGrepReplacePermission(permissionLevel, resolvedMode) }
+        : {})
     }
   };
   const mcp = mergeOpencodeMcp(skillMcp, browser);

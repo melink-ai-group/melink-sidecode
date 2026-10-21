@@ -50,7 +50,7 @@ test('search args use pattern and optional lang', () => {
   ]);
 });
 
-test('replace args default to dry-run', () => {
+test('replace args default to dry-run and require approval to write', () => {
   assert.deepEqual(buildReplaceArgs({ pattern: 'foo($A)', rewrite: 'bar($A)' }), [
     'run',
     '-p',
@@ -60,13 +60,17 @@ test('replace args default to dry-run', () => {
     '--json=compact',
     '.'
   ]);
-  assert.deepEqual(buildReplaceArgs({ pattern: 'foo($A)', rewrite: 'bar($A)', dryRun: false }), [
-    'run',
-    '-p',
-    'foo($A)',
-    '-r',
-    'bar($A)',
-    '--update-all',
-    '.'
-  ]);
+  assert.throws(() =>
+    buildReplaceArgs({ pattern: 'foo($A)', rewrite: 'bar($A)', dryRun: false })
+  );
+  assert.deepEqual(
+    buildReplaceArgs({
+      pattern: 'foo($A)',
+      rewrite: 'bar($A)',
+      dryRun: false,
+      approve: true,
+      paths: ['src/a.ts']
+    }),
+    ['run', '-p', 'foo($A)', '-r', 'bar($A)', '--update-all', 'src/a.ts']
+  );
 });

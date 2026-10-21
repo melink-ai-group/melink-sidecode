@@ -23,12 +23,12 @@ v0.2.0 ships only when all six criteria pass in both hosts.
 | RC-2 | **Reload resume.** Reloading the window and reopening the sidebar resumes the previous thread for the active backend, with its transcript repainted. | Steps 15–24 |
 | RC-3 | **Process teardown.** No orphaned `codex` process remains after deactivate, after window reload, or after closing the editor. | Steps 25–33 |
 | RC-4 | **Credential hygiene.** The Ollama Cloud token lives only in secret storage and never appears in `settings.json`, output channels, or logs. | Steps 34–39b |
-| RC-5 | **Project awareness.** A fresh thread answers "what is this project about?" from the delivered context, without the user pasting anything and without web search. | §4b (steps 39c–39k) |
-| RC-6 | **Change review & checkpoint safety.** A turn that edits files is reviewable: Keep writes nothing, Reject restores the exact pre-turn bytes, a conflict is never silently clobbered, a checkpoint restore reverts files only and is itself undoable, pending decisions survive a reload, and the recorded blob store stays bounded. | §4c (steps S1–S3, 47–58) |
+| RC-5 | **Project awareness.** A fresh thread answers "what is this project about?" from the delivered context, without the user pasting anything and without web search. | Â§4b (steps 39c–39k) |
+| RC-6 | **Change review & checkpoint safety.** A turn that edits files is reviewable: Keep writes nothing, Reject restores the exact pre-turn bytes, a conflict is never silently clobbered, a checkpoint restore reverts files only and is itself undoable, pending decisions survive a reload, and the recorded blob store stays bounded. | Â§4c (steps S1–S3, 47–58) |
 
 Steps 40–43 repeat the rendering/reload/teardown checks per host.
 Steps 44–46 repeat the project-awareness pass for Ollama Cloud and Ollama Local.
-Steps 47–58 (§4c) cover change review, conflict handling, checkpoint restore,
+Steps 47–58 (Â§4c) cover change review, conflict handling, checkpoint restore,
 reload mid-review, approval interaction, and journal pruning, on Codex and on the
 opencode runtime.
 
@@ -217,15 +217,30 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
 - [ ] 14a. Set the Ollama token (step 2). Reload the window and open the sidebar.
       The CLI tab has no "use opencode" switch: every Ollama turn uses the
       shared runtime.
-- [ ] 14a1. **zvec-grep.** Open **Settings → Skills**. Choose local or bundled for
-      zvec-grep, install if needed, then turn **Use semantic search** on. Confirm
-      the user OpenCode config contains a `zvec_grep` MCP entry with an absolute
-      command path when bundled. Turn it off and confirm that entry is removed
-      and the CLI remains installed. A new chat session picks up the change.
-- [ ] 14a2. **ast-grep.** Under **Settings → Skills**, install bundled or local
-      ast-grep, then turn **Use structural search** on. Confirm `ast_grep` appears
-      in the user OpenCode config (command runs `node …/ast-grep-mcp.js` with
-      `AST_GREP_BIN`). Turn it off and confirm the entry is removed.
+- [ ] 14a1. **zvec-grep persistence and index.** Open **Settings -> Skills -> zvec-grep**.
+      Confirm the enable toggle is the first control, above CLI source. Choose local
+      or bundled, install/update if needed, then turn **Use semantic search** on.
+      The chip must read **Ready**, or **Index missing** before you press Build index
+      (the status line then says **Needs a workspace index**), and
+      the user OpenCode config must contain `zvec_grep` with
+      `["zg","server","--stdio"]` (absolute path when bundled) - never `--server`.
+      Press **Test**: it reports the zg version, a successful `tools/list`, and the
+      workspace index state. Press **Build index**: it runs `zg index` in this
+      workspace, shows a busy state, and either says the index is ready or names the
+      missing embedding model (`zg config model set <model> --default`). Reopen
+      Settings and confirm the toggle, source and path are still what you saved.
+      Turn the skill off: the MCP entry is removed, the CLI stays installed, and a
+      reload still shows it off. A legacy `--server` entry is rewritten on
+      activation or on the next enable, with `opencode.json.bak` kept.
+- [ ] 14a2. **ast-grep persistence.** Under **Settings -> Skills -> ast-grep**,
+      install bundled or local ast-grep, then turn **Use structural search** on.
+      Confirm the chip reads **Ready** and `ast_grep` appears in the user OpenCode
+      config with a command that runs the SideCode shim under Node
+      (`ELECTRON_RUN_AS_NODE=1`) and sets `AST_GREP_BIN`. Press **Test**: it must
+      answer `tools/list` for `search` and `replace`. Turn it off and back on, then
+      reload the window: the toggle and source/path must match the last save. A
+      missing binary shows **Missing binary** with the install/path guidance; a
+      server that cannot start shows **Error** with the reason.
 - [ ] 14b. **Mode availability.** Open the mode picker. It offers **Agent**,
       **Plan**, and **Ask**. Open the permission picker: it offers **Read-only**,
       **Default**, and **Unrestricted**. Ollama Cloud and Ollama Local each keep
@@ -376,7 +391,7 @@ This exercises `SidebarViewProvider.degradeToFresh`. It fires when the persisted
 does *not* trigger it, because `restore()` then simply starts fresh — so remove the
 *index* entry while leaving the active-thread reference in place.
 
-- [ ] 22. Note the active thread id from §2, then quit the host. Locate this
+- [ ] 22. Note the active thread id from Â§2, then quit the host. Locate this
       workspace's state database:
       - Windows: `%APPDATA%\Code\User\workspaceStorage\<hash>\state.vscdb`
         (for a Cursor host, substitute `%APPDATA%\Cursor\User\...`).
@@ -652,7 +667,7 @@ both. A pass that names a single provider says so explicitly.
       complete.
       - **Expected:** the **Changes this turn** panel appears with the `1 file`
         chip, a **Modified** status chip, and one row for `scratch.txt` with
-        **No decision yet**. The header shows `1 to review · 1 undecided` and
+        **No decision yet**. The header shows `1 to review Â· 1 undecided` and
         `+1`/`-0` stats. The `scratch.txt` working tree now contains the new line.
 - [ ] 47a. Click **Keep** on the row, then confirm `git diff -- scratch.txt`
       still shows the change.
@@ -679,6 +694,10 @@ ChangesReview header stays collapsed to one line and always shows the check
 summary; expanding it lists one row per check. These steps verify the stored
 state, the panel text, and the Keep gate.
 
+Testing is **off** in a fresh profile: open **Settings -> Orchestration** and turn
+**Testing** on before starting this pass. An explicit legacy
+`melink.review.checks.enabled: true` also enables it.
+
 - [ ] 47d. **Passing checks.** In the scratch `package.json`, add:
       ```json
       "scripts": { "typecheck": "node -e \"process.exit(0)\"", "test": "node -e \"process.exit(0)\"" }
@@ -692,7 +711,7 @@ state, the panel text, and the Keep gate.
         Keep works as before.
 - [ ] 47e. **Failing checks and the Keep gate.** Change the `test` script to
       `node -e "process.exit(1)"`, run another one-file turn, and wait.
-      - **Expected:** the collapsed header reads `Checks: 1 failed · 1 passed`
+      - **Expected:** the collapsed header reads `Checks: 1 failed Â· 1 passed`
         with an alert icon; expanding shows the failed row with its bounded
         output excerpt and the passing row. **Keep** and **Keep all** stay
         disabled while `running`. After the failure, clicking either one opens
@@ -1167,7 +1186,7 @@ The view lifecycle and child-process lifetime can differ between hosts.
 
 - [ ] 40. Repeat the full provider matrix (Passes A–D) in **plain VS Code** (stable)
       and in **one Open VSX consumer** (e.g. Cursor, VSCodium).
-- [ ] 41. Repeat the reload test (§2) and the teardown test (§3) in both hosts.
+- [ ] 41. Repeat the reload test (Â§2) and the teardown test (Â§3) in both hosts.
 - [ ] 41b. Repeat Passes E (always-on OpenCode, Ollama Cloud) and F (Ollama
       Local through the same runtime) in both hosts. In each host confirm every
       Ollama turn spawns an `opencode` child (steps 14j and 14o); there is no
@@ -1181,11 +1200,11 @@ The view lifecycle and child-process lifetime can differ between hosts.
         composer without resizing it, and the transcript still scrolls;
       - light and dark workbench themes both leave the sidebar legible.
 - [ ] 43. Record both host versions in the header of this document.
-- [ ] 44. Repeat the project-awareness pass (§4b) on **Ollama Cloud**. Confirm
-      the §4b "what is sent by default" notes hold: the snapshot is primed into
+- [ ] 44. Repeat the project-awareness pass (Â§4b) on **Ollama Cloud**. Confirm
+      the Â§4b "what is sent by default" notes hold: the snapshot is primed into
       the turn text, no synthetic message appears in the transcript, and the next
       turn reflects the change.
-- [ ] 45. Repeat the project-awareness pass (§4b) with **Ollama Local** when a
+- [ ] 45. Repeat the project-awareness pass (Â§4b) with **Ollama Local** when a
       local server is running. Confirm the same priming and that no credential is
       sent.
 - [ ] 46. Confirm the direct `/api/chat` API is used only for compaction and
@@ -1198,7 +1217,7 @@ The view lifecycle and child-process lifetime can differ between hosts.
 
 The parts that do not need a GUI host were executed during authoring and are
 recorded below; the GUI steps must be completed and signed by a tester. A step that
-fails is either fixed (recorded in the headless section) or listed under §7.
+fails is either fixed (recorded in the headless section) or listed under Â§7.
 
 - Environment validated in: `Windows 11 (10.0.26200), Cursor 3.21.18 (Open VSX), codex-cli 0.156.1`
 - Executed by: authoring run on 2026-09-24 (headless checks only)
@@ -1212,17 +1231,17 @@ fails is either fixed (recorded in the headless section) or listed under §7.
     `unavailable` classification in `AppServerConnection`
   - double `thread/started` and double-opened item cards — deduped per id in
     `src/backends/codex.ts`
-- Failures recorded as known limitations: plain-VS-Code and GUI-only checks (see §7)
+- Failures recorded as known limitations: plain-VS-Code and GUI-only checks (see Â§7)
 
 ### Current verification baseline
 
 Measured on the current T106+T110 working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.0 (`package.json`)
-- **Node test files:** 159 (`src/**/*.test.ts`)
-- **Node tests:** 1576 declarations: 1576 pass, 0 failures (`npm run test:node`).
+- **Node test files:** 173 (`src/**/*.test.ts`)
+- **Node tests:** 1673 declarations: 1673 pass, 0 failures (`npm run test:node`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
-- **DOM suite:** 5 files / 24 tests, all passing (`npm run test:dom`). `npm test`
+- **DOM suite:** 7 files / 38 tests, all passing (`npm run test:dom`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`
@@ -1273,7 +1292,7 @@ These were run from the repo during authoring, without a GUI host:
       `secrets.store` / `secrets.get`; no `console.*` output of secret material
       exists in `src`.
 - [x] **App-server schema version pinned.** Bindings generated with
-      `codex app-server generate-ts --out ./schemas` and checked in (see §7).
+      `codex app-server generate-ts --out ./schemas` and checked in (see Â§7).
 - [x] **Delivery regression test (RC-5).** `npm test` covers the renderer
       (name/root/purpose/languages/entry point), the message order (snapshot as a
       `system` message before the first user turn, delta as system-role input
@@ -1294,10 +1313,10 @@ These were run from the repo during authoring, without a GUI host:
 ### Requires a human on a GUI host
 
 The following could not be exercised from this non-GUI environment and must be
-completed and signed by a tester: all of §1 (provider matrix), §2 (reload),
-§3 (teardown, steps 25–33), §4 (credential hygiene in the UI), §4b (project
-awareness, which needs a live model), §4c (change review and checkpoints, which
-need a live model plus a git workspace), and §5 (per-host).
+completed and signed by a tester: all of Â§1 (provider matrix), Â§2 (reload),
+Â§3 (teardown, steps 25–33), Â§4 (credential hygiene in the UI), Â§4b (project
+awareness, which needs a live model), Â§4c (change review and checkpoints, which
+need a live model plus a git workspace), and Â§5 (per-host).
 
 Rendering itself is not blocked on a GUI host: `npm run visual` renders the
 built webview in Chromium with seeded fixtures and writes the key screens to
@@ -1315,7 +1334,7 @@ checks above still need a GUI host.
   bindings under `schemas/` turn that drift into a build/type error.
 - **Versions the priming path was verified against:** `codex-cli 0.156.1`
   (Windows x86_64) and `opencode 1.19.x` (the installer tracks `releases/latest`).
-  Re-run §0 step 0.3 and `opencode --version` and confirm these before signing
+  Re-run Â§0 step 0.3 and `opencode --version` and confirm these before signing
   off; a different version may invalidate the field/flag assumptions below.
 - **Codex has no per-turn instructions field.** In the pinned bindings,
   `baseInstructions`/`developerInstructions` exist on `thread/start` and

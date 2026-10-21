@@ -202,6 +202,81 @@
   margin-top: 1px;
 }
 
+/* Shared Skills panel: toggle first, then one grouped controls block. */
+.skill-panel {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.skill-head {
+  align-items: flex-start;
+}
+
+.skill-one-line {
+  margin: 0;
+}
+
+.skill-enable {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-editorWidget-background);
+}
+
+.skill-enable > .check {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.skill-enable > .field-tip {
+  margin-top: 1px;
+}
+
+.skill-status-line {
+  margin: 0;
+}
+
+.skill-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.skill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.skill-actions > .btn {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.skill-index-hint {
+  padding-left: 6px;
+  border-left: 2px solid var(--vscode-editorWarning-foreground);
+}
+
+.chip--warning {
+  color: var(--vscode-editorWarning-foreground);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 18%, var(--vscode-badge-background));
+}
+
+@media (max-width: 420px) {
+  .skill-actions > .btn {
+    flex: 1 1 100%;
+  }
+}
+
 .field-help {
   min-width: 0;
   font-size: 11px;
@@ -440,10 +515,10 @@
   flex: 1 1 auto;
 }
 
-@media (max-width: 380px) {
+@media (max-width: 420px) {
   .settings-foot {
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--melink-space-md, 6px);
   }
 
   .settings-foot .dirty-note {
@@ -670,3 +745,51 @@
   background: var(--vscode-descriptionForeground);
 }
 
+
+/* Save outcome and busy state: the footer is the one place a save reports. */
+
+.settings-foot .save-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.settings-foot .save-outcome--ok {
+  color: var(--vscode-testing-iconPassed, var(--vscode-foreground));
+}
+
+.settings-foot .save-outcome--alert {
+  color: var(--vscode-errorForeground);
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+}
+
+.settings-foot .save-outcome--alert .link-btn {
+  flex: 0 0 auto;
+}
+
+.settings-foot .save-spinner {
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-width: 1px;
+}
+
+@media (max-width: 420px) {
+  .settings-foot .save-outcome--alert {
+    order: 3;
+  }
+}
+
+.settings-foot .save-outcome .link-btn {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}

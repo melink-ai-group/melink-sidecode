@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { THINKING_LEVELS } from '../backends/types';
 import type { SettingsPatch, SettingsSnapshot } from '../protocol';
-import { formatDictationTarget } from '../dictation/target';
 import { AlertIcon, BackIcon, CheckIcon, CrossIcon, InfoIcon } from './Icons';
 import { opencodeRuntimeView } from './runtimeStatus';
 import { contextPatternError } from '../context/contextSettings';
@@ -12,7 +11,10 @@ import { TabList, TabPanel, type TabItem } from './Tabs';
 import { CONTEXT_BUILTIN_PATTERNS } from './settings/constants';
 import type { ProviderTab, SettingsScreenProps } from './settings/types';
 import { providerTabForSection } from './settings/types';
-import { draftFrom, normalizedQuickTask, type Draft } from './settings/draft';
+import { draftFrom, isDraftDirty, patchFrom, type Draft } from './settings/draft';
+import { SaveFooter } from './settings/SaveFooter';
+import { SkillPanel } from './settings/SkillPanel';
+import { skillChecked, skillChip, skillStatusText } from './settings/skillState';
 import { OrchestrationFields } from './settings/OrchestrationFields';
 import type { OrchestrationFieldKey } from './settings/orchestrationCopy';
 import {
@@ -26,7 +28,6 @@ import {
 import {
   CliResult,
   ContextCategory,
-  FieldTip,
   RefreshIconInline,
   TestResult
 } from './settings/primitives';
@@ -47,6 +48,7 @@ import {
 export function SettingsScreen({
   settings,
   connectionTest,
+  settingsSave,
   onBack,
   onSave,
   onSaveToken,
@@ -69,10 +71,14 @@ export function SettingsScreen({
   onInstallAstGrep,
   onUpgradeAstGrep,
   zvecGrepInstall,
-  onInstallZvecGrep
+  onInstallZvecGrep,
+  skillAction,
+  onSkillAction
 }: SettingsScreenProps): JSX.Element {
   const [draft, setDraft] = useState<Draft | undefined>(undefined);
-  const [errors, setErrors] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
+  // Local validation errors are derived from the current draft after the first
+  // save attempt, so fixing a field clears its message without a second click.
+  const [showValidation, setShowValidation] = useState(false);
   const [notices, setNotices] = useState<Partial<Record<keyof SettingsPatch, string>>>({});
   const [token, setToken] = useState('');
   const [tokenSaved, setTokenSaved] = useState(false);
@@ -103,9 +109,21 @@ export function SettingsScreen({
     if (!settings) {
       return;
     }
-    setErrors(settings.saveErrors ?? {});
     setNotices(settings.saveNotices ?? {});
   }, [settings]);
+
+  // The host's refusals are echoed on the snapshot; local validation is shown
+  // once Save has been pressed. For the same field the host's message wins: it
+  // is the later authority on what was actually written. Local messages clear
+  // as soon as the draft value becomes valid.
+  const localErrors = useMemo(
+    () => (showValidation && draft ? draftErrors(draft) : {}),
+    [draft, showValidation]
+  );
+  const errors = useMemo(
+    () => ({ ...localErrors, ...(settings?.saveErrors ?? {}) }),
+    [settings?.saveErrors, localErrors]
+  );
 
   // A successful local install writes a new absolute path on the host. Adopt it
   // in the draft when the draft source is local.
@@ -122,6 +140,21 @@ export function SettingsScreen({
         : current
     );
   }, [opencodeInstall]);
+
+  // ast-grep's installer persists an absolute path on the host. Adopt it like
+  // the opencode installer, or the next Save writes the stale bare name back
+  // over the path the install just stored.
+  useEffect(() => {
+    const installedPath = astGrepInstall?.ok ? astGrepInstall.path : undefined;
+    if (!installedPath) {
+      return;
+    }
+    setDraft((current) =>
+      current && current.astGrepPath !== installedPath
+        ? { ...current, astGrepPath: installedPath }
+        : current
+    );
+  }, [astGrepInstall]);
 
   useEffect(() => {
     backRef.current?.focus();
@@ -154,46 +187,10 @@ export function SettingsScreen({
 
   // True when the working copy differs from the stored settings, so the footer
   // can name unsaved changes and gate the single primary action on them.
-  const dirty = useMemo(() => {
-    if (!draft || !settings) {
-      return false;
-    }
-    const storedKb = String(Math.round(settings.context.maxBytes / 1024));
-    const storedExclude = JSON.stringify(settings.context.exclude);
-    return (
-      draft.ollamaBaseUrl !== settings.ollama.baseUrl ||
-      draft.ollamaDefaultModel !== settings.ollama.defaultModel ||
-      draft.ollamaLocalBaseUrl !== settings.ollamaLocal.baseUrl ||
-      draft.ollamaLocalDefaultModel !== settings.ollamaLocal.defaultModel ||
-      draft.opencodeDefaultModel !== settings.opencodeZen.defaultModel ||
-      draft.codexPath !== settings.codex.path ||
-      draft.codexDefaultModel !== settings.codex.defaultModel ||
-      draft.permissionLevel !== settings.defaults.permissionLevel ||
-      draft.mode !== settings.defaults.mode ||
-      draft.thinking !== (settings.defaults.thinking ?? '') ||
-      draft.dictationModel !== formatDictationTarget(settings.defaults.dictationModel) ||
-      draft.orchestrationTesting !== settings.orchestration.testing ||
-      draft.orchestrationReviewing !== settings.orchestration.reviewing ||
-      draft.orchestrationDoubleCheck !== settings.orchestration.doubleCheck ||
-      draft.orchestrationQuickTask !== normalizedQuickTask(settings.orchestration) ||
-      draft.orchestrationPlanning !== settings.orchestration.planning ||
-      draft.opencodeCliSource !== settings.opencode.cliSource ||
-      draft.opencodePath !== settings.opencode.local.path ||
-      draft.browserCodex !== settings.skills.browserCodex ||
-      draft.browserOpencode !== settings.skills.browserOpencode ||
-      draft.zvecGrepCliSource !== settings.skills.zvecGrep.cliSource ||
-      draft.zvecGrepPath !== settings.skills.zvecGrep.local.path ||
-      draft.astGrepCliSource !== settings.skills.astGrep.cliSource ||
-      draft.astGrepPath !== settings.skills.astGrep.local.path ||
-      draft.contextIncludeInstructions !== settings.context.includeInstructions ||
-      draft.contextIncludeShape !== settings.context.includeShape ||
-      draft.contextIncludeEditorState !== settings.context.includeEditorState ||
-      draft.contextIncludeSelection !== settings.context.includeSelection ||
-      draft.contextIncludeChangedFiles !== settings.context.includeChangedFiles ||
-      draft.contextMaxKb !== storedKb ||
-      JSON.stringify(draft.contextExclude) !== storedExclude
-    );
-  }, [draft, settings]);
+  // True when the normalised draft the save would write differs from the stored
+  // values. Sharing that comparison with the patch means a dirty field is always
+  // one the save includes, and the echo always clears it.
+  const dirty = isDraftDirty(draft, settings);
 
   // Seed on first load and after the draft is clean. Background snapshot updates
   // must not erase edits currently being made in another settings section.
@@ -211,7 +208,7 @@ export function SettingsScreen({
     if (settings) {
       setDraft(draftFrom(settings));
     }
-    setErrors({});
+    setShowValidation(false);
     setNotices({});
     setToken('');
     setTokenSaved(false);
@@ -220,106 +217,67 @@ export function SettingsScreen({
     setPatternDraft('');
   };
 
-  // Validate locally, then hand the host only valid fields. An invalid value is
-  // never sent, so it can never be persisted. Primary Save writes user settings;
-  // Save to workspace is offered only when workspace overrides already exist.
-  const save = (target: 'global' | 'workspace' = 'global'): void => {
-    if (!draft) {
+  // Move the screen to the section that owns a refused field, so the inline
+  // message is never on a hidden tab.
+  const jumpToProblem = (field: keyof SettingsPatch): void => {
+    const destination = fieldDestination(field);
+    if (destination.providerTab) {
+      setProviderTab(destination.providerTab);
+    }
+    if (destination.skillTab) {
+      setSkillTab(destination.skillTab);
+    }
+    setTab(destination.tab);
+  };
+  // When the host refuses a field (for example a path that does not exist), the
+  // inline message can otherwise sit on a hidden tab. Bring that tab forward
+  // once the save has settled, without stealing focus mid-edit.
+  useEffect(() => {
+    if (!settingsSave || settingsSave.pending || settingsSave.ok !== false) {
       return;
     }
-    const nextErrors: Partial<Record<keyof SettingsPatch, string>> = {};
-    if (!isHttpUrl(draft.ollamaBaseUrl)) {
-      nextErrors.ollamaBaseUrl = 'Enter a full URL, like https://ollama.com. This value was not saved.';
+    const firstHostProblem = (Object.keys(settings?.saveErrors ?? {}) as Array<keyof SettingsPatch>)[0];
+    if (firstHostProblem) {
+      jumpToProblem(firstHostProblem);
     }
-    if (!isHttpUrl(draft.ollamaLocalBaseUrl)) {
-      nextErrors.ollamaLocalBaseUrl =
-        'Enter a full URL, like http://localhost:11434. This value was not saved.';
-    }
-    if (!draft.codexPath.trim()) {
-      nextErrors.codexPath = 'Enter the CLI path or name. This value was not saved.';
-    } else {
-      // A relative path would run a file from the workspace — with a
-      // separator, or in the Windows drive-relative form.
-      const codexResolved = resolveExecutableCommand(draft.codexPath, 'codex');
-      if (!codexResolved.ok) {
-        nextErrors.codexPath = executablePathError(codexResolved.reason, 'Codex CLI');
-      }
-    }
-    // The path is only meaningful for a local CLI.
-    if (draft.opencodeCliSource === 'local' && !draft.opencodePath.trim()) {
-      nextErrors.opencodePath = 'Enter the opencode CLI path or name. This value was not saved.';
-    } else if (draft.opencodeCliSource === 'local') {
-      const opencodeResolved = resolveExecutableCommand(draft.opencodePath, 'opencode');
-      if (!opencodeResolved.ok) {
-        nextErrors.opencodePath = executablePathError(opencodeResolved.reason, 'opencode CLI');
-      }
-    }
-    // The skill CLI paths follow the same rule: a relative path would run a
-    // file from the workspace.
-    if (draft.zvecGrepCliSource === 'local' && draft.zvecGrepPath.trim()) {
-      const zvecResolved = resolveExecutableCommand(draft.zvecGrepPath, 'zg');
-      if (!zvecResolved.ok) {
-        nextErrors.zvecGrepPath = executablePathError(zvecResolved.reason, 'zg CLI');
-      }
-    }
-    if (draft.astGrepCliSource === 'local' && draft.astGrepPath.trim()) {
-      const astResolved = resolveExecutableCommand(draft.astGrepPath, 'ast-grep');
-      if (!astResolved.ok) {
-        nextErrors.astGrepPath = executablePathError(astResolved.reason, 'ast-grep CLI');
-      }
-    }
-    // The cap is entered in kilobytes, so the value the user sees is readable;
-    // it is stored as bytes. A non-integer or out-of-range value is refused.
-    const maxKb = Number(draft.contextMaxKb.trim());
-    if (!Number.isFinite(maxKb) || !Number.isInteger(maxKb) || maxKb < 1 || maxKb > 1024) {
-      nextErrors.contextMaxBytes = 'Enter a whole number of kilobytes between 1 and 1024. This value was not saved.';
-    }
-    const badPattern = draft.contextExclude.find((pattern) => contextPatternError(pattern) !== undefined);
-    if (badPattern !== undefined) {
-      nextErrors.contextExclude = contextPatternError(badPattern);
-    }
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0) {
+    // jumpToProblem only calls stable setters; the save result is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsSave]);
+
+  const firstLocalProblem = (Object.keys(localErrors) as Array<keyof SettingsPatch>)[0];
+  const blockedSave =
+    firstLocalProblem === undefined
+      ? undefined
+      : {
+          message: localErrors[firstLocalProblem] ?? 'This value was not saved.',
+          actionLabel: `Go to ${fieldDestination(firstLocalProblem).label}`
+        };
+
+  // Validate locally, then send every field that is valid. A refused field is
+  // kept in the draft and marked inline/footer; the rest of the patch still
+  // saves, so one bad cap or URL cannot silently drop unrelated edits. The host
+  // repeats the same per-field validation and echoes what it actually stored.
+  // The primary action writes the effective scope (folder when a folder
+  // override controls the shown value, otherwise workspace, otherwise user);
+  // "Save user settings" remains available beside a scoped save.
+  const save = (target: 'global' | 'workspace' | 'folder'): void => {
+    if (!draft || settingsSave?.pending) {
       return;
     }
-    onSave(
-      {
-        ollamaBaseUrl: draft.ollamaBaseUrl.trim(),
-        ollamaDefaultModel: draft.ollamaDefaultModel.trim(),
-        ollamaLocalBaseUrl: draft.ollamaLocalBaseUrl.trim(),
-        ollamaLocalDefaultModel: draft.ollamaLocalDefaultModel.trim(),
-        opencodeDefaultModel: draft.opencodeDefaultModel.trim(),
-        codexPath: draft.codexPath.trim(),
-        codexDefaultModel: draft.codexDefaultModel.trim(),
-        permissionLevel: draft.permissionLevel,
-        mode: draft.mode,
-        thinking: draft.thinking,
-        dictationModel: draft.dictationModel.trim(),
-        orchestrationTesting: draft.orchestrationTesting,
-        orchestrationReviewing: draft.orchestrationReviewing,
-        orchestrationDoubleCheck: draft.orchestrationDoubleCheck,
-        orchestrationQuickTask: draft.orchestrationQuickTask,
-        orchestrationPlanning: draft.orchestrationPlanning,
-        opencodeCliSource: draft.opencodeCliSource,
-        // Local path only: bundled ignores it for spawns, so a bundled selection
-        // must not write an empty path over a previously stored valid one.
-        ...(draft.opencodeCliSource === 'local' ? { opencodePath: draft.opencodePath.trim() } : {}),
-        browserCodex: draft.browserCodex,
-        browserOpencode: draft.browserOpencode,
-        zvecGrepCliSource: draft.zvecGrepCliSource,
-        ...(draft.zvecGrepCliSource === 'local' ? { zvecGrepPath: draft.zvecGrepPath.trim() } : {}),
-        astGrepCliSource: draft.astGrepCliSource,
-        ...(draft.astGrepCliSource === 'local' ? { astGrepPath: draft.astGrepPath.trim() } : {}),
-        contextIncludeInstructions: draft.contextIncludeInstructions,
-        contextIncludeShape: draft.contextIncludeShape,
-        contextIncludeEditorState: draft.contextIncludeEditorState,
-        contextIncludeSelection: draft.contextIncludeSelection,
-        contextIncludeChangedFiles: draft.contextIncludeChangedFiles,
-        contextMaxBytes: maxKb * 1024,
-        contextExclude: draft.contextExclude.map((pattern) => pattern.trim()).filter((pattern) => pattern.length > 0)
-      },
-      target
-    );
+    const nextErrors = draftErrors(draft);
+    setShowValidation(true);
+    const invalidFields = Object.keys(nextErrors) as Array<keyof SettingsPatch>;
+    if (invalidFields.length > 0) {
+      jumpToProblem(invalidFields[0]);
+    }
+    const patch: SettingsPatch = patchFrom(draft);
+    for (const field of invalidFields) {
+      delete patch[field];
+    }
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+    onSave(patch, target);
   };
 
   const saveToken = (): void => {
@@ -379,30 +337,40 @@ export function SettingsScreen({
   };
   const draftProbe =
     draft.opencodeCliSource === 'bundled' ? settings.opencode.bundled : settings.opencode.local;
-  const zvecChecked = zvecGrep?.pending
-    ? zvecGrep.requested === true
-    : settings.skills.zvecGrep.connected;
-  const zvecStatus = zvecGrep?.pending
-    ? zvecGrep.requested
-      ? 'Installing zvec-grep and connecting it to OpenCode.'
-      : 'Disconnecting zvec-grep from OpenCode.'
-    : settings.skills.zvecGrep.connected
-      ? 'Connected. A new OpenCode session uses it.'
-      : settings.skills.zvecGrep.cli === 'installed'
-        ? 'Installed. Turning this on connects it to OpenCode.'
-        : 'Not installed. Turning this on installs it and connects it to OpenCode.';
-  const astChecked = astGrep?.pending
-    ? astGrep.requested === true
-    : settings.skills.astGrep.connected;
-  const astStatus = astGrep?.pending
-    ? astGrep.requested
-      ? 'Installing ast-grep and connecting it to OpenCode.'
-      : 'Disconnecting ast-grep from OpenCode.'
-    : settings.skills.astGrep.connected
-      ? 'Connected. A new OpenCode session uses it.'
-      : settings.skills.astGrep.cli === 'installed'
-        ? 'Installed. Turning this on connects it to OpenCode.'
-        : 'Not installed. Install the CLI, then turn this on.';
+  const zvecSnapshot = settings.skills.zvecGrep;
+  const astSnapshot = settings.skills.astGrep;
+  const zvecChecked = skillChecked({
+    pending: zvecGrep?.pending === true,
+    requested: zvecGrep?.requested,
+    snapshot: zvecSnapshot
+  });
+  const astChecked = skillChecked({
+    pending: astGrep?.pending === true,
+    requested: astGrep?.requested,
+    snapshot: astSnapshot
+  });
+  const zvecChip = skillChip({
+    skill: 'zvecGrep',
+    pending: zvecGrep?.pending === true,
+    snapshot: zvecSnapshot
+  });
+  const astChip = skillChip({
+    skill: 'astGrep',
+    pending: astGrep?.pending === true,
+    snapshot: astSnapshot
+  });
+  const zvecStatus = skillStatusText({
+    skill: 'zvecGrep',
+    pending: zvecGrep?.pending === true,
+    requested: zvecGrep?.requested,
+    snapshot: zvecSnapshot
+  });
+  const astStatus = skillStatusText({
+    skill: 'astGrep',
+    pending: astGrep?.pending === true,
+    requested: astGrep?.requested,
+    snapshot: astSnapshot
+  });
   const zvecCliDraft = { cliSource: draft.zvecGrepCliSource, path: draft.zvecGrepPath };
   const astCliDraft = { cliSource: draft.astGrepCliSource, path: draft.astGrepPath };
   // A refused skill path is reported by the host on the toggle that carried
@@ -416,29 +384,37 @@ export function SettingsScreen({
     draft.zvecGrepCliSource === 'bundled' ? settings.skills.zvecGrep.bundled : settings.skills.zvecGrep.local;
   const astProbe =
     draft.astGrepCliSource === 'bundled' ? settings.skills.astGrep.bundled : settings.skills.astGrep.local;
+  const zvecTest =
+    skillAction?.skill === 'zvecGrep' && skillAction.action === 'test' ? skillAction : undefined;
+  const zvecIndex =
+    skillAction?.skill === 'zvecGrep' && skillAction.action === 'index' ? skillAction : undefined;
+  const astTest =
+    skillAction?.skill === 'astGrep' && skillAction.action === 'test' ? skillAction : undefined;
   const browserSkillChip = settings.skills.browserError
     ? 'Launch issue'
     : draft.browserCodex || draft.browserOpencode
       ? 'Enabled'
       : 'Off';
-  const astSkillChip = astGrep?.pending
-    ? 'Working…'
-    : settings.skills.astGrep.connected
-      ? 'Connected'
-      : astProbe.status === 'detected'
-        ? 'Installed'
-        : astProbe.status === 'not-runnable'
-          ? 'Not runnable'
-          : 'Not installed';
-  const zvecSkillChip = zvecGrep?.pending
-    ? 'Working…'
-    : settings.skills.zvecGrep.connected
-      ? 'Connected'
-      : zvecProbe.status === 'detected'
-        ? 'Installed'
-        : zvecProbe.status === 'not-runnable'
-          ? 'Not runnable'
-          : 'Not installed';
+  const zvecInstallLabel =
+    zvecProbe.status === 'detected'
+      ? draft.zvecGrepCliSource === 'bundled'
+        ? 'Update bundled zvec-grep'
+        : 'Update zvec-grep'
+      : draft.zvecGrepCliSource === 'bundled'
+        ? 'Install bundled zvec-grep'
+        : 'Install zvec-grep';
+  const astInstallLabel =
+    astProbe.status === 'detected'
+      ? draft.astGrepCliSource === 'bundled'
+        ? 'Update bundled ast-grep'
+        : 'Update ast-grep'
+      : draft.astGrepCliSource === 'bundled'
+        ? 'Install bundled ast-grep'
+        : 'Install ast-grep';
+  const sourceHelp = (source: 'local' | 'bundled'): string =>
+    source === 'bundled'
+      ? 'Install downloads into extension storage. Turns use that binary, not PATH.'
+      : 'Use the path below or PATH. Install and Test use this selection immediately.';
   const tabs: readonly TabItem[] = [
     { id: 'cli', label: 'CLI' },
     { id: 'providers', label: 'Providers' },
@@ -473,7 +449,11 @@ export function SettingsScreen({
         </button>
         <span className="settings-title__name">Settings</span>
         <span className="settings-title__scope">
-          {settings.target === 'workspace' ? 'Workspace settings' : 'User settings'}
+          {settings.target === 'folder'
+            ? 'Folder settings'
+            : settings.target === 'workspace'
+              ? 'Workspace settings'
+              : 'User settings'}
         </span>
       </header>
 
@@ -1628,319 +1608,83 @@ export function SettingsScreen({
           </TabPanel>
 
           <TabPanel id="skill-ast-grep" active={skillTab} className="tabpanel--inline">
-            <div className="field">
-              <div className="field__head">
-                <span className="provider-name">ast-grep</span>
-                <span className="spacer" />
-                <span
-                  className={`chip ${
-                    settings.skills.astGrep.connected
-                      ? 'chip--stored'
-                      : astProbe.status === 'detected'
-                        ? 'chip--signedin'
-                        : 'chip--missing'
-                  }`}
-                >
-                  {astSkillChip}
-                </span>
-                <FieldTip
-                  label="About ast-grep"
-                  text="Syntax-aware code search and rewrite, bundled with the app. Agents find and refactor by AST pattern instead of fragile text matching. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up."
-                />
-              </div>
-              <p className="field-help">
-                Structural search exposed as an MCP tool. Install or update the CLI, then connect it to OpenCode.
-              </p>
-
-              <label className="field-label" htmlFor="ast-grep-cli-source">
-                CLI source
-              </label>
-              <select
-                className="select"
-                id="ast-grep-cli-source"
-                value={draft.astGrepCliSource}
-                aria-describedby="ast-grep-cli-source-help"
-                onChange={(event) =>
-                  update('astGrepCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
-                }
-              >
-                <option value="local">Local machine</option>
-                <option value="bundled">Bundled (extension storage)</option>
-              </select>
-              <p className="field-help" id="ast-grep-cli-source-help">
-                {draft.astGrepCliSource === 'bundled'
-                  ? 'Install downloads into extension storage. Turns use that binary, not PATH.'
-                  : 'Use the path below or PATH. Install and Update use this selection immediately.'}
-              </p>
-              <ScopeNotice id="ast-grep-cli-source-notice" notice={noticeFor('astGrepCliSource')} />
-
-              {draft.astGrepCliSource === 'local' ? (
-                <>
-                  <label className="field-label" htmlFor="ast-grep-path">
-                    ast-grep path
-                  </label>
-                  <input
-                    className="input"
-                    id="ast-grep-path"
-                    type="text"
-                    value={draft.astGrepPath}
-                    spellCheck={false}
-                    autoComplete="off"
-                    aria-invalid={astPathError ? true : undefined}
-                    aria-describedby={astPathError ? 'ast-grep-path-error' : undefined}
-                    onChange={(event) => update('astGrepPath', event.target.value)}
-                  />
-                  {astPathError ? (
-                    <p className="field-msg field-msg--error" id="ast-grep-path-error" role="alert">
-                      <AlertIcon />
-                      <span>{astPathError}</span>
-                    </p>
-                  ) : (
-                    <ScopeNotice id="ast-grep-path-notice" notice={noticeFor('astGrepPath')} />
-                  )}
-                </>
-              ) : (
-                <p className="field-help skill-path" title={settings.skills.astGrep.bundled.path}>
-                  Bundled path
-                  <FieldTip label="Bundled ast-grep path" text={settings.skills.astGrep.bundled.path} />
-                </p>
-              )}
-
-              <p
-                className={`runtime-status runtime-status--${
-                  astProbe.status === 'detected'
-                    ? 'detected'
-                    : astProbe.status === 'not-runnable'
-                      ? 'not-runnable'
-                      : 'missing'
-                }`}
-                role="status"
-              >
-                <span className="runtime-dot" aria-hidden="true" />
-                <span>
-                  {astProbe.status === 'detected'
-                    ? 'Detected'
-                    : astProbe.status === 'not-runnable'
-                      ? 'Installed but not runnable'
-                      : 'Not installed'}
-                </span>
-                {astProbe.status === 'detected' && astProbe.version ? (
-                  <span className="runtime-version">{astProbe.version}</span>
-                ) : null}
-              </p>
-
-              <div className="runtime-actions">
-                <button
-                  className="btn btn--secondary"
-                  type="button"
-                  disabled={astGrepInstall?.pending}
-                  onClick={() =>
-                    astProbe.status === 'detected'
-                      ? onUpgradeAstGrep(astCliDraft)
-                      : onInstallAstGrep(astCliDraft)
-                  }
-                >
-                  {astGrepInstall?.pending
-                    ? 'Working…'
-                    : astProbe.status === 'detected'
-                      ? draft.astGrepCliSource === 'bundled'
-                        ? 'Update bundled ast-grep'
-                        : 'Update ast-grep'
-                      : draft.astGrepCliSource === 'bundled'
-                        ? 'Install bundled ast-grep'
-                        : 'Install ast-grep'}
-                </button>
-                {astGrepInstall && !astGrepInstall.pending && astGrepInstall.message ? (
-                  <CliResult ok={astGrepInstall.ok} message={astGrepInstall.message} />
-                ) : null}
-              </div>
-
-              <div className="skill-check-row">
-                <label className="check" htmlFor="ast-grep-enabled">
-                  <input
-                    className="check-input"
-                    id="ast-grep-enabled"
-                    type="checkbox"
-                    checked={astChecked}
-                    disabled={astGrep?.pending}
-                    aria-describedby="ast-grep-status"
-                    onChange={(event) => onSetAstGrep(event.target.checked, astCliDraft)}
-                  />
-                  <span className="check-box" aria-hidden="true">
-                    <CheckIcon />
-                  </span>
-                  <span className="check-body">
-                    <span className="check-label">Use structural search</span>
-                  </span>
-                </label>
-                <FieldTip
-                  label="About structural search"
-                  text="Updates your user OpenCode config and SideCode turns. A new session picks it up."
-                />
-              </div>
-              <p className="field-help" id="ast-grep-status">
-                {astStatus}
-              </p>
-              {astGrep && !astGrep.pending && astGrep.message ? (
-                <CliResult ok={astGrep.ok} message={astGrep.message} />
-              ) : null}
-            </div>
+            <SkillPanel
+              id="ast-grep"
+              title="ast-grep"
+              about="Syntax-aware code search and rewrite, bundled with the app. Agents find and refactor by AST pattern instead of fragile text matching. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up."
+              oneLineHelp="Structural search and rewrite by AST pattern."
+              checked={astChecked}
+              toggleLabel="Use structural search"
+              toggleTip="Updates your user OpenCode config and SideCode turns. A new session picks it up."
+              togglePending={astGrep?.pending === true}
+              onToggle={(value) => onSetAstGrep(value, astCliDraft)}
+              chip={astChip}
+              statusText={astStatus}
+              detail={astSnapshot.detail}
+              cliSource={draft.astGrepCliSource}
+              onCliSource={(value) => update('astGrepCliSource', value)}
+              sourceHelp={sourceHelp(draft.astGrepCliSource)}
+              sourceNotice={noticeFor('astGrepCliSource')}
+              pathLabel="ast-grep path"
+              pathValue={draft.astGrepPath}
+              onPath={(value) => update('astGrepPath', value)}
+              pathError={astPathError}
+              pathNotice={noticeFor('astGrepPath')}
+              bundledPath={settings.skills.astGrep.bundled.path}
+              probeStatus={astProbe.status}
+              probeVersion={astProbe.version}
+              installLabel={astInstallLabel}
+              installPending={astGrepInstall?.pending === true}
+              onInstall={() =>
+                astProbe.status === 'detected'
+                  ? onUpgradeAstGrep(astCliDraft)
+                  : onInstallAstGrep(astCliDraft)
+              }
+              installResult={astGrepInstall && !astGrepInstall.pending ? astGrepInstall : undefined}
+              testPending={astTest?.pending === true}
+              testResult={astTest && !astTest.pending ? astTest : undefined}
+              onTest={() => onSkillAction('astGrep', 'test', astCliDraft)}
+            />
           </TabPanel>
 
           <TabPanel id="skill-zvec-grep" active={skillTab} className="tabpanel--inline">
-            <div className="field">
-              <div className="field__head">
-                <span className="provider-name">zvec-grep</span>
-                <span className="spacer" />
-                <span
-                  className={`chip ${
-                    settings.skills.zvecGrep.connected
-                      ? 'chip--stored'
-                      : zvecProbe.status === 'detected'
-                        ? 'chip--signedin'
-                        : 'chip--missing'
-                  }`}
-                >
-                  {zvecSkillChip}
-                </span>
-                <FieldTip
-                  label="About zvec-grep"
-                  text="Local semantic, keyword, and ripgrep search, bundled with the app and exposed as an MCP tool. Returns ranked, source-linked snippets so agents read fewer files. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up."
-                />
-              </div>
-              <p className="field-help">
-                Semantic search exposed as an MCP tool. Install or update the CLI, then connect it to OpenCode.
-              </p>
-
-              <label className="field-label" htmlFor="zvec-grep-cli-source">
-                CLI source
-              </label>
-              <select
-                className="select"
-                id="zvec-grep-cli-source"
-                value={draft.zvecGrepCliSource}
-                aria-describedby="zvec-grep-cli-source-help"
-                onChange={(event) =>
-                  update('zvecGrepCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
-                }
-              >
-                <option value="local">Local machine</option>
-                <option value="bundled">Bundled (extension storage)</option>
-              </select>
-              <p className="field-help" id="zvec-grep-cli-source-help">
-                {draft.zvecGrepCliSource === 'bundled'
-                  ? 'Install downloads into extension storage. Turns use that binary, not PATH.'
-                  : 'Use the path below or PATH. Install and Update use this selection immediately.'}
-              </p>
-              <ScopeNotice id="zvec-grep-cli-source-notice" notice={noticeFor('zvecGrepCliSource')} />
-
-              {draft.zvecGrepCliSource === 'local' ? (
-                <>
-                  <label className="field-label" htmlFor="zvec-grep-path">
-                    zg path
-                  </label>
-                  <input
-                    className="input"
-                    id="zvec-grep-path"
-                    type="text"
-                    value={draft.zvecGrepPath}
-                    spellCheck={false}
-                    autoComplete="off"
-                    aria-invalid={zvecPathError ? true : undefined}
-                    aria-describedby={zvecPathError ? 'zvec-grep-path-error' : undefined}
-                    onChange={(event) => update('zvecGrepPath', event.target.value)}
-                  />
-                  {zvecPathError ? (
-                    <p className="field-msg field-msg--error" id="zvec-grep-path-error" role="alert">
-                      <AlertIcon />
-                      <span>{zvecPathError}</span>
-                    </p>
-                  ) : (
-                    <ScopeNotice id="zvec-grep-path-notice" notice={noticeFor('zvecGrepPath')} />
-                  )}
-                </>
-              ) : (
-                <p className="field-help skill-path" title={settings.skills.zvecGrep.bundled.path}>
-                  Bundled path
-                  <FieldTip label="Bundled zvec-grep path" text={settings.skills.zvecGrep.bundled.path} />
-                </p>
-              )}
-
-              <p
-                className={`runtime-status runtime-status--${
-                  zvecProbe.status === 'detected'
-                    ? 'detected'
-                    : zvecProbe.status === 'not-runnable'
-                      ? 'not-runnable'
-                      : 'missing'
-                }`}
-                role="status"
-              >
-                <span className="runtime-dot" aria-hidden="true" />
-                <span>
-                  {zvecProbe.status === 'detected'
-                    ? 'Detected'
-                    : zvecProbe.status === 'not-runnable'
-                      ? 'Installed but not runnable'
-                      : 'Not installed'}
-                </span>
-                {zvecProbe.status === 'detected' && zvecProbe.version ? (
-                  <span className="runtime-version">{zvecProbe.version}</span>
-                ) : null}
-              </p>
-
-              <div className="runtime-actions">
-                <button
-                  className="btn btn--secondary"
-                  type="button"
-                  disabled={zvecGrepInstall?.pending}
-                  onClick={() => onInstallZvecGrep(zvecCliDraft)}
-                >
-                  {zvecGrepInstall?.pending
-                    ? 'Working…'
-                    : zvecProbe.status === 'detected'
-                      ? draft.zvecGrepCliSource === 'bundled'
-                        ? 'Update bundled zvec-grep'
-                        : 'Update zvec-grep'
-                      : draft.zvecGrepCliSource === 'bundled'
-                        ? 'Install bundled zvec-grep'
-                        : 'Install zvec-grep'}
-                </button>
-                {zvecGrepInstall && !zvecGrepInstall.pending && zvecGrepInstall.message ? (
-                  <CliResult ok={zvecGrepInstall.ok} message={zvecGrepInstall.message} />
-                ) : null}
-              </div>
-
-              <div className="skill-check-row">
-                <label className="check" htmlFor="zvec-grep-enabled">
-                  <input
-                    className="check-input"
-                    id="zvec-grep-enabled"
-                    type="checkbox"
-                    checked={zvecChecked}
-                    disabled={zvecGrep?.pending}
-                    aria-describedby="zvec-grep-status"
-                    onChange={(event) => onSetZvecGrep(event.target.checked, zvecCliDraft)}
-                  />
-                  <span className="check-box" aria-hidden="true">
-                    <CheckIcon />
-                  </span>
-                  <span className="check-body">
-                    <span className="check-label">Use semantic search</span>
-                  </span>
-                </label>
-                <FieldTip
-                  label="About semantic search"
-                  text="Updates your user OpenCode config and SideCode turns. A new session picks it up."
-                />
-              </div>
-              <p className="field-help" id="zvec-grep-status">
-                {zvecStatus}
-              </p>
-              {zvecGrep && !zvecGrep.pending && zvecGrep.message ? (
-                <CliResult ok={zvecGrep.ok} message={zvecGrep.message} />
-              ) : null}
-            </div>
+            <SkillPanel
+              id="zvec-grep"
+              title="zvec-grep"
+              about="Local semantic, keyword, and ripgrep search, bundled with the app and exposed as an MCP tool. Returns ranked, source-linked snippets so agents read fewer files. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up. A workspace index is required."
+              oneLineHelp="Semantic search over a workspace index."
+              checked={zvecChecked}
+              toggleLabel="Use semantic search"
+              toggleTip="Updates your user OpenCode config and SideCode turns. A new session picks it up."
+              togglePending={zvecGrep?.pending === true}
+              onToggle={(value) => onSetZvecGrep(value, zvecCliDraft)}
+              chip={zvecChip}
+              statusText={zvecStatus}
+              detail={zvecSnapshot.detail}
+              cliSource={draft.zvecGrepCliSource}
+              onCliSource={(value) => update('zvecGrepCliSource', value)}
+              sourceHelp={sourceHelp(draft.zvecGrepCliSource)}
+              sourceNotice={noticeFor('zvecGrepCliSource')}
+              pathLabel="zg path"
+              pathValue={draft.zvecGrepPath}
+              onPath={(value) => update('zvecGrepPath', value)}
+              pathError={zvecPathError}
+              pathNotice={noticeFor('zvecGrepPath')}
+              bundledPath={settings.skills.zvecGrep.bundled.path}
+              probeStatus={zvecProbe.status}
+              probeVersion={zvecProbe.version}
+              installLabel={zvecInstallLabel}
+              installPending={zvecGrepInstall?.pending === true}
+              onInstall={() => onInstallZvecGrep(zvecCliDraft)}
+              installResult={zvecGrepInstall && !zvecGrepInstall.pending ? zvecGrepInstall : undefined}
+              testPending={zvecTest?.pending === true}
+              testResult={zvecTest && !zvecTest.pending ? zvecTest : undefined}
+              onTest={() => onSkillAction('zvecGrep', 'test', zvecCliDraft)}
+              indexState={zvecSnapshot.index}
+              indexPending={zvecIndex?.pending === true}
+              onBuildIndex={() => onSkillAction('zvecGrep', 'index', zvecCliDraft)}
+              indexResult={zvecIndex && !zvecIndex.pending ? zvecIndex : undefined}
+            />
           </TabPanel>
 
           <p className="panel__foot">Unsaved changes apply to the next turn.</p>
@@ -1948,30 +1692,15 @@ export function SettingsScreen({
         </TabPanel>
       </div>
 
-      <footer className="settings-foot">
-        <span className="dirty-note">
-          <span className="dirty-dot" aria-hidden="true" />
-          {dirty ? 'Changes apply to your next turn.' : 'No unsaved changes.'}
-        </span>
-        <span className="spacer" />
-        <button className="btn" type="button" disabled={!dirty} onClick={resetDraft}>
-          Reset
-        </button>
-        {settings.target === 'workspace' ? (
-          <button
-            className="btn"
-            type="button"
-            disabled={!dirty}
-            onClick={() => save('workspace')}
-            title="Saves to this workspace's .vscode/settings.json. The credential host, the CLI paths and the permission default are always saved to your user settings."
-          >
-            Save to workspace
-          </button>
-        ) : null}
-        <button className="btn btn--primary" type="button" disabled={!dirty} onClick={() => save('global')}>
-          {settings.target === 'workspace' ? 'Save user settings' : 'Save settings'}
-        </button>
-      </footer>
+      <SaveFooter
+        dirty={dirty}
+        target={settings.target}
+        save={settingsSave}
+        blocked={blockedSave}
+        onSave={save}
+        onReset={resetDraft}
+        onJumpToProblem={firstLocalProblem ? () => jumpToProblem(firstLocalProblem) : undefined}
+      />
     </main>
   );
 }
@@ -1995,3 +1724,127 @@ function ScopeNotice({ id, notice }: { id: string; notice?: string }): JSX.Eleme
     </p>
   );
 }
+
+
+
+type SettingsTabId = 'cli' | 'providers' | 'defaults' | 'orchestration' | 'context' | 'skills';
+type SkillTabId = 'skill-browser' | 'skill-ast-grep' | 'skill-zvec-grep';
+
+interface FieldDestination {
+  tab: SettingsTabId;
+  label: string;
+  providerTab?: ProviderTab;
+  skillTab?: SkillTabId;
+}
+
+/** The section and nested page that owns one settings field. */
+function fieldDestination(field: keyof SettingsPatch): FieldDestination {
+  switch (field) {
+    case 'ollamaBaseUrl':
+    case 'ollamaDefaultModel':
+      return { tab: 'providers', label: 'Providers', providerTab: 'provider-ollama' };
+    case 'ollamaLocalBaseUrl':
+    case 'ollamaLocalDefaultModel':
+      return { tab: 'providers', label: 'Providers', providerTab: 'provider-local' };
+    case 'opencodeDefaultModel':
+      return { tab: 'providers', label: 'Providers', providerTab: 'provider-opencode' };
+    case 'codexPath':
+    case 'codexDefaultModel':
+      return { tab: 'providers', label: 'Providers', providerTab: 'provider-codex' };
+    case 'permissionLevel':
+    case 'mode':
+    case 'thinking':
+    case 'dictationModel':
+      return { tab: 'defaults', label: 'Defaults' };
+    case 'orchestrationTesting':
+    case 'orchestrationReviewing':
+    case 'orchestrationDoubleCheck':
+    case 'orchestrationQuickTask':
+    case 'orchestrationPlanning':
+      return { tab: 'orchestration', label: 'Orchestration' };
+    case 'contextIncludeInstructions':
+    case 'contextIncludeShape':
+    case 'contextIncludeEditorState':
+    case 'contextIncludeSelection':
+    case 'contextIncludeChangedFiles':
+    case 'contextMaxBytes':
+    case 'contextExclude':
+      return { tab: 'context', label: 'Context' };
+    case 'browserCodex':
+    case 'browserOpencode':
+      return { tab: 'skills', label: 'Skills', skillTab: 'skill-browser' };
+    case 'zvecGrepPath':
+    case 'zvecGrepCliSource':
+      return { tab: 'skills', label: 'Skills', skillTab: 'skill-zvec-grep' };
+    case 'astGrepPath':
+    case 'astGrepCliSource':
+      return { tab: 'skills', label: 'Skills', skillTab: 'skill-ast-grep' };
+    case 'opencodeCliSource':
+    case 'opencodePath':
+      return { tab: 'cli', label: 'CLI' };
+    default:
+      return { tab: 'cli', label: 'CLI' };
+  }
+}
+
+/**
+ * The same per-field validation the host applies, run locally for immediate
+ * feedback. A refused field is excluded from the patch, but every other valid
+ * field is still sent; the draft keeps the bad value so the user can fix it.
+ */
+function draftErrors(draft: Draft): Partial<Record<keyof SettingsPatch, string>> {
+  const errors: Partial<Record<keyof SettingsPatch, string>> = {};
+  if (!isHttpUrl(draft.ollamaBaseUrl)) {
+    errors.ollamaBaseUrl = 'Enter a full URL, like https://ollama.com. This value was not saved.';
+  }
+  if (!isHttpUrl(draft.ollamaLocalBaseUrl)) {
+    errors.ollamaLocalBaseUrl =
+      'Enter a full URL, like http://localhost:11434. This value was not saved.';
+  }
+  if (!draft.codexPath.trim()) {
+    errors.codexPath = 'Enter the CLI path or name. This value was not saved.';
+  } else {
+    const codexResolved = resolveExecutableCommand(draft.codexPath, 'codex');
+    if (!codexResolved.ok) {
+      errors.codexPath = executablePathError(codexResolved.reason, 'Codex CLI');
+    }
+  }
+  // Paths are persisted regardless of the active source, so they are validated
+  // regardless too. A bundled selection still owns the stored local path.
+  if (!draft.opencodePath.trim()) {
+    errors.opencodePath = 'Enter the opencode CLI path or name. This value was not saved.';
+  } else {
+    const opencodeResolved = resolveExecutableCommand(draft.opencodePath, 'opencode');
+    if (!opencodeResolved.ok) {
+      errors.opencodePath = executablePathError(opencodeResolved.reason, 'opencode CLI');
+    }
+  }
+  if (!draft.zvecGrepPath.trim()) {
+    errors.zvecGrepPath = 'Enter the zg CLI path or name. This value was not saved.';
+  } else {
+    const zvecResolved = resolveExecutableCommand(draft.zvecGrepPath, 'zg');
+    if (!zvecResolved.ok) {
+      errors.zvecGrepPath = executablePathError(zvecResolved.reason, 'zg CLI');
+    }
+  }
+  if (!draft.astGrepPath.trim()) {
+    errors.astGrepPath = 'Enter the ast-grep CLI path or name. This value was not saved.';
+  } else {
+    const astResolved = resolveExecutableCommand(draft.astGrepPath, 'ast-grep');
+    if (!astResolved.ok) {
+      errors.astGrepPath = executablePathError(astResolved.reason, 'ast-grep CLI');
+    }
+  }
+  const maxKb = Number(draft.contextMaxKb.trim());
+  if (!Number.isFinite(maxKb) || !Number.isInteger(maxKb) || maxKb < 1 || maxKb > 1024) {
+    errors.contextMaxBytes =
+      'Enter a whole number of kilobytes between 1 and 1024. This value was not saved.';
+  }
+  const badPattern = draft.contextExclude.find((pattern) => contextPatternError(pattern) !== undefined);
+  if (badPattern !== undefined) {
+    errors.contextExclude = contextPatternError(badPattern);
+  }
+  return errors;
+}
+
+

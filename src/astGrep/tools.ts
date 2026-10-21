@@ -29,7 +29,7 @@ export const AST_GREP_TOOLS = [
   {
     name: 'replace',
     description:
-      'Syntax-aware rewrite with ast-grep. Defaults to dry-run (preview). Set dryRun false to apply.',
+      'Syntax-aware rewrite with ast-grep. Defaults to dry-run (preview). To apply, pass approve: true and explicit paths inside the workspace; a bare --update-all over the whole workspace is never run.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -39,16 +39,20 @@ export const AST_GREP_TOOLS = [
         paths: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Files or directories'
+          description: 'Files or directories, relative to the workspace (required when dryRun is false)'
         },
         globs: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Include/exclude globs'
+          description: 'Include/exclude globs, relative to the workspace'
         },
         dryRun: {
           type: 'boolean',
           description: 'When true (default), preview without writing files'
+        },
+        approve: {
+          type: 'boolean',
+          description: 'Required to be true when dryRun is false: confirms writing the named paths'
         }
       },
       required: ['pattern', 'rewrite'],

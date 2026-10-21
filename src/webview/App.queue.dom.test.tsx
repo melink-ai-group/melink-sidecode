@@ -74,6 +74,19 @@ function setBusy(backendId = 'codex'): void {
 }
 
 describe('busy composer queueing', () => {
+  it('anchors the busy loader to the chat container, not the transcript', () => {
+    renderComposer('codex');
+    setBusy();
+
+    const loader = document.querySelector('.busy-corner');
+    expect(loader).toBeTruthy();
+    const overlay = loader?.closest('.busy-corner-slot--overlay');
+    expect(overlay).toBeTruthy();
+    expect(overlay?.parentElement?.classList.contains('chat-main')).toBe(true);
+    expect(overlay?.closest('.transcript')).toBeNull();
+    expect(document.querySelector('.transcript .busy-corner')).toBeNull();
+  });
+
   it('queues a busy send with an attachment and keeps the draft until the echo', () => {
     const composer = renderComposer('codex');
     attachFile();

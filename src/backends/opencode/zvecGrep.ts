@@ -8,18 +8,32 @@ import {
   firstExisting,
   opencodeConfigCandidates,
   opencodeConfigHasMcpServer,
+  readOpencodeUserConfig,
   removeOpencodeMcpServer,
+  replaceOpencodeConfigText,
   stripJsonComments,
   upsertOpencodeMcpServer,
   type OpencodeUserConfigIO
 } from './userConfig.ts';
-import { zvecGrepOpencodeServer, ZVEC_GREP_MCP_SERVER } from '../../skills/opencodeMcp.ts';
+import { rewriteLegacyZvecCommand } from './opencodeConfigText.ts';
+import {
+  zvecGrepOpencodeServer,
+  ZVEC_GREP_MCP_SERVER,
+  type OpencodeLocalMcpServer
+} from '../../skills/opencodeMcp.ts';
 import {
   bundledZvecGrepExecutable,
   bundledZvecGrepPrefix,
   type ZvecGrepCliSource
 } from '../zvecGrep/resolve.ts';
 import { resolveExecutableCommand } from '../executables.ts';
+import {
+  commandLaunch,
+  commandNotFound,
+  windowsCommandCandidates,
+  windowsCommandLine
+} from '../launch.ts';
+import { probeOpencodeServer, type McpProbeResult } from '../../skills/mcpProbe.ts';
 import type { SkillResolveRoots } from '../skillCli.ts';
 
 /**
@@ -51,9 +65,16 @@ const MAX_OUTPUT = 64_000;
 export type ZvecGrepCli = 'missing' | 'installed';
 
 export interface ZvecGrepStatus {
-  /** True when `zg` runs and the OpenCode config has a `zvec_grep` server. */
+  /** True when `zg` runs, the MCP server answers, and OpenCode has the entry. */
   enabled: boolean;
   cli: ZvecGrepCli;
+  /**
+   * The MCP handshake outcome. `undefined` when the caller injected a runner
+   * without a handshake seam (unit tests use that to keep the probe host-free).
+   */
+  server?: 'ready' | 'failed';
+  /** Plain-language reason when the server is not ready. */
+  message?: string;
 }
 
 export interface ZvecGrepApplyResult extends ZvecGrepStatus {
@@ -74,11 +95,20 @@ export type CommandRunner = (
   timeoutMs: number
 ) => Promise<SpawnOutcome>;
 
+/**
+ * Optional MCP handshake seam.
+ *
+ * The production IO runs the server entry (`zg server --stdio`) and asks for
+ * `tools/list`; tests inject a fake so detection stays host-free.
+ */
+export type ServerProbe = (server: OpencodeLocalMcpServer) => Promise<McpProbeResult>;
+
 export interface ZvecGrepIO {
   run: CommandRunner;
   /** The selected OpenCode config text, or undefined when no file exists. */
   readConfig(): Promise<string | undefined>;
   platform: NodeJS.Platform;
+  probeServer?: ServerProbe;
 }
 
 /** The first `major.minor.patch` token in a `node --version` line. */
@@ -89,6 +119,23 @@ export function nodeMajor(output: string): number | undefined {
   }
   const major = Number(match[1]);
   return Number.isInteger(major) ? major : undefined;
+}
+
+/**
+ * Whether a zg version supports the `server` subcommand the MCP entry uses.
+ * Unknown version strings pass; the handshake then decides.
+ */
+export function zvecVersionSupported(version: string | undefined): boolean {
+  const match = /(\d+)\.(\d+)/.exec(version ?? '');
+  if (!match?.[1] || !match[2]) {
+    return true;
+  }
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) {
+    return true;
+  }
+  return major > 0 || (major === 0 && minor >= 2);
 }
 
 /**
@@ -135,58 +182,23 @@ export function zgGlobalBin(prefix: string, platform: string): string {
   return posix.join(root, 'bin', 'zg');
 }
 
-/**
- * How to start a command without `shell: true`.
- *
- * Node on Windows rejects a direct spawn of `.cmd` / `.bat` (`EINVAL`, no
- * output). Those files are started through `cmd.exe /d /s /c` with a quoted
- * command built only from our own arguments.
- */
-export function commandLaunch(
-  platform: string,
-  command: string,
-  args: readonly string[],
-  comSpec = 'cmd.exe'
-): { command: string; args: string[]; verbatim: boolean } {
-  if (platform === 'win32' && /\.(cmd|bat)$/i.test(command)) {
-    return {
-      command: comSpec,
-      args: ['/d', '/s', '/c', `"${windowsCommandLine(command, args)}"`],
-      verbatim: true
-    };
-  }
-  return { command, args: [...args], verbatim: false };
-}
-
-/** One Windows command line. Arguments that need quoting are quoted; nothing is passed to a shell string from settings. */
-export function windowsCommandLine(command: string, args: readonly string[]): string {
-  return [command, ...args].map(quoteCmdArg).join(' ');
-}
-
-function quoteCmdArg(arg: string): string {
-  if (arg.length === 0) {
-    return '""';
-  }
-  if (/[\s"&|<>^]/.test(arg)) {
-    return `"${arg.replace(/"/g, '""')}"`;
-  }
-  return arg;
-}
-
-/** True when the command is absent, including cmd.exe's "not recognized" text. */
-export function commandNotFound(result: SpawnOutcome): boolean {
-  if (result.error === 'missing') {
-    return true;
-  }
-  const text = `${result.stdout}\n${result.stderr}`;
-  return /not recognized as an internal or external command/i.test(text) || /\bcommand not found\b/i.test(text);
-}
+export { commandLaunch, commandNotFound, windowsCommandLine };
 
 /** Spawn one command. Output is capped so a long install log stays bounded. */
 export function runCommand(
   command: string,
   args: readonly string[],
   timeoutMs: number
+): Promise<SpawnOutcome> {
+  return runCommandAt(command, args, timeoutMs);
+}
+
+/** Spawn one command with an explicit working directory (indexing and status). */
+export function runCommandAt(
+  command: string,
+  args: readonly string[],
+  timeoutMs: number,
+  cwd?: string
 ): Promise<SpawnOutcome> {
   const launched = commandLaunch(process.platform, command, args, process.env.ComSpec || 'cmd.exe');
   return new Promise((resolve) => {
@@ -217,6 +229,7 @@ export function runCommand(
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         shell: false,
+        ...(cwd ? { cwd } : {}),
         ...(launched.verbatim ? { windowsVerbatimArguments: true } : {})
       });
     } catch {
@@ -246,11 +259,57 @@ export function runCommand(
   });
 }
 
-export function createZvecGrepIO(): ZvecGrepIO {
-  return {
+/**
+ * Keep the handshake cheap: one probe per binary per minute. The settings
+ * snapshot runs on every save echo, and each probe starts `zg server --stdio`.
+ */
+const SERVER_PROBE_TTL_MS = 60_000;
+const serverProbeCache = new Map<string, { at: number; result: McpProbeResult }>();
+
+async function probeServerOnce(server: OpencodeLocalMcpServer): Promise<McpProbeResult> {
+  const key = server.command.join('\u0000');
+  const cached = serverProbeCache.get(key);
+  const now = Date.now();
+  if (cached && now - cached.at < SERVER_PROBE_TTL_MS) {
+    return cached.result;
+  }
+  const result = await probeOpencodeServer(server);
+  serverProbeCache.set(key, { at: now, result });
+  return result;
+}
+
+/**
+ * Run `<cli> --version` with the same Windows `.cmd` launch rule the turns and
+ * the MCP shim use. `probeOpencode` spawns directly, which reports a `.cmd`
+ * shim as not runnable; a skill CLI must be probed the way it is started.
+ */
+export async function probeExecutableVersion(
+  command: string,
+  timeoutMs = 8_000,
+  platform: NodeJS.Platform = process.platform
+): Promise<{ status: 'detected' | 'missing' | 'not-runnable'; version?: string }> {
+  let last: 'missing' | 'not-runnable' = 'missing';
+  for (const candidate of windowsCommandCandidates(command, platform)) {
+    const result = await runCommandAt(candidate, ['--version'], timeoutMs);
+    if (result.error === 'missing' || commandNotFound(result)) {
+      last = 'missing';
+      continue;
+    }
+    if (result.error !== undefined || result.code !== 0) {
+      last = 'not-runnable';
+      continue;
+    }
+    const match = /(\d+\.\d+\.\d+(?:[-+][\w.]+)?)/.exec(`${result.stdout}\n${result.stderr}`);
+    return match?.[1] ? { status: 'detected', version: match[1] } : { status: 'detected' };
+  }
+  return { status: last };
+}
+
+export function createZvecGrepIO(): ZvecGrepIO {  return {
     platform: process.platform,
     run: runCommand,
-    readConfig: readOpencodeConfig
+    readConfig: readOpencodeConfig,
+    probeServer: probeServerOnce
   };
 }
 
@@ -266,11 +325,95 @@ export async function detectZvecGrep(
   ioOrContext: ZvecGrepIO | ZvecGrepApplyContext = createZvecGrepIO()
 ): Promise<ZvecGrepStatus> {
   const ctx = normalizeContext(ioOrContext);
-  const [configured, cli] = await Promise.all([
+  const [configured, command] = await Promise.all([
     configHasZvecGrep(ctx.io, ctx.userConfig),
-    probeZg(ctx)
+    locateZg(ctx)
   ]);
-  return { enabled: configured && cli === 'installed', cli };
+  const cli: ZvecGrepCli = command ? 'installed' : 'missing';
+  if (!command) {
+    return { enabled: false, cli };
+  }
+  if (!configured) {
+    return { enabled: false, cli };
+  }
+  // Detection is not "the file exists": the server entry OpenCode will spawn
+  // must answer `initialize` + `tools/list`. A wrong argv (`zg --server`) or a
+  // broken proxy is reported here instead of after a failed turn.
+  const probe = ctx.io.probeServer;
+  if (!probe) {
+    return { enabled: true, cli };
+  }
+  const result = await probe(zvecGrepOpencodeServer(command));
+  if (result.ok) {
+    return { enabled: true, cli, server: 'ready' };
+  }
+  return {
+    enabled: false,
+    cli,
+    server: 'failed',
+    message: result.message ?? 'The zvec-grep MCP server did not answer.'
+  };
+}
+
+/**
+ * Rewrite the known legacy zvec-grep MCP entry `[zg, '--server', '--stdio']`
+ * to the 0.2.x form `[zg, 'server', '--stdio']`.
+ *
+ * Idempotent and safe: the known argv shape is rewritten textually, so
+ * comments, trailing commas, indentation and unrelated keys stay
+ * byte-for-byte. The previous file is kept as `<path>.bak`, and an unparsable,
+ * ambiguous or unsafe rewrite is never written. Other legacy shapes fall back
+ * to the parsed upsert (which preserves keys but normalises formatting).
+ * Best-effort at activation; `enableZvecGrep` calls it before applying.
+ */
+export async function migrateLegacyZvecServer(
+  userConfig: OpencodeUserConfigIO = createOpencodeUserConfigIO()
+): Promise<{ changed: boolean; path?: string; message?: string; mode?: 'textual' | 'parsed' }> {
+  const current = await readOpencodeUserConfig(userConfig);
+  if (current.error) {
+    return {
+      changed: false,
+      path: current.path,
+      message: 'The OpenCode config could not be read, so the zvec-grep entry was not migrated.'
+    };
+  }
+  const mcp =
+    current.data.mcp && typeof current.data.mcp === 'object' && !Array.isArray(current.data.mcp)
+      ? (current.data.mcp as Record<string, unknown>)
+      : undefined;
+  const entry = mcp?.[ZVEC_GREP_MCP_SERVER];
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { changed: false, path: current.path };
+  }
+  const command = (entry as { command?: unknown }).command;
+  if (!Array.isArray(command) || typeof command[0] !== 'string') {
+    return { changed: false, path: current.path };
+  }
+  const rest = command.slice(1).filter((part): part is string => typeof part === 'string');
+  const legacy = rest.includes('--server') && rest[0] !== 'server';
+  if (!legacy) {
+    return { changed: false, path: current.path };
+  }
+  if (current.text === undefined) {
+    return { changed: false, path: current.path };
+  }
+  const textual = rewriteLegacyZvecCommand(current.text);
+  if (textual.status === 'rewritten') {
+    await replaceOpencodeConfigText(userConfig, current.path, current.text, textual.text);
+    return { changed: true, path: current.path, mode: 'textual' };
+  }
+  if (textual.status === 'ambiguous' || textual.status === 'invalid') {
+    return { changed: false, path: current.path, message: textual.message };
+  }
+  // No exact textual match: another legacy argv shape (for example flags in a
+  // different order). The parsed upsert keeps keys but normalises formatting.
+  const extra = rest.filter((part) => part !== '--server' && part !== '--stdio');
+  const next = {
+    ...(entry as Record<string, unknown>),
+    command: [command[0], 'server', '--stdio', ...extra]
+  };
+  await upsertOpencodeMcpServer(ZVEC_GREP_MCP_SERVER, next, userConfig);
+  return { changed: true, path: current.path, mode: 'parsed' };
 }
 
 /**
@@ -313,6 +456,9 @@ function isZvecGrepIO(value: ZvecGrepIO | ZvecGrepApplyContext): value is ZvecGr
 async function enableZvecGrep(
   ctx: ReturnType<typeof normalizeContext>
 ): Promise<ZvecGrepApplyResult> {
+  // Repair a config written by an older build before the upsert below decides
+  // the final entry. A parse failure is reported by the upsert, not here.
+  await migrateLegacyZvecServer(ctx.userConfig).catch(() => undefined);
   let command = await locateZg(ctx);
   if (!command) {
     const ready = await ensureZgInstalled(ctx);
@@ -335,9 +481,14 @@ async function enableZvecGrep(
   await runIntegration(ctx.io, command, 'install').catch(() => undefined);
 
   const server = zvecGrepOpencodeServer(command);
+  const before = await readOpencodeUserConfig(ctx.userConfig).catch(() => undefined);
   try {
     await upsertOpencodeMcpServer(ZVEC_GREP_MCP_SERVER, server, ctx.userConfig);
+    // The saved entry just changed; re-probe instead of reusing an earlier
+    // failure for the same binary.
+    serverProbeCache.clear();
   } catch {
+    await rollbackZvecEntry(before, ctx.userConfig);
     return {
       ok: false,
       enabled: false,
@@ -348,11 +499,17 @@ async function enableZvecGrep(
 
   const status = await detectZvecGrep(ctx);
   if (!status.enabled) {
+    // A failed handshake must not leave a live MCP entry behind while Settings
+    // says the skill is off. Restore the exact bytes we read (comments and all).
+    await rollbackZvecEntry(before, ctx.userConfig);
     return {
       ok: false,
       enabled: false,
       cli: status.cli,
-      message: 'zvec-grep finished installing, but OpenCode is not configured to use it.'
+      ...(status.server ? { server: status.server } : {}),
+      message:
+        status.message ??
+        'zvec-grep finished installing, but OpenCode is not configured to use it.'
     };
   }
   return {
@@ -361,6 +518,29 @@ async function enableZvecGrep(
     cli: 'installed',
     message: 'zvec-grep is connected to OpenCode. A new session uses it.'
   };
+}
+
+/**
+ * Restore the config read before a failed enable. Best effort: the connect
+ * failure is what the user needs to see, and a locked file is retried on the
+ * next toggle.
+ */
+async function rollbackZvecEntry(
+  before: Awaited<ReturnType<typeof readOpencodeUserConfig>> | undefined,
+  userConfig: OpencodeUserConfigIO
+): Promise<void> {
+  if (!before || before.error) {
+    return;
+  }
+  try {
+    if (before.text === undefined) {
+      await removeOpencodeMcpServer(ZVEC_GREP_MCP_SERVER, userConfig);
+      return;
+    }
+    await replaceOpencodeConfigText(userConfig, before.path, undefined, before.text);
+  } catch {
+    // Reported by the apply result; the next toggle retries.
+  }
 }
 
 async function disableZvecGrep(
@@ -444,10 +624,6 @@ async function ensureZgInstalled(
     return { ok: false, message: failureMessage(installed, 'zvec-grep could not be installed') };
   }
   return { ok: true };
-}
-
-async function probeZg(ctx: ReturnType<typeof normalizeContext>): Promise<ZvecGrepCli> {
-  return (await locateZg(ctx)) ? 'installed' : 'missing';
 }
 
 /**

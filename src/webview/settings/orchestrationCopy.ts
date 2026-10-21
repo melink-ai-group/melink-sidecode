@@ -28,8 +28,8 @@ export const ORCHESTRATION_FIELDS: readonly OrchestrationFieldCopy[] = [
   {
     key: 'testing',
     label: 'Testing',
-    help: 'Run typecheck or lint and the tests after a turn that changes files. (Default: on.)',
-    defaultValue: true
+    help: 'Run typecheck or lint and the tests after a turn that changes files. (Default: off.)',
+    defaultValue: false
   },
   {
     key: 'reviewing',

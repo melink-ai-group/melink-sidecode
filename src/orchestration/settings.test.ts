@@ -9,7 +9,7 @@ import {
 test('defaults match the documented policy when nothing is set', () => {
   const settings = resolveOrchestrationSettings({});
   assert.deepEqual(settings, {
-    testing: true,
+    testing: false,
     reviewing: false,
     doubleCheck: true,
     quickTask: true,
@@ -46,7 +46,7 @@ test('unset new keys fall back to the legacy review keys and flag the source', (
     legacyTesting: { defaultValue: false },
     legacyReviewing: { defaultValue: true }
   });
-  assert.equal(legacyDefaults.testing, true);
+  assert.equal(legacyDefaults.testing, false);
   assert.equal(legacyDefaults.legacyTesting, false);
   assert.equal(legacyDefaults.reviewing, false);
   assert.equal(legacyDefaults.legacyReviewing, false);
@@ -90,9 +90,15 @@ test('a defaultValue is not an explicit user value', () => {
     reviewing: { defaultValue: true },
     doubleCheck: { defaultValue: false },
     quickTask: { defaultValue: false },
-    planning: { defaultValue: false }
+    planning: { defaultValue: false },
+    // A fresh profile also carries the legacy schema default; it must not
+    // look like a user chose testing on.
+    legacyTesting: { defaultValue: true },
+    legacyReviewing: { defaultValue: false }
   });
   assert.equal(settings.testing, ORCHESTRATION_DEFAULTS.testing);
+  assert.equal(settings.testing, false);
+  assert.equal(settings.legacyTesting, false);
   assert.equal(settings.reviewing, ORCHESTRATION_DEFAULTS.reviewing);
   assert.equal(settings.doubleCheck, true);
   assert.equal(settings.quickTask, true);
@@ -116,12 +122,12 @@ test('the effective testing value: new wins, legacy is only a fallback', () => {
     }).testing,
     false
   );
-  // New unset: legacy true runs; legacy unset: the documented default runs.
+  // New unset + legacy unset: the documented default (off) runs.
   assert.equal(
     resolveOrchestrationSettings({ legacyTesting: { globalValue: true } }).testing,
     true
   );
-  assert.equal(resolveOrchestrationSettings({}).testing, true);
+  assert.equal(resolveOrchestrationSettings({}).testing, false);
 });
 
 test('each of the three standalone toggles can be turned off explicitly', () => {
@@ -133,7 +139,7 @@ test('each of the three standalone toggles can be turned off explicitly', () => 
   assert.equal(settings.doubleCheck, false);
   assert.equal(settings.quickTask, false);
   assert.equal(settings.planning, false);
-  assert.equal(settings.testing, true);
+  assert.equal(settings.testing, false);
   assert.equal(settings.reviewing, false);
 });
 
@@ -145,7 +151,7 @@ test('malformed values are ignored rather than coerced', () => {
     quickTask: { globalValue: 'true' },
     planning: { globalValue: {} }
   });
-  assert.equal(settings.testing, true);
+  assert.equal(settings.testing, false);
   assert.equal(settings.reviewing, false);
   assert.equal(settings.doubleCheck, true);
   assert.equal(settings.quickTask, true);

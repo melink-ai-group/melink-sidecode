@@ -1,7 +1,9 @@
 import {
   WORKSPACE_SAVE_REFUSED_MESSAGE,
+  controllingScope,
   keyAllowsWorkspaceScope,
   saveScopeForKey,
+  type InspectedSetting,
   type SettingsWriteScope
 } from './trust.ts';
 
@@ -37,9 +39,37 @@ export function fieldSaveOutcome(
   if (keyAllowsWorkspaceScope(key)) {
     return { scope: requested, redirected: false };
   }
+  const redirected = requested !== 'global';
   return {
     scope: saveScopeForKey(key, requested),
-    redirected: requested === 'workspace',
-    ...(requested === 'workspace' ? { notice: WORKSPACE_SAVE_REFUSED_MESSAGE } : {})
+    redirected,
+    ...(redirected ? { notice: WORKSPACE_SAVE_REFUSED_MESSAGE } : {})
   };
+}
+
+/**
+ * The effective scope for the primary save, across the managed keys.
+ *
+ * Priority follows VS Code's own merge: a folder override anywhere makes the
+ * screen a "folder" save, otherwise a workspace override makes it a
+ * "workspace" save, otherwise the user settings are in charge. Trust-sensitive
+ * keys are skipped because their workspace/folder values are never read.
+ */
+export function effectiveSettingsTarget(
+  entries: Iterable<{ key: string; inspected?: InspectedSetting<unknown> }>
+): SettingsWriteScope {
+  let workspace = false;
+  for (const { key, inspected } of entries) {
+    if (!keyAllowsWorkspaceScope(key)) {
+      continue;
+    }
+    const scope = controllingScope(inspected);
+    if (scope === 'folder') {
+      return 'folder';
+    }
+    if (scope === 'workspace') {
+      workspace = true;
+    }
+  }
+  return workspace ? 'workspace' : 'global';
 }

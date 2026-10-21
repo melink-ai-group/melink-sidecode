@@ -253,7 +253,7 @@ function settingsSnapshot() {
       exclude: []
     },
     orchestration: {
-      testing: true,
+      testing: false,
       reviewing: false,
       doubleCheck: true,
       quickTask: true,
@@ -289,14 +289,57 @@ function settingsSnapshot() {
   };
 }
 
-function baseMessages({ title, threadId, model = 'qwen3-coder:480b', replay = [] }) {
+function skillsSettings({ astReady, zvecReady }) {
+  const base = settingsSnapshot();
+  return {
+    ...base,
+    skills: {
+      ...base.skills,
+      astGrep: {
+        enabled: astReady,
+        cliSource: 'local',
+        path: 'ast-grep',
+        status: astReady ? 'detected' : 'missing',
+        ...(astReady ? { version: '0.51.0' } : {}),
+        local: astReady
+          ? { path: 'ast-grep', status: 'detected', version: '0.51.0' }
+          : { path: 'ast-grep', status: 'missing' },
+        bundled: {
+          path: 'C:\\Users\\visual\\AppData\\Roaming\\Code\\User\\globalStorage\\melink.\\ast-grep\\bin\\ast-grep.exe',
+          status: 'missing'
+        },
+        connected: astReady,
+        cli: astReady ? 'installed' : 'missing'
+      },
+      zvecGrep: {
+        enabled: zvecReady,
+        cliSource: 'local',
+        path: 'zg',
+        status: zvecReady ? 'detected' : 'missing',
+        ...(zvecReady ? { version: '0.2.2' } : {}),
+        local: zvecReady
+          ? { path: 'zg', status: 'detected', version: '0.2.2' }
+          : { path: 'zg', status: 'missing' },
+        bundled: {
+          path: 'C:\\Users\\visual\\AppData\\Roaming\\Code\\User\\globalStorage\\melink.\\zvec-grep\\zg.cmd',
+          status: 'missing'
+        },
+        connected: zvecReady,
+        cli: zvecReady ? 'installed' : 'missing',
+        ...(zvecReady ? { index: 'missing' } : {})
+      }
+    }
+  };
+}
+
+function baseMessages({ title, threadId, model = 'qwen3-coder:480b', replay = [], settings = settingsSnapshot() }) {
   return [
     { type: 'snapshot', availability: AVAILABILITY },
     { type: 'models', backendId: 'ollama', models: MODELS.ollama },
     { type: 'models', backendId: 'ollama-local', models: MODELS['ollama-local'] },
     { type: 'models', backendId: 'codex', models: MODELS.codex },
     { type: 'models', backendId: 'opencode', models: MODELS.opencode },
-    { type: 'settings', settings: settingsSnapshot() },
+    { type: 'settings', settings },
     {
       type: 'conversation',
       backendId: 'ollama',
@@ -585,6 +628,43 @@ export function screenMessages(slug) {
     case 'settings-provider-local': {
       const messages = baseMessages({ title: 'New chat' });
       return [...messages, { type: 'showSettings' }];
+    }
+    case 'settings-skills-ast': {
+      const messages = baseMessages({
+        title: 'New chat',
+        settings: skillsSettings({ astReady: true, zvecReady: true })
+      });
+      return [...messages, { type: 'showSettings' }];
+    }
+    case 'settings-skills-zvec': {
+      const messages = baseMessages({
+        title: 'New chat',
+        settings: skillsSettings({ astReady: true, zvecReady: true })
+      });
+      return [...messages, { type: 'showSettings' }];
+    }
+    case 'settings-save-busy': {
+      const messages = baseMessages({ title: 'New chat' });
+      return [
+        ...messages,
+        { type: 'showSettings' },
+        // The host posts this before its first await; seeded here so the
+        // harness can photograph the busy footer without a live save.
+        { type: 'settingsSave', pending: true }
+      ];
+    }
+    case 'settings-save-success': {
+      const messages = baseMessages({
+        title: 'New chat',
+        // A workspace-scoped target also renders the secondary "Save user
+        // settings" action, so the 390px capture covers the widest footer.
+        settings: { ...settingsSnapshot(), target: 'workspace' }
+      });
+      return [
+        ...messages,
+        { type: 'showSettings' },
+        { type: 'settingsSave', pending: false, ok: true }
+      ];
     }
     default:
       throw new Error(`No fixture for screen "${slug}"`);

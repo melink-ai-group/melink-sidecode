@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { OrchestrationFields, type OrchestrationFieldValues } from './OrchestrationFields';
 
 const DEFAULT_VALUES: OrchestrationFieldValues = {
-  testing: true,
+  testing: false,
   reviewing: false,
   doubleCheck: true,
   quickTask: true,
@@ -32,7 +32,7 @@ describe('OrchestrationFields', () => {
     expect(
       screen.getByRole('status').textContent
     ).toBe(
-      'Effective policy: testing, double-check and plan autopilot on · reviewing off · quick tasks skip these passes.'
+      'Effective policy: double-check and plan autopilot on · testing and reviewing off · quick tasks skip these passes.'
     );
   });
 
@@ -42,7 +42,7 @@ describe('OrchestrationFields', () => {
   });
 
   it('reports every toggle change through onChange', () => {
-    const onChange = renderFields();
+    const onChange = renderFields({ testing: true });
     fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Reviewing/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Double-check/ }));

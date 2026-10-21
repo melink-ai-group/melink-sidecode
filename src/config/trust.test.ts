@@ -4,6 +4,7 @@ import {
   GLOBAL_ONLY_KEYS,
   TRUST_SCOPED_KEYS,
   keyAllowsWorkspaceScope,
+  resolveWriteScope,
   saveScopeForKey,
   trustedBoolean,
   trustedOptionalSetting,
@@ -146,4 +147,26 @@ test('every trust-sensitive field redirects the same way', () => {
     assert.equal(outcome.redirected, true, key);
     assert.ok(outcome.notice, key);
   }
+});
+
+test('the nearest override wins: folder, then workspace, then the requested scope', () => {
+  assert.equal(
+    resolveWriteScope('workspace', { workspaceValue: 'w', workspaceFolderValue: 'f' }),
+    'folder'
+  );
+  assert.equal(resolveWriteScope('folder', { workspaceValue: 'w' }), 'workspace');
+  assert.equal(resolveWriteScope('folder', { globalValue: 'g' }), 'folder');
+  assert.equal(resolveWriteScope('workspace', undefined), 'workspace');
+});
+
+test('a user save never becomes a workspace or folder write', () => {
+  const inspected = { workspaceValue: 'w', workspaceFolderValue: 'f' };
+  assert.equal(resolveWriteScope('global', inspected), 'global');
+});
+
+test('a folder save redirects a trust-sensitive key to the user settings', () => {
+  const outcome = fieldSaveOutcome('melink.ollama.baseUrl', 'folder');
+  assert.equal(outcome.scope, 'global');
+  assert.equal(outcome.redirected, true);
+  assert.match(outcome.notice as string, /user settings/);
 });

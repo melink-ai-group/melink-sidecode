@@ -1,4 +1,5 @@
 import type { ConnectionTestResult, SettingsPatch, SettingsSection, SettingsSnapshot } from '../../protocol';
+import type { SettingsSaveState } from './SaveFooter';
 
 export type ProviderTab = 'provider-ollama' | 'provider-local' | 'provider-opencode' | 'provider-codex';
 
@@ -16,8 +17,10 @@ export function providerTabForSection(section: SettingsSection | undefined): Pro
 export interface SettingsScreenProps {
   settings?: SettingsSnapshot;
   connectionTest?: { backendId: string; pending: boolean; result?: ConnectionTestResult };
+  /** Busy/result state of the settings save, owned by the host and App state. */
+  settingsSave?: SettingsSaveState;
   onBack: () => void;
-  onSave: (patch: SettingsPatch, target?: 'global' | 'workspace') => void;
+  onSave: (patch: SettingsPatch, target?: 'global' | 'workspace' | 'folder') => void;
   onSaveToken: (value: string) => void;
   onClearToken: () => void;
   onSaveZenToken: (value: string) => void;
@@ -59,4 +62,16 @@ export interface SettingsScreenProps {
   onUpgradeAstGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
   zvecGrepInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
   onInstallZvecGrep: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
+  skillAction?: {
+    skill: 'zvecGrep' | 'astGrep';
+    action: 'test' | 'index';
+    pending: boolean;
+    ok?: boolean;
+    message?: string;
+  };
+  onSkillAction: (
+    skill: 'zvecGrep' | 'astGrep',
+    action: 'test' | 'index',
+    draft?: { cliSource: 'local' | 'bundled'; path: string }
+  ) => void;
 }

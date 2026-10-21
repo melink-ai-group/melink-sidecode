@@ -1,4 +1,4 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import {
   trustSensitiveNotice
 } from './fieldNotices.ts';
 import { TRUST_SCOPED_KEYS } from './trust.ts';
+import { planSettingsWrites } from '../settings/planWrites.ts';
 
 /**
  * The scope notices on the trust-sensitive fields.
@@ -17,7 +18,7 @@ import { TRUST_SCOPED_KEYS } from './trust.ts';
  * spawned, or what the permission default is. They are read from the user's
  * own settings only, so a "Save to workspace" writes them to the user settings
  * instead. The value *is* persisted, so the screen shows a notice rather than an
- * error — but the notice has to appear on every one of the ten. A field
+ * error â€” but the notice has to appear on every one of the ten. A field
  * that silently saved somewhere else than the button said is a lie.
  */
 
@@ -43,9 +44,11 @@ test('every trust-sensitive field maps to a trust-scoped key', () => {
   for (const key of mapped) {
     assert.equal(TRUST_SCOPED_KEYS.includes(key), true, key);
   }
-  // The mapping and the trust-scoped list name the same settings, so a new
-  // trust-scoped key cannot be added to one and forgotten in the other.
-  assert.deepEqual([...mapped].sort(), [...TRUST_SCOPED_KEYS].sort());
+  // The mapping and the trust-scoped list agree, except for the two skill
+  // enable flags: they decide whether a binary-spawning skill runs, but they
+  // are toggled (not part of the settings patch), so they have no field notice.
+  const extras = TRUST_SCOPED_KEYS.filter((key) => !mapped.includes(key));
+  assert.deepEqual([...extras].sort(), ['melink.skills.astGrep', 'melink.skills.zvecGrep']);
 });
 
 test('the host notice is shown verbatim on a redirected field', () => {
@@ -93,14 +96,29 @@ test('the screen renders a notice for every trust-sensitive field', async () => 
  * The host must produce a notice for each of the ten, so the screen has
  * something truthful to show.
  */
-test('the settings service produces a notice for every trust-sensitive field', async () => {
-  const text = await readFile(join(process.cwd(), 'src', 'settings.ts'), 'utf8');
+test('the write plan produces a notice for every trust-sensitive field', () => {
+  const plan = planSettingsWrites(
+    {
+      ollamaBaseUrl: 'https://ollama.com',
+      ollamaLocalBaseUrl: 'http://localhost:11434',
+      opencodeCliSource: 'local',
+      opencodePath: 'opencode',
+      codexPath: 'codex',
+      permissionLevel: 'default',
+      zvecGrepCliSource: 'local',
+      zvecGrepPath: 'zg',
+      astGrepCliSource: 'local',
+      astGrepPath: 'ast-grep'
+    },
+    'workspace'
+  );
   for (const field of TRUST_SENSITIVE_FIELDS) {
-    assert.match(
-      text,
-      new RegExp(`noticeForScope\\('${field}'`),
-      `the settings service produces no notice for ${field}`
+    assert.equal(
+      plan.writes.find((write) => write.field === field)?.scope,
+      'global',
+      `${field} was not redirected to user settings`
     );
+    assert.ok(plan.notices[field], `the write plan produces no notice for ${field}`);
   }
 });
 
@@ -124,3 +142,4 @@ test('the opencode path field always renders its help text', async () => {
   // The input points at the help text, so a screen reader reads it too.
   assert.match(text, /'opencode-path-help opencode-status'/);
 });
+

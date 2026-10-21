@@ -16,6 +16,7 @@ import {
   readTrustedZvecGrepCliSource,
   readTrustedZvecGrepPath
 } from '../config/settings.ts';
+import { trustedBoolean } from '../config/trust.ts';
 import { SKILLS_SECTION } from '../settingsKeys';
 
 const LEGACY_ZVEC = 'melink.ollama.opencode.zvecGrep';
@@ -30,20 +31,26 @@ const LEGACY_ZVEC = 'melink.ollama.opencode.zvecGrep';
 export interface SkillMcpForTurn {
   mcp?: Record<string, unknown>;
   permissions: Record<string, 'allow'>;
+  /** True when the ast-grep server is injected; its eplace is level-gated. */
+  astGrep: boolean;
 }
 
 export async function skillMcpForOpencodeTurn(options: {
   extensionPath: string;
   globalStoragePath: string;
+  /** Defaults to the first workspace folder; the shim confines paths to it. */
+  workspaceRoot?: string;
 }): Promise<SkillMcpForTurn> {
   const config = vscode.workspace.getConfiguration();
   const roots = {
     extensionPath: options.extensionPath,
     globalStoragePath: options.globalStoragePath
   };
+  const workspaceRoot =
+    options.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
   const zvecEnabled = skillEnabled(config, `${SKILLS_SECTION}.zvecGrep`, LEGACY_ZVEC);
-  const astEnabled = config.get<boolean>(`${SKILLS_SECTION}.astGrep`, false) === true;
+  const astEnabled = trustedBoolean(config.inspect<boolean>(`${SKILLS_SECTION}.astGrep`), false);
 
   let zvecServer: OpencodeLocalMcpServer | undefined;
   let astServer: OpencodeLocalMcpServer | undefined;
@@ -65,7 +72,8 @@ export async function skillMcpForOpencodeTurn(options: {
     if (existsSync(mcpScript)) {
       astServer = astGrepOpencodeServer({
         mcpScriptPath: mcpScript,
-        astGrepExecutable: executable
+        astGrepExecutable: executable,
+        ...(workspaceRoot ? { workspaceRoot } : {})
       });
     }
   }
@@ -75,7 +83,8 @@ export async function skillMcpForOpencodeTurn(options: {
     permissions: skillPermissionKeys({
       zvecGrep: Boolean(zvecServer),
       astGrep: Boolean(astServer)
-    })
+    }),
+    astGrep: Boolean(astServer)
   };
 }
 
@@ -85,12 +94,8 @@ function skillEnabled(
   legacyKey: string
 ): boolean {
   const inspected = config.inspect<boolean>(key);
-  if (
-    inspected?.globalValue !== undefined ||
-    inspected?.workspaceValue !== undefined ||
-    inspected?.workspaceFolderValue !== undefined
-  ) {
-    return config.get<boolean>(key, false) === true;
+  if (inspected?.globalValue !== undefined) {
+    return trustedBoolean(inspected, false);
   }
-  return config.get<boolean>(legacyKey, false) === true;
+  return trustedBoolean(config.inspect<boolean>(legacyKey), false);
 }
