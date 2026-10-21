@@ -127,7 +127,7 @@
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
   background: var(--vscode-editorWidget-background);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow, #000) 35%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow, var(--melink-scrim)) 35%, transparent);
   overflow: hidden;
 }
 
@@ -627,7 +627,7 @@
   border: 0;
   border-radius: var(--melink-radius-sm, 4px);
   background: var(--melink-yellow);
-  color: #1a1604;
+  color: var(--melink-on-accent);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
