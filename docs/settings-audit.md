@@ -2,7 +2,8 @@
 
 This is the audit behind the settings screen. Every value the extension honours is
 listed with where it lives, whether the screen reaches it, and — for a default —
-what actually consumes it (so no control is inert).
+what actually consumes it (so no control is inert). The configuration list is
+enumerated from `package.json` → `contributes.configuration`, not from memory.
 
 ## Contributed configuration (`package.json` → `contributes.configuration`)
 
@@ -33,6 +34,7 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | `melink.skills.zvecGrep.path` | string, `zg` | **Present** — Skills → zvec-grep | `resolveZvecGrepExecutable` → the MCP command |
 | `melink.skills.zvecGrep.cliSource` | enum, `local` | **Present** — Skills → zvec-grep | `resolveZvecGrepExecutable` → the MCP command |
 | `melink.skills.astGrep.path` | string, `ast-grep` | **Present** — Skills → ast-grep | `resolveAstGrepExecutable` → the MCP command |
+| `melink.skills.astGrep` | boolean, `false` | **Present** - Skills -> ast-grep -> Use structural search | MCP shim registration for OpenCode |
 | `melink.skills.astGrep.cliSource` | enum, `local` | **Present** — Skills → ast-grep | `resolveAstGrepExecutable` → the MCP command |
 | `melink.defaults.permissionLevel` | enum, `default` | **Present** — Defaults → Default permission level | `readDefaultPermissionLevel()` → `SidebarViewProvider` seeds a new thread; `CodexBackend.startThread` maps it to `approvalPolicy` + `sandbox` |
 
@@ -54,18 +56,18 @@ the current directory of that drive, i.e. the workspace. A bare command name
 | `melink.context.maxBytes` | number, `20480` | **Present** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
 | `melink.context.exclude` | array, *(empty)* | **Present** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
 | `melink.review.diffReview` | boolean, `false`, application scope | **Not on the screen** - opt in through Settings JSON only | `SidebarViewProvider.diffReviewEnabled()` -> `reviewFinishedTurn()` on live turn finish; off means no input is built, no runner is called, and nothing is stored |
-| `melink.context.includeInstructions` | boolean, `true` | **Added by this ticket** — Context → Included by default | `VscodeProjectContextHost.contextSettings()` → `ProjectContext.getSnapshot`; off sends no instruction documents |
-| `melink.context.includeShape` | boolean, `true` | **Added by this ticket** — Context → Included by default | `contextSettings()` → `ProjectContext.getSnapshot`; off sends no shape |
-| `melink.context.includeEditorState` | boolean, `true` | **Added by this ticket** — Context → Editor state | `contextSettings()` → `ProjectContext.buildEditor` is not called; no active-file or open-editor read |
-| `melink.context.includeSelection` | boolean, `true` | **Added by this ticket** — Context → Selection | `contextSettings()` → `ProjectContext.buildEditor`; off never reads the selected text |
-| `melink.context.includeChangedFiles` | boolean, `true` | **Added by this ticket** — Context → Included by default | `contextSettings()` → `ProjectContext.getDelta`; off omits the changed-files notice |
-| `melink.context.maxBytes` | number, `20480` | **Added by this ticket** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
+| `melink.opencode.defaultModel` | string, *(empty)* | **Present** - Providers -> OpenCode Zen -> Default model | `buildZenOpencodeConfig` model default; empty uses the first catalog model |
+| `melink.ollama.opencode.enabled` | boolean, `true` | **Present** - CLI -> opencode runtime | `OllamaBackend.opencodeEnabled`; off uses the direct adapter |
+| `melink.ollama.opencode.zvecGrep` | boolean, `false` | **Not on the screen** - legacy | read only when `melink.skills.zvecGrep` is unset |
+| `melink.defaults.dictationModel` | string, *(empty)* | **Present** - Defaults -> Dictation model | dictation cleanup model (`provider / model`); empty disables the microphone |
+| `melink.skills.browserCodex` | boolean, `true` | **Present** - Skills -> Browser -> Codex | Codex browser skill |
+| `melink.skills.browserOpencode` | boolean, `true` | **Present** - Skills -> Browser -> OpenCode | OpenCode browser skill |
+| `melink.skills.browser` | boolean, `true` | **Not on the screen** - legacy fallback | read only when the per-provider browser keys are unset |
 | `melink.context.repoMap` | boolean, `false` | **Added by T84** — off by default; no map is built until enabled | `contextSettings()` → `ContextDelivery.repoMapForTurn`; on builds a bounded map over `shape.files`, off sends the explicit disabled marker |
 | `melink.context.repoMapMaxFiles` | number, `200` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxFiles`; stops the build deterministically |
 | `melink.context.repoMapMaxBytes` | number, `131072` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBytes`; stops the build deterministically |
 | `melink.context.repoMapBuildMs` | number, `750` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxBuildMs`; per-read timeout also bounds a never-resolving read |
 | `melink.context.repoMapMaxChars` | number, `1200` | **Added by T84** | `contextSettings()` → `RepoMapCaps.maxChars`; bounds the rendered per-turn block |
-| `melink.context.exclude` | array, *(empty)* | **Added by this ticket** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
 | `melink.review.checks.enabled` | boolean, `true` | **Pending UI pass** - read directly by `CheckHost`; the review panel will show the state | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
 | `melink.review.checks.commands` | array, *(empty)* | **Pending UI pass** - read directly by `CheckHost` | `readCheckSettingsFrom()` -> `detectDefaultChecks` when unset, explicit `[]` means run nothing |
 | `melink.review.checks.timeoutSeconds` | number, `120` | **Pending UI pass** - read directly by `CheckHost` | `clampCheckTimeoutSeconds()` -> `runChecks` per-check timeout, 5-600 |
@@ -78,13 +80,15 @@ the current directory of that drive, i.e. the workspace. A bare command name
 
 ## Credentials
 
-| Secret | Store | On the screen | Write path |
+| Secret | Store | On the screen | Consumer / write path |
 |---|---|---|---|
-| `melink.ollama.token` (`OLLAMA_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → Ollama Cloud → API key (masked, empty; only `hasToken` is sent to the webview) | `context.secrets.store` / `context.secrets.delete`, the same helper the contributed commands use |
+| `melink.ollama.token` (`OLLAMA_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → Ollama Cloud → API key (masked, empty; only `hasToken` is sent to the webview) | Bearer credential for `melink.ollama.baseUrl` requests, including the opencode runtime child env. Written by the screen and `SideCode: Set Ollama Cloud token` via `context.secrets.store`; removed with `context.secrets.delete` |
+| `melink.opencode.zenToken` (`OPENCODE_ZEN_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → OpenCode Zen → Zen API key (optional, masked, empty; only `hasToken` is sent to the webview) | Paid-model Zen catalog and model requests (`OpencodeBackend`). Written by the screen and `SideCode: Set OpenCode Zen API key` via `context.secrets.store`; removed with `context.secrets.delete` |
 
-There is no second credential store and no `settings.json` write path for the
-token. The webview read model exposes only `hasToken`, so the stored value can
-never be painted into the DOM.
+There is no second credential store and no `settings.json` write path for either
+secret. The webview read model exposes only `hasToken`, so a stored value can
+never be painted into the DOM. Codex holds no SideCode credential: it signs in
+through its own CLI and the screen reports that login state.
 
 The token is sent only to `melink.ollama.baseUrl`, which is read from the
 user's own settings. A workspace override of that key is ignored, so opening a

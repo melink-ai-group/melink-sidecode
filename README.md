@@ -1,7 +1,7 @@
 # SideCode
 
-One agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud and
-the OpenAI Codex CLI.
+One agent chat sidebar for VS Code and Open VSX hosts, driving three providers:
+Ollama Cloud, the OpenAI Codex CLI, and OpenCode Zen.
 
 - **Install and set up:** see below.
 - **How to use it and what it can do:** [docs/usage.md](docs/usage.md).
@@ -11,12 +11,13 @@ the OpenAI Codex CLI.
 
 ## What it is
 
-A single chat view in the Activity Bar that talks to one of two providers:
+A single chat view in the Activity Bar that talks to three providers:
 
 | Provider | What it needs | Badge |
 |---|---|---|
-| **Ollama Cloud** | An `ollama.com` bearer token | Ollama |
-| **OpenAI Codex CLI** | The `codex` CLI installed and signed in | Codex |
+| **Ollama Cloud** | An `ollama.com` bearer token in secret storage | Ollama |
+| **OpenAI Codex CLI** | The `codex` CLI installed and signed in (ChatGPT login; an API-key login is reported as a mismatch) | Codex |
+| **OpenCode Zen** | The shared `opencode` CLI; free models need no key, paid models need a Zen API key in secret storage | OpenCode |
 
 Providers are independent. A provider that is missing or has no credential is
 hidden and stays silent; it never blocks or adds error noise to the one you are
@@ -77,6 +78,9 @@ settings below.
   - **Ollama Cloud:** an API token from <https://ollama.com>.
   - **Codex CLI:** install the `codex` CLI and sign in (`codex login`). The
     integration is developed against `codex-cli 0.156.1`.
+  - **OpenCode Zen:** the shared `opencode` CLI, installed locally or as a
+    SideCode-managed download. Free Zen models need no key; paid models need a
+    Zen API key.
 
 ## Install
 
@@ -243,8 +247,10 @@ Optional settings (`Settings → search "melink"`, or **SideCode: Open settings*
 #### Optional opencode agentic runtime
 
 By default Ollama Cloud runs through [opencode](https://opencode.ai), a terminal
-coding agent that can read the project, edit files, and run commands. Provider
-identity stays **Ollama**: no new provider, badge, or dot is added. Turning
+coding agent that can read the project, edit files, and run commands. This
+runtime keeps the **Ollama** identity: it adds no fourth provider, badge, or dot
+behind Ollama Cloud. (OpenCode Zen is the separate provider that also uses the
+shared opencode CLI.) Turning
 **`melink.ollama.opencode.enabled`** off uses the direct HTTP adapter instead
 (`GET /api/tags` for models and `POST /api/chat` with `stream: true`), which
 streams chat and does not spawn opencode.
@@ -285,7 +291,7 @@ streams chat and does not spawn opencode.
 - **Streaming.** A turn that cannot ask runs headless (`opencode run --format
   json`). A turn whose permission level can ask (the `default` bash ask) uses
   the same short-lived runtime through `opencode serve`, so its `ask` becomes a
-  sidebar decision card instead of being auto-rejected. Both paths parse the
+  sidebar decision card instead of a silent refusal. Both paths parse the
   same normalized event union the direct adapter uses, so the transcript has one
   path. A stream that ends without a terminal event is a stream error, not a
   success.
@@ -384,7 +390,7 @@ verify each archive's SHA-256 before writing. See
 [docs/cli-pins.md](docs/cli-pins.md) for the pinned digests and the bump
 procedure.
 
-Both providers are also spawned with the workspace root as their working
+Both child-process paths are spawned with the workspace root as their working
 directory, so their own project discovery reads the real `AGENTS.md` even when the
 rendered snapshot is the only thing the model is explicitly handed.
 
@@ -405,6 +411,31 @@ Optional settings:
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable. |
 | `melink.codex.defaultModel` | *(empty)* | Default model; empty uses the CLI default. |
 
+### OpenCode Zen
+
+OpenCode Zen is its own provider: free models work without a key, and paid models
+use a Zen API key. It runs on the same shared `opencode` CLI as the optional
+Ollama runtime; choose **local** or **bundled** under **Settings → CLI**
+(`melink.ollama.opencode.cliSource` / `.path`), or install it from that screen.
+
+1. Free models: install the CLI and pick an OpenCode Zen model in the model
+   picker. No credential is needed.
+2. Paid models: Command Palette → **SideCode: Set OpenCode Zen API key**
+   (`melink.setOpencodeZenToken`), then paste the key. Remove it with
+   **SideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`).
+
+The key lives in VS Code **secret storage** under `melink.opencode.zenToken` and
+is used only for OpenCode Zen requests. Free and paid model ids come from the
+live Zen catalog; an empty default selects the first model in the catalog the app
+can show (the free list without a key, the full live list with one). Optional
+settings:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `melink.opencode.defaultModel` | *(empty)* | Default Zen model; empty uses the first model in the catalog the app can show (free list without a key, full list with one). |
+| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage. |
+| `melink.ollama.opencode.path` | `opencode` | Path to the shared `opencode` CLI when `cliSource` is `local`. |
+
 ### App-level defaults
 
 The settings screen also exposes defaults for a **new conversation**. Each is
@@ -414,7 +445,7 @@ picker in the title bar override them for the conversation you are in.
 | Setting | Default | Purpose |
 |---|---|---|
 | `melink.defaults.permissionLevel` | `default` | Permission level a new conversation runs at (`read-only` / `default` / `unrestricted`). `unrestricted` must be confirmed. |
-| `melink.defaults.mode` | `agent` | Starting mode a new conversation runs in (`agent` / `plan` / `ask`). A mode is applied to the Codex thread at start. |
+| `melink.defaults.mode` | `agent` | Starting mode a new conversation runs in (`agent` / `plan` / `ask`). The adapter applies it as instructions at thread start. |
 
 ### Post-turn checks
 
@@ -448,9 +479,14 @@ permission machinery. Plan and Agent honor the selected level, so Codex's own
 sandbox controls which writes and commands can run. In Default, a sandboxed
 command can raise an approval card, and the destructive-command check runs
 before any stored rule. Ask refuses every approval the agent raises, so a
-question can never become a change. A mode a backend cannot enforce is not
-advertised: Ollama Cloud reports `agent` only,
-so Plan/Ask are hidden rather than shown and behaving like Agent.
+question can never become a change. A backend that cannot enforce a mode does
+not advertise it; with the agentic runtime on, all three backends advertise
+`agent`, `plan`, and `ask` on every provider.
+
+A request is only shown as an approval card when the backend exposes an
+approval channel (`hasApprovalChannel`); the direct adapter reports none. An
+unanswered request is refused after 120 seconds (`APPROVAL_WAIT_MS` in
+`src/backends/approvalWait.ts`).
 
 The generated `CollaborationMode` / `ModeKind` types exist, but this pinned CLI
 exposes no client request that sets them (`collaborationMode` appears only on
@@ -536,8 +572,8 @@ across a reload.
 
 ## Verify it works
 
-1. Reopen the sidebar. An empty chat shows the meLink mark and the name
-   **meLink SideCode**, with a tall composer and no suggestion buttons.
+1. Reopen the sidebar. An empty chat shows the SideCode logo and the name
+   **SideCode**, with a tall composer and no suggestion buttons.
 2. Open the **Model** trigger. You should see one group per provider you set up,
    listing that provider's live models.
 3. Type a message and press **Enter**. The reply streams into the transcript.
