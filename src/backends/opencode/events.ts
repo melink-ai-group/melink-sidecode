@@ -42,6 +42,8 @@ export interface OpencodeReasoningEvent {
   sessionId?: string;
   partId: string;
   text: string;
+  /** True while the server is still producing this reasoning part. */
+  streaming?: boolean;
 }
 
 export interface OpencodeToolEvent {
@@ -124,6 +126,28 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 }
 
+/** Convert cumulative parts into deltas, retaining the final reasoning status. */
+export function createOpencodePublisher(onEvent: (event: OpencodeEvent) => void): (event: OpencodeEvent) => void {
+  const seen = new Map<string, string>();
+  const completed = new Set<string>();
+  return (event) => {
+    if (event.kind !== 'text' && event.kind !== 'reasoning') {
+      onEvent(event);
+      return;
+    }
+    if (completed.has(event.partId)) return;
+    const previous = seen.get(event.partId);
+    const finishing = event.kind === 'reasoning' && !event.streaming;
+    if (previous === undefined || (event.text.startsWith(previous) && event.text.length > previous.length)) {
+      seen.set(event.partId, event.text);
+      onEvent({ ...event, text: previous === undefined ? event.text : event.text.slice(previous.length) });
+    } else if (finishing) {
+      onEvent({ ...event, text: '' });
+    }
+    if (finishing) completed.add(event.partId);
+  };
+}
+
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -197,7 +221,8 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
       if (text === undefined || partId === undefined) {
         return { kind: 'unknown', sessionId, type };
       }
-      return { kind: 'reasoning', sessionId, partId, text };
+      const time = asRecord(part?.time);
+      return { kind: 'reasoning', sessionId, partId, text, ...(time && time.end === undefined ? { streaming: true } : {}) };
     }
     case 'tool_use': {
       const tool = asString(part?.tool);

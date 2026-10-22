@@ -43,9 +43,11 @@
 .changes-review__collapse {
   display: inline-flex;
   align-items: center;
+  align-self: stretch;
   gap: 4px;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 26px;
   padding: 0 2px;
   border: 0;
   border-radius: var(--melink-radius-sm, 4px);
@@ -85,20 +87,40 @@
   color: var(--vscode-descriptionForeground);
 }
 
-/* Compact advisory status: stays visible while the file list is collapsed. */
-.changes-review__diff-review {
-  flex: 0 0 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 4px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
+.changes-review__notices {
+  display: flex;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.review-notice {
+  display: inline-flex;
+}
+
+.changes-review__notice {
   color: var(--vscode-descriptionForeground);
+}
+
+.review-notice__tooltip {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 16px));
+  max-height: calc(50vh - 16px);
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border));
+  border-radius: var(--melink-radius-sm, 4px);
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .changes-review__diff-review--error {
@@ -124,11 +146,6 @@
   border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
   background: color-mix(in srgb, var(--melink-primary) 85%, black);
   color: var(--melink-on-primary);
-}
-
-/* The spacer pushes the file actions right; narrow sidebars wrap instead of clipping. */
-.changes-review__head .spacer {
-  flex: 1 1 auto;
 }
 
 .changes-review__head .btn:not(.btn--link) {

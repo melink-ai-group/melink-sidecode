@@ -76,7 +76,7 @@ test('a fresh profile resolves testing off, so the plan gate starts closed', () 
   assert.equal(plan.testing, false);
   assert.equal(plan.doubleCheck, true);
   assert.equal(plan.reviewing, false);
-  assert.equal(plan.styling, false);
+  assert.equal(plan.styling, true);
 });
 
 test('quick detection disabled means the gates stay on', () => {

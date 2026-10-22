@@ -60,11 +60,11 @@ ready for a future model reviewer, but this release runs only the local pass and
 never calls a model. Turn reviews are stored per turn and restored on reload; a
 failed or timed-out pass is a visible, non-blocking notice.
 
-### Opt-in styling check
+### Styling check
 
 **Orchestration → Styling check** (`melink.orchestration.styling`, default
-**off**) adds a second advisory pass for frontend work. It runs only when the
-turn changed at least one UI file, so a backend-only turn pays nothing. The pass
+**on**) adds an advisory pass for frontend work. It runs only when the turn
+changed at least one UI file, so a backend-only turn pays nothing. The pass
 reads the project's brand kit (`tokens.css` and `DESIGN.md` when present) and
 checks the new component or style work for literal colours, hardcoded fonts,
 inline styles, unknown brand tokens, and `!important` escapes. It is read-only,
@@ -254,7 +254,7 @@ Optional settings (`Settings → search "melink"`, or **sideCode: Open settings*
 | `melink.review.diffReview` | `false` | Legacy opt-in for the read-only advisory diff review, used only while `melink.orchestration.reviewing` is unset. Application scope, so only a user setting can enable it. |
 | `melink.orchestration.testing` | `false` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. Default: off. |
 | `melink.orchestration.reviewing` | `false` | Advisory diff review; falls back to `melink.review.diffReview` until saved. |
-| `melink.orchestration.styling` | `false` | Advisory styling check for frontend work, compared with the brand kit and existing components. Runs only when a frontend file changed. |
+| `melink.orchestration.styling` | `true` | Advisory styling check for frontend work, compared with the brand kit and existing components. Runs only when a frontend file changed. |
 | `melink.orchestration.doubleCheck` | `true` | Read diagnostics for the changed files after a turn and post one advisory notice. Never calls a model. |
 | `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for a short single-question Agent turn. |
 | `melink.orchestration.planning` | `true` | Continue a built plan step by step after a clean Agent turn. |
@@ -330,13 +330,12 @@ OpenCode binary, and each keeps its own provider identity and dot in the picker.
   time into the child's environment (`OLLAMA_API_KEY`); the generated config
   names only that variable, so the secret never appears in the config, on disk,
   in settings, in logs, or in error text.
-- **Streaming.** A turn that cannot ask runs headless (`opencode run --format
-  json`). A turn whose permission level can ask (the `default` bash ask) uses
-  the same short-lived runtime through `opencode serve`, so its `ask` becomes a
-  sidebar decision card instead of a silent refusal. Both paths parse the
-  same normalized event union every backend uses, so the transcript has one
-  path. A stream that ends without a terminal event is a stream error, not a
-  success.
+- **Streaming.** Sidebar turns use the short-lived `opencode serve` runtime at
+  every permission level. Its live event bus supplies reasoning and tool
+  activity while work is running, and a configured `ask` becomes a sidebar
+  decision card. Events use the same normalized union as the other backends.
+  The headless `opencode run --format json` path remains available to runtime
+  callers that do not request live activity.
 - **Sessions.** The runtime's session id is persisted per thread, so a second
   turn in the same thread resumes the same session. A stale id degrades to a
   fresh session with a visible notice.
@@ -789,16 +788,16 @@ capability flag.
 
 ### Shared OpenCode runtime
 
-The Ollama (Cloud and Local) OpenCode runtime is a per-turn, short-lived child
-process. It runs
-whatever `opencode` the installer resolved (the installer tracks
-`releases/latest`; the T69 regression used 1.19.x); the flags used (`run`,
-`--format json`, `--model`, `--agent`, `--session`, `--variant`) are the ones
-that version's `opencode run --help` lists. Notes:
+The Ollama (Cloud and Local) and OpenCode Zen runtime is a per-turn, short-lived
+child process. Sidebar turns use `opencode serve` with the installed CLI
+(the installer tracks `releases/latest`; the T69 regression used 1.19.x).
+Notes:
 
-- The runtime emits whole message parts rather than token deltas, so a text or
-  reasoning part is forwarded as one `item/started` + `item/delta` +
-  `item/completed` group keyed by its part id.
+- Reasoning snapshots and text deltas from the live bus update one reasoning
+  item per part id. The item stays active until its part finishes; repeated
+  snapshots and the final response body do not duplicate text. Tool lifecycle
+  updates drive the shared Exploring, Running, and Editing activity indicators.
+  Assistant text parts are forwarded when finished.
 - The bundled 1.19.x CLI exposes `--auto`, but the sidebar never passes it: the
   turn's permission level is expressed entirely through the generated
   `permission` config, and an `ask` is answered through the sidebar's approval

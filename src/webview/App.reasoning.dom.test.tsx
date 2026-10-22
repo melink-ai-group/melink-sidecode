@@ -80,3 +80,39 @@ describe('reasoning select-to-collapse guard', () => {
     expect(isExpanded()).toBe(true);
   });
 });
+
+describe.each(['opencode', 'ollama', 'ollama-local'])('%s live activity', (backendId) => {
+  it('shows waiting thoughts, live exploration and settled activity', () => {
+    render(<App />);
+    const threadId = 'live-activity';
+    const event = (value: Record<string, unknown>): void => {
+      act(() => {
+        sendHostMessage({ type: 'agentEvent', event: { ...value, backendId, threadId } });
+        // An urgent host message flushes the stream's coalescing queue.
+        sendHostMessage({ type: 'busy', value: true, backendId, threadId });
+      });
+    };
+    act(() => {
+      sendHostMessage({ type: 'snapshot', availability: [{ id: backendId, label: backendId, status: 'available' }] });
+      sendHostMessage({ type: 'restoring', value: false });
+      sendHostMessage({ type: 'conversation', backendId, threadId, replay: [] });
+    });
+    event({ type: 'turn/started', turnId: 'turn' });
+    event({ type: 'item/started', item: { id: 'thought', kind: 'reasoning', title: 'Reasoning' } });
+    expect(document.querySelector('.reasoning-wait')).not.toBeNull();
+    const toggle = screen.getByRole('button', { name: 'Show Reasoning' });
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Hide Reasoning' }).getAttribute('aria-expanded')).toBe('true');
+    event({ type: 'item/completed', itemId: 'thought', status: 'completed' });
+    expect(document.querySelector('.reasoning-wait')).toBeNull();
+    event({ type: 'item/started', item: { id: 'read', kind: 'tool', tool: 'read', title: 'Reading src/a.ts' } });
+    event({ type: 'item/started', item: { id: 'grep', kind: 'tool', tool: 'grep', title: 'Searching tests' } });
+    expect(screen.getByRole('button', { name: 'Exploring…' })).toBeTruthy();
+    event({ type: 'item/completed', itemId: 'read', status: 'completed' });
+    event({ type: 'item/completed', itemId: 'grep', status: 'completed' });
+    expect(screen.queryByRole('button', { name: 'Exploring…' })).toBeNull();
+    expect(screen.getByRole('button', { name: /Explored/ })).toBeTruthy();
+  });
+});

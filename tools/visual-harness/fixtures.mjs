@@ -255,6 +255,7 @@ function settingsSnapshot() {
     orchestration: {
       testing: false,
       reviewing: false,
+      styling: true,
       doubleCheck: true,
       quickTask: true,
       planning: true,

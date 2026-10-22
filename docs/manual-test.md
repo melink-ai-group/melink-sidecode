@@ -740,8 +740,8 @@ Testing is **off** in a fresh profile: open **Settings -> Orchestration** and tu
 
 ### Pass 1c - styling check
 
-*Applies to: Codex and opencode (both).* **Styling check** is off in a fresh
-profile. Open **Settings -> Orchestration**, turn it on, and save.
+*Applies to: Codex and opencode (both).* **Styling check** is on in a fresh
+profile. Open **Settings -> Orchestration** and leave it on for this pass.
 
 - [ ] 47i. **Frontend work runs the check.** Ask for a small change to a
       component or stylesheet in the webview, for example add a rule with a
@@ -1255,8 +1255,8 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current T106+T110 working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.0 (`package.json`)
-- **Node test files:** 174 (`src/**/*.test.ts`)
-- **Node tests:** 1687 declarations: 1677 pass, 10 skipped, 0 failures (`npm run test:node`).
+- **Node test files:** 176 (`src/**/*.test.ts`)
+- **Node tests:** 1694 declarations: 1684 pass, 10 skipped, 0 failures (`npm run test:node`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 7 files / 38 tests, all passing (`npm run test:dom`). `npm test`
   runs the node, tools and DOM suites together.

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { stampTurnWorked } from './turnTiming.ts';
+import { workspaceTranscriptIndex } from './transcriptTail.ts';
 import { mergeTranscriptTool } from './transcriptTool.ts';
 import { PERMISSION_LEVELS, type AgentEvent, type DefaultMode, type PermissionLevel, type TodoStep, type TranscriptItem } from './types';
 import { mergeThreadRef } from './threadRef.ts';
@@ -91,12 +92,6 @@ const PLANS_KEY = 'melink.plans';
 
 /** Bounds so persisted state cannot grow without limit. */
 const MAX_THREADS_PER_BACKEND = 25;
-/**
- * How many items `workspaceState` keeps as a fallback. The full transcript is
- * written beside it, under the workspace storage directory, so a long Ollama
- * chat is not cut off at this count when the window reloads.
- */
-const MAX_ITEMS_PER_TRANSCRIPT = 200;
 const TRANSCRIPT_DIR = 'transcripts';
 /** Milliseconds to coalesce transcript writes while a turn streams. */
 const FLUSH_DELAY_MS = 750;
@@ -558,13 +553,27 @@ export class ThreadStore implements vscode.Disposable {
     }
     const dirty = [...this.dirty];
     this.dirty.clear();
+    await this.persistTranscriptCopies(dirty);
+  }
+
+  /**
+   * Write every in-memory transcript to its file, then keep only a short tail
+   * in workspace state. Opening the sidebar used to rewrite the full tool
+   * output on every storage update, which blocked the chat from painting.
+   * Memory is left unchanged so the open chat still has the full text.
+   */
+  async compactWorkspaceCopy(): Promise<void> {
+    await this.persistTranscriptCopies(Object.keys(this.loadTranscripts()), true);
+  }
+
+  private async persistTranscriptCopies(keys: readonly string[], preserveLongerFiles = false): Promise<void> {
     const transcripts = this.loadTranscripts();
-    await this.writeTranscriptFiles(dirty, transcripts);
-    const tails: TranscriptIndex = {};
-    for (const [key, items] of Object.entries(transcripts)) {
-      tails[key] = items.slice(-MAX_ITEMS_PER_TRANSCRIPT);
-    }
-    await this.context.workspaceState.update(TRANSCRIPTS_KEY, tails);
+    const written = await this.writeTranscriptFiles(keys, transcripts, preserveLongerFiles);
+    const previous = this.context.workspaceState.get<TranscriptIndex>(TRANSCRIPTS_KEY) ?? {};
+    await this.context.workspaceState.update(
+      TRANSCRIPTS_KEY,
+      workspaceTranscriptIndex(transcripts, written, previous)
+    );
   }
 
   private transcriptDirectory(): vscode.Uri | undefined {
@@ -577,30 +586,80 @@ export class ThreadStore implements vscode.Disposable {
     return dir ? vscode.Uri.joinPath(dir, `${encodeURIComponent(key)}.json`) : undefined;
   }
 
-  /** Write the full transcript for each dirty key. A missing storage root keeps the workspaceState tail only. */
-  private async writeTranscriptFiles(keys: readonly string[], transcripts: TranscriptIndex): Promise<void> {
+  /**
+   * Write the full transcript for each key. Returns the keys whose file now
+   * matches memory. A missing storage root or a failed write is absent, so the
+   * workspace-state copy of that chat is left as it was.
+   */
+  private async writeTranscriptFiles(
+    keys: readonly string[],
+    transcripts: TranscriptIndex,
+    preserveLongerFiles = false
+  ): Promise<Set<string>> {
+    const written = new Set<string>();
     const dir = this.transcriptDirectory();
     if (!dir) {
-      return;
+      return written;
     }
-    await ignoreFsError(vscode.workspace.fs.createDirectory(dir));
+    try {
+      await vscode.workspace.fs.createDirectory(dir);
+    } catch {
+      return written;
+    }
     for (const key of keys) {
       const file = this.transcriptFile(key);
       if (!file) {
         continue;
       }
       const items = transcripts[key];
-      if (!items) {
-        await ignoreFsError(vscode.workspace.fs.delete(file));
-        continue;
+      try {
+        if (!items) {
+          await vscode.workspace.fs.delete(file);
+          written.add(key);
+          continue;
+        }
+        if (preserveLongerFiles) {
+          const existing = await this.storedFileLength(file);
+          // A file that already has this chat, or more of it, stays. The
+          // workspace-state copy can shrink without discarding the file.
+          if (existing === 'unreadable') {
+            continue;
+          }
+          if (typeof existing === 'number' && existing >= items.length) {
+            written.add(key);
+            continue;
+          }
+        }
+        await vscode.workspace.fs.writeFile(file, Buffer.from(JSON.stringify(items), 'utf8'));
+        written.add(key);
+      } catch {
+        // Keep the previous workspace-state copy for this chat.
       }
-      await ignoreFsError(vscode.workspace.fs.writeFile(file, Buffer.from(JSON.stringify(items), 'utf8')));
+    }
+    return written;
+  }
+
+  /** How many items a transcript file holds, or why it could not be counted. */
+  private async storedFileLength(file: vscode.Uri): Promise<number | 'missing' | 'unreadable'> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(file);
+      const parsed = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown;
+      return Array.isArray(parsed) ? parsed.length : 'unreadable';
+    } catch (error) {
+      if (isMissingFile(error)) {
+        return 'missing';
+      }
+      return 'unreadable';
     }
   }
 
   dispose(): void {
     void this.flush();
   }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'FileNotFound';
 }
 
 /** A missing transcript file is not a failure. The workspaceState tail remains. */

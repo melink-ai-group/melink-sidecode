@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOpencodeEvent } from './events.ts';
+import { createOpencodePublisher, parseOpencodeEvent, type OpencodeEvent } from './events.ts';
 import {
   approvalFromOpencode,
   busPayloadToOpencodeLine,
@@ -111,6 +111,44 @@ test('a streaming text part is held until it finishes', () => {
   });
   assert.ok(done);
   assert.equal(parseOpencodeEvent(done).kind, 'text');
+});
+
+test('live reasoning survives snapshots, deltas, completion and prompt-body replay without duplication', () => {
+  const parts = new Map<string, Record<string, unknown>>();
+  const received: OpencodeEvent[] = [];
+  const publish = createOpencodePublisher((event) => received.push(event));
+  const part = { id: 'thought', sessionID: 'ses_1', type: 'reasoning', text: '', time: { start: 1 } };
+  const update = (value: Record<string, unknown>): void => {
+    const line = busPayloadToOpencodeLine({ type: 'message.part.updated', properties: { part: value } }, parts);
+    assert.ok(line);
+    publish(parseOpencodeEvent(line));
+  };
+  update(part);
+  const delta = { type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'thought', field: 'text', delta: 'Inspect files' } };
+  assert.equal(busPayloadToOpencodeLine({ ...delta, properties: { ...delta.properties, sessionID: 'other' } }, parts), undefined);
+  const line = busPayloadToOpencodeLine(delta, parts);
+  assert.ok(line);
+  publish(parseOpencodeEvent(line));
+  update({ ...part, text: 'Inspect files' });
+  update({ ...part, text: 'Inspect files', time: { start: 1, end: 2 } });
+  update({ ...part, text: 'Inspect files', time: { start: 1, end: 2 } });
+  assert.equal(busPayloadToOpencodeLine(delta, parts), undefined);
+  assert.deepEqual(received, [
+    { kind: 'reasoning', sessionId: 'ses_1', partId: 'thought', text: '', streaming: true },
+    { kind: 'reasoning', sessionId: 'ses_1', partId: 'thought', text: 'Inspect files', streaming: true },
+    { kind: 'reasoning', sessionId: 'ses_1', partId: 'thought', text: '' }
+  ]);
+});
+
+test('completed-only reasoning and a growing final snapshot retain their text', () => {
+  const received: OpencodeEvent[] = [];
+  const publish = createOpencodePublisher((event) => received.push(event));
+  publish({ kind: 'reasoning', partId: 'a', text: 'Look', streaming: true });
+  publish({ kind: 'reasoning', partId: 'a', text: 'Look at tests' });
+  publish({ kind: 'reasoning', partId: 'b', text: 'Whole thought' });
+  assert.deepEqual(received.map((event) => event.kind === 'reasoning' ? [event.text, event.streaming] : []), [
+    ['Look', true], [' at tests', undefined], ['Whole thought', undefined]
+  ]);
 });
 
 test('a closed SSE stream keeps a trailing frame that has no blank line', () => {
