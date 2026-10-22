@@ -106,12 +106,24 @@ export function approvalFromOpencode(ask: OpencodePermissionAsk, origin: string)
 
 /**
  * Turn one server-bus payload into the NDJSON line `parseOpencodeEvent` already
- * understands. Text and reasoning wait for a finished part so a delta cannot
- * be appended twice. Anything that is not transcript content returns undefined.
+ * understands. Text waits for a finished part; reasoning snapshots are forwarded
+ * live and the publisher removes repeated prefixes before appending them.
  */
-export function busPayloadToOpencodeLine(payload: Record<string, unknown>): string | undefined {
+export function busPayloadToOpencodeLine(
+  payload: Record<string, unknown>,
+  reasoningParts = new Map<string, Record<string, unknown>>()
+): string | undefined {
   const type = asString(payload.type);
   const properties = asRecord(payload.properties) ?? {};
+  if (type === 'message.part.delta' && properties.field === 'text') {
+    const partId = asString(properties.partID);
+    const previous = partId ? reasoningParts.get(partId) : undefined;
+    const delta = asString(properties.delta);
+    if (!previous || !partStillStreaming(previous) || delta === undefined || properties.sessionID !== previous.sessionID) return undefined;
+    const part: Record<string, unknown> = { ...previous, text: `${asString(previous.text) ?? ''}${delta}` };
+    reasoningParts.set(partId!, part);
+    return JSON.stringify({ type: 'reasoning', sessionID: part.sessionID, part });
+  }
   if (type === 'message.part.updated') {
     const part = asRecord(properties.part);
     const partType = asString(part?.type);
@@ -122,13 +134,15 @@ export function busPayloadToOpencodeLine(payload: Record<string, unknown>): stri
     if (partType === 'tool') {
       return JSON.stringify({ type: 'tool_use', sessionID, part });
     }
-    if ((partType === 'text' || partType === 'reasoning') && partStillStreaming(part)) {
+    if (partType === 'text' && partStillStreaming(part)) {
       return undefined;
     }
     if (partType === 'text') {
       return JSON.stringify({ type: 'text', sessionID, part });
     }
     if (partType === 'reasoning') {
+      const id = asString(part.id);
+      if (id) reasoningParts.set(id, part);
       return JSON.stringify({ type: 'reasoning', sessionID, part });
     }
     if (partType === 'step-start') {

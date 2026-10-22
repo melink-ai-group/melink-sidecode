@@ -152,4 +152,46 @@ describe('orchestration transcript entries', () => {
     expect(details?.open).toBe(false);
     expect(screen.queryByText('You')).toBeTruthy();
   });
+
+  it('does not show the Starting row while an orchestration turn begins', async () => {
+    openConversation([
+      {
+        id: 'orch-1',
+        kind: 'message',
+        role: 'user',
+        text: ORCHESTRATION_TEXT,
+        orchestration: true
+      }
+    ]);
+
+    act(() => {
+      sendHostMessage({
+        type: 'agentEvent',
+        event: { type: 'turn/started', backendId: 'codex', threadId: THREAD_ID, turnId: 'turn-1' }
+      });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+
+    expect(screen.queryByText('Starting')).toBeNull();
+  });
+
+  it('still shows the Starting row for a normal user turn', async () => {
+    openConversation([
+      { id: 'user-1', kind: 'message', role: 'user', text: 'Build the ring' }
+    ]);
+
+    act(() => {
+      sendHostMessage({
+        type: 'agentEvent',
+        event: { type: 'turn/started', backendId: 'codex', threadId: THREAD_ID, turnId: 'turn-1' }
+      });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+
+    expect(screen.getByText('Starting')).toBeTruthy();
+  });
 });

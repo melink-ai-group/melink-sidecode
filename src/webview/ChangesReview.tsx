@@ -19,12 +19,14 @@ import {
   RenameIcon,
   RestoreIcon,
   SearchIcon,
+  ShieldIcon,
   TrashIcon
 } from './Icons';
 import { checkRows, checkSummary, keepGate, type CheckRowView } from './checkReviewView';
 import { prettyPath } from './prettyPath.ts';
 import { diffReviewView, stylingReviewView, type DiffReviewView } from './diffReviewView.ts';
 import { confirmRestoreTarget, focusableControls, trapTab } from './focusTrap.ts';
+import { ReviewNotice } from './ReviewNotice';
 
 /**
  * The change review surface: what a turn changed, with per-file keep/reject.
@@ -324,16 +326,7 @@ function ChangesReviewView({
               {summary}
             </span>
           ) : null}
-          {diffReview ? (
-            <span
-              className={`changes-review__diff-review changes-review__diff-review--${diffReview.tone}`}
-              title={diffReview.detail ?? diffReview.summary}
-            >
-              {diffReview.summary}
-            </span>
-          ) : null}
         </button>
-        <span className="spacer" />
         {allKept ? null : (
           <>
             <button
@@ -386,8 +379,8 @@ function ChangesReviewView({
             </div>
           ) : null}
 
-          {diffReview ? <DiffReviewSection view={diffReview} /> : null}
-          {stylingReview ? <DiffReviewSection view={stylingReview} label="Styling check" /> : null}
+          {diffReview?.kind === 'findings' ? <DiffReviewSection view={diffReview} /> : null}
+          {stylingReview?.kind === 'findings' ? <DiffReviewSection view={stylingReview} label="Styling check" /> : null}
           {rows.length > 0 ? <CheckRows rows={rows} /> : null}
 
           <ul className="changes-review__list" aria-label="Changed files">
@@ -417,6 +410,28 @@ function ChangesReviewView({
             >
               Show {Math.min(24, review.files.length - visibleFileCount)} more files
             </button>
+          ) : null}
+          {diffReview || stylingReview ? (
+            <span className="changes-review__notices" role="group" aria-label="Review notices">
+              {diffReview ? (
+                <ReviewNotice label={diffReview.summary} message={[diffReview.heading, diffReview.detail].filter(Boolean).join('\n')} tone={diffReview.tone}>
+                  <ShieldIcon className="ico ico--xs" />
+                </ReviewNotice>
+              ) : null}
+              {stylingReview ? (
+                <ReviewNotice label={stylingReview.summary} message={stylingReview.heading} tone={stylingReview.tone}>
+                  <PencilIcon className="ico ico--xs" />
+                </ReviewNotice>
+              ) : null}
+              <ReviewNotice label="About advisory reviews" message="Advisory only; it never keeps or rejects changes.">
+                <InfoIcon className="ico ico--xs" />
+              </ReviewNotice>
+              {stylingReview?.detail ? (
+                <ReviewNotice label="Styling check details" message={stylingReview.detail}>
+                  <FileIcon className="ico ico--xs" />
+                </ReviewNotice>
+              ) : null}
+            </span>
           ) : null}
         </div>
       ) : null}
@@ -526,16 +541,7 @@ function DiffReviewSection({
       <div className="diff-review__head">
         <Icon className="ico ico--xs" />
         <span className="diff-review__title">{view.heading}</span>
-        <span className="diff-review__note">Advisory only; it never keeps or rejects changes.</span>
       </div>
-      {view.detail ? (
-        <p
-          className="diff-review__detail"
-          role={view.kind === 'failed' ? 'status' : undefined}
-        >
-          {view.detail}
-        </p>
-      ) : null}
       {view.findings.length > 0 ? (
         <ul className="diff-review__findings" aria-label={`${label} findings`}>
           {view.findings.map((finding, index) => (

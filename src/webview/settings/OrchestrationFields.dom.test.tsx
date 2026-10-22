@@ -5,7 +5,7 @@ import { OrchestrationFields, type OrchestrationFieldValues } from './Orchestrat
 const DEFAULT_VALUES: OrchestrationFieldValues = {
   testing: false,
   reviewing: false,
-  styling: false,
+  styling: true,
   doubleCheck: true,
   quickTask: true,
   planning: true
@@ -33,7 +33,7 @@ describe('OrchestrationFields', () => {
     expect(
       screen.getByRole('status').textContent
     ).toBe(
-      'Effective policy: double-check and plan autopilot on · testing, reviewing and styling off · quick tasks skip these passes.'
+      'Effective policy: styling, double-check and plan autopilot on · testing and reviewing off · quick tasks skip these passes.'
     );
   });
 
@@ -52,14 +52,14 @@ describe('OrchestrationFields', () => {
     expect(onChange.mock.calls).toEqual([
       ['testing', false],
       ['reviewing', true],
-      ['styling', true],
+      ['styling', false],
       ['doubleCheck', false],
       ['planning', false]
     ]);
   });
 
   it('disables and unchecks quick tasks when every pass is off', () => {
-    renderFields({ testing: false, reviewing: false, doubleCheck: false, quickTask: true });
+    renderFields({ testing: false, reviewing: false, styling: false, doubleCheck: false, quickTask: true });
     const quick = screen.getByRole('checkbox', { name: /Quick tasks/ }) as HTMLInputElement;
     expect(quick.disabled).toBe(true);
     expect(quick.checked).toBe(false);
@@ -73,6 +73,7 @@ describe('OrchestrationFields', () => {
     const onChange = renderFields({
       testing: true,
       reviewing: false,
+      styling: false,
       doubleCheck: false,
       quickTask: true
     });

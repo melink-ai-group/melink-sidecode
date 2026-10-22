@@ -1488,6 +1488,21 @@ function preferText(current: string, incoming: string | undefined): string {
   return incoming.length >= current.length ? incoming : current;
 }
 
+/**
+ * True when the latest user row is an injected orchestration continuation.
+ * The row is posted before the backend turn starts, so `turn/started` can use
+ * it to keep the "Starting" placeholder out of the transcript.
+ */
+function latestUserIsOrchestration(transcript: readonly TranscriptItemView[]): boolean {
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    const item = transcript[index];
+    if (item?.kind === 'message' && item.role === 'user') {
+      return item.orchestration === true;
+    }
+  }
+  return false;
+}
+
 function mergeToolItem(item: TranscriptItemView, incoming: TranscriptItem): TranscriptItemView {
   return {
     ...item,
@@ -1512,21 +1527,27 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         return { ...state, busy: true };
       }
       return state;
-    case 'turn/started':
+    case 'turn/started': {
       // A new turn freezes the review surface rather than discarding it: the
       // panel keeps the last completed turn's rows but renders them pending with
       // their controls locked, so a running turn never shows a settled decision
       // as actionable. The authoritative counts are replaced by a pending strip
       // in the surface itself. Decision bookkeeping for the prior round resets.
+      //
+      // An orchestration continuation is already represented by its own
+      // collapsed row, so it has no "Starting" row of its own. A normal user
+      // turn keeps that affordance until its first item arrives.
+      const opensFromOrchestration = latestUserIsOrchestration(state.transcript);
       return {
         ...state,
         busy: true,
-        startingTurn: true,
+        startingTurn: !opensFromOrchestration,
         notice: withoutFailureNotice(state.notice),
         changeDecision: undefined,
         changeRejectConfirm: undefined,
         changeDeciding: false
       };
+    }
     case 'item/started': {
       // One card per id. A later tool event can fill in the real command or
       // output once the runtime reports it; it must not open a second card.

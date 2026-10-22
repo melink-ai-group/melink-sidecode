@@ -15,7 +15,7 @@ import {
 const DEFAULTS: OrchestrationCopyValues = {
   testing: false,
   reviewing: false,
-  styling: false,
+  styling: true,
   doubleCheck: true,
   quickTask: true,
   planning: true
@@ -37,7 +37,7 @@ test('the six fields carry the exact labels, help, and defaults', () => {
     [
       ['testing', 'Testing', false],
       ['reviewing', 'Reviewing', false],
-      ['styling', 'Styling check', false],
+      ['styling', 'Styling check', true],
       ['doubleCheck', 'Double-check', true],
       ['quickTask', 'Quick tasks', true],
       ['planning', 'Plan autopilot', true]
@@ -48,7 +48,7 @@ test('the six fields carry the exact labels, help, and defaults', () => {
     [
       'Run typecheck or lint and the tests after a turn that changes files. (Default: off.)',
       'Read-only diff review after a turn that changes files. Advisory; never edits or blocks Keep. (Default: off.)',
-      'Check new frontend work against the brand kit, tokens, and existing components. Runs only when a frontend file changed. (Default: off.)',
+      'Check new frontend work against the brand kit, tokens, and existing components. Runs only when a frontend file changed. (Default: on.)',
       'Sweep changed files for VS Code errors after a turn. No second model call. (Default: on.)',
       'Skip these passes for short, single-question turns in Agent mode. (Default: on.)',
       'Continue a built plan step by step after a clean turn. Agent mode only. (Default: on.)'
@@ -59,27 +59,29 @@ test('the six fields carry the exact labels, help, and defaults', () => {
 test('the fresh default policy summary shows testing off', () => {
   assert.equal(
     orchestrationSummary(values()),
-    'Effective policy: double-check and plan autopilot on · testing, reviewing and styling off · quick tasks skip these passes.'
+    'Effective policy: styling, double-check and plan autopilot on · testing and reviewing off · quick tasks skip these passes.'
   );
 });
 
 test('summary lists every pass that is on and every pass that is off', () => {
   assert.equal(
     orchestrationSummary(values({ reviewing: true })),
-    'Effective policy: reviewing, double-check and plan autopilot on · testing and styling off · quick tasks skip these passes.'
+    'Effective policy: reviewing, styling, double-check and plan autopilot on · testing off · quick tasks skip these passes.'
   );
   assert.equal(
     orchestrationSummary(values({ reviewing: true, planning: false, doubleCheck: false })),
-    'Effective policy: reviewing on · testing, styling, double-check and plan autopilot off · quick tasks skip these passes.'
+    'Effective policy: reviewing and styling on · testing, double-check and plan autopilot off · quick tasks skip these passes.'
   );
   assert.equal(
-    orchestrationSummary(values({ testing: false, reviewing: false, doubleCheck: false, planning: false })),
+    orchestrationSummary(
+      values({ testing: false, reviewing: false, styling: false, doubleCheck: false, planning: false })
+    ),
     'Effective policy: no post-turn passes.'
   );
 });
 
 test('the summary never claims a skip when every pass is off', () => {
-  const allPassesOff = values({ testing: false, reviewing: false, doubleCheck: false });
+  const allPassesOff = values({ testing: false, reviewing: false, styling: false, doubleCheck: false });
   assert.equal(effectiveQuickTask(allPassesOff), false);
   assert.equal(
     orchestrationSummary(allPassesOff),
@@ -92,11 +94,11 @@ test('the summary never claims a skip when every pass is off', () => {
 test('summary drops the quick suffix when quick tasks are off', () => {
   assert.equal(
     orchestrationSummary(values({ quickTask: false })),
-    'Effective policy: double-check and plan autopilot on · testing, reviewing and styling off.'
+    'Effective policy: styling, double-check and plan autopilot on · testing and reviewing off.'
   );
   assert.equal(
     orchestrationSummary(
-      values({ quickTask: false, testing: false, reviewing: false, doubleCheck: false, planning: false })
+      values({ quickTask: false, testing: false, reviewing: false, styling: false, doubleCheck: false, planning: false })
     ),
     'Effective policy: no post-turn passes.'
   );
@@ -105,7 +107,7 @@ test('summary drops the quick suffix when quick tasks are off', () => {
 test('a single enabled pass is named without a conjunction', () => {
   assert.equal(
     orchestrationSummary(
-      values({ testing: true, reviewing: false, doubleCheck: false, planning: false })
+      values({ testing: true, reviewing: false, styling: false, doubleCheck: false, planning: false })
     ),
     'Effective policy: testing on · reviewing, styling, double-check and plan autopilot off · quick tasks skip these passes.'
   );
@@ -127,7 +129,7 @@ test('legacy sources replace the field help with the migration copy', () => {
 });
 
 test('quick tasks is disabled with help when every pass is off', () => {
-  const allPassesOff = values({ testing: false, reviewing: false, doubleCheck: false });
+  const allPassesOff = values({ testing: false, reviewing: false, styling: false, doubleCheck: false });
   assert.equal(quickTasksAvailable(allPassesOff), false);
   assert.equal(orchestrationFieldHelp('quickTask', allPassesOff), QUICK_TASKS_DISABLED_HELP);
   assert.equal(QUICK_TASKS_DISABLED_HELP, 'Enable at least one pass first.');

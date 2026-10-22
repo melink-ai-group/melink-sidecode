@@ -578,6 +578,7 @@ export class OpencodeBackend implements AgentBackend {
               token,
               apiKeyEnv: ZEN_API_KEY_ENV,
               signal: controller.signal,
+              streamActivity: true,
               decidePermission: opencodeRequiresApproval(permissionLevel, request.mode ?? 'agent')
                 ? (ask, signal) => this.decideOpencodePermission(handle.threadId, ask, signal)
                 : undefined,
@@ -883,13 +884,15 @@ export class OpencodeBackend implements AgentBackend {
           item: { id: event.partId, kind: 'reasoning', role: 'assistant', title: 'Reasoning' }
         });
         this.events.fire({ type: 'item/delta', backendId: this.id, threadId, itemId: event.partId, delta: event.text });
-        this.events.fire({
-          type: 'item/completed',
-          backendId: this.id,
-          threadId,
-          itemId: event.partId,
-          status: 'completed'
-        });
+        if (!event.streaming) {
+          this.events.fire({
+            type: 'item/completed',
+            backendId: this.id,
+            threadId,
+            itemId: event.partId,
+            status: 'completed'
+          });
+        }
         break;
       case 'tool': {
         if (event.todos) {

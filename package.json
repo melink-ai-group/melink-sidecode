@@ -365,8 +365,8 @@
         },
         "melink.orchestration.styling": {
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "Run an advisory styling-consistency check after a turn that changes frontend files. It compares the new UI against the project's brand kit, design tokens, and existing components. Skipped when no frontend file changed."
+          "default": true,
+          "markdownDescription": "Run an advisory styling-consistency check after a turn that changes frontend files. It compares the new UI against the project's brand kit, design tokens, and existing components. Skipped when no frontend file changed. Default: on."
         },
         "melink.orchestration.doubleCheck": {
           "type": "boolean",

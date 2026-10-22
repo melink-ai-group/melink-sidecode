@@ -77,11 +77,13 @@ export interface OpencodeRunOptions {
   apiKeyEnv?: string;
   /** Aborted by `cancel()`; terminates the child process tree. */
   signal?: AbortSignal;
+  /** Use the live server bus even when the permission policy needs no prompts. */
+  streamActivity?: boolean;
   /**
    * When set, the turn is driven through `opencode serve` and every `ask`
    * permission is handed here. The promise must not resolve before the user
-   * decides or {@link APPROVAL_WAIT_MS} elapses. Absent means `opencode run`,
-   * which cannot show a prompt.
+   * decides or {@link APPROVAL_WAIT_MS} elapses. Without this callback, any
+   * unexpected server permission request is rejected.
    */
   decidePermission?: (ask: OpencodePermissionAsk, signal: AbortSignal) => Promise<OpencodePermissionReply>;
   /**
@@ -130,10 +132,10 @@ export async function runOpencodeTurn(
     };
   }
 
-  if (options.decidePermission) {
+  if (options.streamActivity || options.decidePermission) {
     const { runOpencodeServerTurn } = await import('./interactive.ts');
     return runOpencodeServerTurn(
-      { ...options, decidePermission: options.decidePermission },
+      { ...options, decidePermission: options.decidePermission ?? (async () => 'reject' as const) },
       onEvent
     );
   }

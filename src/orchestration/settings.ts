@@ -15,7 +15,7 @@ export const LEGACY_REVIEWING_KEY = 'melink.review.diffReview';
 export const ORCHESTRATION_DEFAULTS = {
   testing: false,
   reviewing: false,
-  styling: false,
+  styling: true,
   doubleCheck: true,
   quickTask: true,
   planning: true

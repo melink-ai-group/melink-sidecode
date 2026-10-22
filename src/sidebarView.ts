@@ -8,7 +8,7 @@ import { DictationController } from './dictation/controller';
 import { parseDictationTarget } from './dictation/target';
 import { OLLAMA_TOKEN_SECRET_KEY } from './backends/secrets';
 import { SettingsService } from './settings';
-import { DeadlineError, SAVE_TIMEOUT_MESSAGE, runSettingsWrite } from './settings/deadline.ts';
+import { DeadlineError, SAVE_TIMEOUT_MESSAGE, runSettingsWrite, withDeadline } from './settings/deadline.ts';
 import { runSkillOperation } from './settings/skillOperation.ts';
 import type { SaveResult } from './settings/planWrites.ts';
 import { PlanStore } from './planStore';
@@ -209,6 +209,15 @@ import {
   type UserTurnQueues
 } from './sidebar/turnQueue';
 import { render } from './sidebar/viewHtml';
+import {
+  OPEN_HYDRATE_MS,
+  openSidebarSafely,
+  RESUME_HYDRATE_MS,
+  RESUME_PROVIDER_MS,
+  RESUME_SNAPSHOT_MS,
+  safeOpenNotice
+} from './sidebar/startup.ts';
+import { workspaceTranscriptTail } from './backends/transcriptTail.ts';
 
 /**
  * Renders the sideCode sidebar. Each open conversation is a tab in that view.
@@ -2185,12 +2194,36 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       outgoing = { ...message, notice: this.session.questionNotice };
       this.session.questionNotice = undefined;
     }
-    void this.view.webview.postMessage(outgoing);
+    this.deliver(outgoing);
     // A conversation repaint clears the webview's chip list; always follow it
     // with this chat's queue so a rewind, restore or handover cannot hide it.
     if (message.type === 'conversation' && this.visible && !this.visible.disposed) {
       this.postQueuedTurns(this.visible);
     }
+  }
+
+  /**
+   * A transcript with a large tool result can be rejected by the webview
+   * channel. Send a short copy so the chat still appears.
+   */
+  private deliver(message: HostToWebviewMessage): void {
+    const webview = this.view?.webview;
+    if (!webview) {
+      return;
+    }
+    void Promise.resolve(webview.postMessage(message)).then(
+      () => undefined,
+      () => {
+        if (message.type !== 'conversation' || !message.replay?.length || this.view?.webview !== webview) {
+          return;
+        }
+        const slim: HostToWebviewMessage = { ...message, replay: workspaceTranscriptTail(message.replay) };
+        void Promise.resolve(webview.postMessage(slim)).then(
+          () => undefined,
+          () => undefined
+        );
+      }
+    );
   }
 
   private async handle(message: WebviewToHostMessage): Promise<void> {
@@ -2212,20 +2245,47 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case 'ready': {
-        await this.transcriptsReady;
-        this.post({ type: 'snapshot', availability: this.registry.snapshot() });
-        if (this.liveSessions().length === 0) {
-          this.loadSavedSessions();
-        }
-        // Queued turns are claimed once the tabs exist, so their session ids
-        // can be matched. Restored turns dispatch only for the visible idle
-        // chat (showSession) or on the next turn completion.
-        await this.restoreQueuedTurns();
-        const session = this.visible && !this.visible.disposed ? this.visible : this.liveSessions()[0];
-        if (session) {
-          await this.showSession(session);
-        }
-        await this.postContextView();
+        // Safe mode: a failure or a hang while loading must not leave the chat
+        // on the restoring screen. Saved messages are painted first. Queue
+        // restore and shrinking the workspace copy run only after that.
+        await openSidebarSafely(
+          {
+            hydrate: () => this.transcriptsReady,
+            paint: async () => {
+              this.post({ type: 'snapshot', availability: this.registry.snapshot() });
+              if (this.liveSessions().length === 0) {
+                this.loadSavedSessions();
+              }
+              const session = this.visible && !this.visible.disposed ? this.visible : this.liveSessions()[0];
+              if (session) {
+                await this.showSession(session);
+              }
+            },
+            onHydratedLate: async () => {
+              const session = this.visible;
+              if (!session || session.disposed || session.turnBusy || session.turnOpen || !session.activeThread) {
+                return;
+              }
+              await this.sessionStore.run(session, () => this.repaintSession());
+            },
+            afterPaint: async () => {
+              await this.postContextView();
+              // Files are the full transcript. Wait for that read, then drop the
+              // bulky workspace-state copy. A file that is already longer is
+              // left alone, so this cannot replace it with a short tail.
+              await withDeadline(this.transcriptsReady, OPEN_HYDRATE_MS, 'Loading saved chats').catch(() => undefined);
+              await this.store.compactWorkspaceCopy();
+              // Queued turns are claimed once the tabs exist. Restored turns
+              // dispatch for the visible idle chat, or on the next completion.
+              await this.restoreQueuedTurns();
+              this.flushQueuedTurns();
+            }
+          },
+          (error) => {
+            this.post({ type: 'notice', level: 'info', message: safeOpenNotice(error, false) });
+          },
+          () => this.post({ type: 'restoring', value: false })
+        );
         break;
       }
       case 'refresh':
@@ -3522,28 +3582,107 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /**
+   * Put the saved transcript on screen without waiting for the provider.
+   * Safe mode uses this so a resume error still leaves the chat usable.
+   */
+  private async paintStoredThread(backendId: string, threadId: string, storedItems: TranscriptItem[]): Promise<void> {
+    const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
+    this.activeThread = { backendId, threadId, model: ref?.modelId };
+    this.syncPlanPreviewThread(threadId);
+    if (!this.session?.modeChosen) {
+      this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
+      if (this.session) {
+        this.session.modeChosen = true;
+      }
+    } else {
+      this.mode = this.resolveMode(backendId, this.mode);
+    }
+    const titled = historyThreadTitle(
+      ref?.title,
+      storedItems.find((item) => item.role === 'user' && !item.orchestration && item.text?.trim())?.text
+    );
+    if (this.session) {
+      this.session.blank = false;
+      this.session.title = tabTitle(titled);
+      this.publishTabs();
+    }
+    const history = this.openHistory(this.store.mergeApprovalMarkers(backendId, threadId, storedItems));
+    const choice = this.composerSelection(backendId, ref?.modelId);
+    const permission = this.sessionPermission(choice.backendId);
+    this.post({
+      type: 'conversation',
+      backendId: choice.backendId,
+      threadId,
+      model: choice.model,
+      permissionLevel: permission,
+      mode: this.mode,
+      replay: await this.previewReplay(history.replay),
+      hasOlderHistory: history.hasOlderHistory,
+      pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
+      plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
+    });
+    try {
+      await this.finishComposerPaint(choice.backendId, choice.model);
+      await this.postLatestChanges();
+      await this.postActiveCheckpoints();
+    } catch {
+      // The transcript is already on screen. Composer details and change cards can catch up.
+    }
+  }
+
   /** Reconnects to a listed thread and replays its stored turns. */
   private async resumeThread(backendId: string, threadId: string): Promise<void> {
-    await this.transcriptsReady;
-    this.post({ type: 'restoring', value: true });
+    try {
+      await withDeadline(this.transcriptsReady, RESUME_HYDRATE_MS, 'Loading saved chats');
+    } catch {
+      // Paint with the copy already in memory.
+    }
+    const storedItems = this.store.getTranscript(backendId, threadId);
+    let painted = false;
+    if (storedItems.length > 0) {
+      try {
+        await this.paintStoredThread(backendId, threadId, storedItems);
+        painted = true;
+      } catch {
+        // The provider replay below can still paint the chat.
+      }
+    }
+    // Saved messages leave the restoring screen immediately. A provider hang
+    // must not cover them again.
+    this.post({ type: 'restoring', value: !painted });
     try {
       const backend = this.registry.get(backendId);
       if (!backend) {
         this.post({
           type: 'notice',
-          level: 'warning',
-          message: 'That conversation could not be restored because its provider is not available.'
+          level: painted ? 'info' : 'warning',
+          message: painted
+            ? 'That provider is not available. Your saved messages are on screen, and you can keep working.'
+            : 'That conversation could not be restored because its provider is not available.'
         });
         return;
       }
       // A resumed thread is re-primed with a fresh snapshot, because the upstream
-      // context may be gone after the replay.
-      const prime = await this.contextDelivery.snapshot();
+      // context may be gone after the replay. A slow read must not block the chat.
+      const snap = this.contextDelivery.snapshot();
+      void snap.then(
+        () => undefined,
+        () => undefined
+      );
+      const prime = await withDeadline(snap, RESUME_SNAPSHOT_MS, 'Reading the project').catch(() => ({
+        payload: { priming: true }
+      }));
       const stored = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
-      const result = await backend.resumeThread(threadId, {
+      const resume = backend.resumeThread(threadId, {
         context: prime.payload,
         handover: stored?.handoverSummary
       });
+      void resume.then(
+        () => undefined,
+        () => undefined
+      );
+      const result = await withDeadline(resume, RESUME_PROVIDER_MS, 'Reconnecting to the provider');
       this.activeThread = result.handle;
       this.syncPlanPreviewThread(result.handle.threadId);
       this.contextDelivery.begin(
@@ -3615,61 +3754,30 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       // Repaint the resumed thread's own recorded change set, so the change
       // surface matches the thread now in view rather than carrying the previous
       // conversation's files.
-      await this.postLatestChanges();
-      await this.postActiveCheckpoints();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const storedItems = this.store.getTranscript(backendId, threadId);
-      if (isMissingThreadError(error) && storedItems.length > 0) {
-        // The provider thread is gone, but the sidebar chat is not. Keep it on
-        // screen. The next turn starts a replacement thread with this record.
-        const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
-        this.activeThread = { backendId, threadId, model: ref?.modelId };
-        this.syncPlanPreviewThread(threadId);
-        if (!this.session?.modeChosen) {
-          this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
-          if (this.session) {
-            this.session.modeChosen = true;
-          }
-        } else {
-          this.mode = this.resolveMode(backendId, this.mode);
-        }
-        const titled = historyThreadTitle(
-          ref?.title,
-          storedItems.find((item) => item.role === 'user' && !item.orchestration && item.text?.trim())?.text
-        );
-        if (this.session) {
-          this.session.blank = false;
-          this.session.title = tabTitle(titled);
-          this.publishTabs();
-        }
-        const history = this.openHistory(this.store.mergeApprovalMarkers(backendId, threadId, storedItems));
-        const choice = this.composerSelection(backendId, ref?.modelId);
-        const permission = this.sessionPermission(choice.backendId);
-        this.post({
-          type: 'conversation',
-          backendId: choice.backendId,
-          threadId,
-          model: choice.model,
-          permissionLevel: permission,
-          mode: this.mode,
-          replay: await this.previewReplay(history.replay),
-          hasOlderHistory: history.hasOlderHistory,
-          pendingQuestion: this.pendingQuestionPayload(backendId, threadId),
-          plan: this.store.getPlanState(backendId, threadId) ? this.planArtifact(backendId, threadId) : undefined
-        });
-        await this.finishComposerPaint(choice.backendId, choice.model);
+      try {
         await this.postLatestChanges();
         await this.postActiveCheckpoints();
-        this.post({
-          type: 'notice',
-          level: 'info',
-          message:
-            'The provider thread was not found. This chat is still here, and the next message continues it on a new thread with the earlier context.'
-        });
-      } else {
-        this.post({ type: 'notice', level: 'warning', message });
+      } catch {
+        // The transcript is already on screen.
       }
+    } catch (error) {
+      // Safe mode: any resume failure keeps the saved chat on screen.
+      if (storedItems.length > 0 && !painted) {
+        try {
+          await this.paintStoredThread(backendId, threadId, storedItems);
+          painted = true;
+        } catch {
+          painted = false;
+        }
+      }
+      this.post({
+        type: 'notice',
+        level: painted ? 'info' : 'warning',
+        message:
+          painted && isMissingThreadError(error)
+            ? 'The provider thread was not found. This chat is still here, and the next message continues it on a new thread with the earlier context.'
+            : safeOpenNotice(error, painted)
+      });
     } finally {
       this.post({ type: 'restoring', value: false });
     }

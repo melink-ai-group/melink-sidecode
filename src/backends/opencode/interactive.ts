@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { request as httpRequest, Agent, type IncomingMessage } from 'node:http';
-import { isTerminalStepReason, opencodeStreamDetail, parseOpencodeEvent, promptTurnFromBody } from './events.ts';
+import { createOpencodePublisher, isTerminalStepReason, opencodeStreamDetail, parseOpencodeEvent, promptTurnFromBody } from './events.ts';
 import type { OpencodeEvent } from './events.ts';
 import {
   busPayloadToOpencodeLine,
@@ -123,7 +123,7 @@ export async function runOpencodeServerTurn(
       terminal: false,
       cutoff: undefined as string | undefined
     };
-    const seenText = new Map<string, string>();
+    const publishContent = createOpencodePublisher(onEvent);
     const publish = (event: OpencodeEvent): void => {
       if (event.kind === 'step-finish') {
         if (event.reason === 'length') {
@@ -133,18 +133,7 @@ export async function runOpencodeServerTurn(
           state.terminal = true;
         }
       }
-      if (event.kind === 'text' || event.kind === 'reasoning') {
-        const previous = seenText.get(event.partId);
-        if (previous !== undefined) {
-          if (event.text.startsWith(previous) && event.text.length > previous.length) {
-            onEvent({ ...event, text: event.text.slice(previous.length) });
-            seenText.set(event.partId, event.text);
-          }
-          return;
-        }
-        seenText.set(event.partId, event.text);
-      }
-      onEvent(event);
+      publishContent(event);
     };
     const eventsAbort = new AbortController();
     const stopEvents = (): void => eventsAbort.abort();
@@ -301,11 +290,12 @@ async function readEvents(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const reasoningParts = new Map<string, Record<string, unknown>>();
   const drain = async (flushTail: boolean): Promise<void> => {
     const consumed = consumeSse(buffer, flushTail);
     buffer = consumed.rest;
     for (const message of consumed.messages) {
-      await handleBusMessage(message, baseUrl, options, env, sessionId, state, onEvent);
+      await handleBusMessage(message, baseUrl, options, env, sessionId, state, onEvent, reasoningParts);
     }
   };
   try {
@@ -343,7 +333,8 @@ async function handleBusMessage(
   env: NodeJS.ProcessEnv,
   sessionId: string,
   state: { sawError?: { message: string; statusCode?: number }; terminal: boolean },
-  onEvent: (event: OpencodeEvent) => void
+  onEvent: (event: OpencodeEvent) => void,
+  reasoningParts: Map<string, Record<string, unknown>>
 ): Promise<void> {
   let payload: Record<string, unknown>;
   try {
@@ -408,7 +399,7 @@ async function handleBusMessage(
     return;
   }
 
-  const line = busPayloadToOpencodeLine(payload);
+  const line = busPayloadToOpencodeLine(payload, reasoningParts);
   if (!line) {
     return;
   }

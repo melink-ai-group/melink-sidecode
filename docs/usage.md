@@ -352,7 +352,7 @@ settings (**sideCode: Open settings**).
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5–600. A timed-out check is killed and reported as timed out. |
 | `melink.orchestration.testing` | `false` | Post-turn typecheck/lint and tests; default off. Falls back to `melink.review.checks.enabled` when unset. |
 | `melink.orchestration.reviewing` | `false` | Advisory read-only diff review. Falls back to `melink.review.diffReview` when unset. |
-| `melink.orchestration.styling` | `false` | Advisory styling check for frontend work. Skipped unless a frontend file changed. Uses the project brand kit and tokens when present. |
+| `melink.orchestration.styling` | `true` | Advisory styling check for frontend work. Skipped unless a frontend file changed. Uses the project brand kit and tokens when present. |
 | `melink.orchestration.doubleCheck` | `true` | Sweep changed files for VS Code errors after a turn. |
 | `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for short single-question Agent turns. |
 | `melink.orchestration.planning` | `true` | Continue a built plan after a clean Agent turn. |
@@ -517,7 +517,7 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
 | `melink.orchestration.testing` | `false` | Orchestration -> Testing |
 | `melink.orchestration.reviewing` | `false` | Orchestration -> Reviewing |
-| `melink.orchestration.styling` | `false` | Orchestration -> Styling check |
+| `melink.orchestration.styling` | `true` | Orchestration -> Styling check |
 | `melink.orchestration.doubleCheck` | `true` | Orchestration -> Double-check |
 | `melink.orchestration.quickTask` | `true` | Orchestration -> Quick tasks |
 | `melink.orchestration.planning` | `true` | Orchestration -> Plan autopilot |
@@ -897,7 +897,7 @@ changes the reply, the tools, or the permission level.
   typecheck/lint and tests through the post-turn check runner described above.
 - **Reviewing** (`melink.orchestration.reviewing`, default off) adds the advisory
   diff review. It falls back to `melink.review.diffReview` until saved.
-- **Styling check** (`melink.orchestration.styling`, default off) runs only when
+- **Styling check** (`melink.orchestration.styling`, default on) runs only when
   the turn changed at least one frontend file (`.tsx`, `.jsx`, `.css`, `.scss`,
   `.html`, `.vue`, `.svelte`, and similar). It compares the new work with the
   brand kit (`tokens.css` / `DESIGN.md` when present), the theme tokens, and the

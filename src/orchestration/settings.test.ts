@@ -11,7 +11,7 @@ test('defaults match the documented policy when nothing is set', () => {
   assert.deepEqual(settings, {
     testing: false,
     reviewing: false,
-    styling: false,
+    styling: true,
     doubleCheck: true,
     quickTask: true,
     planning: true,
@@ -133,6 +133,7 @@ test('the effective testing value: new wins, legacy is only a fallback', () => {
 
 test('each of the three standalone toggles can be turned off explicitly', () => {
   const settings = resolveOrchestrationSettings({
+    styling: { globalValue: false },
     doubleCheck: { globalValue: false },
     quickTask: { globalValue: false },
     planning: { globalValue: false }
@@ -155,7 +156,7 @@ test('malformed values are ignored rather than coerced', () => {
   });
   assert.equal(settings.testing, false);
   assert.equal(settings.reviewing, false);
-  assert.equal(settings.styling, false);
+  assert.equal(settings.styling, true);
   assert.equal(settings.doubleCheck, true);
   assert.equal(settings.quickTask, true);
   assert.equal(settings.planning, true);

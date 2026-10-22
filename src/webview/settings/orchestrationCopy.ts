@@ -40,8 +40,8 @@ export const ORCHESTRATION_FIELDS: readonly OrchestrationFieldCopy[] = [
   {
     key: 'styling',
     label: 'Styling check',
-    help: 'Check new frontend work against the brand kit, tokens, and existing components. Runs only when a frontend file changed. (Default: off.)',
-    defaultValue: false
+    help: 'Check new frontend work against the brand kit, tokens, and existing components. Runs only when a frontend file changed. (Default: on.)',
+    defaultValue: true
   },
   {
     key: 'doubleCheck',
