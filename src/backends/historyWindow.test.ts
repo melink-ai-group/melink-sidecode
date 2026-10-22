@@ -2,14 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TranscriptItem } from './types.ts';
 import {
-  HISTORY_PAGE_SIZE,
-  initialHistoryHidden,
   mergeOlderItems,
   newerThanLoaded,
   transcriptWithNewer,
   prependOlderHistory,
   revealStoredHistory,
   visibleHistory,
+  withStoredHistory,
   withStoredUserIds
 } from './historyWindow.ts';
 import { mergeTranscriptTool } from './transcriptTool.ts';
@@ -30,30 +29,38 @@ function item(id: string, role?: 'user' | 'assistant', text = id): TranscriptIte
   return { id, kind: 'message', role, text, status: 'completed' };
 }
 
-test('a restored thread paints the latest page and hides the rest', () => {
-  const items = Array.from({ length: HISTORY_PAGE_SIZE + 5 }, (_, index) => item(`m${index}`, 'user'));
-  const hidden = initialHistoryHidden(items);
-  assert.equal(hidden, 5);
+test('a resumed chat keeps every stored turn the provider did not replay', () => {
+  const stored = [
+    item('user-old', 'user', 'old prompt'),
+    item('reply-old', 'assistant', 'old reply'),
+    item('user-new', 'user', 'new prompt'),
+    item('reason-new'),
+    item('reply-new', 'assistant', 'new reply')
+  ];
+  const server = [item('user-new', 'user', 'new prompt'), item('reason-new'), item('reply-new', 'assistant', 'new reply')];
   assert.deepEqual(
-    visibleHistory(items, hidden).map((entry) => entry.id),
-    items.slice(5).map((entry) => entry.id)
+    withStoredHistory(server, stored).map((entry) => entry.id),
+    ['user-old', 'reply-old', 'user-new', 'reason-new', 'reply-new']
   );
 });
 
-test('a page cut inside a turn backs up to the user message instead of starting at reasoning', () => {
-  const items = [
-    item('older', 'user', 'previous'),
-    item('reply', 'assistant', 'done'),
-    item('prompt', 'user', 'inspect'),
-    item('reason', undefined, 'looking'),
-    ...Array.from({ length: HISTORY_PAGE_SIZE }, (_, index) => item(`tail${index}`, 'assistant'))
-  ];
-  items[3].kind = 'reasoning';
-  const hidden = initialHistoryHidden(items);
-  assert.equal(items[hidden]?.id, 'prompt');
-  assert.equal(
-    visibleHistory(items, hidden).some((entry) => entry.kind === 'reasoning' && entry.id === 'reason'),
-    true
+test('a full provider replay is not duplicated by the stored copy', () => {
+  const stored = [item('u1', 'user', 'first'), item('a1', 'assistant', 'done')];
+  const server = [item('server-u1', 'user', 'first'), item('a1', 'assistant', 'done')];
+  const merged = withStoredHistory(server, stored);
+  assert.deepEqual(
+    merged.map((entry) => entry.id),
+    ['u1', 'a1']
+  );
+});
+
+test('a provider window that starts inside a turn keeps the stored prompt above it', () => {
+  const stored = [item('u1', 'user', 'do the work'), item('reason'), item('tool')];
+  stored[1].kind = 'reasoning';
+  const server = [item('reason'), item('tool')];
+  assert.deepEqual(
+    withStoredHistory(server, stored).map((entry) => entry.id),
+    ['u1', 'reason', 'tool']
   );
 });
 

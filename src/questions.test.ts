@@ -337,7 +337,11 @@ test('the question retry action routes a fresh host turn, not a continuation', a
   assert.match(app, /type: 'retryQuestion'/);
   const retry = app.slice(app.indexOf('const retryQuestion'), app.indexOf('const runNoticeAction'));
   assert.doesNotMatch(retry, /continueAfterStopInstruction/);
-  assert.match(view, /case 'retryQuestion':[\s\S]*?this\.sendTurn\([\s\S]*?questionRetryInstruction\(\)/);
+  // The retry prompt is a host instruction: it opens a real turn but never
+  // appears as a message the user wrote.
+  const retryTurn = view.slice(view.indexOf("case 'retryQuestion':"), view.indexOf("case 'startDictation':"));
+  assert.match(retryTurn, /questionRetryInstruction\(\)/);
+  assert.match(retryTurn, /'instruction'/);
 });
 
 test('a background question notice is held until that conversation is painted', async () => {

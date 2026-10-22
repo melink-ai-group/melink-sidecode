@@ -335,7 +335,7 @@ export function sessionMatchesQueueTarget(
 
 /** True when a user send must draw its own transcript row in the webview. */
 export function shouldAnnounceUserMessage(input: {
-  origin: 'user' | 'autopilot' | 'continue';
+  origin: 'user' | 'autopilot' | 'continue' | 'instruction';
   busy: boolean;
   queueRequested: boolean;
   queuedDispatch: boolean;

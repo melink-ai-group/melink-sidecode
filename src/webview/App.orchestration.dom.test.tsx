@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { App } from './App';
 import { sendHostMessage } from './domSetup';
 
@@ -40,8 +40,8 @@ function conversationMessage(
   };
 }
 
-describe('orchestration transcript entries', () => {
-  it('renders an injected continuation as a collapsed tagged line, not as You', () => {
+describe('injected orchestration entries', () => {
+  it('never renders an injected continuation in the transcript', () => {
     openConversation([
       { id: 'user-1', kind: 'message', role: 'user', text: 'Build the ring' },
       {
@@ -54,18 +54,14 @@ describe('orchestration transcript entries', () => {
       { id: 'reply-1', kind: 'message', role: 'assistant', text: 'Working on it.' }
     ]);
 
-    const details = document.querySelector<HTMLDetailsElement>('.turn--orchestration');
-    expect(details).not.toBeNull();
-    expect(details?.open).toBe(false);
-    expect(details?.querySelector('.orchestration-tag')?.textContent).toBe('Orchestration');
-    expect(details?.querySelector('.orchestration-line')?.textContent).toContain(
-      'Continue the remaining steps of this plan.'
-    );
+    expect(document.querySelector('.turn--orchestration')).toBeNull();
+    expect(screen.queryByText(/Continue the remaining steps/)).toBeNull();
     // Only the user's own line says You.
     expect(screen.getAllByText('You')).toHaveLength(1);
+    expect(screen.getByText('Working on it.')).toBeTruthy();
   });
 
-  it('expands and collapses the orchestration entry on click', () => {
+  it('hides a transcript that is only orchestration rows', () => {
     openConversation([
       {
         id: 'orch-1',
@@ -76,19 +72,9 @@ describe('orchestration transcript entries', () => {
       }
     ]);
 
-    const details = document.querySelector<HTMLDetailsElement>('.turn--orchestration');
-    const summary = details?.querySelector('summary');
-    expect(details?.open).toBe(false);
-
-    act(() => {
-      fireEvent.click(summary as HTMLElement);
-    });
-    expect(details?.open).toBe(true);
-
-    act(() => {
-      fireEvent.click(summary as HTMLElement);
-    });
-    expect(details?.open).toBe(false);
+    expect(document.querySelector('.turn--orchestration')).toBeNull();
+    expect(screen.queryByText('You')).toBeNull();
+    expect(screen.queryByText(/Continue the remaining steps/)).toBeNull();
   });
 
   it('keeps the turn change card anchored when a continuation opens the turn', async () => {
@@ -129,7 +115,7 @@ describe('orchestration transcript entries', () => {
     expect(screen.getByLabelText('Changed files')).toBeTruthy();
   });
 
-  it('adds a live orchestration row when the host dispatches a continuation', () => {
+  it('does not draw a live instruction row when the host dispatches it', () => {
     openConversation([
       { id: 'user-1', kind: 'message', role: 'user', text: 'Build the ring' },
       { id: 'reply-1', kind: 'message', role: 'assistant', text: 'Planning.' }
@@ -147,10 +133,9 @@ describe('orchestration transcript entries', () => {
       });
     });
 
-    const details = document.querySelector<HTMLDetailsElement>('.turn--orchestration');
-    expect(details).not.toBeNull();
-    expect(details?.open).toBe(false);
-    expect(screen.queryByText('You')).toBeTruthy();
+    expect(document.querySelector('.turn--orchestration')).toBeNull();
+    expect(screen.queryByText(/Continue the remaining steps/)).toBeNull();
+    expect(screen.getAllByText('You')).toHaveLength(1);
   });
 
   it('does not show the Starting row while an orchestration turn begins', async () => {

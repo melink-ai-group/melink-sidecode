@@ -531,10 +531,10 @@ export interface TranscriptItem {
    */
   attachments?: Attachment[];
   /**
-   * True when this user line is an injected orchestration instruction (plan
-   * continuation or crash resume), not text the user typed. It stays a user
-   * row so turn anchoring and change cards keep working, but the transcript
-   * renders it as its own collapsed orchestration entry.
+   * True when this user line is a host-built instruction (plan build or
+   * continuation, crash resume, question retry), not text the user typed. It
+   * stays a user row so turn anchoring and change cards keep working, but the
+   * transcript never renders it.
    */
   orchestration?: boolean;
   /**

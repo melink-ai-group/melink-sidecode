@@ -1256,7 +1256,7 @@ Measured on the current T106+T110 working tree, so the numbers stay truthful bef
 
 - **Package version:** 0.2.0 (`package.json`)
 - **Node test files:** 176 (`src/**/*.test.ts`)
-- **Node tests:** 1694 declarations: 1684 pass, 10 skipped, 0 failures (`npm run test:node`).
+- **Node tests:** 1695 declarations: 1685 pass, 10 skipped, 0 failures (`npm run test:node`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 7 files / 38 tests, all passing (`npm run test:dom`). `npm test`
   runs the node, tools and DOM suites together.

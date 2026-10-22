@@ -47,7 +47,10 @@ test('the build transition ends with an explicit verification step', async () =>
   assert.ok(body.indexOf('Before you finish, verify the work') > body.indexOf('const list'));
 });
 
-test('the helper is still the one the build transition sends', async () => {
+test('the helper is still the one the build transition sends as an instruction', async () => {
   const source = await viewSource();
-  assert.match(source, /await this\.sendTurn\(buildTurnInstruction\(state\.steps\)\)/);
+  assert.match(
+    source,
+    /await this\.sendTurn\(\s*buildTurnInstruction\(state\.steps\),[\s\S]*?'instruction'\s*\)/
+  );
 });

@@ -308,10 +308,9 @@ export class ThreadStore implements vscode.Disposable {
 
   /**
    * Appends a local user turn so a reload repaints the prompt the user typed.
-   * `orchestration` marks an injected continuation so the transcript can render
-   * it as its own entry while it still anchors the turn it opens. Returns the
-   * created item's id, which is the message id a checkpoint for the turn it
-   * opens is addressed by.
+   * `orchestration` marks an injected instruction so the transcript hides it
+   * while it still anchors the turn it opens. Returns the created item's id,
+   * which is the message id a checkpoint for the turn it opens is addressed by.
    */
   appendUserMessage(
     backendId: string,

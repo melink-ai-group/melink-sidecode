@@ -28,7 +28,7 @@ test('a clean sweep keeps the count internally and omits it from the info notice
   });
   assert.deepEqual(doubleCheckNotice(result), {
     level: 'info',
-    message: 'No VS Code errors found in the checked files.'
+    message: 'No errors found in the checked files.'
   });
 });
 
