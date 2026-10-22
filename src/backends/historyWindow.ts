@@ -2,20 +2,10 @@ import type { Attachment, TranscriptItem } from './types.ts';
 import { takeAttachmentSection } from './userPrompt.ts';
 
 /**
- * How many transcript items a restored chat paints at first, and how many more
- * appear each time the reader scrolls to the top. The rest stay available and
- * load on demand, so a long thread does not have to render in one pass.
+ * How many older items the provider asks for per page when the reader scrolls
+ * to the top of a thread whose earlier turns are not stored locally.
  */
 export const HISTORY_PAGE_SIZE = 40;
-
-/**
- * Index of the first item currently on screen. The cut snaps back to the user
- * message that opened the turn, so a page does not begin on the reasoning row
- * that follows the prompt.
- */
-export function initialHistoryHidden(items: readonly TranscriptItem[], pageSize = HISTORY_PAGE_SIZE): number {
-  return snapToUserMessage(items, Math.max(0, items.length - pageSize));
-}
 
 /**
  * Move a cut that landed mid-turn back to the user message that opened it.
@@ -125,6 +115,46 @@ export function withStoredUserIds(serverItems: readonly TranscriptItem[], stored
   const seen = new Set(overlaid.filter((item) => item.kind === 'message' && item.role === 'user').map((item) => promptKey(item.text)));
   const rest = storedUsers.slice(cursor).filter((item) => !seen.has(promptKey(item.text)));
   return rest.length > 0 ? [...overlaid, ...rest] : overlaid;
+}
+
+/**
+ * Keep the turns the provider did not replay. A resumed provider may return
+ * only its most recent window, while the local log still holds the full thread;
+ * the chat must show both. The provider's window stays authoritative for the
+ * rows it contains, and the stored prefix that came before it is kept in front.
+ */
+export function withStoredHistory(serverItems: readonly TranscriptItem[], stored: readonly TranscriptItem[]): TranscriptItem[] {
+  if (serverItems.length === 0) {
+    return [...stored];
+  }
+  const prefix = stored.length > 0 ? storedPrefixLength(serverItems, stored) : 0;
+  const overlaid = withStoredUserIds(serverItems, prefix > 0 ? stored.slice(prefix) : stored);
+  return prefix > 0 ? [...stored.slice(0, prefix), ...overlaid] : overlaid;
+}
+
+/**
+ * How many stored rows come before the provider's replay window. A window that
+ * opens on a user prompt is anchored by that prompt even when the provider
+ * restarted with fresh ids; otherwise the first shared item id marks the cut.
+ */
+function storedPrefixLength(serverItems: readonly TranscriptItem[], stored: readonly TranscriptItem[]): number {
+  const first = serverItems[0];
+  if (first?.kind === 'message' && first.role === 'user' && promptKey(first.text)) {
+    const key = promptKey(first.text);
+    const start = stored.findIndex(
+      (item) => item.kind === 'message' && item.role === 'user' && promptKey(item.text) === key
+    );
+    if (start >= 0) {
+      return start;
+    }
+  }
+  const serverIds = new Set(serverItems.map((item) => item.id));
+  for (let index = 0; index < stored.length; index += 1) {
+    if (serverIds.has(stored[index].id)) {
+      return index;
+    }
+  }
+  return 0;
 }
 
 /** The words the user typed, without the provider's attachment list. */

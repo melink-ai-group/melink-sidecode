@@ -3,11 +3,10 @@ import type { ApprovalDecision } from '../../backends/types';
 import { Markdown } from '../Markdown';
 import { splitReplyClose } from '../replyClose';
 import { visibleTranscriptText } from '../visibleTranscript';
-import { AlertIcon, CheckIcon, ChevronDownIcon, CopyIcon, PersonIcon, RestoreIcon, StopIcon } from '../Icons';
+import { AlertIcon, CheckIcon, CopyIcon, PersonIcon, RestoreIcon, StopIcon } from '../Icons';
 import { AttachmentList, type ViewableImage } from '../composer/attachments';
 import { bridge } from '../hostBridge';
 import { noticeActionLabel } from '../notices';
-import { plainRowText } from '../plainRowText';
 import type { CheckpointView } from '../../protocol';
 import type { NoticeAction, TranscriptItemView } from '../state';
 import { ApprovalPrompt, ApprovalResolvedCard } from './ApprovalCards';
@@ -42,28 +41,15 @@ export const TranscriptRow = memo(function TranscriptRow({
   onNoticeAction: (action: NoticeAction, noticeText?: string) => void;
 }): JSX.Element | null {
   if (item.kind === 'message' && item.role === 'user') {
+    // An injected instruction is provider input, not a message the user wrote.
+    // It stays in state so a turn's change card keeps its anchor, but the chat
+    // never shows the prompt itself.
+    if (item.orchestration) {
+      return null;
+    }
     const text = visibleTranscriptText(item.text);
     if (!text && !(item.attachments && item.attachments.length > 0)) {
       return null;
-    }
-    if (item.orchestration) {
-      const line = plainRowText(text);
-      return (
-        <details className="turn turn--orchestration">
-          <summary className="orchestration-head">
-            <span className="orchestration-chevron" aria-hidden="true">
-              <ChevronDownIcon />
-            </span>
-            <span className="orchestration-tag">Orchestration</span>
-            <span className="orchestration-line" title={line}>
-              {line}
-            </span>
-          </summary>
-          <div className="turn-body orchestration-body">
-            <Markdown text={text} />
-          </div>
-        </details>
-      );
     }
     return (
       <article className="turn turn--user" data-user-message={item.id}>

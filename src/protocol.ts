@@ -476,8 +476,8 @@ export type HostToWebviewMessage =
    * started dispatching, or an injected orchestration continuation. The webview
    * appends it to the open transcript, so it appears now rather than on the next
    * repaint. It carries the stored id, so a later replay replaces it instead of
-   * adding a second copy. `orchestration` tells the renderer to show a collapsed
-   * orchestration entry instead of the user's own bubble.
+   * adding a second copy. `orchestration` marks provider input: the renderer
+   * keeps the row for turn anchoring but never shows the prompt itself.
    */
   | {
       type: 'userMessageSent';

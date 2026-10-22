@@ -62,12 +62,10 @@ import {
   threadRecoveredNotice
 } from './backends/threadRecovery';
 import {
-  initialHistoryHidden,
   prependOlderHistory,
   revealStoredHistory,
   transcriptWithNewer,
-  visibleHistory,
-  withStoredUserIds
+  withStoredHistory
 } from './backends/historyWindow.ts';
 import {
   adoptedPlanSteps,
@@ -1467,8 +1465,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * The open chat gets the user message of a queued turn that just started, or
    * the injected row of an orchestration continuation. Stored attachments keep
    * only their path; the preview bytes are read here, the same way a replay
-   * paints a stored bubble. `orchestration` makes the row a collapsed
-   * orchestration entry rather than the user's own bubble.
+   * paints a stored bubble. `orchestration` marks provider input, which the
+   * chat keeps for turn anchoring but never shows.
    */
   private async postDispatchedUserMessage(
     backendId: string,
@@ -2384,7 +2382,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.permissionLevel,
           undefined,
           undefined,
-          message.backendId
+          message.backendId,
+          undefined,
+          'instruction'
         );
         break;
       case 'startDictation':
@@ -3474,18 +3474,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Paint the latest page of `items` and remember the rest. A later scroll
-   * reveals the hidden prefix before asking the provider for anything older.
+   * Paint a stored transcript in full. Everything the local log already holds
+   * is on screen when the chat opens; only rows the provider still has to send
+   * are fetched later, so a reload never truncates a conversation.
    */
   private openHistory(items: TranscriptItem[], serverHasOlder = false): { replay: TranscriptItem[]; hasOlderHistory: boolean } {
     const session = this.session;
-    const hidden = initialHistoryHidden(items);
     if (session) {
       session.loadedTranscript = items;
-      session.historyHidden = hidden;
+      session.historyHidden = 0;
       session.serverHasOlder = serverHasOlder;
     }
-    return { replay: visibleHistory(items, hidden), hasOlderHistory: hidden > 0 || serverHasOlder };
+    return { replay: items, hasOlderHistory: serverHasOlder };
   }
 
   /** The painted page of the tab's current history, without resetting the window. */
@@ -3494,15 +3494,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!session) {
       return { replay: [], hasOlderHistory: false };
     }
-    const items = this.historyItems(session);
-    let hidden = session.historyHidden;
-    if (hidden === undefined || hidden > items.length) {
-      hidden = initialHistoryHidden(items);
-      session.historyHidden = hidden;
-    }
+    session.historyHidden = 0;
     return {
-      replay: visibleHistory(items, hidden),
-      hasOlderHistory: hidden > 0 || Boolean(session.serverHasOlder)
+      replay: this.historyItems(session),
+      hasOlderHistory: Boolean(session.serverHasOlder)
     };
   }
 
@@ -3529,7 +3524,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.olderHistoryInFlight = true;
     try {
       const items = this.historyItems(session);
-      let hidden = session.historyHidden ?? initialHistoryHidden(items);
+      let hidden = session.historyHidden ?? 0;
       if (hidden > 0) {
         const revealed = revealStoredHistory(items, hidden);
         session.historyHidden = revealed.hidden;
@@ -3724,7 +3719,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       const carriedCount = ref?.handoverHistoryCount ?? 0;
       const carried = carriedCount > 0 ? storedItems.slice(0, carriedCount) : [];
       const tailStored = carriedCount > 0 ? storedItems.slice(carriedCount) : storedItems;
-      const tail = result.items.length > 0 ? withStoredUserIds(result.items, tailStored) : tailStored;
+      const tail = result.items.length > 0 ? withStoredHistory(result.items, tailStored) : tailStored;
       const source = carried.length > 0 ? [...carried, ...tail] : result.items.length > 0 ? tail : storedItems;
       const history = this.openHistory(
         this.store.mergeApprovalMarkers(backendId, threadId, source),
@@ -3791,7 +3786,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     attachments?: Attachment[],
     backendId?: string,
     updatePlan?: boolean,
-    origin: 'user' | 'autopilot' | 'continue' = 'user',
+    origin: 'user' | 'autopilot' | 'continue' | 'instruction' = 'user',
     queueRequested = false,
     queuedDispatch = false
   ): Promise<void> {
@@ -4446,7 +4441,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     attachments?: Attachment[],
     backendId?: string,
     updatePlan?: boolean,
-    origin: 'user' | 'autopilot' | 'continue' = 'user',
+    origin: 'user' | 'autopilot' | 'continue' | 'instruction' = 'user',
     announceUserMessage = false
   ): Promise<boolean> {
     const openedAt = Date.now();
@@ -4455,10 +4450,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const automatic = origin === 'autopilot';
     const continuing = origin === 'continue';
-    // Injected continuations are orchestration, not something the user typed.
-    // They still open a real turn, so every checkpoint and change card path
-    // keeps working; only the transcript presentation differs.
-    const orchestration = automatic || continuing;
+    const instruction = origin === 'instruction';
+    // Injected continuations and host-built instructions are orchestration, not
+    // something the user typed. They still open a real turn, so every checkpoint
+    // and change card path keeps working; only the transcript presentation
+    // differs.
+    const orchestration = automatic || continuing || instruction;
     if (this.session) {
       this.session.planRunAutomatic = automatic;
       if (!automatic && !continuing) {
@@ -5128,8 +5125,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'plan', plan: builtPlan });
     this.post({ type: 'modes', modes: this.modeSnapshot(backendId) });
     this.publishPlanDocument(builtPlan, false);
-    // Kick off execution as the next turn, now that the mode is `agent`.
-    await this.sendTurn(buildTurnInstruction(state.steps));
+    // Kick off execution as the next turn, now that the mode is `agent`. This is
+    // a host-built instruction, so it never appears as a message the user wrote.
+    await this.sendTurn(
+      buildTurnInstruction(state.steps),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'instruction'
+    );
   }
 
   /**
@@ -6228,7 +6235,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       undefined,
       undefined,
       undefined,
-      revisingPlan
+      revisingPlan,
+      revisingPlan ? 'instruction' : 'user'
     );
   }
 
