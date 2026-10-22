@@ -139,6 +139,7 @@ const SETTINGS_KEYS: readonly string[] = [
   `${DEFAULTS_SECTION}.dictationModel`,
   `${ORCHESTRATION_SECTION}.testing`,
   `${ORCHESTRATION_SECTION}.reviewing`,
+  `${ORCHESTRATION_SECTION}.styling`,
   `${ORCHESTRATION_SECTION}.doubleCheck`,
   `${ORCHESTRATION_SECTION}.quickTask`,
   `${ORCHESTRATION_SECTION}.planning`,
@@ -381,6 +382,7 @@ export class SettingsService {
     return resolveOrchestrationSettings({
       testing: inspect(`${ORCHESTRATION_SECTION}.testing`),
       reviewing: inspect(`${ORCHESTRATION_SECTION}.reviewing`),
+      styling: inspect(`${ORCHESTRATION_SECTION}.styling`),
       doubleCheck: inspect(`${ORCHESTRATION_SECTION}.doubleCheck`),
       quickTask: inspect(`${ORCHESTRATION_SECTION}.quickTask`),
       planning: inspect(`${ORCHESTRATION_SECTION}.planning`),
@@ -740,7 +742,7 @@ export class SettingsService {
       return {
         ok: false,
         message:
-          'The ast-grep MCP shim is missing from the extension build. Reinstall SideCode.'
+          'The ast-grep MCP shim is missing from the extension build. Reinstall sideCode.'
       };
     }
     const probe = await probeOpencodeServer(

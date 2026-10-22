@@ -106,6 +106,12 @@ export interface ChangeView {
    * only actions, and a failed review is represented here as a notice.
    */
   diffReview?: DiffReviewResult;
+  /**
+   * The advisory styling-consistency check for this turn, when the toggle was
+   * on and the turn changed frontend work. It is read-only and never changes a
+   * decision.
+   */
+  stylingReview?: DiffReviewResult;
   /** The post-turn check run attached by the host, when one exists. */
   checks?: CheckRunView;
 }

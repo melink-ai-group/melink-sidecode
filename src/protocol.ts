@@ -141,7 +141,7 @@ export interface SettingsSnapshot {
    */
   opencode: {
     /**
-     * Where the CLI comes from. `bundled` uses the SideCode download under
+     * Where the CLI comes from. `bundled` uses the sideCode download under
      * extension global storage; `local` uses `path` / PATH.
      */
     cliSource: 'local' | 'bundled';
@@ -183,6 +183,7 @@ export interface SettingsSnapshot {
   orchestration: {
     testing: boolean;
     reviewing: boolean;
+    styling: boolean;
     doubleCheck: boolean;
     quickTask: boolean;
     planning: boolean;
@@ -218,7 +219,7 @@ export interface SettingsSnapshot {
   saveNotices?: Partial<Record<keyof SettingsPatch, string>>;
 }
 
-/** One SideCode-managed skill CLI (local path or bundled download). */
+/** One sideCode-managed skill CLI (local path or bundled download). */
 export interface SkillCliSnapshot {
   enabled: boolean;
   cliSource: 'local' | 'bundled';
@@ -274,11 +275,12 @@ export interface SettingsPatch {
   thinking?: ThinkingLevel | '';
   /** Ollama model id for dictation cleanup. Empty clears the choice. */
   dictationModel?: string;
-  /** `local` uses the path field; `bundled` uses the SideCode-managed download. */
+  /** `local` uses the path field; `bundled` uses the sideCode-managed download. */
   opencodeCliSource?: 'local' | 'bundled';
   opencodePath?: string;
   orchestrationTesting?: boolean;
   orchestrationReviewing?: boolean;
+  orchestrationStyling?: boolean;
   orchestrationDoubleCheck?: boolean;
   orchestrationQuickTask?: boolean;
   orchestrationPlanning?: boolean;
@@ -471,9 +473,11 @@ export type HostToWebviewMessage =
   | { type: 'queuedTurns'; entries: QueuedTurnEntryView[] }
   /**
    * A user message the host sent on the user's behalf: a queued turn that just
-   * started dispatching. The webview appends it to the open transcript, so the
-   * message appears now rather than on the next repaint. It carries the stored
-   * id, so a later replay replaces it instead of adding a second copy.
+   * started dispatching, or an injected orchestration continuation. The webview
+   * appends it to the open transcript, so it appears now rather than on the next
+   * repaint. It carries the stored id, so a later replay replaces it instead of
+   * adding a second copy. `orchestration` tells the renderer to show a collapsed
+   * orchestration entry instead of the user's own bubble.
    */
   | {
       type: 'userMessageSent';
@@ -483,6 +487,7 @@ export type HostToWebviewMessage =
       text: string;
       attachments?: Attachment[];
       sentAt?: number;
+      orchestration?: boolean;
     }
   | { type: 'settings'; settings: SettingsSnapshot }
   /**

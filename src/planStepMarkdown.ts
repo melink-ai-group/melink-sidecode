@@ -17,7 +17,7 @@ const LEADING_MARKER = /^\[([ xX~-])\]\s*/;
 const EXTENDED_MARKER = /^\[(~|-)\]/;
 const CHECKBOX = /<input\b[^>]*\btype\s*=\s*["']?checkbox\b/i;
 
-/** True when a workspace path is a SideCode plan document. */
+/** True when a workspace path is a sideCode plan document. */
 export function isPlanMarkdownPath(filePath: string | undefined): boolean {
   if (!filePath) {
     return false;

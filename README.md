@@ -1,4 +1,4 @@
-# SideCode
+# sideCode
 
 One agent chat sidebar for VS Code and Open VSX hosts, driving four providers:
 Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.
@@ -59,8 +59,21 @@ change. It does not claim to find semantic regressions. The prompt/runner seam i
 ready for a future model reviewer, but this release runs only the local pass and
 never calls a model. Turn reviews are stored per turn and restored on reload; a
 failed or timed-out pass is a visible, non-blocking notice.
+
+### Opt-in styling check
+
+**Orchestration → Styling check** (`melink.orchestration.styling`, default
+**off**) adds a second advisory pass for frontend work. It runs only when the
+turn changed at least one UI file, so a backend-only turn pays nothing. The pass
+reads the project's brand kit (`tokens.css` and `DESIGN.md` when present) and
+checks the new component or style work for literal colours, hardcoded fonts,
+inline styles, unknown brand tokens, and `!important` escapes. It is read-only,
+never blocks Keep, and when no brand kit exists it says so rather than inventing
+evidence. Results are stored per turn next to the diff review and restored on
+reload; the prompt/runner seam is ready for a future model reviewer.
+
 A turn that changed files can also run **post-turn checks** before you keep it.
-By default SideCode detects `typecheck` (or `lint` when there is no typecheck)
+By default sideCode detects `typecheck` (or `lint` when there is no typecheck)
 and `test` in `package.json` and runs them with the manifest's package manager.
 Checks only run in a **trusted** workspace, are killed after a per-check timeout,
 and keep only a bounded tail of their output. They never call a model or
@@ -80,7 +93,7 @@ settings below.
   - **Codex CLI:** install the `codex` CLI and sign in (`codex login`). The
     integration is developed against `codex-cli 0.156.1`.
   - **OpenCode Zen:** the shared `opencode` CLI, installed locally or as a
-    SideCode-managed download. Free Zen models need no key; paid models need a
+    sideCode-managed download. Free Zen models need no key; paid models need a
     Zen API key.
 
 ## Install
@@ -102,7 +115,7 @@ settings below.
 ### Release assets by platform
 
 A release publishes one VSIX per supported OS and architecture. Pick the file
-that matches the machine that will run SideCode:
+that matches the machine that will run sideCode:
 
 | Release asset | Platform |
 |---|---|
@@ -216,31 +229,32 @@ prerequisites, screens, determinism, and limitations.
 
 ## Set up a provider
 
-Open the sidebar (Activity Bar → **SideCode**) once to activate the extension, then
+Open the sidebar (Activity Bar → **sideCode**) once to activate the extension, then
 set up whichever provider you have.
 
 ### Ollama Cloud
 
 1. Create an API token at <https://ollama.com>.
-2. Command Palette → **SideCode: Set Ollama Cloud token**.
+2. Command Palette → **sideCode: Set Ollama Cloud token**.
 3. Paste the token and press Enter.
 
 The token is stored in VS Code **secret storage** and sent only as a bearer
 credential to the configured base URL. It never appears in `settings.json`,
-output channels, or logs. To remove it, run **SideCode: Clear Ollama Cloud token**.
+output channels, or logs. To remove it, run **sideCode: Clear Ollama Cloud token**.
 
-Optional settings (`Settings → search "melink"`, or **SideCode: Open settings**):
+Optional settings (`Settings → search "melink"`, or **sideCode: Open settings**):
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. |
 | `melink.ollama.defaultModel` | *(empty)* | Default model; empty uses the first one the backend reports. |
-| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
+| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the sideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
 | `melink.review.diffReview` | `false` | Legacy opt-in for the read-only advisory diff review, used only while `melink.orchestration.reviewing` is unset. Application scope, so only a user setting can enable it. |
 | `melink.orchestration.testing` | `false` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. Default: off. |
 | `melink.orchestration.reviewing` | `false` | Advisory diff review; falls back to `melink.review.diffReview` until saved. |
+| `melink.orchestration.styling` | `false` | Advisory styling check for frontend work, compared with the brand kit and existing components. Runs only when a frontend file changed. |
 | `melink.orchestration.doubleCheck` | `true` | Read diagnostics for the changed files after a turn and post one advisory notice. Never calls a model. |
 | `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for a short single-question Agent turn. |
 | `melink.orchestration.planning` | `true` | Continue a built plan step by step after a clean Agent turn. |
@@ -284,7 +298,7 @@ dictation cleanup. Ollama Cloud, Ollama Local and OpenCode Zen share the same
 OpenCode binary, and each keeps its own provider identity and dot in the picker.
 
 - **CLI source.** Configure under **Settings → CLI**. `melink.ollama.opencode.cliSource`
-  is `local` (path / PATH) or `bundled` (SideCode download in extension global
+  is `local` (path / PATH) or `bundled` (sideCode download in extension global
   storage). Bundled turns always use that binary; it survives closing VS Code.
   Install and Update fetch the official GitHub release into the active install
   directory (they do not rely on `opencode upgrade`, which can report success
@@ -294,14 +308,14 @@ OpenCode binary, and each keeps its own provider identity and dot in the picker.
   `melink.codex.path`.
 - **zvec-grep.** Under **Settings → Skills**, enable semantic search to connect
   [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. Choose **local**
-  or **bundled** (SideCode-managed install under extension global storage).
+  or **bundled** (sideCode-managed install under extension global storage).
   Enable writes an absolute-path `zvec_grep` MCP entry into the user OpenCode
-  config and injects the same server into each SideCode turn. Off removes that
+  config and injects the same server into each sideCode turn. Off removes that
   entry and leaves the CLI installed. Stored as `melink.skills.zvecGrep`
   (legacy key `melink.ollama.opencode.zvecGrep` is still read when unset).
 - **ast-grep.** Under **Settings → Skills**, enable structural search to connect
   [ast-grep](https://github.com/ast-grep/ast-grep). Bundled downloads the
-  official GitHub release into extension global storage. SideCode ships a thin
+  official GitHub release into extension global storage. sideCode ships a thin
   MCP shim (`dist/ast-grep-mcp.js`) that shells out to the resolved binary.
   Enable writes `ast_grep` into the user OpenCode config and injects it per turn.
 - **Config is generated per turn, never committed.** The generated config is
@@ -446,9 +460,9 @@ Ollama runtime; choose **local** or **bundled** under **Settings → CLI**
 
 1. Free models: install the CLI and pick an OpenCode Zen model in the model
    picker. No credential is needed.
-2. Paid models: Command Palette → **SideCode: Set OpenCode Zen API key**
+2. Paid models: Command Palette → **sideCode: Set OpenCode Zen API key**
    (`melink.setOpencodeZenToken`), then paste the key. Remove it with
-   **SideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`).
+   **sideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`).
 
 The key lives in VS Code **secret storage** under `melink.opencode.zenToken` and
 is used only for OpenCode Zen requests. Free and paid model ids come from the
@@ -459,7 +473,7 @@ settings:
 | Setting | Default | Purpose |
 |---|---|---|
 | `melink.opencode.defaultModel` | *(empty)* | Default Zen model; empty uses the first model in the catalog the app can show (free list without a key, full list with one). |
-| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage. |
+| `melink.ollama.opencode.cliSource` | `local` | `local` uses the path / PATH; `bundled` uses the sideCode download in extension global storage. |
 | `melink.ollama.opencode.path` | `opencode` | Path to the shared `opencode` CLI when `cliSource` is `local`. |
 
 ### App-level defaults
@@ -597,12 +611,12 @@ across a reload.
 
 ## Privacy and the optional local missed-issue log
 
-SideCode has **no network telemetry** and never sends project-derived content
+sideCode has **no network telemetry** and never sends project-derived content
 to any telemetry service. Project context goes only to the provider you select,
 as described in [Project context](#project-context). The only log it can write
 is an opt-in, local-only missed-issue log, off by default via the
 application-scoped `melink.telemetry.failureLog` setting
-(a workspace cannot turn it on). Enable it, then run **SideCode: Record a
+(a workspace cannot turn it on). Enable it, then run **sideCode: Record a
 missed issue locally**. One append-only JSONL line is written under the
 extension's global storage:
 
@@ -620,8 +634,8 @@ statement.
 
 ## Verify it works
 
-1. Reopen the sidebar. An empty chat shows the SideCode logo and the name
-   **SideCode**, with a tall composer and no suggestion buttons.
+1. Reopen the sidebar. An empty chat shows the sideCode logo and the name
+   **sideCode**, with a tall composer and no suggestion buttons.
 2. Open the **Model** trigger. You should see one group per provider you set up,
    listing that provider's live models.
 3. Type a message and press **Enter**. The reply streams into the transcript.
@@ -687,7 +701,7 @@ The `"jsonrpc":"2.0"` field is omitted on the wire, matching the app-server.
 The CLI is spawned as one long-lived child process per workspace. It tries
 `app-server --listen stdio://` first and, if a newer CLI rejects that argument,
 retries once with the bare `codex app-server` (stdio is the default); whichever
-form starts is logged to the **SideCode (Codex)** output channel. A missing
+form starts is logged to the **sideCode (Codex)** output channel. A missing
 binary is reported as `unavailable` before anything is written, so an Ollama-only
 sidebar never shows Codex noise.
 

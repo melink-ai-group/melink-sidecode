@@ -1,6 +1,6 @@
 # Pinned CLI releases
 
-SideCode installs two CLIs from GitHub releases: `opencode` and `ast-grep`.
+sideCode installs two CLIs from GitHub releases: `opencode` and `ast-grep`.
 Both installers use an explicit release tag and verify the downloaded archive
 SHA-256 before extracting or writing anything. The versions and digests live in
 `src/backends/cliManifest.ts`:

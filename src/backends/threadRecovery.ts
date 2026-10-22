@@ -2,7 +2,7 @@ import type { TranscriptItem } from './types.ts';
 import { compactionSource, fitCompactionSource } from './compaction.ts';
 
 /**
- * A provider thread can disappear while SideCode still has the chat: Codex
+ * A provider thread can disappear while sideCode still has the chat: Codex
  * drops a rollout, or opencode no longer has the session file. The sidebar
  * conversation is the record that survives. This module turns that record into
  * the standing context a replacement thread starts with.
@@ -100,7 +100,7 @@ export function isMissingThreadError(error: unknown): boolean {
 
 export interface RecoveryInput {
   provider: 'Codex' | 'OpenCode';
-  transcript: readonly Pick<TranscriptItem, 'kind' | 'role' | 'text' | 'files'>[];
+  transcript: readonly Pick<TranscriptItem, 'kind' | 'role' | 'text' | 'files' | 'orchestration'>[];
   plan?: {
     path?: string;
     title?: string;
@@ -188,10 +188,10 @@ function omitTrailingUser(
   return items;
 }
 
-function lastUserText(items: readonly Pick<TranscriptItem, 'kind' | 'role' | 'text'>[]): string | undefined {
+function lastUserText(items: readonly Pick<TranscriptItem, 'kind' | 'role' | 'text' | 'orchestration'>[]): string | undefined {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
-    if (item?.kind === 'message' && item.role === 'user') {
+    if (item?.kind === 'message' && item.role === 'user' && !item.orchestration) {
       const text = item.text?.trim();
       if (text) {
         return text;

@@ -527,7 +527,8 @@ export function App(): JSX.Element {
             messageId: message.messageId,
             text: message.text,
             attachments: message.attachments,
-            sentAt: message.sentAt
+            sentAt: message.sentAt,
+            orchestration: message.orchestration
           });
           onUserMessageSentRef.current(message);
           break;
@@ -889,7 +890,9 @@ export function App(): JSX.Element {
     activeModels[0]?.label;
 
   useEffect(() => {
-    const firstUser = state.transcript.find((item) => item.kind === 'message' && item.role === 'user' && item.text?.trim());
+    const firstUser = state.transcript.find(
+      (item) => item.kind === 'message' && item.role === 'user' && !item.orchestration && item.text?.trim()
+    );
     const blank = !state.activeThreadId && !firstUser;
     bridge.setState({
       backendId: state.selectedBackendId,
@@ -2128,6 +2131,10 @@ export function App(): JSX.Element {
   // rules apply, so the composer clears (and its timeout is cancelled) rather
   // than later claiming the message was never queued.
   onUserMessageSentRef.current = (message): void => {
+    // An injected orchestration row never owns the composer draft.
+    if (message.orchestration) {
+      return;
+    }
     const queued = queueAwaitRef.current;
     if (!queued) {
       return;
@@ -2535,7 +2542,7 @@ export function App(): JSX.Element {
             <div className="turn turn--agent">
               <div className="turn-meta">
                 <span className={`provider-dot provider-dot--${active?.id ?? 'ollama'}`} aria-hidden="true" />
-                <span className="meta-strong">SideCode</span>
+                <span className="meta-strong">sideCode</span>
                 <span className="stream-status" role="status">
                   <span className="spinner" aria-hidden="true" />
                   Starting
@@ -2552,7 +2559,7 @@ export function App(): JSX.Element {
           ) : null}
 
           {state.busy ? (
-            <div className="typing-dots" role="status" aria-label="SideCode is working">
+            <div className="typing-dots" role="status" aria-label="sideCode is working">
               <span />
               <span />
               <span />
@@ -2654,7 +2661,7 @@ export function App(): JSX.Element {
                 : pending || asking
                   ? 'Waiting for your decision above...'
                   : active?.status === 'available'
-                    ? 'Build, Plan or Ask SideCode anything...'
+                    ? 'Build, Plan or Ask sideCode anything...'
                     : 'No backend available'
             }
             disabled={active?.status !== 'available' || state.restoring || Boolean(pending) || asking}

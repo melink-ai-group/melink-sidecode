@@ -15,6 +15,7 @@ export function readOrchestrationSettings(): ResolvedOrchestrationSettings {
   return resolveOrchestrationSettings({
     testing: inspect(`${ORCHESTRATION_SECTION}.testing`),
     reviewing: inspect(`${ORCHESTRATION_SECTION}.reviewing`),
+    styling: inspect(`${ORCHESTRATION_SECTION}.styling`),
     doubleCheck: inspect(`${ORCHESTRATION_SECTION}.doubleCheck`),
     quickTask: inspect(`${ORCHESTRATION_SECTION}.quickTask`),
     planning: inspect(`${ORCHESTRATION_SECTION}.planning`),

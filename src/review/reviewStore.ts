@@ -13,8 +13,11 @@ import type { DiffReviewFinding, DiffReviewResult, DiffReviewStatus } from './di
  * `node --test` with a fake memento and never lets it import the host.
  */
 
-/** The `workspaceState` key the host and this module agree on. */
+/** The `workspaceState` key the host and the diff review agree on. */
 export const REVIEW_STORE_KEY = 'melink.review.findings';
+
+/** The separate key for the advisory styling check, so the two never mix. */
+export const STYLING_REVIEW_STORE_KEY = 'melink.review.styling';
 
 /** How many turns keep a stored review. */
 export const REVIEW_STORE_LIMIT = 50;
@@ -40,13 +43,19 @@ export function reviewStoreKey(backendId: string, threadId: string, turnId: stri
 export class ReviewStore {
   private readonly memento: ReviewStoreMemento;
   private readonly now: () => number;
+  private readonly key: string;
   /** Loaded once, then updated only through the serialized write chain. */
   private index?: ReviewIndex;
   private writeChain: Promise<void> = Promise.resolve();
 
-  constructor(memento: ReviewStoreMemento, now: () => number = () => Date.now()) {
+  constructor(
+    memento: ReviewStoreMemento,
+    now: () => number = () => Date.now(),
+    key: string = REVIEW_STORE_KEY
+  ) {
     this.memento = memento;
     this.now = now;
+    this.key = key;
   }
 
   /** The stored result for one turn, or `undefined` when it was never reviewed. */
@@ -101,7 +110,7 @@ export class ReviewStore {
 
   private load(): ReviewIndex {
     if (this.index === undefined) {
-      const raw = this.memento.get<ReviewIndex>(REVIEW_STORE_KEY);
+      const raw = this.memento.get<ReviewIndex>(this.key);
       this.index = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     }
     return this.index;
@@ -118,7 +127,7 @@ export class ReviewStore {
       if (next === undefined) {
         return;
       }
-      await this.memento.update(REVIEW_STORE_KEY, next);
+      await this.memento.update(this.key, next);
       this.index = next;
     });
     this.writeChain = operation.catch(() => undefined);

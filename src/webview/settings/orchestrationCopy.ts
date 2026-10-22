@@ -38,6 +38,12 @@ export const ORCHESTRATION_FIELDS: readonly OrchestrationFieldCopy[] = [
     defaultValue: false
   },
   {
+    key: 'styling',
+    label: 'Styling check',
+    help: 'Check new frontend work against the brand kit, tokens, and existing components. Runs only when a frontend file changed. (Default: off.)',
+    defaultValue: false
+  },
+  {
     key: 'doubleCheck',
     label: 'Double-check',
     help: 'Sweep changed files for VS Code errors after a turn. No second model call. (Default: on.)',
@@ -60,6 +66,7 @@ export const ORCHESTRATION_FIELDS: readonly OrchestrationFieldCopy[] = [
 const SUMMARY_LABELS: Record<OrchestrationFieldKey, string> = {
   testing: 'testing',
   reviewing: 'reviewing',
+  styling: 'styling',
   doubleCheck: 'double-check',
   quickTask: 'quick tasks',
   planning: 'plan autopilot'
@@ -101,7 +108,7 @@ export function orchestrationFieldHelp(
 }
 
 export function quickTasksAvailable(values: OrchestrationCopyValues): boolean {
-  return values.testing || values.reviewing || values.doubleCheck;
+  return values.testing || values.reviewing || values.styling || values.doubleCheck;
 }
 
 /**
@@ -114,7 +121,7 @@ export function effectiveQuickTask(values: OrchestrationCopyValues): boolean {
 }
 
 function summaryKeys(): OrchestrationFieldKey[] {
-  return ['testing', 'reviewing', 'doubleCheck', 'planning'];
+  return ['testing', 'reviewing', 'styling', 'doubleCheck', 'planning'];
 }
 
 function joinNatural(items: string[]): string {

@@ -19,7 +19,7 @@ export type ZvecGrepCliSource = SkillCliSource;
 
 export { readSkillCliSource as readZvecGrepCliSource };
 
-/** npm `--prefix` root for the SideCode-bundled install. */
+/** npm `--prefix` root for the sideCode-bundled install. */
 export function bundledZvecGrepPrefix(roots: SkillResolveRoots): string {
   const storage = roots.globalStoragePath?.trim();
   if (storage) {

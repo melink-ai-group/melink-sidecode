@@ -128,11 +128,11 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           tag="v${version}.${GITHUB_RUN_NUMBER}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "name=SideCode ${tag}" >> "$GITHUB_OUTPUT"
+          echo "name=sideCode ${tag}" >> "$GITHUB_OUTPUT"
 
           prev="$(git tag --list 'v*' --sort=-creatordate | head -n 1 || true)"
           {
-            echo "## SideCode ${version}"
+            echo "## sideCode ${version}"
             echo
             echo "Download the VSIX that matches your OS and architecture:"
             echo
@@ -156,7 +156,7 @@ jobs:
           } > release-notes.md
 
           if ! grep -q '^- ' release-notes.md; then
-            echo "- Packaged SideCode ${version} from ${GITHUB_SHA::7}." >> release-notes.md
+            echo "- Packaged sideCode ${version} from ${GITHUB_SHA::7}." >> release-notes.md
           fi
 
       - name: Publish GitHub Release

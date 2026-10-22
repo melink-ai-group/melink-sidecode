@@ -14,7 +14,14 @@ async function source(name: string): Promise<string> {
 }
 
 test('the review package imports no host, filesystem, child-process or network module', async () => {
-  for (const name of ['diffReview.ts', 'reviewInput.ts', 'turnReview.ts', 'reviewStore.ts']) {
+  for (const name of [
+    'diffReview.ts',
+    'reviewInput.ts',
+    'turnReview.ts',
+    'stylingReview.ts',
+    'turnStyling.ts',
+    'reviewStore.ts'
+  ]) {
     const text = await source(name);
     for (const pattern of [
       /\bfrom\s+['"]vscode['"]/,

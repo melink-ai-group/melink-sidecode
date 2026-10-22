@@ -28,7 +28,7 @@ export const NarrationRow = memo(function NarrationRow({
       {showSpeaker ? (
         <div className="turn-meta">
           <span className={`provider-dot provider-dot--${providerId}`} aria-hidden="true" />
-          <span className="meta-strong">melink</span>
+          <span className="meta-strong">meLink</span>
         </div>
       ) : null}
       <button

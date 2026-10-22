@@ -20,7 +20,7 @@ export const SKIPPED_ANSWER =
 
 /** The warning shown when a model's question payload is not valid JSON. */
 export const INVALID_QUESTION_MESSAGE =
-  'The agent sent a question in a format SideCode could not read. It was removed from the reply.';
+  'The agent sent a question in a format sideCode could not read. It was removed from the reply.';
 
 /** Ask mode answers only, so a question payload there is a no-op. */
 export const ASK_MODE_QUESTION_MESSAGE =

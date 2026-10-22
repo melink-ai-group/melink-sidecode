@@ -287,11 +287,24 @@ export function buildArgs(options: OpencodeRunOptions): string[] {
 /** Default credential env for the Ollama nested OpenCode runtime. */
 export const DEFAULT_OPENCODE_API_KEY_ENV = 'OLLAMA_API_KEY';
 
+/**
+ * Credential variable names a nested runtime may understand. A child gets only
+ * the one that belongs to its own provider, so an ambient Cloud key can never
+ * leak into a Local or Zen turn (and vice versa).
+ */
+const PROVIDER_CREDENTIAL_ENV = ['OLLAMA_API_KEY', 'OLLAMA_LOCAL_API_KEY', 'OPENCODE_API_KEY'] as const;
+
 /** Build the child environment; the config and the token travel only here. */
 export function buildEnv(options: OpencodeRunOptions): NodeJS.ProcessEnv {
   const apiKeyEnv = options.apiKeyEnv?.trim() || DEFAULT_OPENCODE_API_KEY_ENV;
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of PROVIDER_CREDENTIAL_ENV) {
+    if (key !== apiKeyEnv) {
+      delete env[key];
+    }
+  }
   return {
-    ...process.env,
+    ...env,
     // The generated config wins on overlapping keys, so a workspace cannot
     // disable the active agent or widen its permission block.
     [OPENCODE_CONFIG_ENV]: JSON.stringify(options.config),

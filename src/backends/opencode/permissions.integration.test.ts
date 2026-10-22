@@ -78,7 +78,7 @@ const opencode = findOpencode();
 const astGrep = findAstGrep();
 const available = Boolean(opencode && astGrep && existsSync(shim));
 
-/** The environment OpenCode's own process must not inherit from a SideCode turn. */
+/** The environment OpenCode's own process must not inherit from a sideCode turn. */
 function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const base = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !/^OPENCODE_|^XDG_/.test(key))
@@ -192,7 +192,7 @@ async function runScenario(options: {
   const configPath = join(options.home, 'opencode.json');
   const permission = {
     '*': 'allow',
-    // The read-only defaults SideCode emits, plus the skill's search tool.
+    // The read-only defaults sideCode emits, plus the skill's search tool.
     edit: 'deny',
     write: 'deny',
     patch: 'deny',
@@ -216,7 +216,7 @@ async function runScenario(options: {
     },
     small_model: 'mock/mock-model',
     permission,
-    // A custom agent, like SideCode's per-turn agent: OpenCode evaluates the
+    // A custom agent, like sideCode's per-turn agent: OpenCode evaluates the
     // agent-level permission block, so a key mismatch is not hidden by the
     // global map.
     agent: {

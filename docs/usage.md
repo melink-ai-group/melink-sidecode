@@ -1,14 +1,14 @@
-# Using SideCode
+# Using sideCode
 
 A tour of what the sidebar does and how to drive it. For installation, see the
 [README](../README.md).
 
 ## Opening a chat
 
-Click the **SideCode** icon in the Activity Bar, or run **View: Show SideCode** from the
+Click the **sideCode** icon in the Activity Bar, or run **View: Show sideCode** from the
 Command Palette. Each conversation is a tab in the sidebar. A new tab is named
-**SideCode** until you send a message; the tab is then renamed to a short truncation
-of that message. **+** opens another sidebar tab (an unused SideCode tab is focused
+**sideCode** until you send a message; the tab is then renamed to a short truncation
+of that message. **+** opens another sidebar tab (an unused sideCode tab is focused
 instead of stacking a second blank one). History opens a chat in a new sidebar tab, or
 focuses that tab when it is already open.
 
@@ -16,7 +16,7 @@ focuses that tab when it is already open.
 
 ```
 +--------------------------------------------------+
-| SideCode | Fix the login            x   [+][history] |
+| sideCode | Fix the login            x   [+][history] |
 +--------------------------------------------------+
 | Model  <provider> <model> v          [context][cog] |
 +--------------------------------------------------+
@@ -134,7 +134,7 @@ not resolve), the turn reports a distinct, actionable notice — the missing CLI
 a spawn failure, a rejected generated config, and a rejected token each read
 differently.
 
-You can set all of this from **SideCode: Open settings** without editing JSON:
+You can set all of this from **sideCode: Open settings** without editing JSON:
 the CLI tab carries the **opencode CLI source** and path fields. The status line
 shows one of three distinct states — detected (with the CLI version), missing, or
 not runnable — and an invalid path is refused inline without overwriting a
@@ -145,7 +145,7 @@ source (bundled lives under extension global storage, like opencode). The
 like the path it runs, so a workspace value cannot flip it back after a reload.
 Turning a skill on installs the CLI when needed, rewrites the one known legacy
 `zg --server --stdio` entry to `zg server --stdio`, writes an absolute-path MCP
-entry into your user OpenCode config, and injects that server into SideCode
+entry into your user OpenCode config, and injects that server into sideCode
 turns. Turning it off removes the MCP entry and leaves the CLI installed. The
 source, path and enabled flag are written only after the apply succeeded, so a
 failed install never leaves a half-changed CLI selection behind.
@@ -176,7 +176,7 @@ what you see is what was stored.
 
 ### Ollama Local
 
-**Settings → Providers → Ollama Local** points SideCode at a local server.
+**Settings → Providers → Ollama Local** points sideCode at a local server.
 The default base URL is `http://localhost:11434`. Start Ollama with
 `ollama serve`, pull at least one model, then press **Test connection**. The
 status chip reads **Running** only when both the native `/api/tags` API and the
@@ -233,7 +233,7 @@ instead of spinning forever.
   window leaves it alone until that window closes. Removing a message or
   pressing **Stop** deletes it from the stored queue.
 
-An empty chat shows the SideCode logo and the name **SideCode**. The composer
+An empty chat shows the sideCode logo and the name **sideCode**. The composer
 opens tall so the first message has room to be written.
 
 ### Automatic mode selection
@@ -274,7 +274,7 @@ conversation is easy to read.
   focuses the tab when it is already open.
 - **New chat** (the primary `+` button, the rightmost control on the tab row)
   opens another sidebar tab. It does not clear the tab you are in. An unused
-  SideCode tab is focused instead of opening a second blank one. Drag a tab to
+  sideCode tab is focused instead of opening a second blank one. Drag a tab to
   change the order.
 
 ### Reload resume
@@ -282,7 +282,7 @@ conversation is easy to read.
 Reloading the window **reopens the sidebar tabs** that were open. Each tab
 restores its own conversation: a brief *"Restoring conversation…"* status clears
 and the prior turns repaint. A tab that never sent a message comes back as
-SideCode. If a thread is no longer available, that tab shows a notice and stays
+sideCode. If a thread is no longer available, that tab shows a notice and stays
 usable.
 
 For Ollama Cloud, replaying the stored turns against the stateless `/api/chat`
@@ -306,19 +306,19 @@ The view title, from left to right, is **Refresh project context** (rebuilds the
 workspace snapshot for the next turn), **Refresh backend availability** (re-probes
 every provider and drops cached model lists, so a model added or removed on the
 server shows up after a refresh), and the **gear**, which opens the extension's
-settings (**SideCode: Open settings**).
+settings (**sideCode: Open settings**).
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| **SideCode: Set Ollama Cloud token** | Prompt for the bearer token, store it in secret storage. |
-| **SideCode: Clear Ollama Cloud token** | Delete the stored token. |
-| **SideCode: Set OpenCode Zen API key** (`melink.setOpencodeZenToken`) | Prompt for the optional Zen key, store it in secret storage (paid models). |
-| **SideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`) | Delete the stored Zen key. |
-| **SideCode: Refresh project context** | Rebuild the project context snapshot for the next turn. |
-| **SideCode: Refresh backend availability** | Re-probe every provider. |
-| **SideCode: Open settings** | Open the inline settings screen. |
+| **sideCode: Set Ollama Cloud token** | Prompt for the bearer token, store it in secret storage. |
+| **sideCode: Clear Ollama Cloud token** | Delete the stored token. |
+| **sideCode: Set OpenCode Zen API key** (`melink.setOpencodeZenToken`) | Prompt for the optional Zen key, store it in secret storage (paid models). |
+| **sideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`) | Delete the stored Zen key. |
+| **sideCode: Refresh project context** | Rebuild the project context snapshot for the next turn. |
+| **sideCode: Refresh backend availability** | Re-probe every provider. |
+| **sideCode: Open settings** | Open the inline settings screen. |
 
 ## Settings reference
 
@@ -329,7 +329,7 @@ settings (**SideCode: Open settings**).
 | `melink.ollamaLocal.baseUrl` | `http://localhost:11434` | Local Ollama server address. Application scope: a workspace cannot redirect local prompts. |
 | `melink.ollamaLocal.defaultModel` | *(empty)* | Default local model; empty uses the first model the local server reports. |
 | `melink.opencode.defaultModel` | *(empty)* | Default OpenCode Zen model; empty uses the first model in the catalog the app can show (free list without a key, full list with one). |
-| `melink.ollama.opencode.cliSource` | `local` | Shared opencode CLI source: `local` uses the path / PATH; `bundled` uses the SideCode download in extension global storage (survives closing VS Code). |
+| `melink.ollama.opencode.cliSource` | `local` | Shared opencode CLI source: `local` uses the path / PATH; `bundled` uses the sideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`; a bare name is resolved from `PATH`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy zvec-grep switch, read only when `melink.skills.zvecGrep` is unset. Prefer the skills key. |
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
@@ -352,6 +352,7 @@ settings (**SideCode: Open settings**).
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5–600. A timed-out check is killed and reported as timed out. |
 | `melink.orchestration.testing` | `false` | Post-turn typecheck/lint and tests; default off. Falls back to `melink.review.checks.enabled` when unset. |
 | `melink.orchestration.reviewing` | `false` | Advisory read-only diff review. Falls back to `melink.review.diffReview` when unset. |
+| `melink.orchestration.styling` | `false` | Advisory styling check for frontend work. Skipped unless a frontend file changed. Uses the project brand kit and tokens when present. |
 | `melink.orchestration.doubleCheck` | `true` | Sweep changed files for VS Code errors after a turn. |
 | `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for short single-question Agent turns. |
 | `melink.orchestration.planning` | `true` | Continue a built plan after a clean Agent turn. |
@@ -390,7 +391,7 @@ and is not saved.
 ### Which settings a workspace may set
 
 A repository can ship a `.vscode/settings.json`, and VS Code merges it over
-your own settings. SideCode does not let a repository decide the three things
+your own settings. sideCode does not let a repository decide the three things
 that would make opening a folder a security problem, so those settings are
 **read from your user settings only** and are declared
 `"scope": "application"`:
@@ -408,7 +409,7 @@ that would make opening a folder a security problem, so those settings are
 A workspace value for one of these is ignored even if it was written before
 this restriction, and the **Save to workspace** action writes these to your
 user settings instead, with a short note on the field. Every one of the ten
-fields shows that note. Every other SideCode setting (model names, context
+fields shows that note. Every other sideCode setting (model names, context
 toggles) keeps its normal workspace-scope behaviour. Skill enable flags are application-scoped with the CLI path they run.
 
 Two further rules apply to the CLI paths, because they name the binary that
@@ -437,7 +438,7 @@ workspace-defined value for them at all.
 
 ## The settings screen
 
-Open it from the gear in the title bar (or **SideCode: Open settings**). It opens
+Open it from the gear in the title bar (or **sideCode: Open settings**). It opens
 inline in the sidebar — the same panel pattern as the model switcher, never a
 floating popover — and groups the settings as **Providers** above **Defaults**.
 
@@ -516,6 +517,7 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
 | `melink.orchestration.testing` | `false` | Orchestration -> Testing |
 | `melink.orchestration.reviewing` | `false` | Orchestration -> Reviewing |
+| `melink.orchestration.styling` | `false` | Orchestration -> Styling check |
 | `melink.orchestration.doubleCheck` | `true` | Orchestration -> Double-check |
 | `melink.orchestration.quickTask` | `true` | Orchestration -> Quick tasks |
 | `melink.orchestration.planning` | `true` | Orchestration -> Plan autopilot |
@@ -571,7 +573,7 @@ key (`melink.opencode.zenToken`) live only in VS Code **secret storage**. Each i
 read only for its own provider request (the Ollama `Authorization` header, or the
 Zen catalog / model request) and is never written to `settings.json`, output
 channels, or logs. A rejected credential is reported as an actionable notice, not
-as a raw HTTP status. Codex holds no SideCode secret: it uses its own CLI login.
+as a raw HTTP status. Codex holds no sideCode secret: it uses its own CLI login.
 
 ## Project context
 
@@ -693,12 +695,12 @@ of those actions.
 
 ### Optional local missed-issue log
 
-SideCode has **no network telemetry**. The only log the extension can write is
+sideCode has **no network telemetry**. The only log the extension can write is
 an opt-in, local-only missed-issue log. It is **off by default**, uses the
 application-scoped `melink.telemetry.failureLog` setting (a workspace cannot
 enable it), and never sends, uploads, or shares anything.
 
-Enable that setting, then run **SideCode: Record a missed issue locally** to
+Enable that setting, then run **sideCode: Record a missed issue locally** to
 append one JSON line to:
 
 `<VS Code user data>/User/globalStorage/melink.melink-sidecode/failure-log.jsonl`
@@ -854,11 +856,11 @@ mistake.
 
 ### Post-turn checks
 
-After a turn that changed files is recorded, SideCode can run the project's own
+After a turn that changed files is recorded, sideCode can run the project's own
 checks before you keep it. Checks are **advisory evidence**, not an automatic
 decision:
 
-- **Default detection.** With `melink.review.checks.commands` unset, SideCode
+- **Default detection.** With `melink.review.checks.commands` unset, sideCode
   reads `package.json` and runs `typecheck` when present (otherwise `lint`), then
   `test`. Each command is `<packageManager> run <script>`, using the manifest's
   `packageManager` (for example `pnpm@9`) and falling back to `npm`. An explicit
@@ -886,7 +888,7 @@ decision:
 
 ### Orchestration
 
-The **Orchestration** tab in the settings screen decides what SideCode does once a
+The **Orchestration** tab in the settings screen decides what sideCode does once a
 reply finishes. Changes apply from the **next turn**; the summary at the top of
 the tab spells out the current policy. Every pass is advisory and none of them
 changes the reply, the tools, or the permission level.
@@ -895,6 +897,14 @@ changes the reply, the tools, or the permission level.
   typecheck/lint and tests through the post-turn check runner described above.
 - **Reviewing** (`melink.orchestration.reviewing`, default off) adds the advisory
   diff review. It falls back to `melink.review.diffReview` until saved.
+- **Styling check** (`melink.orchestration.styling`, default off) runs only when
+  the turn changed at least one frontend file (`.tsx`, `.jsx`, `.css`, `.scss`,
+  `.html`, `.vue`, `.svelte`, and similar). It compares the new work with the
+  brand kit (`tokens.css` / `DESIGN.md` when present), the theme tokens, and the
+  existing components, and lists token, inline-style, font, and state
+  inconsistencies in the same review panel as the diff review. It is read-only,
+  never blocks Keep, and says when no brand kit was found so the check's
+  evidence is honest.
 - **Double-check** (`melink.orchestration.doubleCheck`, default on) waits 1.5
   seconds for VS Code to publish diagnostics, then reads only the files the turn
   changed and posts at most one notice: a clean info line, or a warning with up to
@@ -913,8 +923,8 @@ changes the reply, the tools, or the permission level.
   Agent mode. Turning it off does not stop the turn-end settle: a step the
   provider left running still returns to pending, so no spinner is left behind.
 
-Quick tasks is disabled while Testing, Reviewing, and Double-check are all off;
-enable at least one pass first. In that state the toggle is off and is saved as
+Quick tasks is disabled while Testing, Reviewing, Styling check, and
+Double-check are all off; enable at least one pass first. In that state the toggle is off and is saved as
 off, because there is no pass left to skip. A value that came from an older
 review key shows its source in the field help until you save the orchestration
 key.

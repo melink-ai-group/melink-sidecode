@@ -92,6 +92,7 @@ server and reads `zg status`.
 | `melink.review.checks.enabled` | boolean, `false` | **Legacy fallback** - surfaced in Orchestration -> Testing; read only while `melink.orchestration.testing` is unset, and its schema default is not treated as explicit | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
 | `melink.orchestration.testing` | boolean, `false` | **Present** - Orchestration -> Testing, default off; falls back to `melink.review.checks.enabled` | `resolveOrchestrationSettings()` -> per-turn plan gate |
 | `melink.orchestration.reviewing` | boolean, `false` | **Present** - Orchestration -> Reviewing; falls back to `melink.review.diffReview` | `resolveOrchestrationSettings()` -> diff-review gate |
+| `melink.orchestration.styling` | boolean, `false` | **Present** - Orchestration -> Styling check; runs only when a frontend file changed | `resolveOrchestrationSettings()` -> `shouldRunStylingCheck()` -> styling-review gate |
 | `melink.orchestration.doubleCheck` | boolean, `true` | **Present** - Orchestration -> Double-check | `resolveOrchestrationSettings()` -> diagnostics sweep gate |
 | `melink.orchestration.quickTask` | boolean, `true` | **Present** - Orchestration -> Quick tasks | `resolveOrchestrationSettings()` -> quick-task gate |
 | `melink.orchestration.planning` | boolean, `true` | **Present** - Orchestration -> Plan autopilot | `resolveOrchestrationSettings()` -> plan-autopilot gate |
@@ -103,18 +104,18 @@ server and reads `zg status`.
 | Key | Scope | Purpose |
 |---|---|---|
 | `melink.review.checks` | workspace | Newest 50 check runs, keyed `backendId:threadId:turnId`; a stored `running` run is read back as `skipped` after a reload. This is state, not a setting, and it shares the name with the configuration section only by design. |
-| `melink.telemetry.failureLog` | boolean, `false`, **application scope** | **Not on the screen** — VS Code Settings or the **SideCode: Record a missed issue locally** command | `createFailureLogHost()` / `recordFailureEntry()`; false keeps the command informational and touches no directory or file. Application scope means a workspace cannot opt in |
+| `melink.telemetry.failureLog` | boolean, `false`, **application scope** | **Not on the screen** — VS Code Settings or the **sideCode: Record a missed issue locally** command | `createFailureLogHost()` / `recordFailureEntry()`; false keeps the command informational and touches no directory or file. Application scope means a workspace cannot opt in |
 
 ## Credentials
 
 | Secret | Store | On the screen | Consumer / write path |
 |---|---|---|---|
-| `melink.ollama.token` (`OLLAMA_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → Ollama Cloud → API key (masked, empty; only `hasToken` is sent to the webview) | Bearer credential for `melink.ollama.baseUrl` requests, including the opencode runtime child env. Written by the screen and `SideCode: Set Ollama Cloud token` via `context.secrets.store`; removed with `context.secrets.delete` |
-| `melink.opencode.zenToken` (`OPENCODE_ZEN_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → OpenCode Zen → Zen API key (optional, masked, empty; only `hasToken` is sent to the webview) | Paid-model Zen catalog and model requests (`OpencodeBackend`). Written by the screen and `SideCode: Set OpenCode Zen API key` via `context.secrets.store`; removed with `context.secrets.delete` |
+| `melink.ollama.token` (`OLLAMA_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → Ollama Cloud → API key (masked, empty; only `hasToken` is sent to the webview) | Bearer credential for `melink.ollama.baseUrl` requests, including the opencode runtime child env. Written by the screen and `sideCode: Set Ollama Cloud token` via `context.secrets.store`; removed with `context.secrets.delete` |
+| `melink.opencode.zenToken` (`OPENCODE_ZEN_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → OpenCode Zen → Zen API key (optional, masked, empty; only `hasToken` is sent to the webview) | Paid-model Zen catalog and model requests (`OpencodeBackend`). Written by the screen and `sideCode: Set OpenCode Zen API key` via `context.secrets.store`; removed with `context.secrets.delete` |
 
 There is no second credential store and no `settings.json` write path for either
 secret. The webview read model exposes only `hasToken`, so a stored value can
-never be painted into the DOM. Codex holds no SideCode credential: it signs in
+never be painted into the DOM. Codex holds no sideCode credential: it signs in
 through its own CLI and the screen reports that login state.
 
 The token is sent only to `melink.ollama.baseUrl`, which is read from the

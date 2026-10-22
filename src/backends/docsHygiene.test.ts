@@ -42,19 +42,31 @@ test('docs and the empty state carry no stale provider or brand claims', async (
     for (const [pattern, label] of staleClaims) {
       assert.equal(pattern.test(text), false, `${file} still says "${label}"`);
     }
-    // Case-sensitive: `melink` package and setting ids are legitimate; only the
-    // old display spelling `meLink` is stale.
-    assert.equal(/meLink/.test(text), false, `${file} still uses the meLink brand`);
+    // Case-sensitive: `melink` package and setting ids are legitimate; the
+    // display brand is `meLink`, so the old PascalCase `Melink` is stale.
+    assert.equal(/Melink/.test(text), false, `${file} still uses the old Melink brand`);
   }
 });
 
-test('the empty state renders the SideCode brand', async () => {
+test('the empty state renders the sideCode brand', async () => {
   const empty = await read('src/webview/screens/EmptyState.tsx');
-  assert.match(empty, /empty-title--brand">SideCode</);
+  assert.match(empty, /empty-title--brand">sideCode</);
   assert.equal(/>melink</.test(empty), false);
-  assert.equal(/melink is working/.test(empty), false);
+  assert.equal(/>meLink</.test(empty), false);
   const app = await read('src/webview/App.tsx');
-  assert.equal(/meLink/.test(app), false);
+  assert.match(app, /aria-label="sideCode is working"/);
+  assert.equal(/SideCode/.test(app), false);
+});
+
+test('the assistant speaker label uses the meLink brand', async () => {
+  for (const file of [
+    'src/webview/transcript/TranscriptRow.tsx',
+    'src/webview/transcript/ActivityCards.tsx'
+  ] as const) {
+    const source = await read(file);
+    assert.match(source, /meta-strong">meLink</, `${file} must render the meLink brand`);
+    assert.equal(/meta-strong">melink</.test(source), false, `${file} still renders the old melink label`);
+  }
 });
 
 test('the docs describe all four providers and the OpenCode Zen key command', async () => {

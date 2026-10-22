@@ -23,7 +23,7 @@ import {
 } from './Icons';
 import { checkRows, checkSummary, keepGate, type CheckRowView } from './checkReviewView';
 import { prettyPath } from './prettyPath.ts';
-import { diffReviewView, type DiffReviewView } from './diffReviewView.ts';
+import { diffReviewView, stylingReviewView, type DiffReviewView } from './diffReviewView.ts';
 import { confirmRestoreTarget, focusableControls, trapTab } from './focusTrap.ts';
 
 /**
@@ -236,6 +236,7 @@ function ChangesReviewView({
   const visibleFiles = review.files.slice(0, visibleFileCount);
   const countLabel = fileCountLabel(review.files);
   const diffReview = diffReviewView(review.diffReview);
+  const stylingReview = stylingReviewView(review.stylingReview);
 
   const locked = busy || deciding;
   const keepBlocked = gate === 'blocked-running';
@@ -386,6 +387,7 @@ function ChangesReviewView({
           ) : null}
 
           {diffReview ? <DiffReviewSection view={diffReview} /> : null}
+          {stylingReview ? <DiffReviewSection view={stylingReview} label="Styling check" /> : null}
           {rows.length > 0 ? <CheckRows rows={rows} /> : null}
 
           <ul className="changes-review__list" aria-label="Changed files">
@@ -508,12 +510,18 @@ export const ChangesReview = memo(ChangesReviewView, sameChangesReview);
  * failed pass is a non-blocking notice rather than a decision blocker. Severity
  * is a visible word plus an icon, never colour alone.
  */
-function DiffReviewSection({ view }: { view: DiffReviewView }): JSX.Element {
+function DiffReviewSection({
+  view,
+  label = 'Diff review'
+}: {
+  view: DiffReviewView;
+  label?: string;
+}): JSX.Element {
   const Icon = view.kind === 'failed' ? InfoIcon : view.kind === 'empty' ? CheckIcon : view.tone === 'info' ? InfoIcon : AlertIcon;
   return (
     <section
       className={`diff-review diff-review--${view.kind} diff-review--${view.tone}`}
-      aria-label="Diff review"
+      aria-label={label}
     >
       <div className="diff-review__head">
         <Icon className="ico ico--xs" />
@@ -529,7 +537,7 @@ function DiffReviewSection({ view }: { view: DiffReviewView }): JSX.Element {
         </p>
       ) : null}
       {view.findings.length > 0 ? (
-        <ul className="diff-review__findings" aria-label="Diff-review findings">
+        <ul className="diff-review__findings" aria-label={`${label} findings`}>
           {view.findings.map((finding, index) => (
             <li
               className={`diff-review__finding diff-review__finding--${finding.severity}`}
