@@ -1,5 +1,5 @@
 /**
- * Host-free resolution of the five orchestration toggles.
+ * Host-free resolution of the six orchestration toggles.
  *
  * Values come from an injected `inspect()`-shaped object: the nearest explicit
  * scope wins (folder > workspace > global) and a schema default is not explicit.
@@ -15,6 +15,7 @@ export const LEGACY_REVIEWING_KEY = 'melink.review.diffReview';
 export const ORCHESTRATION_DEFAULTS = {
   testing: false,
   reviewing: false,
+  styling: false,
   doubleCheck: true,
   quickTask: true,
   planning: true
@@ -26,6 +27,7 @@ export type OrchestrationToggles = Record<OrchestrationKey, boolean>;
 export const ORCHESTRATION_KEYS: readonly OrchestrationKey[] = [
   'testing',
   'reviewing',
+  'styling',
   'doubleCheck',
   'quickTask',
   'planning'
@@ -42,6 +44,7 @@ export interface SettingScope<T> {
 export interface OrchestrationInspect {
   testing?: SettingScope<unknown>;
   reviewing?: SettingScope<unknown>;
+  styling?: SettingScope<unknown>;
   doubleCheck?: SettingScope<unknown>;
   quickTask?: SettingScope<unknown>;
   planning?: SettingScope<unknown>;
@@ -65,6 +68,7 @@ export function resolveOrchestrationSettings(
   return {
     testing: testing ?? legacyTesting ?? ORCHESTRATION_DEFAULTS.testing,
     reviewing: reviewing ?? legacyReviewing ?? ORCHESTRATION_DEFAULTS.reviewing,
+    styling: explicitBoolean(inspect.styling) ?? ORCHESTRATION_DEFAULTS.styling,
     doubleCheck: explicitBoolean(inspect.doubleCheck) ?? ORCHESTRATION_DEFAULTS.doubleCheck,
     quickTask: explicitBoolean(inspect.quickTask) ?? ORCHESTRATION_DEFAULTS.quickTask,
     planning: explicitBoolean(inspect.planning) ?? ORCHESTRATION_DEFAULTS.planning,

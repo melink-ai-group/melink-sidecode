@@ -1,6 +1,6 @@
 # Browser tools (local verification)
 
-SideCode's browser skill lets an agent drive a headless Edge/Chrome page and
+sideCode's browser skill lets an agent drive a headless Edge/Chrome page and
 show it in an editor tab. It is a **tool for external URLs**; it is not a dev
 server for this repository.
 
@@ -11,7 +11,7 @@ server for this repository.
   VS Code; it is not served over HTTP.
 - The browser tools therefore require an **external URL** (for example a docs
   site, a deployed app, or a throwaway local server you started yourself). Do
-  not imply that `localhost` runs a SideCode app.
+  not imply that `localhost` runs a sideCode app.
 - If you started a server outside this repository, localhost and loopback
   addresses open without the external-site prompt. Every other origin asks the
   user once before the page opens.

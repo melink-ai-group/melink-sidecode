@@ -4,9 +4,9 @@ import { homedir } from 'node:os';
 import { isAbsoluteExecutable, resolveExecutableCommand } from '../executables.ts';
 
 /**
- * Where the opencode CLI comes from for SideCode turns.
+ * Where the opencode CLI comes from for sideCode turns.
  *
- * `local` uses the configured path (or PATH). `bundled` uses the SideCode-
+ * `local` uses the configured path (or PATH). `bundled` uses the sideCode-
  * managed download under the extension global storage (survives VS Code
  * restarts and extension updates), never the machine's PATH entry.
  */
@@ -20,7 +20,7 @@ export interface OpencodeResolveRoots {
   extensionPath: string;
   /**
    * Persistent storage that survives VS Code restarts and extension updates.
-   * Preferred location for the SideCode-managed (bundled) CLI download.
+   * Preferred location for the sideCode-managed (bundled) CLI download.
    */
   globalStoragePath?: string;
 }
@@ -31,7 +31,7 @@ export function opencodeExecutableName(): string {
 }
 
 /**
- * Directory that holds the SideCode-bundled CLI.
+ * Directory that holds the sideCode-bundled CLI.
  *
  * Prefer `globalStoragePath/opencode/bin` so the download survives closing
  * VS Code and extension updates. Fall back to the legacy
@@ -111,7 +111,7 @@ export function resolveOpencodeExecutable(options: {
 /**
  * Directory to write into on install/upgrade for the active source.
  *
- * Bundled always targets the persistent SideCode-managed folder. Local prefers
+ * Bundled always targets the persistent sideCode-managed folder. Local prefers
  * the directory of an absolute configured path so Update replaces that binary;
  * otherwise the managed `~/.opencode/bin` install.
  */

@@ -1,7 +1,7 @@
 {
   "name": "melink-sidecode",
-  "displayName": "SideCode",
-  "description": "SideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.",
+  "displayName": "sideCode",
+  "description": "sideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.",
   "version": "0.2.0",
   "publisher": "melink",
   "icon": "media/melink-logo.png",
@@ -30,7 +30,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "SideCode works in an untrusted workspace, but the settings that decide where a credential is sent, which binary is spawned, and what the permission default is are read from your user settings only. These settings are ignored when they come from a workspace: melink.ollama.baseUrl, melink.ollamaLocal.baseUrl, melink.ollama.opencode.path, melink.ollama.opencode.cliSource, melink.codex.path, melink.skills.zvecGrep, melink.skills.zvecGrep.path, melink.skills.zvecGrep.cliSource, melink.skills.astGrep, melink.skills.astGrep.path, melink.skills.astGrep.cliSource, melink.defaults.permissionLevel. The application scope of these settings is enforced by SideCode itself, so a workspace value never reaches them, trusted or not. Open the workspace in Restricted Mode to keep the workspace from changing anything at all.",
+      "description": "sideCode works in an untrusted workspace, but the settings that decide where a credential is sent, which binary is spawned, and what the permission default is are read from your user settings only. These settings are ignored when they come from a workspace: melink.ollama.baseUrl, melink.ollamaLocal.baseUrl, melink.ollama.opencode.path, melink.ollama.opencode.cliSource, melink.codex.path, melink.skills.zvecGrep, melink.skills.zvecGrep.path, melink.skills.zvecGrep.cliSource, melink.skills.astGrep, melink.skills.astGrep.path, melink.skills.astGrep.cliSource, melink.defaults.permissionLevel. The application scope of these settings is enforced by sideCode itself, so a workspace value never reaches them, trusted or not. Open the workspace in Restricted Mode to keep the workspace from changing anything at all.",
       "restrictedConfigurations": [
         "melink.ollama.baseUrl",
         "melink.ollamaLocal.baseUrl",
@@ -52,7 +52,7 @@
       "activitybar": [
         {
           "id": "melinkAgent",
-          "title": "SideCode",
+          "title": "sideCode",
           "icon": "media/melink-logo.png"
         }
       ]
@@ -61,47 +61,47 @@
       "melinkAgent": [
         {
           "id": "melinkAgent.chat",
-          "name": "SideCode",
+          "name": "sideCode",
           "type": "webview",
-          "contextualTitle": "SideCode"
+          "contextualTitle": "sideCode"
         }
       ]
     },
     "commands": [
       {
         "command": "melink.setOllamaToken",
-        "title": "SideCode: Set Ollama Cloud token"
+        "title": "sideCode: Set Ollama Cloud token"
       },
       {
         "command": "melink.clearOllamaToken",
-        "title": "SideCode: Clear Ollama Cloud token"
+        "title": "sideCode: Clear Ollama Cloud token"
       },
       {
         "command": "melink.setOpencodeZenToken",
-        "title": "SideCode: Set OpenCode Zen API key"
+        "title": "sideCode: Set OpenCode Zen API key"
       },
       {
         "command": "melink.clearOpencodeZenToken",
-        "title": "SideCode: Clear OpenCode Zen API key"
+        "title": "sideCode: Clear OpenCode Zen API key"
       },
       {
         "command": "melink.refreshContext",
-        "title": "SideCode: Refresh project context",
+        "title": "sideCode: Refresh project context",
         "icon": "$(notebook)"
       },
       {
         "command": "melink.refreshBackends",
-        "title": "SideCode: Refresh backend availability",
+        "title": "sideCode: Refresh backend availability",
         "icon": "$(refresh)"
       },
       {
         "command": "melink.openSettings",
-        "title": "SideCode: Open settings",
+        "title": "sideCode: Open settings",
         "icon": "$(gear)"
       },
       {
         "command": "melink.recordMissedIssue",
-        "title": "SideCode: Record a missed issue locally"
+        "title": "sideCode: Record a missed issue locally"
       }
     ],
     "markdown.previewStyles": [
@@ -127,13 +127,13 @@
       ]
     },
     "configuration": {
-      "title": "SideCode",
+      "title": "sideCode",
       "properties": {
         "melink.ollama.baseUrl": {
           "type": "string",
           "default": "https://ollama.com",
           "scope": "application",
-          "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **SideCode: Set Ollama Cloud token** is sent as a bearer credential to this host. This setting is read from your user settings only, so a workspace cannot redirect the token to another host."
+          "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **sideCode: Set Ollama Cloud token** is sent as a bearer credential to this host. This setting is read from your user settings only, so a workspace cannot redirect the token to another host."
         },
         "melink.ollama.defaultModel": {
           "type": "string",
@@ -154,7 +154,7 @@
         "melink.opencode.defaultModel": {
           "type": "string",
           "default": "",
-          "description": "Default OpenCode Zen model. Empty means the first model the app's catalog shows is used: the free list without a Zen API key, or the full live list with one. Free models work without a key; paid models require SideCode: Set OpenCode Zen API key."
+          "description": "Default OpenCode Zen model. Empty means the first model the app's catalog shows is used: the free list without a Zen API key, or the full live list with one. Free models work without a key; paid models require sideCode: Set OpenCode Zen API key."
         },
         "melink.ollama.opencode.path": {
           "type": "string",
@@ -171,7 +171,7 @@
           ],
           "enumDescriptions": [
             "Use the opencode CLI on this machine (path setting or PATH).",
-            "Use the SideCode-downloaded CLI in extension global storage. Install and Update fetch the official GitHub release into that folder; it survives closing VS Code."
+            "Use the sideCode-downloaded CLI in extension global storage. Install and Update fetch the official GitHub release into that folder; it survives closing VS Code."
           ],
           "default": "local",
           "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path`. **bundled** downloads into extension global storage and every turn uses that binary instead of the machine PATH. Read from your user settings only."
@@ -222,7 +222,7 @@
           ],
           "default": "ask",
           "scope": "application",
-          "markdownDescription": "What SideCode does when it recognises a destructive command (recursive delete, force push, hard reset, database drop, or a pattern from `melink.safety.destructivePatterns`). This check runs before stored approval rules, so an `Always allow` rule for `git` or `rm` cannot answer it silently. The reason names the risk and the bounded command; common password/token values are redacted, and no working directory, environment or secret-store values are included."
+          "markdownDescription": "What sideCode does when it recognises a destructive command (recursive delete, force push, hard reset, database drop, or a pattern from `melink.safety.destructivePatterns`). This check runs before stored approval rules, so an `Always allow` rule for `git` or `rm` cannot answer it silently. The reason names the risk and the bounded command; common password/token values are redacted, and no working directory, environment or secret-store values are included."
         },
         "melink.safety.destructivePatterns": {
           "type": "array",
@@ -363,6 +363,11 @@
           "default": false,
           "markdownDescription": "Run a read-only diff review after a turn that changes files. Advisory only; it never edits files or blocks Keep. Used as the fallback for `melink.review.diffReview`."
         },
+        "melink.orchestration.styling": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Run an advisory styling-consistency check after a turn that changes frontend files. It compares the new UI against the project's brand kit, design tokens, and existing components. Skipped when no frontend file changed."
+        },
         "melink.orchestration.doubleCheck": {
           "type": "boolean",
           "default": true,
@@ -371,7 +376,7 @@
         "melink.orchestration.quickTask": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Skip post-turn testing, review, and double-check for short single-question turns in Agent mode. The reply, tools, permissions, and mode are unchanged."
+          "markdownDescription": "Skip post-turn testing, review, styling, and double-check for short single-question turns in Agent mode. The reply, tools, permissions, and mode are unchanged."
         },
         "melink.orchestration.planning": {
           "type": "boolean",
@@ -397,7 +402,7 @@
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Opt-in local missed-issue log, off by default. When on, the **SideCode: Record a missed issue locally** command appends one short entry (timestamp, issue class, model, provider, prompt version, summary) to `failure-log.jsonl` in the extension's global storage. Nothing is ever sent over the network, and project content, code, prompts, and secrets are never accepted. Turn it off to stop writing; existing entries stay on this machine."
+          "markdownDescription": "Opt-in local missed-issue log, off by default. When on, the **sideCode: Record a missed issue locally** command appends one short entry (timestamp, issue class, model, provider, prompt version, summary) to `failure-log.jsonl` in the extension's global storage. Nothing is ever sent over the network, and project content, code, prompts, and secrets are never accepted. Turn it off to stop writing; existing entries stay on this machine."
         },
         "melink.skills.browserCodex": {
           "type": "boolean",
@@ -426,7 +431,7 @@
           "enum": ["local", "bundled"],
           "enumDescriptions": [
             "Use zg on this machine (path setting or PATH / npm global).",
-            "Use the SideCode-managed install under extension global storage."
+            "Use the sideCode-managed install under extension global storage."
           ],
           "default": "local",
           "markdownDescription": "Where the zvec-grep CLI comes from. Read from your user settings only."
@@ -441,7 +446,7 @@
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Connect [ast-grep](https://github.com/ast-grep/ast-grep) to OpenCode (syntax-aware structural search and rewrite via a SideCode MCP shim). Read from your user settings only, like the path it runs, so a workspace cannot turn the skill on."
+          "markdownDescription": "Connect [ast-grep](https://github.com/ast-grep/ast-grep) to OpenCode (syntax-aware structural search and rewrite via a sideCode MCP shim). Read from your user settings only, like the path it runs, so a workspace cannot turn the skill on."
         },
         "melink.skills.astGrep.cliSource": {
           "type": "string",
@@ -449,7 +454,7 @@
           "enum": ["local", "bundled"],
           "enumDescriptions": [
             "Use ast-grep on this machine (path setting or PATH).",
-            "Use the SideCode-downloaded CLI under extension global storage."
+            "Use the sideCode-downloaded CLI under extension global storage."
           ],
           "default": "local",
           "markdownDescription": "Where the ast-grep CLI comes from. Read from your user settings only."

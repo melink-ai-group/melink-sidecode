@@ -241,7 +241,7 @@ export function ModelPanel({
           <span>
             {providers.length > 0
               ? 'Providers without a usable integration are hidden until they are installed.'
-              : 'Set up provider opens the SideCode settings.'}
+              : 'Set up provider opens the sideCode settings.'}
           </span>
         </div>
       </div>

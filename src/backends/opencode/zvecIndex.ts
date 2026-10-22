@@ -5,7 +5,7 @@ import type { SpawnOutcome } from './zvecGrep.ts';
  * zvec-grep index state and the explicit "Build index" action.
  *
  * A zvec search against a workspace with no index answers `INDEX_MISSING`.
- * SideCode never indexes on its own: indexing reads the workspace and writes
+ * sideCode never indexes on its own: indexing reads the workspace and writes
  * `.zvec-grep/`, so it only runs when the user presses **Build index**.
  */
 

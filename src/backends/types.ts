@@ -531,6 +531,13 @@ export interface TranscriptItem {
    */
   attachments?: Attachment[];
   /**
+   * True when this user line is an injected orchestration instruction (plan
+   * continuation or crash resume), not text the user typed. It stays a user
+   * row so turn anchoring and change cards keep working, but the transcript
+   * renders it as its own collapsed orchestration entry.
+   */
+  orchestration?: boolean;
+  /**
    * Full text of a message item. Live turns stream their text through
    * `item/delta`, so this is only populated for replayed history; the renderer
    * treats an absent value as an empty message.

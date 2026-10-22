@@ -133,7 +133,7 @@ export function runMcpSession(
         return;
       }
       // Newline-delimited JSON is the modern MCP stdio framing and is accepted
-      // by zg 0.2.x; the SideCode shims read both.
+      // by zg 0.2.x; the sideCode shims read both.
       child.stdin?.write(`${payload}\n`);
     };
 

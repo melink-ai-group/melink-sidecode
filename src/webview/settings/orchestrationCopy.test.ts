@@ -15,6 +15,7 @@ import {
 const DEFAULTS: OrchestrationCopyValues = {
   testing: false,
   reviewing: false,
+  styling: false,
   doubleCheck: true,
   quickTask: true,
   planning: true
@@ -30,12 +31,13 @@ test('title and intro are the documented copy', () => {
   assert.equal(ORCHESTRATION_INTRO.includes('Per-turn helpers'), false);
 });
 
-test('the five fields carry the exact labels, help, and defaults', () => {
+test('the six fields carry the exact labels, help, and defaults', () => {
   assert.deepEqual(
     ORCHESTRATION_FIELDS.map(({ key, label, defaultValue }) => [key, label, defaultValue]),
     [
       ['testing', 'Testing', false],
       ['reviewing', 'Reviewing', false],
+      ['styling', 'Styling check', false],
       ['doubleCheck', 'Double-check', true],
       ['quickTask', 'Quick tasks', true],
       ['planning', 'Plan autopilot', true]
@@ -46,6 +48,7 @@ test('the five fields carry the exact labels, help, and defaults', () => {
     [
       'Run typecheck or lint and the tests after a turn that changes files. (Default: off.)',
       'Read-only diff review after a turn that changes files. Advisory; never edits or blocks Keep. (Default: off.)',
+      'Check new frontend work against the brand kit, tokens, and existing components. Runs only when a frontend file changed. (Default: off.)',
       'Sweep changed files for VS Code errors after a turn. No second model call. (Default: on.)',
       'Skip these passes for short, single-question turns in Agent mode. (Default: on.)',
       'Continue a built plan step by step after a clean turn. Agent mode only. (Default: on.)'
@@ -56,18 +59,18 @@ test('the five fields carry the exact labels, help, and defaults', () => {
 test('the fresh default policy summary shows testing off', () => {
   assert.equal(
     orchestrationSummary(values()),
-    'Effective policy: double-check and plan autopilot on · testing and reviewing off · quick tasks skip these passes.'
+    'Effective policy: double-check and plan autopilot on · testing, reviewing and styling off · quick tasks skip these passes.'
   );
 });
 
 test('summary lists every pass that is on and every pass that is off', () => {
   assert.equal(
     orchestrationSummary(values({ reviewing: true })),
-    'Effective policy: reviewing, double-check and plan autopilot on · testing off · quick tasks skip these passes.'
+    'Effective policy: reviewing, double-check and plan autopilot on · testing and styling off · quick tasks skip these passes.'
   );
   assert.equal(
     orchestrationSummary(values({ reviewing: true, planning: false, doubleCheck: false })),
-    'Effective policy: reviewing on · testing, double-check and plan autopilot off · quick tasks skip these passes.'
+    'Effective policy: reviewing on · testing, styling, double-check and plan autopilot off · quick tasks skip these passes.'
   );
   assert.equal(
     orchestrationSummary(values({ testing: false, reviewing: false, doubleCheck: false, planning: false })),
@@ -80,7 +83,7 @@ test('the summary never claims a skip when every pass is off', () => {
   assert.equal(effectiveQuickTask(allPassesOff), false);
   assert.equal(
     orchestrationSummary(allPassesOff),
-    'Effective policy: plan autopilot on · testing, reviewing and double-check off.'
+    'Effective policy: plan autopilot on · testing, reviewing, styling and double-check off.'
   );
   assert.equal(orchestrationSummary(allPassesOff).includes('quick tasks skip'), false);
   assert.equal(effectiveQuickTask(values()), true);
@@ -89,7 +92,7 @@ test('the summary never claims a skip when every pass is off', () => {
 test('summary drops the quick suffix when quick tasks are off', () => {
   assert.equal(
     orchestrationSummary(values({ quickTask: false })),
-    'Effective policy: double-check and plan autopilot on · testing and reviewing off.'
+    'Effective policy: double-check and plan autopilot on · testing, reviewing and styling off.'
   );
   assert.equal(
     orchestrationSummary(
@@ -104,7 +107,7 @@ test('a single enabled pass is named without a conjunction', () => {
     orchestrationSummary(
       values({ testing: true, reviewing: false, doubleCheck: false, planning: false })
     ),
-    'Effective policy: testing on · reviewing, double-check and plan autopilot off · quick tasks skip these passes.'
+    'Effective policy: testing on · reviewing, styling, double-check and plan autopilot off · quick tasks skip these passes.'
   );
 });
 

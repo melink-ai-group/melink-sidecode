@@ -10,9 +10,9 @@ import {
 import { resolveExecutableCommand } from '../executables.ts';
 
 /**
- * Where the ast-grep CLI comes from for SideCode skills.
+ * Where the ast-grep CLI comes from for sideCode skills.
  *
- * `local` uses the configured path (or PATH). `bundled` uses the SideCode-
+ * `local` uses the configured path (or PATH). `bundled` uses the sideCode-
  * managed download under extension global storage.
  */
 

@@ -1,6 +1,6 @@
 # Visual harness (dev only)
 
-`npm run visual` renders the **built** SideCode webview in headless Chromium,
+`npm run visual` renders the **built** sideCode webview in headless Chromium,
 seeded with fixed host state, and writes twelve screens (24 PNGs) plus a
 manifest and an index under `.melink/reports/visual/`.
 

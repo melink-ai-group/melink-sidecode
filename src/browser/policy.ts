@@ -122,7 +122,7 @@ export function navigationOrigin(url: string): string | undefined {
  */
 export function originApprovalCopy(origin: string): string {
   return [
-    `SideCode browser wants to open ${origin}.`,
+    `sideCode browser wants to open ${origin}.`,
     '',
     'Allowing this origin also lets the agent use browser_click, browser_type, browser_press and browser_snapshot in the browser tab you are watching.',
     'Redirects and in-page link or form navigation are not re-prompted; navigate explicitly to be asked again.',

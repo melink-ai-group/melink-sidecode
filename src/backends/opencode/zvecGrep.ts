@@ -162,7 +162,7 @@ export function npmGlobalInstallArgs(): readonly string[] {
   return ['install', '-g', ZVEC_GREP_PACKAGE];
 }
 
-/** Install into a SideCode-managed prefix (bundled). */
+/** Install into a sideCode-managed prefix (bundled). */
 export function npmPrefixInstallArgs(prefix: string): readonly string[] {
   return ['install', '-g', '--prefix', prefix, ZVEC_GREP_PACKAGE];
 }
@@ -629,7 +629,7 @@ async function ensureZgInstalled(
 /**
  * Find `zg` for the active source.
  *
- * Bundled prefers the SideCode-managed prefix. Local uses the path setting,
+ * Bundled prefers the sideCode-managed prefix. Local uses the path setting,
  * PATH, then npm's global prefix.
  *
  * A path setting that is relative and contains a separator is skipped: it
@@ -693,7 +693,7 @@ async function missingZgMessage(io: ZvecGrepIO): Promise<string> {
 }
 
 async function configHasZvecGrep(io: ZvecGrepIO, userConfig?: OpencodeUserConfigIO): Promise<boolean> {
-  // When SideCode owns the user-config IO, that file is authoritative (enable
+  // When sideCode owns the user-config IO, that file is authoritative (enable
   // upserts / disable removes it). Fall back to the probe readConfig otherwise.
   if (userConfig) {
     try {

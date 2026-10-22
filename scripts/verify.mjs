@@ -44,7 +44,7 @@ const css = read('src/webview/styles.css');
 const titleVersion = claim(
   document,
   'title version',
-  /^#\s+Manual test script\s+[—–-]\s+SideCode v(\d+\.\d+\.\d+)/m,
+  /^#\s+Manual test script\s+[—–-]\s+sideCode v(\d+\.\d+\.\d+)/m,
 );
 const bulletVersion = claim(
   document,
@@ -90,7 +90,7 @@ const hexLines = css
   .filter((line) => /#[0-9a-fA-F]{3,8}\b/.test(line)).length;
 
 if (titleVersion !== version) {
-  fail(`title says SideCode v${titleVersion}, package.json says v${version}`);
+  fail(`title says sideCode v${titleVersion}, package.json says v${version}`);
 }
 if (bulletVersion !== version) {
   fail(`baseline says package version ${bulletVersion}, package.json says ${version}`);
@@ -148,7 +148,7 @@ if (existsSync(join(root, artifactRelativePath))) {
   }
 }
 
-console.log('SideCode verify — docs/manual-test.md vs the working tree');
+console.log('sideCode verify — docs/manual-test.md vs the working tree');
 console.log(`  package version:      ${version}`);
 console.log(`  node test files:      ${testFiles.length}`);
 console.log(`  node tests:           ${declaredTests}`);

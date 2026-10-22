@@ -11,6 +11,7 @@ test('defaults match the documented policy when nothing is set', () => {
   assert.deepEqual(settings, {
     testing: false,
     reviewing: false,
+    styling: false,
     doubleCheck: true,
     quickTask: true,
     planning: true,
@@ -141,6 +142,7 @@ test('each of the three standalone toggles can be turned off explicitly', () => 
   assert.equal(settings.planning, false);
   assert.equal(settings.testing, false);
   assert.equal(settings.reviewing, false);
+  assert.equal(settings.styling, false);
 });
 
 test('malformed values are ignored rather than coerced', () => {
@@ -153,15 +155,17 @@ test('malformed values are ignored rather than coerced', () => {
   });
   assert.equal(settings.testing, false);
   assert.equal(settings.reviewing, false);
+  assert.equal(settings.styling, false);
   assert.equal(settings.doubleCheck, true);
   assert.equal(settings.quickTask, true);
   assert.equal(settings.planning, true);
 });
 
-test('the exported key list is the five policy toggles', () => {
+test('the exported key list is the six policy toggles', () => {
   assert.deepEqual(ORCHESTRATION_KEYS, [
     'testing',
     'reviewing',
+    'styling',
     'doubleCheck',
     'quickTask',
     'planning'

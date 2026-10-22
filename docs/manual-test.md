@@ -1,4 +1,4 @@
-# Manual test script — SideCode v0.2.0
+# Manual test script — sideCode v0.2.0
 
 Runnable checklist for signing off v0.2.0. Work top to bottom; tick `[x]` for pass,
 leave `[ ]` and record the failure (or promote it to a known limitation) for a miss.
@@ -73,7 +73,7 @@ readiness rules, assertion tool, and screenshot storage.
       (expected: `Logged in using ChatGPT`).
 - [ ] 0.6 Open a **fresh, empty scratch workspace** so `workspaceState` from an
       earlier run cannot mask a failure.
-- [ ] 0.7 Open SideCode once (Activity Bar → **SideCode**) to force
+- [ ] 0.7 Open sideCode once (Activity Bar → **sideCode**) to force
       activation, then close it again.
 
 ### Making the Codex CLI unresolvable (reversible)
@@ -137,12 +137,12 @@ include a Zen group in that case; without the CLI, Zen is absent.
 - [ ] 1. Make the Codex CLI unresolvable with Method A (leave the Codex login in
       place — this pass proves that an unusable provider is isolated even when a
       credential exists).
-- [ ] 2. Set the Ollama token: Command Palette → **SideCode: Set Ollama Cloud token**,
+- [ ] 2. Set the Ollama token: Command Palette → **sideCode: Set Ollama Cloud token**,
       paste a valid `ollama.com` bearer token, Enter.
 - [ ] 3. Command Palette → **Developer: Reload Window**.
-- [ ] 4. Open the sidebar (Activity Bar → **SideCode**).
+- [ ] 4. Open the sidebar (Activity Bar → **sideCode**).
 - [ ] 5. **Expected sidebar state:** transcript reaches the empty state
-      with the SideCode logo and the name *“SideCode”*, with no suggestion
+      with the sideCode logo and the name *“sideCode”*, with no suggestion
       buttons and a tall composer;
       composer placeholder reads `Ask the agent...` and is enabled (input not
       disabled) after restore completes.
@@ -160,11 +160,11 @@ include a Zen group in that case; without the CLI, Zen is absent.
 
 ### Pass B — Codex only
 
-- [ ] 8. **SideCode: Clear Ollama Cloud token**, then reload the window.
+- [ ] 8. **sideCode: Clear Ollama Cloud token**, then reload the window.
 - [ ] 9. Ensure the CLI is resolvable again (step 0.5 restored) and signed in.
 - [ ] 10. Open the sidebar, open the **Model** trigger.
-      - **Expected sidebar state:** empty state with the SideCode logo and the name
-        *“SideCode”*; composer enabled with placeholder `Ask the agent...`.
+      - **Expected sidebar state:** empty state with the sideCode logo and the name
+        *“sideCode”*; composer enabled with placeholder `Ask the agent...`.
       - **Expected switcher:** the **OpenAI Codex CLI** group, listing
         `gpt-5-codex` and `gpt-5`, plus an **OpenCode Zen** group (free models)
         when the shared `opencode` CLI is installed. The **Ollama Cloud group
@@ -187,7 +187,7 @@ include a Zen group in that case; without the CLI, Zen is absent.
 
 ### Pass D — neither
 
-- [ ] 13. **SideCode: Clear Ollama Cloud token**; make the CLI unresolvable
+- [ ] 13. **sideCode: Clear Ollama Cloud token**; make the CLI unresolvable
       (Method A/B); reload; open the sidebar; open the **Model** trigger.
       - **Expected sidebar state:** empty state with title *“No backend is ready”*
         and text *“Ollama Cloud needs a token before you can chat.”*, with
@@ -235,7 +235,7 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
 - [ ] 14a2. **ast-grep persistence.** Under **Settings -> Skills -> ast-grep**,
       install bundled or local ast-grep, then turn **Use structural search** on.
       Confirm the chip reads **Ready** and `ast_grep` appears in the user OpenCode
-      config with a command that runs the SideCode shim under Node
+      config with a command that runs the sideCode shim under Node
       (`ELECTRON_RUN_AS_NODE=1`) and sets `AST_GREP_BIN`. Press **Test**: it must
       answer `tools/list` for `search` and `replace`. Turn it off and back on, then
       reload the window: the toggle and source/path must match the last save. A
@@ -482,7 +482,7 @@ specified criteria.`; pgrep exits non-zero with no output).
 Use a distinctive, non-real token so it is easy to grep for, e.g.
 `TEST-ONLY-should-never-appear-7f3a`. Never use a real credential for this check.
 
-- [ ] 34. Command Palette → **SideCode: Set Ollama Cloud token**, enter the distinctive
+- [ ] 34. Command Palette → **sideCode: Set Ollama Cloud token**, enter the distinctive
       token.
 - [ ] 35. **settings.json:** open both *User Settings (JSON)* and *Workspace Settings
       (JSON)* and search for the token substring. **Expected: absent.** The
@@ -504,7 +504,7 @@ Use a distinctive, non-real token so it is easy to grep for, e.g.
       and confirm the only uses are `secrets.store` / `secrets.get` against
       `OLLAMA_TOKEN_SECRET_KEY`. Confirm the token is only ever read into the
       `Authorization` header and never interpolated into an error string.
-- [ ] 39b. **Clear:** **SideCode: Clear Ollama Cloud token**, then confirm a subsequent
+- [ ] 39b. **Clear:** **sideCode: Clear Ollama Cloud token**, then confirm a subsequent
       turn reports *unauthenticated* (not a raw 401) with a **Set token** action.
 
 ---
@@ -524,7 +524,7 @@ it inherited from the environment. These checks confirm it end to end.
       the host. Send a Codex turn. **Expected:** the turn succeeds, and the
       Output channel shows no request carrying that key. (If the turn instead
       401s with *Incorrect API key provided*, the scrub did not take effect;
-      record it as a failure with the spawn args from the *(SideCode
+      record it as a failure with the spawn args from the *(sideCode
       (Codex))* output channel.)
 - [ ] 39l. **Config independence.** Add `forced_login_method = "api"` to
       `~/.codex/config.toml`, reload, and send a Codex turn. **Expected:** the
@@ -737,6 +737,23 @@ Testing is **off** in a fresh profile: open **Settings -> Orchestration** and tu
         spinner remains and no late child output overwrites it.
 - [ ] 47h. **Cleanup:** remove the temporary `scripts` entry and run
       `git status --porcelain`; restore the scratch files.
+
+### Pass 1c - styling check
+
+*Applies to: Codex and opencode (both).* **Styling check** is off in a fresh
+profile. Open **Settings -> Orchestration**, turn it on, and save.
+
+- [ ] 47i. **Frontend work runs the check.** Ask for a small change to a
+      component or stylesheet in the webview, for example add a rule with a
+      literal hex colour. On the finished turn, expand **Changes this turn**.
+      - **Expected:** a **Styling check** section appears beside the diff review
+        and names the hardcoded colour (or another token/state inconsistency) by
+        file and line. It stays advisory: **Keep** and **Reject** behave exactly
+        as before.
+- [ ] 47j. **Backend-only work is skipped.** Ask for a change to a backend
+      TypeScript file, not UI code, and finish the turn.
+      - **Expected:** no **Styling check** section and no brand-kit read; the
+        diff review, checks, and Keep/Reject behave exactly as before.
 
 
 ### Pass 2 — multi-file turn, counts, and bulk decisions
@@ -1238,8 +1255,8 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current T106+T110 working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.0 (`package.json`)
-- **Node test files:** 173 (`src/**/*.test.ts`)
-- **Node tests:** 1677 declarations: 1667 pass, 10 skipped, 0 failures (`npm run test:node`).
+- **Node test files:** 174 (`src/**/*.test.ts`)
+- **Node tests:** 1687 declarations: 1677 pass, 10 skipped, 0 failures (`npm run test:node`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 7 files / 38 tests, all passing (`npm run test:dom`). `npm test`
   runs the node, tools and DOM suites together.
@@ -1284,7 +1301,7 @@ These were run from the repo during authoring, without a GUI host:
       (queried best-effort), never the generic `unavailable` state.
 - [x] **Spawn-arg drift tolerated.** A rejected `--listen stdio://` exits early;
       the adapter retries once with the bare `codex app-server` and records which
-      form started in the **SideCode (Codex)** output channel.
+      form started in the **sideCode (Codex)** output channel.
 - [x] **No experimental feature probe.** No call to `experimentalFeature/list`
       or an enablement set exists; only the documented `initialize` capability
       flag is opted into (static guard in `src/backends/protocolHygiene.test.ts`).

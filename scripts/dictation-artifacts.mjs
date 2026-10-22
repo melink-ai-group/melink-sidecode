@@ -35,7 +35,7 @@ export function ffmpegLicenseFileName(platform = process.platform) {
   return `${ffmpegFileName(platform)}.LICENSE`;
 }
 
-/** ffmpeg-static publishes a LICENSE asset for every platform SideCode releases. */
+/** ffmpeg-static publishes a LICENSE asset for every platform sideCode releases. */
 export function ffmpegLicenseExpected(platform = process.platform) {
   return LICENSE_PLATFORMS.has(platform);
 }

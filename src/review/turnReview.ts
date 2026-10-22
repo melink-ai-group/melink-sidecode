@@ -123,6 +123,11 @@ function userText(item: TranscriptItem | undefined): string | undefined {
   if (!item || item.kind !== 'message' || item.role !== 'user') {
     return undefined;
   }
+  // An orchestration continuation is instructions we injected, not the
+  // request being reviewed. Fall back to the user turn that started the work.
+  if (item.orchestration) {
+    return undefined;
+  }
   const text = item.text?.trim();
   return text && text.length > 0 ? text : undefined;
 }

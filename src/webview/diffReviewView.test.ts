@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { DiffReviewResult } from '../review/diffReview.ts';
-import { diffReviewView, findingView, severityLabel } from './diffReviewView.ts';
+import { diffReviewView, findingView, severityLabel, stylingReviewView } from './diffReviewView.ts';
 
 /**
  * The diff-review section is driven by one pure display model. These tests pin
@@ -62,6 +62,24 @@ test('a failed review keeps its notice and stays advisory', () => {
 
 test('an unreviewed turn renders no section at all', () => {
   assert.equal(diffReviewView(undefined), undefined);
+});
+
+test('a styling result uses its own wording and keeps the brand-kit notice', () => {
+  const view = stylingReviewView({
+    status: 'reviewed',
+    findings: [{ path: 'src/webview/Card.tsx', line: 4, severity: 'warning', message: 'Literal colour.' }],
+    notice: 'No brand kit was found; this pass checked generic token and state consistency only.'
+  });
+  assert.equal(view?.summary, 'Styling: 1 finding');
+  assert.equal(view?.heading, '1 styling finding');
+  assert.equal(view?.detail, 'No brand kit was found; this pass checked generic token and state consistency only.');
+  assert.deepEqual(view?.findings[0], {
+    severity: 'warning',
+    severityLabel: 'Warning',
+    location: 'src/webview/Card.tsx:4',
+    message: 'Literal colour.'
+  });
+  assert.equal(stylingReviewView(undefined), undefined);
 });
 
 test('severity labels are fixed words, not glyph-only states', () => {

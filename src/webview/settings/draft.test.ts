@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizedQuickTask } from './draft.ts';
 
-const allPassesOff = { testing: false, reviewing: false, doubleCheck: false, quickTask: true };
+const allPassesOff = { testing: false, reviewing: false, styling: false, doubleCheck: false, quickTask: true };
 
 test('a stored quickTask=true opens clean when every pass is off', () => {
   assert.equal(normalizedQuickTask(allPassesOff), false);
@@ -57,6 +57,7 @@ function snapshot(): SettingsSnapshot {
     orchestration: {
       testing: false,
       reviewing: false,
+      styling: false,
       doubleCheck: true,
       quickTask: true,
       planning: true,
@@ -134,6 +135,7 @@ function applied(settings: SettingsSnapshot, patch: SettingsPatch): SettingsSnap
       ...settings.orchestration,
       testing: patch.orchestrationTesting ?? settings.orchestration.testing,
       reviewing: patch.orchestrationReviewing ?? settings.orchestration.reviewing,
+      styling: patch.orchestrationStyling ?? settings.orchestration.styling,
       doubleCheck: patch.orchestrationDoubleCheck ?? settings.orchestration.doubleCheck,
       quickTask: patch.orchestrationQuickTask ?? settings.orchestration.quickTask,
       planning: patch.orchestrationPlanning ?? settings.orchestration.planning

@@ -4,7 +4,7 @@
  */
 import { parseStoredComposer, type StoredComposer } from './composerControls.ts';
 
-export const DEFAULT_TAB_TITLE = 'SideCode';
+export const DEFAULT_TAB_TITLE = 'sideCode';
 
 /** First-line length before the sidebar tab title is cut. */
 export const TAB_TITLE_LIMIT = 28;
@@ -49,7 +49,7 @@ export interface ChatTabState extends StoredComposer {
 
 /**
  * Tab label for a user message or a stored history title.
- * Empty text stays `SideCode`. Only the first line is used, extra whitespace
+ * Empty text stays `sideCode`. Only the first line is used, extra whitespace
  * collapses, and a long line is cut at {@link TAB_TITLE_LIMIT}.
  */
 export function tabTitle(text: string | undefined): string {

@@ -1,4 +1,4 @@
-# SideCode (VS Code / Open VSX extension)
+# sideCode (VS Code / Open VSX extension)
 
 This file is the brand contract for designer-agent prototypes and OpenCode UI work. Tokens live in `tokens.css`.
 

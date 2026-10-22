@@ -145,9 +145,10 @@ test('quick does not mutate the input text', () => {
 });
 
 test('quick tasks is only effective while at least one pass is on', () => {
-  const pass = { testing: false, reviewing: false, doubleCheck: false };
+  const pass = { testing: false, reviewing: false, styling: false, doubleCheck: false };
   assert.equal(quickTaskApplies(true, pass), false);
   assert.equal(quickTaskApplies(false, { ...pass, testing: true }), false);
   assert.equal(quickTaskApplies(true, { ...pass, doubleCheck: true }), true);
   assert.equal(quickTaskApplies(true, { ...pass, reviewing: true }), true);
+  assert.equal(quickTaskApplies(true, { ...pass, styling: true }), true);
 });

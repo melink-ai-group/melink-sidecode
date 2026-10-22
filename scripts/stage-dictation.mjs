@@ -39,7 +39,7 @@ const ffmpegFrom = hostFfmpegPath(modules);
 if (!existsSync(ffmpegFrom) || statSync(ffmpegFrom).size === 0) {
   throw new Error(
     `Cannot package dictation for ${host}: ${ffmpegFrom} is missing or empty. ` +
-      `The build host must install ffmpeg-static for ${host}; SideCode will not package another platform's ffmpeg binary.`
+      `The build host must install ffmpeg-static for ${host}; sideCode will not package another platform's ffmpeg binary.`
   );
 }
 const binDir = path.join(root, 'dist', 'bin');
@@ -68,7 +68,7 @@ const platformTo = stagedOnnxBinaryDir(root);
 if (!existsSync(platformBin) || statSync(platformBin).isDirectory() === false) {
   throw new Error(
     `Cannot package dictation for ${host}: missing ONNX runtime directory ${platformBin}. ` +
-      `The build host must install onnxruntime-node for ${host}; SideCode will not package another platform's ONNX binary.`
+      `The build host must install onnxruntime-node for ${host}; sideCode will not package another platform's ONNX binary.`
   );
 }
 const hostOnnxProblems = onnxDirectoryProblems(platformBin);
@@ -76,7 +76,7 @@ if (hostOnnxProblems.length > 0) {
   throw new Error(
     `Cannot package dictation for ${host}: ONNX runtime directory ${platformBin} is incomplete ` +
       `(${hostOnnxProblems.join('; ')}). The build host must install onnxruntime-node for ${host}; ` +
-      `SideCode will not package another platform's ONNX binary.`
+      `sideCode will not package another platform's ONNX binary.`
   );
 }
 rmSync(onnxTo, { recursive: true, force: true });

@@ -5,6 +5,7 @@ import {
   type DiffReviewFile,
   type DiffReviewInput
 } from './diffReview.ts';
+import type { StylingBrandKitFile, StylingReviewInput } from './stylingReview.ts';
 
 /**
  * Turn a finished change review into the bounded input the diff reviewer sees.
@@ -29,6 +30,29 @@ export function buildTurnDiffReviewInput(view: ChangeView, request: string): Dif
   return {
     request: boundRequest(request),
     files: boundDiffFiles(files)
+  };
+}
+
+/**
+ * Build the styling reviewer input. The brand kit is bounded separately from
+ * the diff so a large design document cannot crowd the changed code out of the
+ * prompt; the local pass ignores it except for the token names it defines.
+ */
+export function buildTurnStylingReviewInput(
+  view: ChangeView,
+  request: string,
+  brandKit: readonly StylingBrandKitFile[] = []
+): StylingReviewInput {
+  return {
+    request: boundRequest(request),
+    files: view.files.map((file) => ({
+      path: file.path,
+      diff: renderFileDiff(file)
+    })),
+    brandKit: brandKit.map((file) => ({
+      path: file.path,
+      text: file.text.length > 8_000 ? `${file.text.slice(0, 7_999)}…` : file.text
+    }))
   };
 }
 

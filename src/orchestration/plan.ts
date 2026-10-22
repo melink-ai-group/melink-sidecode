@@ -20,6 +20,7 @@ export interface TurnPlan {
   quickReason: QuickTaskReason;
   testing: boolean;
   reviewing: boolean;
+  styling: boolean;
   doubleCheck: boolean;
   planning: boolean;
 }
@@ -37,6 +38,7 @@ export function planTurn(input: TurnPlanInput): TurnPlan {
       quickTask: quickTaskApplies(input.settings.quickTask, {
         testing: input.settings.testing,
         reviewing: input.settings.reviewing,
+        styling: input.settings.styling,
         doubleCheck: input.settings.doubleCheck
       })
     }
@@ -48,6 +50,7 @@ export function planTurn(input: TurnPlanInput): TurnPlan {
     quickReason: decision.reason,
     testing: input.settings.testing && enabled,
     reviewing: input.settings.reviewing && enabled,
+    styling: input.settings.styling && enabled,
     doubleCheck: input.settings.doubleCheck && enabled,
     planning: input.settings.planning && enabled && input.mode === 'agent'
   };

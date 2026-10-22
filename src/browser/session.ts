@@ -404,8 +404,8 @@ export class BrowserPage {
       const detail = last instanceof Error ? last.message : '';
       throw new Error(
         detail
-          ? `SideCode could not start Edge or Chrome. ${detail}`
-          : 'SideCode could not start Edge or Chrome, so the browser tab is unavailable.'
+          ? `sideCode could not start Edge or Chrome. ${detail}`
+          : 'sideCode could not start Edge or Chrome, so the browser tab is unavailable.'
       );
     }
     this.page = await this.browser.newPage();

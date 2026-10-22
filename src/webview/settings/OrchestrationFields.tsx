@@ -14,13 +14,14 @@ import {
  * The Orchestration tab's field group.
  *
  * The settings screen owns the draft and passes the effective values down, so
- * this component stays presentational: it renders the summary and the five
+ * this component stays presentational: it renders the summary and the six
  * toggles and reports every change through `onChange`. The body is intentionally
  * small; the orchestration work owns its final copy and dependent states.
  */
 export interface OrchestrationFieldValues {
   testing: boolean;
   reviewing: boolean;
+  styling: boolean;
   doubleCheck: boolean;
   quickTask: boolean;
   planning: boolean;

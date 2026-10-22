@@ -534,7 +534,19 @@ export function screenMessages(slug) {
                 linesOmitted: true,
                 restorable: true
               }
-            ]
+            ],
+            stylingReview: {
+              status: 'reviewed',
+              findings: [
+                {
+                  path: 'src/auth/middleware.ts',
+                  line: 18,
+                  severity: 'warning',
+                  message: 'Hardcoded hex color; use a theme or brand token so the UI follows the host and the brand kit.'
+                }
+              ],
+              notice: 'No brand kit was found; this pass checked generic token and state consistency only.'
+            }
           }
         }
       ];

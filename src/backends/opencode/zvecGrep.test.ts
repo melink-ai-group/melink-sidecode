@@ -225,7 +225,7 @@ test('enable refuses Node older than 22 and does not install', async () => {
   assert.equal(calls.some((call) => call.startsWith('npm install')), false);
 });
 
-test('bundled enable installs into the SideCode prefix', async () => {
+test('bundled enable installs into the sideCode prefix', async () => {
   const store = memoryConfig();
   const roots = { extensionPath: '/ext', globalStoragePath: '/storage' };
   const bin = bundledZvecGrepExecutable(roots, 'linux');

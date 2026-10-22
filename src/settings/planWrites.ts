@@ -228,6 +228,7 @@ export function planSettingsWrites(
   const orchestration: Array<[keyof SettingsPatch, string, boolean | undefined]> = [
     ['orchestrationTesting', `${ORCHESTRATION_SECTION}.testing`, patch.orchestrationTesting],
     ['orchestrationReviewing', `${ORCHESTRATION_SECTION}.reviewing`, patch.orchestrationReviewing],
+    ['orchestrationStyling', `${ORCHESTRATION_SECTION}.styling`, patch.orchestrationStyling],
     ['orchestrationDoubleCheck', `${ORCHESTRATION_SECTION}.doubleCheck`, patch.orchestrationDoubleCheck],
     ['orchestrationQuickTask', `${ORCHESTRATION_SECTION}.quickTask`, patch.orchestrationQuickTask],
     ['orchestrationPlanning', `${ORCHESTRATION_SECTION}.planning`, patch.orchestrationPlanning]

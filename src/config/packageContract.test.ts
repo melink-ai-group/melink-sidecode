@@ -148,6 +148,7 @@ test('the orchestration keys are window-scoped with the designed defaults', asyn
   const expected: Array<[string, boolean]> = [
     ['melink.orchestration.testing', false],
     ['melink.orchestration.reviewing', false],
+    ['melink.orchestration.styling', false],
     ['melink.orchestration.doubleCheck', true],
     ['melink.orchestration.quickTask', true],
     ['melink.orchestration.planning', true]

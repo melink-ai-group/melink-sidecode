@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_TAB_TITLE, parseChatTabState, reorderById, resolveChatTarget, tabTitle, TAB_TITLE_LIMIT } from './chatTabs.ts';
 
-test('an empty message keeps the SideCode tab title', () => {
+test('an empty message keeps the sideCode tab title', () => {
   assert.equal(tabTitle(undefined), DEFAULT_TAB_TITLE);
   assert.equal(tabTitle(''), DEFAULT_TAB_TITLE);
   assert.equal(tabTitle('   \n  '), DEFAULT_TAB_TITLE);

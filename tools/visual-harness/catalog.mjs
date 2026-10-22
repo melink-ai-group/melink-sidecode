@@ -13,7 +13,7 @@ export const SCREENS = Object.freeze([
   Object.freeze({
     slug: 'chat-idle',
     title: 'Composer / chat idle',
-    expectText: 'SideCode',
+    expectText: 'sideCode',
     waitFor: '.app--chat-empty'
   }),
   Object.freeze({

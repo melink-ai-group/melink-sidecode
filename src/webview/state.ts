@@ -79,6 +79,8 @@ export interface TranscriptItemView {
   threadId?: string;
   /** `message` items: files the user attached to the turn. */
   attachments?: Attachment[];
+  /** True for an injected orchestration continuation, not a user-typed message. */
+  orchestration?: boolean;
   text: string;
   /** Epoch milliseconds when this user message was stored. */
   sentAt?: number;
@@ -331,6 +333,7 @@ export type Action =
       text: string;
       attachments?: Attachment[];
       sentAt?: number;
+      orchestration?: boolean;
     }
   /** Replace the optimistic user bubble id with the host message id. */
   | { type: 'userMessageId'; backendId: string; threadId: string; messageId: string; sentAt?: number }
@@ -785,16 +788,20 @@ export function reduce(state: AppState, action: Action): AppState {
         attachments: action.attachments,
         text: action.text,
         status: 'completed',
-        ...(action.sentAt != null ? { sentAt: action.sentAt } : {})
+        ...(action.sentAt != null ? { sentAt: action.sentAt } : {}),
+        ...(action.orchestration ? { orchestration: true } : {})
       };
       // A webview that already showed an optimistic bubble for this text gets
-      // it adopted rather than duplicated.
+      // it adopted rather than duplicated. An orchestration row is never the
+      // user's own bubble, so it must not adopt one even if the text matches.
       let localIndex = -1;
-      for (let cursor = state.transcript.length - 1; cursor >= 0; cursor -= 1) {
-        const item = state.transcript[cursor];
-        if (item?.kind === 'message' && item.role === 'user' && item.id.startsWith('local_') && item.text === action.text) {
-          localIndex = cursor;
-          break;
+      if (!action.orchestration) {
+        for (let cursor = state.transcript.length - 1; cursor >= 0; cursor -= 1) {
+          const item = state.transcript[cursor];
+          if (item?.kind === 'message' && item.role === 'user' && item.id.startsWith('local_') && item.text === action.text) {
+            localIndex = cursor;
+            break;
+          }
         }
       }
       if (localIndex !== -1) {
@@ -1417,6 +1424,7 @@ function toTranscriptItemView(backendId: string) {
     approval: item.approval,
     approvalDecision: item.approvalDecision,
     attachments: item.attachments,
+    orchestration: item.orchestration,
     text: item.text ?? '',
     sentAt: item.sentAt,
     workedMs: item.workedMs,

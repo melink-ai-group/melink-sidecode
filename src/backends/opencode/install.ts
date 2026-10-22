@@ -18,7 +18,7 @@ import {
  * The bytes come from the anomalyco/opencode GitHub release named by the same
  * asset the opencode install script uses. Nothing is piped through a shell.
  * The caller chooses `installDir` (bundled global-storage `opencode/bin`, a
- * local absolute path's parent, or `~/.opencode/bin`). SideCode upgrades by
+ * local absolute path's parent, or `~/.opencode/bin`). sideCode upgrades by
  * calling this again rather than `opencode upgrade`, which can report success
  * without replacing the binary the path setting points at.
  */

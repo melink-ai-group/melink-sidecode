@@ -17,6 +17,7 @@ export interface Draft {
   dictationModel: string;
   orchestrationTesting: boolean;
   orchestrationReviewing: boolean;
+  orchestrationStyling: boolean;
   orchestrationDoubleCheck: boolean;
   orchestrationQuickTask: boolean;
   orchestrationPlanning: boolean;
@@ -40,7 +41,10 @@ export interface Draft {
 
 /** The value the draft displays/saves: with every pass off there is nothing to skip. */
 export function normalizedQuickTask(
-  orchestration: Pick<SettingsSnapshot['orchestration'], 'quickTask' | 'testing' | 'reviewing' | 'doubleCheck'>
+  orchestration: Pick<
+    SettingsSnapshot['orchestration'],
+    'quickTask' | 'testing' | 'reviewing' | 'styling' | 'doubleCheck'
+  >
 ): boolean {
   return quickTaskApplies(orchestration.quickTask, orchestration);
 }
@@ -62,6 +66,7 @@ export function draftFrom(settings: SettingsSnapshot): Draft {
     dictationModel: formatDictationTarget(settings.defaults.dictationModel),
     orchestrationTesting: settings.orchestration.testing,
     orchestrationReviewing: settings.orchestration.reviewing,
+    orchestrationStyling: settings.orchestration.styling,
     orchestrationDoubleCheck: settings.orchestration.doubleCheck,
     orchestrationQuickTask,
     orchestrationPlanning: settings.orchestration.planning,
@@ -101,6 +106,7 @@ export function patchFrom(draft: Draft): Required<SettingsPatch> {
     dictationModel: draft.dictationModel.trim(),
     orchestrationTesting: draft.orchestrationTesting,
     orchestrationReviewing: draft.orchestrationReviewing,
+    orchestrationStyling: draft.orchestrationStyling,
     orchestrationDoubleCheck: draft.orchestrationDoubleCheck,
     orchestrationQuickTask: draft.orchestrationQuickTask,
     orchestrationPlanning: draft.orchestrationPlanning,
@@ -146,6 +152,7 @@ function storedPatch(settings: SettingsSnapshot): Required<SettingsPatch> {
     dictationModel: formatDictationTarget(settings.defaults.dictationModel),
     orchestrationTesting: settings.orchestration.testing,
     orchestrationReviewing: settings.orchestration.reviewing,
+    orchestrationStyling: settings.orchestration.styling,
     orchestrationDoubleCheck: settings.orchestration.doubleCheck,
     orchestrationQuickTask: normalizedQuickTask(settings.orchestration),
     orchestrationPlanning: settings.orchestration.planning,

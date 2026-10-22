@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 
 /**
- * OpenCode MCP server entries and permission keys for SideCode skills.
+ * OpenCode MCP server entries and permission keys for sideCode skills.
  *
  * Used both when writing the user OpenCode config and when injecting into
  * per-turn OPENCODE_CONFIG_CONTENT.
@@ -68,7 +68,7 @@ export function zvecGrepOpencodeServer(zgExecutable: string): OpencodeLocalMcpSe
 }
 
 /**
- * The Node executable that runs the SideCode MCP shims.
+ * The Node executable that runs the sideCode MCP shims.
  *
  * Inside the extension host `process.execPath` is `Code.exe`, so the entry also
  * sets `ELECTRON_RUN_AS_NODE=1` (the same pattern the browser skill uses).
@@ -79,7 +79,7 @@ export function astGrepNodeExecutable(nodeExecutable?: string): string {
 }
 
 /**
- * ast-grep MCP entry: Node runs the SideCode shim; the shim shells out to
+ * ast-grep MCP entry: Node runs the sideCode shim; the shim shells out to
  * `AST_GREP_BIN`.
  */
 export function astGrepOpencodeServer(options: {

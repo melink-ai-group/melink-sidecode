@@ -150,7 +150,7 @@ export function readTrustedAstGrepExecutable(fallback = 'ast-grep'): string {
 
 /**
  * Where the opencode CLI comes from: `local` (the user's own path or PATH) or
- * `bundled` (the SideCode-managed download).
+ * `bundled` (the sideCode-managed download).
  *
  * Read from the user's own settings only, so a workspace cannot push the
  * runtime back onto a machine-local binary.

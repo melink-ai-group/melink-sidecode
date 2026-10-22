@@ -6,6 +6,7 @@ import { resolveOrchestrationSettings, type OrchestrationToggles } from './setti
 const ALL_ON: OrchestrationToggles = {
   testing: true,
   reviewing: true,
+  styling: true,
   doubleCheck: true,
   quickTask: true,
   planning: true
@@ -29,6 +30,7 @@ test('a non-quick Agent turn runs every enabled pass', () => {
     quickReason: 'action-verb',
     testing: true,
     reviewing: true,
+    styling: true,
     doubleCheck: true,
     planning: true
   });
@@ -40,15 +42,16 @@ test('a quick turn disables every pass', () => {
   assert.equal(plan.quickReason, 'quick');
   assert.equal(plan.testing, false);
   assert.equal(plan.reviewing, false);
+  assert.equal(plan.styling, false);
   assert.equal(plan.doubleCheck, false);
   assert.equal(plan.planning, false);
 });
 
 test('each gate is its toggle AND not quick', () => {
-  for (const key of ['testing', 'reviewing', 'doubleCheck', 'planning'] as const) {
+  for (const key of ['testing', 'reviewing', 'styling', 'doubleCheck', 'planning'] as const) {
     const plan = planTurn(input({ settings: { ...ALL_ON, [key]: false } }));
     assert.equal(plan[key], false, key);
-    for (const other of ['testing', 'reviewing', 'doubleCheck', 'planning'] as const) {
+    for (const other of ['testing', 'reviewing', 'styling', 'doubleCheck', 'planning'] as const) {
       if (other !== key) {
         assert.equal(plan[other], true, `${key} off must not change ${other}`);
       }
@@ -63,6 +66,7 @@ test('planning stays off outside Agent mode while the other passes still run', (
     assert.equal(plan.planning, false, mode);
     assert.equal(plan.testing, true, mode);
     assert.equal(plan.reviewing, true, mode);
+    assert.equal(plan.styling, true, mode);
     assert.equal(plan.doubleCheck, true, mode);
   }
 });
@@ -72,6 +76,7 @@ test('a fresh profile resolves testing off, so the plan gate starts closed', () 
   assert.equal(plan.testing, false);
   assert.equal(plan.doubleCheck, true);
   assert.equal(plan.reviewing, false);
+  assert.equal(plan.styling, false);
 });
 
 test('quick detection disabled means the gates stay on', () => {
@@ -85,6 +90,7 @@ test('quick detection disabled means the gates stay on', () => {
   assert.equal(plan.quickReason, 'quick-task-disabled');
   assert.equal(plan.testing, true);
   assert.equal(plan.reviewing, true);
+  assert.equal(plan.styling, true);
   assert.equal(plan.doubleCheck, true);
   assert.equal(plan.planning, true);
 });
@@ -93,7 +99,7 @@ test('quick tasks is inert when every pass it could skip is off', () => {
   const plan = planTurn(
     input({
       text: 'What does registry.probe do?',
-      settings: { ...ALL_ON, testing: false, reviewing: false, doubleCheck: false }
+      settings: { ...ALL_ON, testing: false, reviewing: false, styling: false, doubleCheck: false }
     })
   );
   assert.equal(plan.quick, false);

@@ -1,5 +1,5 @@
 /**
- * Shared local/bundled CLI source for SideCode-managed skill binaries.
+ * Shared local/bundled CLI source for sideCode-managed skill binaries.
  * Same vocabulary as the opencode CLI source setting.
  */
 

@@ -427,6 +427,7 @@ export function SettingsScreen({
   const orchestrationDraftKeys: Record<OrchestrationFieldKey, keyof Draft> = {
     testing: 'orchestrationTesting',
     reviewing: 'orchestrationReviewing',
+    styling: 'orchestrationStyling',
     doubleCheck: 'orchestrationDoubleCheck',
     quickTask: 'orchestrationQuickTask',
     planning: 'orchestrationPlanning'
@@ -435,6 +436,7 @@ export function SettingsScreen({
     const draftKey = orchestrationDraftKeys[key] as
       | 'orchestrationTesting'
       | 'orchestrationReviewing'
+      | 'orchestrationStyling'
       | 'orchestrationDoubleCheck'
       | 'orchestrationQuickTask'
       | 'orchestrationPlanning';
@@ -1096,7 +1098,7 @@ export function SettingsScreen({
               </div>
               {settings.codex.status === 'incompatible' ? (
                 <p className="field-help">
-                  Checks this CLI against the protocol SideCode uses. A version that passes is allowed.
+                  Checks this CLI against the protocol sideCode uses. A version that passes is allowed.
                 </p>
               ) : null}
               {codexVersionCheck && !codexVersionCheck.pending && codexVersionCheck.message ? (
@@ -1288,6 +1290,7 @@ export function SettingsScreen({
               values={{
                 testing: draft.orchestrationTesting,
                 reviewing: draft.orchestrationReviewing,
+                styling: draft.orchestrationStyling,
                 doubleCheck: draft.orchestrationDoubleCheck,
                 quickTask: draft.orchestrationQuickTask,
                 planning: draft.orchestrationPlanning
@@ -1611,11 +1614,11 @@ export function SettingsScreen({
             <SkillPanel
               id="ast-grep"
               title="ast-grep"
-              about="Syntax-aware code search and rewrite, bundled with the app. Agents find and refactor by AST pattern instead of fragile text matching. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up."
+              about="Syntax-aware code search and rewrite, bundled with the app. Agents find and refactor by AST pattern instead of fragile text matching. Enabling updates your user OpenCode config and sideCode turns; a new session picks it up."
               oneLineHelp="Structural search and rewrite by AST pattern."
               checked={astChecked}
               toggleLabel="Use structural search"
-              toggleTip="Updates your user OpenCode config and SideCode turns. A new session picks it up."
+              toggleTip="Updates your user OpenCode config and sideCode turns. A new session picks it up."
               togglePending={astGrep?.pending === true}
               onToggle={(value) => onSetAstGrep(value, astCliDraft)}
               chip={astChip}
@@ -1651,11 +1654,11 @@ export function SettingsScreen({
             <SkillPanel
               id="zvec-grep"
               title="zvec-grep"
-              about="Local semantic, keyword, and ripgrep search, bundled with the app and exposed as an MCP tool. Returns ranked, source-linked snippets so agents read fewer files. Enabling updates your user OpenCode config and SideCode turns; a new session picks it up. A workspace index is required."
+              about="Local semantic, keyword, and ripgrep search, bundled with the app and exposed as an MCP tool. Returns ranked, source-linked snippets so agents read fewer files. Enabling updates your user OpenCode config and sideCode turns; a new session picks it up. A workspace index is required."
               oneLineHelp="Semantic search over a workspace index."
               checked={zvecChecked}
               toggleLabel="Use semantic search"
-              toggleTip="Updates your user OpenCode config and SideCode turns. A new session picks it up."
+              toggleTip="Updates your user OpenCode config and sideCode turns. A new session picks it up."
               togglePending={zvecGrep?.pending === true}
               onToggle={(value) => onSetZvecGrep(value, zvecCliDraft)}
               chip={zvecChip}
@@ -1758,6 +1761,7 @@ function fieldDestination(field: keyof SettingsPatch): FieldDestination {
       return { tab: 'defaults', label: 'Defaults' };
     case 'orchestrationTesting':
     case 'orchestrationReviewing':
+    case 'orchestrationStyling':
     case 'orchestrationDoubleCheck':
     case 'orchestrationQuickTask':
     case 'orchestrationPlanning':

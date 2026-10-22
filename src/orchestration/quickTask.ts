@@ -25,10 +25,11 @@ export interface QuickTaskSettings {
   quickTask: boolean;
 }
 
-/** The three post-turn passes a quick task can skip. */
+/** The post-turn passes a quick task can skip. */
 export interface QuickTaskPasses {
   testing: boolean;
   reviewing: boolean;
+  styling: boolean;
   doubleCheck: boolean;
 }
 
@@ -38,7 +39,7 @@ export interface QuickTaskPasses {
  * off, rather than hiding a stored `true` behind a disabled control).
  */
 export function quickTaskApplies(enabled: boolean, passes: QuickTaskPasses): boolean {
-  return enabled && (passes.testing || passes.reviewing || passes.doubleCheck);
+  return enabled && (passes.testing || passes.reviewing || passes.styling || passes.doubleCheck);
 }
 
 export interface QuickTaskInput {

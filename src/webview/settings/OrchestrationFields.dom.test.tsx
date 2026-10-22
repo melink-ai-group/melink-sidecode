@@ -5,6 +5,7 @@ import { OrchestrationFields, type OrchestrationFieldValues } from './Orchestrat
 const DEFAULT_VALUES: OrchestrationFieldValues = {
   testing: false,
   reviewing: false,
+  styling: false,
   doubleCheck: true,
   quickTask: true,
   planning: true
@@ -32,7 +33,7 @@ describe('OrchestrationFields', () => {
     expect(
       screen.getByRole('status').textContent
     ).toBe(
-      'Effective policy: double-check and plan autopilot on · testing and reviewing off · quick tasks skip these passes.'
+      'Effective policy: double-check and plan autopilot on · testing, reviewing and styling off · quick tasks skip these passes.'
     );
   });
 
@@ -45,11 +46,13 @@ describe('OrchestrationFields', () => {
     const onChange = renderFields({ testing: true });
     fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Reviewing/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Styling check/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Double-check/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Plan autopilot/ }));
     expect(onChange.mock.calls).toEqual([
       ['testing', false],
       ['reviewing', true],
+      ['styling', true],
       ['doubleCheck', false],
       ['planning', false]
     ]);
@@ -62,7 +65,7 @@ describe('OrchestrationFields', () => {
     expect(quick.checked).toBe(false);
     expect(screen.getByText('Enable at least one pass first.')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toBe(
-      'Effective policy: plan autopilot on · testing, reviewing and double-check off.'
+      'Effective policy: plan autopilot on · testing, reviewing, styling and double-check off.'
     );
   });
 

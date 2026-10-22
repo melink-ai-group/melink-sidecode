@@ -243,7 +243,7 @@ test('a one-line reply does not swallow an edit', () => {
   assert.deepEqual(entries.map(entryKey), ['a1', 'e1']);
 });
 
-test('melink is marked on the first reply, and on the last only once the turn has settled', () => {
+test('meLink is marked on the first reply, and on the last only once the turn has settled', () => {
   const entries = groupTranscript([
     row({ id: 'u', kind: 'message', role: 'user', text: 'look at settings' }),
     row({ id: 'a1', kind: 'message', role: 'assistant', text: 'I will look at the settings pages.' }),

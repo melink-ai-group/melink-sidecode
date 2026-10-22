@@ -138,7 +138,7 @@ export const WORKSPACE_SAVE_REFUSED_MESSAGE =
 /**
  * Whether a settings key may be written to workspace settings.
  *
- * Only the trust-sensitive keys are refused; every other SideCode setting
+ * Only the trust-sensitive keys are refused; every other sideCode setting
  * (model names, context toggles, the browser skill flags) keeps its existing
  * workspace-scope behaviour.
  */

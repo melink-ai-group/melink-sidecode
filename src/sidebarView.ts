@@ -109,13 +109,21 @@ import { readFileDiagnostics } from './orchestration/vscodeDiagnostics.ts';
 import { anyCategoryEnabled } from './context/contextView';
 import type { CheckpointPlanRecord } from './changes/journal';
 import { REVIEW_HUNK_LINE_LIMIT, capReviewLines } from './changes/reviewLines.ts';
-import { ReviewStore } from './review/reviewStore.ts';
+import { ReviewStore, STYLING_REVIEW_STORE_KEY } from './review/reviewStore.ts';
 import {
   DIFF_REVIEW_TIMEOUT_MS,
   runTurnDiffReview,
   shouldRunDiffReview,
   turnRequestText
 } from './review/turnReview.ts';
+import {
+  shouldRunStylingCheck,
+  type StylingBrandKitFile
+} from './review/stylingReview.ts';
+import {
+  STYLING_REVIEW_TIMEOUT_MS,
+  runTurnStylingReview
+} from './review/turnStyling.ts';
 import { VscodeChangeJournal } from './changes/vscodeJournal';
 import { VscodeChangeStore } from './changes/vscodeChangeStore';
 import { VscodeCheckpointStore } from './changes/vscodeCheckpoint';
@@ -203,7 +211,7 @@ import {
 import { render } from './sidebar/viewHtml';
 
 /**
- * Renders the SideCode sidebar. Each open conversation is a tab in that view.
+ * Renders the sideCode sidebar. Each open conversation is a tab in that view.
  * This class is UI-facing glue: it forwards the registry's snapshot and
  * normalized events to the React webview and turns webview intents into
  * registry calls. It holds no provider types.
@@ -305,6 +313,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private readonly reviewStore: ReviewStore;
   /**
+   * The advisory styling-check result for a finished turn. It uses the same
+   * bounded review store with its own workspace key, so the diff review and the
+   * styling check never overwrite each other.
+   */
+  private readonly stylingReviewStore: ReviewStore;
+  /**
    * The post-turn check result store and runner. Checks are advisory evidence
    * about a finished turn: they never reach a model and never decide a Keep.
    */
@@ -388,6 +402,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // journal instance so a view read and a decision read agree on content.
     this.changeStore = new VscodeChangeStore(context, { artifacts: this.changeJournal });
     this.reviewStore = new ReviewStore(context.workspaceState);
+    this.stylingReviewStore = new ReviewStore(
+      context.workspaceState,
+      Date.now,
+      STYLING_REVIEW_STORE_KEY
+    );
     this.checkStore = new VscodeCheckStore(context);
     this.checkHost = new CheckHost({
       store: this.checkStore,
@@ -838,8 +857,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const fallback = plan ? undefined : readOrchestrationSettings();
     const testing = plan?.testing ?? fallback?.testing ?? false;
     const reviewing = plan?.reviewing ?? fallback?.reviewing ?? false;
+    const styling = plan?.styling ?? fallback?.styling ?? false;
     const doubleCheck = plan?.doubleCheck ?? fallback?.doubleCheck ?? true;
     const shouldReview = shouldRunDiffReview(reviewing, set.entries);
+    // The styling pass is a frontend-only pass: a backend-only turn is skipped
+    // before a brand kit is read or a prompt is built.
+    const shouldStyle = shouldRunStylingCheck(styling, set.entries);
     // Checks start only for a non-empty, closed change set. A background turn
     // still stores its result; the runner decides whether the visible surface
     // may be repainted.
@@ -857,11 +880,17 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       if (shouldReview) {
         await this.reviewFinishedTurn(set);
       }
+      if (shouldStyle) {
+        await this.stylingReviewFinishedTurn(set);
+      }
       return;
     }
     this.postTurnChanged(set);
     if (shouldReview) {
       await this.reviewFinishedTurn(set);
+    }
+    if (shouldStyle) {
+      await this.stylingReviewFinishedTurn(set);
     }
     await this.postChangeReview(set.backendId, set.threadId, set.turnId);
     // A turn that just touched files makes its opening message a checkpoint, so
@@ -956,6 +985,70 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** True when the resolved policy has the advisory styling check on. */
+  private stylingCheckEnabled(): boolean {
+    return readOrchestrationSettings().styling;
+  }
+
+  /**
+   * Run and persist the styling check once, at live turn finish. A reload reads
+   * the stored result through `postChangeReview` and never calls this. The
+   * caller has already proven the turn changed frontend work.
+   */
+  private async stylingReviewFinishedTurn(set: TurnChangeSet): Promise<void> {
+    const view = await this.changeStore.view(set.backendId, set.threadId, set.turnId);
+    if (!view) {
+      return;
+    }
+    const request = turnRequestText(
+      this.store.getTranscript(set.backendId, set.threadId),
+      set.messageId
+    );
+    const brandKit = await this.readBrandKit();
+    await runTurnStylingReview({
+      view,
+      ...(request === undefined ? {} : { request }),
+      brandKit,
+      store: this.stylingReviewStore,
+      timeoutMs: STYLING_REVIEW_TIMEOUT_MS
+    });
+  }
+
+  /**
+   * Read the project's own brand contract, when it exists. Reading only happens
+   * after the styling gate has passed, so an ordinary backend turn pays nothing.
+   * Each file is bounded; a missing or unreadable file is simply absent.
+   */
+  private async readBrandKit(): Promise<StylingBrandKitFile[]> {
+    let uris: vscode.Uri[];
+    try {
+      uris = await vscode.workspace.findFiles(
+        '**/{tokens.css,DESIGN.md,design-tokens.json,brand.json}',
+        '**/{node_modules,dist,out,build,.git}/**',
+        12
+      );
+    } catch {
+      return [];
+    }
+    const files: StylingBrandKitFile[] = [];
+    let budget = 40_000;
+    for (const uri of uris) {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        if (bytes.byteLength > 20_000 || budget <= 0) {
+          continue;
+        }
+        const text = new TextDecoder().decode(bytes);
+        const bounded = text.length > budget ? text.slice(0, budget) : text;
+        budget -= bounded.length;
+        files.push({ path: vscode.workspace.asRelativePath(uri, false), text: bounded });
+      } catch {
+        // A brand file is optional; an unreadable one never fails the check.
+      }
+    }
+    return files;
+  }
+
   /**
    * Offer post-turn checks for one finished change set. The runner stores a
    * `running` view before spawning and a final view when it settles; the
@@ -1048,12 +1141,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const diffReview = this.diffReviewEnabled()
       ? this.reviewStore.get(backendId, threadId, turnId)
       : undefined;
+    const stylingReview = this.stylingCheckEnabled()
+      ? this.stylingReviewStore.get(backendId, threadId, turnId)
+      : undefined;
     const checks = this.checkStore.get(backendId, threadId, turnId);
     this.post({
       type: 'changes/review',
       review: {
         ...review,
         ...(diffReview === undefined ? {} : { diffReview }),
+        ...(stylingReview === undefined ? {} : { stylingReview }),
         ...(checks ? { checks } : {}),
         files: review.files.map((file) =>
           file.hunks.length === 0
@@ -1358,9 +1455,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * The open chat gets the user message of a queued turn that just started.
-   * Stored attachments keep only their path; the preview bytes are read here,
-   * the same way a replay paints a stored bubble.
+   * The open chat gets the user message of a queued turn that just started, or
+   * the injected row of an orchestration continuation. Stored attachments keep
+   * only their path; the preview bytes are read here, the same way a replay
+   * paints a stored bubble. `orchestration` makes the row a collapsed
+   * orchestration entry rather than the user's own bubble.
    */
   private async postDispatchedUserMessage(
     backendId: string,
@@ -1368,7 +1467,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     messageId: string,
     text: string,
     attachments: Attachment[] | undefined,
-    sentAt: number
+    sentAt: number,
+    orchestration = false
   ): Promise<void> {
     const [preview] = await this.previewReplay([
       {
@@ -1378,7 +1478,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         text,
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
         status: 'completed',
-        sentAt
+        sentAt,
+        ...(orchestration ? { orchestration: true } : {})
       }
     ]);
     this.post({
@@ -1388,7 +1489,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       messageId,
       text,
       ...(preview?.attachments && preview.attachments.length > 0 ? { attachments: preview.attachments } : {}),
-      sentAt
+      sentAt,
+      ...(orchestration ? { orchestration: true } : {})
     });
   }
 
@@ -1683,7 +1785,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const stored = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId)?.title;
     const transcript = this.store
       .getTranscript(backendId, threadId)
-      .find((item) => item.role === 'user' && item.text?.trim())?.text;
+      .find((item) => item.role === 'user' && !item.orchestration && item.text?.trim())?.text;
     void this.showSession(
       this.createSession({ blank: false, backendId, threadId, title: tabTitle(historyThreadTitle(stored, transcript)) })
     );
@@ -1706,7 +1808,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const transcript = this.store
       .getTranscript(backendId, threadId)
-      .find((item) => item.role === 'user' && item.text?.trim())?.text;
+      .find((item) => item.role === 'user' && !item.orchestration && item.text?.trim())?.text;
     return historyThreadTitle(transcript, providerTitle);
   }
 
@@ -3463,7 +3565,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       }
       const titled = historyThreadTitle(
         ref?.title,
-        result.items.find((item) => item.role === 'user' && item.text?.trim())?.text
+        result.items.find((item) => item.role === 'user' && !item.orchestration && item.text?.trim())?.text
       );
       const choice = this.composerSelection(backendId, result.model);
       await this.store.setActiveThread({
@@ -3534,7 +3636,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         }
         const titled = historyThreadTitle(
           ref?.title,
-          storedItems.find((item) => item.role === 'user' && item.text?.trim())?.text
+          storedItems.find((item) => item.role === 'user' && !item.orchestration && item.text?.trim())?.text
         );
         if (this.session) {
           this.session.blank = false;
@@ -4245,6 +4347,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const automatic = origin === 'autopilot';
     const continuing = origin === 'continue';
+    // Injected continuations are orchestration, not something the user typed.
+    // They still open a real turn, so every checkpoint and change card path
+    // keeps working; only the transcript presentation differs.
+    const orchestration = automatic || continuing;
     if (this.session) {
       this.session.planRunAutomatic = automatic;
       if (!automatic && !continuing) {
@@ -4361,7 +4467,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       this.contextDelivery.setExclusions([]);
       void this.postContextView();
     }
-    if (!automatic) {
+    // Only the user moving on hides a finished plan row; an orchestration
+    // continuation is still that plan's own work.
+    if (!orchestration) {
       await this.dismissCompletedPlan(activeBackendId, threadId);
     }
     const messageId = await this.store.appendUserMessage(
@@ -4370,10 +4478,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       text,
       persisted,
       true,
-      openedAt
+      openedAt,
+      orchestration
     );
     const indexed = this.store.listThreads(activeBackendId).find((entry) => entry.threadId === threadId);
-    const title = historyThreadTitle(indexed?.title, text);
+    // An orchestration instruction is not a title the user wrote.
+    const title = historyThreadTitle(indexed?.title, orchestration ? undefined : text);
     await this.store.setActiveThread({
       backendId: activeBackendId,
       threadId,
@@ -4382,7 +4492,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       title,
       updatedAt: Date.now()
     });
-    if (this.session && (this.session.blank || this.session.title === DEFAULT_TAB_TITLE)) {
+    if (!orchestration && this.session && (this.session.blank || this.session.title === DEFAULT_TAB_TITLE)) {
       const label = tabTitle(text);
       if (label !== DEFAULT_TAB_TITLE) {
         this.session.title = label;
@@ -4405,11 +4515,21 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.pendingTurnMessage = { messageId, backendId: activeBackendId, threadId };
     await this.captureSentMessage(activeBackendId, threadId, messageId);
     // A queued turn (or a queue:true send that raced the turn end) was never
-    // drawn by the webview. Post the stored message now so the transcript shows
-    // it before the first reply streams. The stored id makes the next replay
-    // replace this row instead of adding a duplicate.
-    if (announceUserMessage && this.visible === this.session) {
-      await this.postDispatchedUserMessage(activeBackendId, threadId, messageId, text, persisted, openedAt);
+    // drawn by the webview. An orchestration continuation was never typed at
+    // all. Post the stored row now so the transcript shows it before the first
+    // reply streams; this row is also the anchor the turn's change card needs,
+    // so omitting it would leave the turn's file changes unplaced. The stored id
+    // makes the next replay replace this row instead of adding a duplicate.
+    if ((announceUserMessage || orchestration) && this.visible === this.session) {
+      await this.postDispatchedUserMessage(
+        activeBackendId,
+        threadId,
+        messageId,
+        text,
+        persisted,
+        openedAt,
+        orchestration
+      );
     }
     if (this.session) {
       this.session.turnOpen = true;

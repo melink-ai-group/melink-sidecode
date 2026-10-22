@@ -67,6 +67,46 @@ export function diffReviewView(result: DiffReviewResult | undefined): DiffReview
   };
 }
 
+/**
+ * The styling check's display model. It shares the finding rows and severity
+ * vocabulary with the diff review but never uses the diff-review wording, so a
+ * reader can tell the two advisory passes apart.
+ */
+export function stylingReviewView(result: DiffReviewResult | undefined): DiffReviewView | undefined {
+  if (!result) {
+    return undefined;
+  }
+  if (result.status === 'failed') {
+    return {
+      kind: 'failed',
+      tone: 'warning',
+      summary: 'Styling unavailable',
+      heading: 'Styling check unavailable.',
+      detail: result.notice ?? 'The styling check could not complete. Your changes are still ready for review.',
+      findings: []
+    };
+  }
+  if (result.findings.length === 0) {
+    return {
+      kind: 'empty',
+      tone: 'ok',
+      summary: 'Styling: clean',
+      heading: 'No styling-consistency findings.',
+      ...(result.notice === undefined ? {} : { detail: result.notice }),
+      findings: []
+    };
+  }
+  const findings = result.findings.map(findingView);
+  return {
+    kind: 'findings',
+    tone: highestSeverity(findings),
+    summary: `Styling: ${findings.length} finding${findings.length === 1 ? '' : 's'}`,
+    heading: `${findings.length} styling finding${findings.length === 1 ? '' : 's'}`,
+    ...(result.notice === undefined ? {} : { detail: result.notice }),
+    findings
+  };
+}
+
 /** One finding as the panel shows it: severity word, `path:line`, then message. */
 export function findingView(finding: DiffReviewFinding): DiffReviewFindingView {
   return {
