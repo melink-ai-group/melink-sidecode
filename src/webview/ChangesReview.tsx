@@ -52,6 +52,9 @@ export interface ChangesReviewProps {
   busy: boolean;
   /** True while a decision request is in flight, so controls lock. */
   deciding: boolean;
+  /** Send the listed issues as a normal user message. */
+  onFix: (text: string) => void;
+  fixDisabled?: boolean;
   /** The most recent decision outcomes, so a conflict or failure is surfaced. */
   decisionResults?: ChangeDecisionResult[];
   /** The destructive reject awaiting an explicit confirmation, if any. */
@@ -86,6 +89,8 @@ function ChangesReviewView({
   review,
   busy,
   deciding,
+  onFix,
+  fixDisabled,
   decisionResults,
   rejectConfirm,
   onOpenFile,
@@ -239,6 +244,23 @@ function ChangesReviewView({
   const countLabel = fileCountLabel(review.files);
   const diffReview = diffReviewView(review.diffReview);
   const stylingReview = stylingReviewView(review.stylingReview);
+  const reviews = [diffReview, stylingReview].filter((view): view is DiffReviewView => Boolean(view));
+  const attention = (['error', 'warning', 'info'] as const).map((severity) => ({
+    severity,
+    count: reviews.reduce((count, view) => count + view.findings.filter((finding) => finding.severity === severity).length +
+      (view.kind === 'failed' && severity === 'warning' ? 1 : 0), 0) +
+      (severity === 'error' ? Math.max(rows.filter((row) => row.failed).length, gate === 'needs-override' ? 1 : 0) : 0)
+  })).filter(({ count }) => count > 0);
+  const fixMessage = [
+    `Fix the issues reported for the files changed in turn ${review.turnId}. Inspect the current files first, address the findings below, and rerun the relevant checks.`,
+    ...reviews.flatMap((view) => [
+      ...view.findings.map((finding) => `${finding.severityLabel}: ${finding.location} — ${finding.message}`),
+      ...(view.kind === 'failed' ? [`${view.heading} ${view.detail ?? ''}`] : [])
+    ]),
+    ...rows.filter((row) => row.failed).map((row) =>
+      `${row.statusLabel}: ${row.name}${row.command ? ` (${row.command})` : ''}\n${[row.reason, row.excerpt].filter(Boolean).join('\n')}`),
+    ...(gate === 'needs-override' && !rows.some((row) => row.failed) ? [summary ?? 'Post-turn checks failed.'] : [])
+  ].join('\n\n');
 
   const locked = busy || deciding;
   const keepBlocked = gate === 'blocked-running';
@@ -327,6 +349,24 @@ function ChangesReviewView({
             </span>
           ) : null}
         </button>
+        {!expanded && attention.length > 0 ? (
+          <span className="changes-review__attention" role="status" aria-label="Issues need attention">
+            {attention.map(({ severity, count }) => {
+              const Icon = severity === 'info' ? InfoIcon : severity === 'error' ? CrossIcon : AlertIcon;
+              const label = `${count} ${severity === 'info' ? 'informational notice' : severity}${count === 1 ? '' : 's'}`;
+              return (
+                <span key={severity} className={`changes-review__attention-item diff-review__severity--${severity}`} role="img" aria-label={label} title={label}>
+                  <Icon className="ico ico--xs" />{count}
+                </span>
+              );
+            })}
+          </span>
+        ) : null}
+        {attention.length > 0 ? (
+          <button className="btn changes-review__fix" type="button" disabled={busy || deciding || fixDisabled} onClick={() => onFix(fixMessage)} title="Send a message asking the agent to fix the reported issues">
+            <PencilIcon className="ico ico--xs" />Fix
+          </button>
+        ) : null}
         {allKept ? null : (
           <>
             <button
@@ -379,8 +419,8 @@ function ChangesReviewView({
             </div>
           ) : null}
 
-          {diffReview?.kind === 'findings' ? <DiffReviewSection view={diffReview} /> : null}
-          {stylingReview?.kind === 'findings' ? <DiffReviewSection view={stylingReview} label="Styling check" /> : null}
+          {diffReview && diffReview.kind !== 'empty' ? <DiffReviewSection view={diffReview} /> : null}
+          {stylingReview && stylingReview.kind !== 'empty' ? <DiffReviewSection view={stylingReview} label="Styling check" /> : null}
           {rows.length > 0 ? <CheckRows rows={rows} /> : null}
 
           <ul className="changes-review__list" aria-label="Changed files">
@@ -510,6 +550,8 @@ function sameChangesReview(prev: ChangesReviewProps, next: ChangesReviewProps): 
     prev.review === next.review &&
     prev.busy === next.busy &&
     prev.deciding === next.deciding &&
+    prev.onFix === next.onFix &&
+    prev.fixDisabled === next.fixDisabled &&
     prev.decisionResults === next.decisionResults &&
     prev.rejectConfirm === next.rejectConfirm
   );
@@ -542,6 +584,7 @@ function DiffReviewSection({
         <Icon className="ico ico--xs" />
         <span className="diff-review__title">{view.heading}</span>
       </div>
+      {view.detail ? <p className="diff-review__detail">{view.detail}</p> : null}
       {view.findings.length > 0 ? (
         <ul className="diff-review__findings" aria-label={`${label} findings`}>
           {view.findings.map((finding, index) => (
@@ -552,6 +595,8 @@ function DiffReviewSection({
               <span className={`diff-review__severity diff-review__severity--${finding.severity}`}>
                 {finding.severity === 'info' ? (
                   <InfoIcon className="ico ico--xs" />
+                ) : finding.severity === 'error' ? (
+                  <CrossIcon className="ico ico--xs" />
                 ) : (
                   <AlertIcon className="ico ico--xs" />
                 )}
@@ -578,12 +623,13 @@ function CheckRows({ rows }: { rows: CheckRowView[] }): JSX.Element {
         {rows.map((row, index) => (
           <li
             key={`${row.name}-${index}`}
-            className={`check-row${row.failed ? ' check-row--failed' : ''}${
+            className={`check-row check-row--${row.status}${row.failed ? ' check-row--failed' : ''}${
               row.status === 'running' ? ' check-row--running' : ''
             }`}
           >
             <span className="check-row__status">
               {row.status === 'running' ? <span className="spinner" aria-hidden="true" /> : null}
+              {row.status === 'passed' ? <CheckIcon className="ico ico--xs" /> : row.failed ? <AlertIcon className="ico ico--xs" /> : row.status === 'skipped' ? <InfoIcon className="ico ico--xs" /> : null}
               <span className="check-row__status-word">{row.statusLabel}</span>
             </span>
             <span className="check-row__name" title={row.command ?? row.name}>

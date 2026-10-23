@@ -87,6 +87,26 @@
   color: var(--vscode-descriptionForeground);
 }
 
+.changes-review__attention,
+.changes-review__attention-item {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-review__attention {
+  margin-left: auto;
+  gap: 8px;
+}
+
+.changes-review__fix:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
 .changes-review__notices {
   display: flex;
   justify-content: flex-start;
@@ -298,11 +318,28 @@
 
 .diff-review__finding {
   display: grid;
-  grid-template-columns: max-content minmax(5rem, max-content) minmax(0, 1fr);
-  gap: 6px;
-  align-items: baseline;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: start;
   min-width: 0;
+  padding: 7px 8px;
+  border-left: 2px solid var(--finding-color);
+  border-radius: var(--melink-radius-sm, 4px);
+  background: color-mix(in srgb, var(--finding-color) 7%, transparent);
   font-size: 11px;
+  line-height: 1.5;
+}
+
+.diff-review__finding--error {
+  --finding-color: var(--vscode-editorError-foreground, var(--vscode-errorForeground));
+}
+
+.diff-review__finding--warning {
+  --finding-color: var(--vscode-editorWarning-foreground);
+}
+
+.diff-review__finding--info {
+  --finding-color: var(--vscode-editorInfo-foreground, var(--vscode-descriptionForeground));
 }
 
 .diff-review__severity {
@@ -322,21 +359,29 @@
 }
 
 .diff-review__severity--info {
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-editorInfo-foreground, var(--vscode-descriptionForeground));
 }
 
 .diff-review__location {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-family: var(--vscode-editor-font-family, monospace);
   color: var(--vscode-descriptionForeground);
 }
 
 .diff-review__message {
+  grid-column: 1 / -1;
   min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--vscode-foreground);
+}
+
+.diff-review--info .diff-review__head > .ico {
+  color: var(--vscode-editorInfo-foreground, var(--vscode-descriptionForeground));
+}
+
+.diff-review__detail {
+  overflow-wrap: anywhere;
 }
 
 /* The check summary stays in the collapsed header; the word states the outcome. */
@@ -417,6 +462,18 @@
 
 .check-row--running .check-row__status {
   color: var(--vscode-descriptionForeground);
+}
+
+.check-row--passed .check-row__status {
+  color: var(--vscode-testing-iconPassed, var(--melink-success));
+}
+
+.check-row--skipped .check-row__status {
+  color: var(--vscode-descriptionForeground);
+}
+
+.check-row__status > .ico {
+  flex: 0 0 auto;
 }
 
 .check-row__name {
