@@ -74,6 +74,42 @@ function setBusy(backendId = 'codex'): void {
 }
 
 describe('busy composer queueing', () => {
+  it.each(AVAILABILITY)('switches between Stop and the draft action while $id is busy', ({ id }) => {
+    const composer = renderComposer(id);
+    setBusy(id);
+
+    const expectStopOnly = (): void => {
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /^(Send|Queue message)$/ })).toBeNull();
+    };
+
+    expectStopOnly();
+    fireEvent.change(composer, { target: { value: '   ' } });
+    expectStopOnly();
+
+    fireEvent.change(composer, { target: { value: 'follow up' } });
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
+
+    fireEvent.change(composer, { target: { value: '' } });
+    expectStopOnly();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(messagesOf('cancelTurn')).toHaveLength(1);
+  });
+
+  it('shows only Queue message for an attachment-only draft and restores Stop when removed', () => {
+    renderComposer();
+    setBusy();
+    attachFile();
+
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Queue message' }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove guard.png' }));
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^(Send|Queue message)$/ })).toBeNull();
+  });
+
   it('anchors the busy loader to the chat container, not the transcript', () => {
     renderComposer('codex');
     setBusy();
@@ -120,6 +156,8 @@ describe('busy composer queueing', () => {
 
     expect(composer.value).toBe('');
     expect(screen.queryByLabelText('Attachments')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Queue message' })).toBeNull();
     expect(within(screen.getByLabelText('Queued messages')).getByText('Queued')).toBeTruthy();
   });
 
@@ -265,6 +303,8 @@ describe('busy composer queueing', () => {
     expect(sendTurns()).toHaveLength(0);
     expect(messagesOf('steerTurn')).toEqual([{ type: 'steerTurn', text: 'steer this turn' }]);
     expect(composer.value).toBe('');
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
   });
 
   it('locks provider, model and permission controls while busy or queued', () => {

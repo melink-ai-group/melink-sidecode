@@ -1541,6 +1541,7 @@ export function App(): JSX.Element {
   });
   // A busy send is labelled for what it will do once content exists. Queueing
   // is the only option when a chip is attached or the provider cannot steer.
+  const hasComposerContent = draft.trim().length > 0 || state.attachments.length > 0;
   const busyActionLabel =
     state.attachments.length > 0 || !acceptsSteer(active?.id) ? 'Queue message' : 'Send';
   const canSend = composerIntent !== 'blocked' && !(state.busy && queuePending);
@@ -2895,7 +2896,7 @@ export function App(): JSX.Element {
                 </button>
               ) : null}
               {state.busy ? (
-                <>
+                !hasComposerContent ? (
                   <button
                     className={`icon-btn composer-action composer-action--stop ${composerModeClass}`}
                     type="button"
@@ -2905,6 +2906,7 @@ export function App(): JSX.Element {
                   >
                     <StopSolidIcon />
                   </button>
+                ) : (
                   <button
                     className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}
                     type="button"
@@ -2922,7 +2924,7 @@ export function App(): JSX.Element {
                   >
                     <SendSolidIcon />
                   </button>
-                </>
+                )
               ) : showMic ? null : (
                 <button
                   className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}
