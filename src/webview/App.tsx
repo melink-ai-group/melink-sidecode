@@ -2408,6 +2408,21 @@ export function App(): JSX.Element {
           review={review}
           busy={state.busy}
           deciding={state.changeDeciding}
+          fixDisabled={state.startingTurn || state.restoring || Boolean(pending) || asking || Boolean(state.modeSwitch) || active?.status !== 'available'}
+          onFix={(text) => {
+            if (state.busy || state.startingTurn || state.changeDeciding || state.restoring || pending || asking || state.modeSwitch || active?.status !== 'available') return;
+            followSentMessage();
+            setHistoryStale(true);
+            dispatch({ type: 'localUserMessage', text });
+            dispatch({ type: 'setAttachments', attachments: state.attachments });
+            dispatch({ type: 'dismissNotice' });
+            bridge.post({
+              type: 'sendTurn', text,
+              backendId: state.selectedBackendId,
+              model: state.selectedModel,
+              permissionLevel: state.permissionLevel
+            });
+          }}
           decisionResults={state.changeDecision?.results}
           rejectConfirm={state.changeRejectConfirm?.turnId === review.turnId ? state.changeRejectConfirm : undefined}
           onOpenFile={openChangeFile}
