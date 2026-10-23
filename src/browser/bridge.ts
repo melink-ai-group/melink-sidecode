@@ -1,11 +1,15 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
+import { asBrowserProvider } from './config.ts';
+import type { BrowserSkillProvider } from './policy.ts';
 import type { ToolResult } from './tools.ts';
 
 /** A tool call the stdio shim forwards onto the extension. */
 export interface BridgeCall {
   name: string;
   arguments: unknown;
+  /** The agent that spawned the shim; absent for calls made from the panel. */
+  provider?: BrowserSkillProvider;
 }
 
 const MAX_BODY = 1_000_000;
@@ -17,8 +21,11 @@ const MAX_BODY = 1_000_000;
 export class BrowserBridge {
   private server?: Server;
   private token = '';
+  private readonly handle: (call: BridgeCall) => Promise<ToolResult>;
 
-  constructor(private readonly handle: (call: BridgeCall) => Promise<ToolResult>) {}
+  constructor(handle: (call: BridgeCall) => Promise<ToolResult>) {
+    this.handle = handle;
+  }
 
   /** Bind 127.0.0.1 and return the URL the shim should POST to. */
   start(token: string): Promise<string> {
@@ -74,11 +81,12 @@ export class BrowserBridge {
     }
     let parsed: BridgeCall;
     try {
-      const value = JSON.parse(body) as { name?: unknown; arguments?: unknown };
+      const value = JSON.parse(body) as { name?: unknown; arguments?: unknown; provider?: unknown };
       if (typeof value.name !== 'string' || value.name.length === 0) {
         throw new Error('missing name');
       }
-      parsed = { name: value.name, arguments: value.arguments };
+      const provider = asBrowserProvider(value.provider);
+      parsed = { name: value.name, arguments: value.arguments, ...(provider ? { provider } : {}) };
     } catch {
       respond(response, 400, { content: [{ type: 'text', text: 'The browser call was not valid JSON.' }], isError: true });
       return;

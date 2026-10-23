@@ -354,34 +354,40 @@
           "markdownDescription": "Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit user value still wins. Checks never run in an untrusted workspace."
         },
         "melink.orchestration.testing": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Run typecheck or lint and the tests after a turn that changes files. Default: off. Used as the fallback for `melink.review.checks.enabled`."
+          "type": ["boolean", "string"],
+          "enum": ["auto", "on", "off", true, false],
+          "default": "on",
+          "markdownDescription": "Run typecheck or lint and the tests after a turn. **Auto** runs only when code (non-documentation) files changed; **On** runs on any change set; **Off** never runs. Default: On. Falls back to `melink.review.checks.enabled` while unset."
         },
         "melink.orchestration.reviewing": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Run a read-only diff review after a turn that changes files. Advisory only; it never edits files or blocks Keep. Used as the fallback for `melink.review.diffReview`."
+          "type": ["boolean", "string"],
+          "enum": ["auto", "on", "off", true, false],
+          "default": "auto",
+          "markdownDescription": "Run a read-only diff review after a turn. **Auto** runs only when code (non-documentation) files changed; **On** runs on any change set; **Off** never runs. Advisory only; it never edits files or blocks Keep. Default: Auto. Falls back to `melink.review.diffReview` while unset."
         },
         "melink.orchestration.styling": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Run an advisory styling-consistency check after a turn that changes frontend files. It compares the new UI against the project's brand kit, design tokens, and existing components. Skipped when no frontend file changed. Default: on."
+          "type": ["boolean", "string"],
+          "enum": ["auto", "on", "off", true, false],
+          "default": "auto",
+          "markdownDescription": "Run an advisory styling-consistency check after a turn that changes frontend files. **Auto** and **On** both require a frontend file change; **Off** never runs. It compares the new UI against the project's brand kit, design tokens, and existing components. Default: Auto."
         },
         "melink.orchestration.doubleCheck": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Sweep the files a turn changed for VS Code errors after the reply. No second model call."
+          "type": ["boolean", "string"],
+          "enum": ["auto", "on", "off", true, false],
+          "default": "auto",
+          "markdownDescription": "Sweep the files a turn changed for VS Code errors after the reply. **Auto** runs only when code (non-documentation) files changed; **On** runs on any change set; **Off** never runs. No second model call. Default: Auto."
         },
         "melink.orchestration.quickTask": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Skip post-turn testing, review, styling, and double-check for short single-question turns in Agent mode. The reply, tools, permissions, and mode are unchanged."
+          "type": ["boolean", "string"],
+          "enum": ["auto", "on", "off", true, false],
+          "default": "off",
+          "markdownDescription": "Quick detection always runs and always bypasses the post-turn passes for short single-question Agent turns. This choice controls only the Quick role/notice: **Off** hides it (silent bypass); **Auto** or **On** shows it. Default: Off."
         },
         "melink.orchestration.planning": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Continue a built plan step by step after a clean turn. Agent mode only."
+          "type": ["boolean", "string"],
+          "enum": ["auto", "on", "off", true, false],
+          "default": "auto",
+          "markdownDescription": "Continue a built plan step by step after a clean turn. Agent mode and an active plan are required. **Auto** and **On** both continue a built plan; **Off** never continues. Default: Auto."
         },
         "melink.review.checks.commands": {
           "type": "array",
@@ -508,3 +514,4 @@
     "vitest": "^3.2.7"
   }
 }
+

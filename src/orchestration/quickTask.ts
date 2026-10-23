@@ -1,6 +1,9 @@
 /**
  * Deterministic quick-task detector. Quick only marks the post-turn passes as
  * unnecessary; it never changes the reply, tools, permissions, or selected mode.
+ *
+ * Detection always runs. The `quickTask` orchestration choice controls only
+ * whether the Quick role/notice is surfaced; it can never disable the bypass.
  */
 
 export const QUICK_TASK_MAX_CHARS = 120;
@@ -8,7 +11,6 @@ export const QUICK_TASK_MAX_WORDS = 20;
 
 export type QuickTaskReason =
   | 'quick'
-  | 'quick-task-disabled'
   | 'mode-not-agent'
   | 'origin-not-user'
   | 'attachments'
@@ -21,34 +23,12 @@ export type QuickTaskReason =
   | 'action-verb'
   | 'not-question';
 
-export interface QuickTaskSettings {
-  quickTask: boolean;
-}
-
-/** The post-turn passes a quick task can skip. */
-export interface QuickTaskPasses {
-  testing: boolean;
-  reviewing: boolean;
-  styling: boolean;
-  doubleCheck: boolean;
-}
-
-/**
- * Quick tasks only skip a pass. When every pass is off there is nothing to
- * skip, so the toggle is effectively off (and the settings screen saves it as
- * off, rather than hiding a stored `true` behind a disabled control).
- */
-export function quickTaskApplies(enabled: boolean, passes: QuickTaskPasses): boolean {
-  return enabled && (passes.testing || passes.reviewing || passes.styling || passes.doubleCheck);
-}
-
 export interface QuickTaskInput {
   text: string;
   mode: string;
   origin: string;
   hasAttachments: boolean;
   hasActivePlan: boolean;
-  settings: QuickTaskSettings;
 }
 
 export interface QuickTaskDecision {
@@ -65,9 +45,6 @@ const QUESTION_OPENING =
   /^(?:what|why|how|who|when|where|which|is|are|does|do|can|could|should|would|explain|describe|summarise|summarize|show|list|tell)\b/i;
 
 export function detectQuickTask(input: QuickTaskInput): QuickTaskDecision {
-  if (!input.settings.quickTask) {
-    return veto('quick-task-disabled');
-  }
   if (input.mode !== 'agent') {
     return veto('mode-not-agent');
   }

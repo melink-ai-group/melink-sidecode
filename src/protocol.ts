@@ -1,4 +1,4 @@
-﻿import type { ContextView } from './context/contextView';
+import type { ContextView } from './context/contextView';
 import type {
   ChangeDecisionResult,
   ChangeHunkView,
@@ -35,6 +35,8 @@ import type {
   QuestionRequest,
   TranscriptItem
 } from './backends/types';
+import type { OrchestrationChoice } from './orchestration/settings';
+import type { OrchestrationTurnSnapshot } from './orchestration/plan';
 
 /**
  * The project-context defaults type, re-exported from the host-free module so
@@ -181,14 +183,21 @@ export interface SettingsSnapshot {
    * the source flags the screen uses to explain a legacy fallback.
    */
   orchestration: {
-    testing: boolean;
-    reviewing: boolean;
-    styling: boolean;
-    doubleCheck: boolean;
-    quickTask: boolean;
-    planning: boolean;
+    testing: OrchestrationChoice;
+    reviewing: OrchestrationChoice;
+    styling: OrchestrationChoice;
+    doubleCheck: OrchestrationChoice;
+    quickTask: OrchestrationChoice;
+    planning: OrchestrationChoice;
     legacyTesting: boolean;
     legacyReviewing: boolean;
+    /**
+     * The newest resolved post-turn decision, when this window has finished a
+     * turn. It carries the six choices, the resolved roles, and each reason, so
+     * the pipeline is observable without the output channel. Absent until the
+     * first turn of this window ends.
+     */
+    lastTurn?: OrchestrationTurnSnapshot;
   };
   /**
    * Optional agent skills. Browser control is per provider so Codex and
@@ -278,12 +287,12 @@ export interface SettingsPatch {
   /** `local` uses the path field; `bundled` uses the sideCode-managed download. */
   opencodeCliSource?: 'local' | 'bundled';
   opencodePath?: string;
-  orchestrationTesting?: boolean;
-  orchestrationReviewing?: boolean;
-  orchestrationStyling?: boolean;
-  orchestrationDoubleCheck?: boolean;
-  orchestrationQuickTask?: boolean;
-  orchestrationPlanning?: boolean;
+  orchestrationTesting?: OrchestrationChoice;
+  orchestrationReviewing?: OrchestrationChoice;
+  orchestrationStyling?: OrchestrationChoice;
+  orchestrationDoubleCheck?: OrchestrationChoice;
+  orchestrationQuickTask?: OrchestrationChoice;
+  orchestrationPlanning?: OrchestrationChoice;
   contextIncludeInstructions?: boolean;
   contextIncludeShape?: boolean;
   contextIncludeEditorState?: boolean;

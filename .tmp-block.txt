@@ -1,0 +1,25 @@
+﻿    const plan = this.turnPlans.get(turnId);
+    const choices = plan?.choices ?? readOrchestrationSettings();
+    const roles = resolvePostTurnRoles({
+      choices,
+      quick: plan?.quick ?? false,
+      entries: set.entries
+    });
+    this.rememberResolvedRoles(turnId, roles);
+    logDiagnostic(
+      orchestrationDiagnostic(plan ?? { quick: false, quickBypass: false }, roles)
+    );
+    const shouldReview = roles.reviewing;
+    // The styling pass is a frontend-only pass: a backend-only turn is skipped
+    // before a brand kit is read or a prompt is built.
+    const shouldStyle = roles.styling;
+    // Checks start only for a non-empty, closed change set. A background turn
+    // still stores its result; the runner decides whether the visible surface
+    // may be repainted.
+    this.startChangeChecks(set, roles.testing);
+    // The advisory diagnostics sweep runs for every completed turn, active or
+    // background. Its notice is routed to the owning chat (or held for it), so
+    // one chat's file names never appear in another.
+    if (roles.doubleCheck && terminus === 'completed') {
+      void this.runDoubleCheck(set);
+    }

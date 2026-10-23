@@ -2,19 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planTurnEnd, runTurnEnd } from './turnEnd.ts';
 import type { TurnPlan } from './plan.ts';
-import type { OrchestrationToggles } from './settings.ts';
+import type { OrchestrationChoices } from './settings.ts';
 
-const SETTINGS: Pick<OrchestrationToggles, 'planning'> = { planning: true };
+const SETTINGS: Pick<OrchestrationChoices, 'planning'> = { planning: 'on' };
 
 function plan(overrides: Partial<TurnPlan> = {}): TurnPlan {
   return {
+    choices: {
+      testing: 'on',
+      reviewing: 'off',
+      styling: 'off',
+      doubleCheck: 'on',
+      quickTask: 'off',
+      planning: 'on'
+    },
     quick: false,
     quickReason: 'not-question',
+    quickBypass: false,
+    quickNotice: false,
     testing: true,
     reviewing: false,
     styling: false,
     doubleCheck: true,
     planning: true,
+    reasons: {},
     ...overrides
   };
 }
@@ -78,11 +89,11 @@ test('a stale chat settles but does not continue', async () => {
 
 test('a missing plan falls back to the resolved policy for continuation', async () => {
   const off = seams();
-  await runTurnEnd({ mode: 'agent', settings: { planning: false } }, off.seams);
+  await runTurnEnd({ mode: 'agent', settings: { planning: 'off' } }, off.seams);
   assert.deepEqual(off.calls, ['settle']);
 
   const on = seams();
-  await runTurnEnd({ mode: 'agent', settings: { planning: true } }, on.seams);
+  await runTurnEnd({ mode: 'agent', settings: { planning: 'auto' } }, on.seams);
   assert.deepEqual(on.calls, ['settle', 'continue']);
 });
 
@@ -100,3 +111,4 @@ test('the decision itself is pure and never calls a seam', () => {
     continuePlan: false
   });
 });
+

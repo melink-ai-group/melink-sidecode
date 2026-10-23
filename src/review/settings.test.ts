@@ -30,11 +30,18 @@ test('melink.review.diffReview stays an application-scoped opt-in, default off',
   assert.equal(setting.scope, 'application');
 });
 
-test('melink.orchestration.reviewing is a window-scoped opt-in, default off', async () => {
-  const setting = (await properties())['melink.orchestration.reviewing'];
+test('melink.orchestration.reviewing is a window-scoped Auto/On/Off choice', async () => {
+  const setting = (await properties())['melink.orchestration.reviewing'] as {
+    type?: string | string[];
+    enum?: unknown[];
+    default?: unknown;
+    scope?: string;
+  };
 
   assert.ok(setting, 'the setting is contributed');
-  assert.equal(setting.type, 'boolean');
-  assert.equal(setting.default, false);
+  assert.deepEqual(setting.type, ['boolean', 'string']);
+  // Legacy stored booleans must stay schema-valid; the reader migrates them.
+  assert.deepEqual(setting.enum, ['auto', 'on', 'off', true, false]);
+  assert.equal(setting.default, 'auto');
   assert.equal(setting.scope, undefined);
 });

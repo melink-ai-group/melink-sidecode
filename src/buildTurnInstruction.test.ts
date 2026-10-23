@@ -40,7 +40,9 @@ test('the build transition ends with an explicit verification step', async () =>
   // The verification paragraph comes after the checklist, so it is the last
   // instruction the agent reads before closing.
   assert.match(body, /list,\s*'',\s*'Before you finish, verify the work/);
-  assert.match(body, /lint, typecheck, and tests/);
+  assert.match(body, /the project\\u2019s own scripts/);
+  assert.match(body, /install\/build, lint, typecheck, test, and run\/dev/);
+  assert.match(body, /aggregate verification script/);
   assert.match(body, /`package\.json` scripts and the README or contributor docs/);
   assert.match(body, /console, runtime, and network errors/);
   assert.match(body, /Report each command.*result and any failure before you close/);

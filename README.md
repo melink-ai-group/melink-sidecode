@@ -30,13 +30,13 @@ account for, in one place.
 A turn that edits files is recorded and shown as a **Changes this turn** panel.
 You decide per file: **Keep** and **Keep all** write nothing to disk (the edit is
 already there), while **Reject** and **Reject all** write the pre-turn content
-back, deleting a file the turn created — behind a confirmation that names the
+back, deleting a file the turn created â€” behind a confirmation that names the
 paths. A file edited outside the agent is a **conflict** and is never clobbered
 silently, and a **binary** or oversized file is listed but not reviewable inline.
 Every message whose turn touched files also carries a **Restore checkpoint**
 action that reverts those files (across later turns) to their state before that
 message; it reverts **files only**, keeps the conversation, is itself undoable,
-and is stored **locally, separately from Git** — it is not a version-control
+and is stored **locally, separately from Git** â€” it is not a version-control
 substitute.
 
 This post-hoc review is deliberately separate from the pre-execution **approval
@@ -48,7 +48,8 @@ effects, and the storage/pruning behaviour are documented in
 
 ### Opt-in diff review
 
-**Orchestration → Reviewing** (`melink.orchestration.reviewing`, default **off**)
+**Orchestration â†’ Reviewing** (`melink.orchestration.reviewing`, default **Auto**; Auto runs only when
+code (non-documentation) files changed, On on any change set, Off never)
 adds an advisory second pass to the **Changes this turn** panel. Until that key
 is saved it falls back to the older application-scoped
 `melink.review.diffReview`. The review is strictly read-only: it never edits
@@ -56,21 +57,28 @@ files, runs shell commands, requests approvals, or keeps/rejects anything, and
 **Keep** / **Reject** behave exactly as before. The first pass is local and
 deterministic: it flags explicit paths the request named but the turn did not
 change. It does not claim to find semantic regressions. The prompt/runner seam is
-ready for a future model reviewer, but this release runs only the local pass and
-never calls a model. Turn reviews are stored per turn and restored on reload; a
-failed or timed-out pass is a visible, non-blocking notice.
+reserved for a future model reviewer: no runner is wired, so no model prompt is
+sent and the Reviewer role is the local pass. Turn reviews are stored per turn
+and restored on reload; switching **Reviewing** Off later does not hide a stored
+review, because the choice gates only new turns. A failed or timed-out pass is a
+visible, non-blocking notice.
 
 ### Styling check
 
-**Orchestration → Styling check** (`melink.orchestration.styling`, default
-**on**) adds an advisory pass for frontend work. It runs only when the turn
+**Orchestration â†’ Styling check** (`melink.orchestration.styling`, default **Auto**; Auto and On both require a
+frontend file change, Off never runs) adds an advisory pass for frontend work.
+It runs only when the turn
 changed at least one UI file, so a backend-only turn pays nothing. The pass
-reads the project's brand kit (`tokens.css` and `DESIGN.md` when present) and
+reads the project's brand kit (`tokens.css`, `DESIGN.md`, `design-tokens.json`,
+and `brand.json` when present) and
 checks the new component or style work for literal colours, hardcoded fonts,
-inline styles, unknown brand tokens, and `!important` escapes. It is read-only,
-never blocks Keep, and when no brand kit exists it says so rather than inventing
-evidence. Results are stored per turn next to the diff review and restored on
-reload; the prompt/runner seam is ready for a future model reviewer.
+inline styles, unknown brand tokens, and `!important` escapes. It derives its
+token rules from that kit rather than assuming a particular brand or prefix. It
+is read-only, never blocks Keep, and when no brand kit exists it says so rather
+than inventing evidence. Results are stored per turn next to the diff review and
+restored on reload; switching **Styling check** Off later hides nothing already
+stored. The prompt/runner seam is reserved and no model prompt is
+sent.
 
 A turn that changed files can also run **post-turn checks** before you keep it.
 By default sideCode detects `typecheck` (or `lint` when there is no typecheck)
@@ -84,7 +92,7 @@ settings below.
 
 ## Requirements
 
-- VS Code **1.93.0** or newer, or an Open VSX host (Cursor, VSCodium, …).
+- VS Code **1.93.0** or newer, or an Open VSX host (Cursor, VSCodium, â€¦).
 - **Node.js 20+** to build from source. Tests and typecheck need **Node.js 22.6+
   (22.x)** because `npm test` runs with `--experimental-strip-types`; CI uses
   Node **22.12**.
@@ -98,9 +106,9 @@ settings below.
 
 ## Install
 
-### Option A — from a packaged `.vsix`
+### Option A â€” from a packaged `.vsix`
 
-1. Build the package (or obtain a released `melink-sidecode-0.2.0.vsix`) —
+1. Build the package (or obtain a released `melink-sidecode-0.2.0.vsix`) â€”
    see [Build from source](#build-from-source) if you need to make one.
 2. Install it:
    - **VS Code CLI:**
@@ -108,7 +116,7 @@ settings below.
      code --install-extension ./melink-sidecode-0.2.0.vsix
      ```
    - **Any host (including Open VSX consumers):** open the Extensions view, click
-     the `...` menu in its title bar, choose **Install from VSIX…**, and pick the
+     the `...` menu in its title bar, choose **Install from VSIXâ€¦**, and pick the
      file.
 3. Reload the window when prompted.
 
@@ -161,7 +169,7 @@ Then install the `.vsix` as in Option A.
 #### Build with a script
 
 If you do not know the npm scripts by heart, run the wrapper for your platform
-from anywhere in the checkout — each script resolves the repo root itself and
+from anywhere in the checkout â€” each script resolves the repo root itself and
 runs the same flow (install if needed, then build, then package):
 
 ```sh
@@ -229,20 +237,20 @@ prerequisites, screens, determinism, and limitations.
 
 ## Set up a provider
 
-Open the sidebar (Activity Bar → **sideCode**) once to activate the extension, then
+Open the sidebar (Activity Bar â†’ **sideCode**) once to activate the extension, then
 set up whichever provider you have.
 
 ### Ollama Cloud
 
 1. Create an API token at <https://ollama.com>.
-2. Command Palette → **sideCode: Set Ollama Cloud token**.
+2. Command Palette â†’ **sideCode: Set Ollama Cloud token**.
 3. Paste the token and press Enter.
 
 The token is stored in VS Code **secret storage** and sent only as a bearer
 credential to the configured base URL. It never appears in `settings.json`,
 output channels, or logs. To remove it, run **sideCode: Clear Ollama Cloud token**.
 
-Optional settings (`Settings → search "melink"`, or **sideCode: Open settings**):
+Optional settings (`Settings â†’ search "melink"`, or **sideCode: Open settings**):
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -252,12 +260,12 @@ Optional settings (`Settings → search "melink"`, or **sideCode: Open settings*
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
 | `melink.review.diffReview` | `false` | Legacy opt-in for the read-only advisory diff review, used only while `melink.orchestration.reviewing` is unset. Application scope, so only a user setting can enable it. |
-| `melink.orchestration.testing` | `false` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. Default: off. |
-| `melink.orchestration.reviewing` | `false` | Advisory diff review; falls back to `melink.review.diffReview` until saved. |
-| `melink.orchestration.styling` | `true` | Advisory styling check for frontend work, compared with the brand kit and existing components. Runs only when a frontend file changed. |
-| `melink.orchestration.doubleCheck` | `true` | Read diagnostics for the changed files after a turn and post one advisory notice. Never calls a model. |
-| `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for a short single-question Agent turn. |
-| `melink.orchestration.planning` | `true` | Continue a built plan step by step after a clean Agent turn. |
+| `melink.orchestration.testing` | `on` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. `auto` runs only for code (non-documentation) changes, `off` never. |
+| `melink.orchestration.reviewing` | `auto` | Advisory diff review; falls back to `melink.review.diffReview` until saved. `auto` runs only for code changes, `on` for any change set, `off` never. |
+| `melink.orchestration.styling` | `auto` | Advisory styling check for frontend work, compared with the brand kit and existing components. `auto` and `on` both require a frontend file change; `off` never. |
+| `melink.orchestration.doubleCheck` | `auto` | Read diagnostics for the changed files after a turn and post one advisory notice. `auto` runs only for code changes. Never calls a model. |
+| `melink.orchestration.quickTask` | `off` | Quick detection always bypasses the post-turn passes for a short single-question Agent turn. `off` hides the Quick notice, `auto`/`on` show it. |
+| `melink.orchestration.planning` | `auto` | Continue a built plan step by step after a clean Agent turn. Requires Agent mode and an active plan; `off` never continues. |
 | `melink.skills.browserCodex` | `true` | Let Codex open a browser tab in the editor. |
 | `melink.skills.browserOpencode` | `true` | Let OpenCode open a browser tab in the editor. |
 | `melink.skills.zvecGrep` | `false` | Connect [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode (semantic + keyword + ripgrep MCP). |
@@ -268,13 +276,13 @@ Optional settings (`Settings → search "melink"`, or **sideCode: Open settings*
 | `melink.skills.astGrep.path` | `ast-grep` | Path to `ast-grep` when `cliSource` is local. |
 
 `Ollama Cloud` lists exactly the models the live server returns from
-`GET /api/tags` — there is no hardcoded fallback list.
+`GET /api/tags` â€” there is no hardcoded fallback list.
 
 ### Ollama Local
 
 1. Install Ollama and start it with `ollama serve`.
 2. Pull at least one model (`ollama pull qwen2.5-coder:7b`).
-3. In **Settings → Providers → Ollama Local**, keep the default
+3. In **Settings â†’ Providers â†’ Ollama Local**, keep the default
    `http://localhost:11434` (or enter another address) and press **Test
    connection**.
 
@@ -297,7 +305,7 @@ project, edit files, and run commands. This is always on; there is no direct
 dictation cleanup. Ollama Cloud, Ollama Local and OpenCode Zen share the same
 OpenCode binary, and each keeps its own provider identity and dot in the picker.
 
-- **CLI source.** Configure under **Settings → CLI**. `melink.ollama.opencode.cliSource`
+- **CLI source.** Configure under **Settings â†’ CLI**. `melink.ollama.opencode.cliSource`
   is `local` (path / PATH) or `bundled` (sideCode download in extension global
   storage). Bundled turns always use that binary; it survives closing VS Code.
   Install and Update fetch the official GitHub release into the active install
@@ -306,14 +314,14 @@ OpenCode binary, and each keeps its own provider identity and dot in the picker.
 - **Path.** When `cliSource` is `local`, `melink.ollama.opencode.path` defaults
   to `opencode`, resolved from `PATH` when it is a bare name, exactly like
   `melink.codex.path`.
-- **zvec-grep.** Under **Settings → Skills**, enable semantic search to connect
+- **zvec-grep.** Under **Settings â†’ Skills**, enable semantic search to connect
   [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. Choose **local**
   or **bundled** (sideCode-managed install under extension global storage).
   Enable writes an absolute-path `zvec_grep` MCP entry into the user OpenCode
   config and injects the same server into each sideCode turn. Off removes that
   entry and leaves the CLI installed. Stored as `melink.skills.zvecGrep`
   (legacy key `melink.ollama.opencode.zvecGrep` is still read when unset).
-- **ast-grep.** Under **Settings → Skills**, enable structural search to connect
+- **ast-grep.** Under **Settings â†’ Skills**, enable structural search to connect
   [ast-grep](https://github.com/ast-grep/ast-grep). Bundled downloads the
   official GitHub release into extension global storage. sideCode ships a thin
   MCP shim (`dist/ast-grep-mcp.js`) that shells out to the resolved binary.
@@ -413,13 +421,13 @@ The OpenCode and Codex paths were verified against the versions below.
 
 ### Versions the priming path was verified against
 
-- **Codex CLI: `codex-cli 0.156.1`** — the generated bindings in `schemas/`
+- **Codex CLI: `codex-cli 0.156.1`** â€” the generated bindings in `schemas/`
   expose `baseInstructions`/`developerInstructions` on `thread/start` and
   `thread/resume`, and no per-turn instructions field on `turn/start`. That is
   why Codex priming is native at start/resume and left to Codex's own file access
-  mid-thread. The supported protocol window is `0.154.0–0.163.x`; a server
+  mid-thread. The supported protocol window is `0.154.0â€“0.163.x`; a server
   outside it is reported as `incompatible` with its version rather than used.
-- **opencode: `1.19.x`** — the installer tracks `releases/latest`, and the T69
+- **opencode: `1.19.x`** â€” the installer tracks `releases/latest`, and the T69
   regression ran against the bundled 1.19.x CLI. `opencode run --help` exposes
   no system/instructions flag, so the snapshot is delivered by priming the turn
   text. This is a deliberate fallback, not an oversight.
@@ -454,12 +462,12 @@ Optional settings:
 
 OpenCode Zen is its own provider: free models work without a key, and paid models
 use a Zen API key. It runs on the same shared `opencode` CLI as the optional
-Ollama runtime; choose **local** or **bundled** under **Settings → CLI**
+Ollama runtime; choose **local** or **bundled** under **Settings â†’ CLI**
 (`melink.ollama.opencode.cliSource` / `.path`), or install it from that screen.
 
 1. Free models: install the CLI and pick an OpenCode Zen model in the model
    picker. No credential is needed.
-2. Paid models: Command Palette → **sideCode: Set OpenCode Zen API key**
+2. Paid models: Command Palette â†’ **sideCode: Set OpenCode Zen API key**
    (`melink.setOpencodeZenToken`), then paste the key. Remove it with
    **sideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`).
 
@@ -492,7 +500,7 @@ picker in the title bar override them for the conversation you are in.
 |---|---|---|
 | `melink.review.checks.enabled` | `false` | Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit value still wins; untrusted workspaces always skip. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands; empty auto-detects `typecheck` (or `lint`) and `test` from `package.json`. An explicitly saved empty list runs nothing. |
-| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout, clamped to 5–600 seconds. |
+| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout, clamped to 5â€“600 seconds. |
 
 The command list and timeout are read directly from `settings.json`. The
 **Orchestration** tab controls whether the pass runs, plus the review,
@@ -561,15 +569,19 @@ reload reports that the question was lost instead of silently dropping it.
 
 ### Plan artifact
 
-In Plan mode the plan is written to one markdown file per thread at a
+In Plan mode the plan is written to one markdown file per chat at a
 predictable, workspace-relative path:
 
 ```
-<workspace root>/.melink/plans/<thread-id>.md
+<workspace root>/.melink/plans/<kebab-case-title>.md
 ```
 
-The name is derived from the **thread id**, never the raw prompt, so a revision
-updates the same file rather than creating a second plan. The file contains what
+The name comes from the **plan title**, never the raw prompt or the thread id:
+"Acme board status and location" becomes
+`.melink/plans/acme-board-status-and-location.md`. A chat that already has a
+plan file keeps that path, so a revision or a retitle updates the same file
+rather than creating a second one. The legacy `<thread-id>.md` path is read and
+retired when a titled file replaces it. The file contains what
 the plan will do and a bullet list of steps; **creating it is the one permitted
 write in Plan mode**. Building the plan moves the thread into execution (the mode
 returns to `agent`) and the bullet list becomes the todo list, whose per-step
@@ -725,9 +737,9 @@ the user never chose. Two things prevent that:
   key. An unrecognised key is ignored by the CLI rather than fatal, so the
   override is safe across the supported version window.
 
-The `getAuthStatus` reply's auth mode is surfaced in **Settings → Providers →
-Codex** (*Reported auth method*). When the CLI reports an API-key login — or a
-failed turn body is `Incorrect API key provided` — the state is named as the
+The `getAuthStatus` reply's auth mode is surfaced in **Settings â†’ Providers â†’
+Codex** (*Reported auth method*). When the CLI reports an API-key login â€” or a
+failed turn body is `Incorrect API key provided` â€” the state is named as the
 API-key-vs-ChatGPT mismatch rather than a healthy sign-in or a plain sign-out,
 and it is only surfaced while Codex is the selected provider. No credential value
 is ever logged, shown, or interpolated into a message.
@@ -738,7 +750,7 @@ Generated protocol bindings are checked in under `schemas/` and the extension
 compiles against them, so a protocol drift surfaces as a build/type error rather
 than a runtime mystery. At runtime, the server's own version (from the
 `initialize` user agent, or `codex --version` when the handshake times out) is
-checked against the pinned protocol window: a version outside `0.154.0–0.163.x`
+checked against the pinned protocol window: a version outside `0.154.0â€“0.163.x`
 is reported as the specific `incompatible` status carrying that version, never the
 generic `unavailable` state and never a silent no-op.
 
@@ -819,7 +831,7 @@ and the JSON event shapes before relying on these assumptions.
 src/
   extension.ts          activation, commands, registrations
   sidebarView.ts        webview <-> host glue, reload/restore lifecycle
-  planStore.ts          writes/reads the per-thread plan file under .melink/plans
+  planStore.ts          writes/reads the per-chat plan file under .melink/plans
   protocol.ts           typed host <-> webview message contract
   backends/
     types.ts            provider-neutral seam every backend implements
@@ -836,3 +848,4 @@ src/
 schemas/                generated Codex app-server protocol bindings
 docs/                   usage and manual-test documentation
 ```
+

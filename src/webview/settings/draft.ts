@@ -1,6 +1,6 @@
-﻿import type { SettingsPatch, SettingsSnapshot } from '../../protocol';
+import type { SettingsPatch, SettingsSnapshot } from '../../protocol';
 import { formatDictationTarget } from '../../dictation/target.ts';
-import { quickTaskApplies } from '../../orchestration/quickTask.ts';
+import type { OrchestrationChoice } from '../../orchestration/settings.ts';
 
 /** Local draft state; the host snapshot is the source of truth on save. */
 export interface Draft {
@@ -15,12 +15,12 @@ export interface Draft {
   mode: SettingsSnapshot['defaults']['mode'];
   thinking: SettingsSnapshot['defaults']['thinking'] | '';
   dictationModel: string;
-  orchestrationTesting: boolean;
-  orchestrationReviewing: boolean;
-  orchestrationStyling: boolean;
-  orchestrationDoubleCheck: boolean;
-  orchestrationQuickTask: boolean;
-  orchestrationPlanning: boolean;
+  orchestrationTesting: OrchestrationChoice;
+  orchestrationReviewing: OrchestrationChoice;
+  orchestrationStyling: OrchestrationChoice;
+  orchestrationDoubleCheck: OrchestrationChoice;
+  orchestrationQuickTask: OrchestrationChoice;
+  orchestrationPlanning: OrchestrationChoice;
   opencodeCliSource: 'local' | 'bundled';
   opencodePath: string;
   browserCodex: boolean;
@@ -39,19 +39,8 @@ export interface Draft {
   contextExclude: string[];
 }
 
-/** The value the draft displays/saves: with every pass off there is nothing to skip. */
-export function normalizedQuickTask(
-  orchestration: Pick<
-    SettingsSnapshot['orchestration'],
-    'quickTask' | 'testing' | 'reviewing' | 'styling' | 'doubleCheck'
-  >
-): boolean {
-  return quickTaskApplies(orchestration.quickTask, orchestration);
-}
-
 /** Seed the draft from a host snapshot; used on load, echo, and reset. */
 export function draftFrom(settings: SettingsSnapshot): Draft {
-  const orchestrationQuickTask = normalizedQuickTask(settings.orchestration);
   return {
     ollamaBaseUrl: settings.ollama.baseUrl,
     ollamaDefaultModel: settings.ollama.defaultModel,
@@ -68,7 +57,7 @@ export function draftFrom(settings: SettingsSnapshot): Draft {
     orchestrationReviewing: settings.orchestration.reviewing,
     orchestrationStyling: settings.orchestration.styling,
     orchestrationDoubleCheck: settings.orchestration.doubleCheck,
-    orchestrationQuickTask,
+    orchestrationQuickTask: settings.orchestration.quickTask,
     orchestrationPlanning: settings.orchestration.planning,
     opencodeCliSource: settings.opencode.cliSource,
     opencodePath: settings.opencode.local.path,
@@ -154,7 +143,7 @@ function storedPatch(settings: SettingsSnapshot): Required<SettingsPatch> {
     orchestrationReviewing: settings.orchestration.reviewing,
     orchestrationStyling: settings.orchestration.styling,
     orchestrationDoubleCheck: settings.orchestration.doubleCheck,
-    orchestrationQuickTask: normalizedQuickTask(settings.orchestration),
+    orchestrationQuickTask: settings.orchestration.quickTask,
     orchestrationPlanning: settings.orchestration.planning,
     opencodeCliSource: settings.opencode.cliSource,
     opencodePath: settings.opencode.local.path,
@@ -193,4 +182,3 @@ export function dirtyKeys(draft: Draft, settings: SettingsSnapshot): Array<keyof
 export function isDraftDirty(draft: Draft | undefined, settings: SettingsSnapshot | undefined): boolean {
   return Boolean(draft && settings && dirtyKeys(draft, settings).length > 0);
 }
-

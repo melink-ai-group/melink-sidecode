@@ -4,7 +4,6 @@ import {
   QUICK_TASK_MAX_CHARS,
   QUICK_TASK_MAX_WORDS,
   detectQuickTask,
-  quickTaskApplies,
   type QuickTaskInput
 } from './quickTask.ts';
 
@@ -15,7 +14,6 @@ function input(overrides: Partial<QuickTaskInput> = {}): QuickTaskInput {
     origin: 'user',
     hasAttachments: false,
     hasActivePlan: false,
-    settings: { quickTask: true },
     ...overrides
   };
 }
@@ -38,7 +36,6 @@ test('the design table classifies exactly as documented', () => {
 });
 
 test('each documented veto reason is reported', () => {
-  assert.equal(detectQuickTask(input({ settings: { quickTask: false } })).reason, 'quick-task-disabled');
   assert.equal(detectQuickTask(input({ mode: 'ask' })).reason, 'mode-not-agent');
   assert.equal(detectQuickTask(input({ mode: 'plan' })).reason, 'mode-not-agent');
   assert.equal(detectQuickTask(input({ origin: 'plan' })).reason, 'origin-not-user');
@@ -132,23 +129,9 @@ test('quick detection trims surrounding whitespace and is case-insensitive', () 
   assert.equal(detectQuickTask(input({ text: '  explain  the retry logic  ' })).quick, true);
 });
 
-test('a disabled toggle wins even for a clean quick question', () => {
-  const decision = detectQuickTask(input({ settings: { quickTask: false } }));
-  assert.equal(decision.quick, false);
-  assert.equal(decision.reason, 'quick-task-disabled');
-});
-
 test('quick does not mutate the input text', () => {
   const text = 'What does it do?';
   detectQuickTask(input({ text }));
   assert.equal(text, 'What does it do?');
 });
 
-test('quick tasks is only effective while at least one pass is on', () => {
-  const pass = { testing: false, reviewing: false, styling: false, doubleCheck: false };
-  assert.equal(quickTaskApplies(true, pass), false);
-  assert.equal(quickTaskApplies(false, { ...pass, testing: true }), false);
-  assert.equal(quickTaskApplies(true, { ...pass, doubleCheck: true }), true);
-  assert.equal(quickTaskApplies(true, { ...pass, reviewing: true }), true);
-  assert.equal(quickTaskApplies(true, { ...pass, styling: true }), true);
-});

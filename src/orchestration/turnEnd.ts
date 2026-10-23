@@ -9,12 +9,12 @@
  */
 
 import type { TurnPlan } from './plan.ts';
-import type { OrchestrationToggles } from './settings.ts';
+import type { OrchestrationChoices } from './settings.ts';
 
 export interface TurnEndInput {
   mode: string;
   plan?: TurnPlan;
-  settings: Pick<OrchestrationToggles, 'planning'>;
+  settings: Pick<OrchestrationChoices, 'planning'>;
 }
 
 export interface TurnEndActions {
@@ -30,7 +30,10 @@ export function planTurnEnd(input: TurnEndInput): TurnEndActions {
   }
   return {
     settlePlanProgress: true,
-    continuePlan: input.plan?.planning ?? input.settings.planning
+    // The per-turn plan is authoritative. The fallback only exists for a turn
+    // with no stored plan; Off is the only choice that forbids an attempt, and
+    // the plan-autopilot decision still checks that a built plan exists.
+    continuePlan: input.plan?.planning ?? (input.settings.planning !== 'off')
   };
 }
 

@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BROWSER_TOOL_NAMES, browserPermissionKeys, codexBrowserConfig, mergeOpencodeMcp, type BrowserCommand } from './config.ts';
+import {
+  BROWSER_TOOL_NAMES,
+  browserAgentCallAllowed,
+  browserEndpointFileName,
+  browserPermissionKeys,
+  codexBrowserConfig,
+  mergeOpencodeMcp,
+  type BrowserCommand
+} from './config.ts';
 import { ConsoleBuffer, EMPTY_CONSOLE_TEXT, attachPageDiagnostics, navigatePage } from './consoleBuffer.ts';
 import {
   browserSkillEnabled,
@@ -217,7 +225,7 @@ test('an opencode turn config carries the browser server only when asked', () =>
     permissionLevel: 'default'
   });
   assert.equal(off.config.mcp, undefined);
-  assert.equal((off.config.permission as Record<string, string>).melink_browser, undefined);
+  assert.equal((off.config.permission as Record<string, string>).melink_browser_browser_navigate, undefined);
 
   const on = buildOpencodeConfig({
     baseUrl: 'https://ollama.com',
@@ -228,21 +236,55 @@ test('an opencode turn config carries the browser server only when asked', () =>
     browser: command
   });
   assert.equal((on.config.permission as Record<string, string>).edit, 'deny');
-  assert.equal((on.config.permission as Record<string, string>).melink_browser, 'allow');
-  assert.equal((on.config.permission as Record<string, string>).browser_snapshot, 'allow');
+  assert.equal((on.config.permission as Record<string, string>).melink_browser_browser_navigate, 'allow');
+  assert.equal((on.config.permission as Record<string, string>).melink_browser_browser_snapshot, 'allow');
+  assert.equal((on.config.permission as Record<string, string>).melink_browser, undefined);
+  assert.equal((on.config.permission as Record<string, string>).browser_navigate, undefined);
   const mcp = on.config.mcp as Record<string, { type: string }>;
   assert.equal(mcp.melink_browser?.type, 'local');
   const agent = (on.config.agent as Record<string, { permission: Record<string, string> }>)[on.agent];
-  assert.equal(agent?.permission.melink_browser, 'allow');
+  assert.equal(agent?.permission.melink_browser_browser_navigate, 'allow');
   assert.equal(agent?.permission.bash, 'deny');
 });
 
-test('browser permission keys allow the server and each tool', () => {
+test('browser permission keys are the resolved server_tool names, never the bare ones', () => {
   const keys = browserPermissionKeys();
-  assert.equal(keys.melink_browser, 'allow');
-  assert.equal(keys.browser_navigate, 'allow');
-  assert.equal(keys.browser_click, 'allow');
-  assert.equal(keys.browser_console, 'allow');
+  const tools = BROWSER_TOOLS.map((tool) => tool.name);
+  assert.deepEqual(Object.keys(keys).sort(), tools.map((name) => `melink_browser_${name}`).sort());
+  assert.equal(keys.melink_browser_browser_navigate, 'allow');
+  assert.equal(keys.melink_browser_browser_click, 'allow');
+  assert.equal(keys.melink_browser_browser_console, 'allow');
+  assert.equal(keys.melink_browser, undefined);
+  assert.equal(keys.browser_navigate, undefined);
+  assert.equal(keys.browser_click, undefined);
+});
+
+test('a tool added to the list gets a permission key without a second list', () => {
+  // BROWSER_TOOL_NAMES is derived from BROWSER_TOOLS so Dev B's new tools are
+  // covered by the same rule; pin the invariant rather than a fixed count.
+  assert.deepEqual([...BROWSER_TOOL_NAMES], BROWSER_TOOLS.map((tool) => tool.name));
+  for (const name of BROWSER_TOOL_NAMES) {
+    assert.equal(browserPermissionKeys()[`melink_browser_${name}`], 'allow', name);
+  }
+});
+
+test('each window endpoint file is unique and keeps the pid', () => {
+  const a = browserEndpointFileName('a'.repeat(48), 1234);
+  const b = browserEndpointFileName('b'.repeat(48), 1234);
+  assert.notEqual(a, b);
+  assert.match(a, /^browser-endpoint-1234-a+\.json$/);
+  assert.match(browserEndpointFileName('../evil token?', 7), /^browser-endpoint-7-eviltoken\.json$/);
+  assert.match(browserEndpointFileName('', 7), /^browser-endpoint-7-window\.json$/);
+});
+
+test('an agent call uses only its own provider; panel calls need either', () => {
+  const settings = { codex: false, opencode: true };
+  const enabled = (provider?: 'codex' | 'opencode'): boolean =>
+    provider === undefined ? settings.codex || settings.opencode : settings[provider];
+  assert.equal(browserAgentCallAllowed('codex', enabled), false);
+  assert.equal(browserAgentCallAllowed('opencode', enabled), true);
+  assert.equal(browserAgentCallAllowed(undefined, enabled), true);
+  assert.equal(browserAgentCallAllowed('codex', () => false), false);
 });
 
 test('browser_console is listed with an empty schema and states the buffer behavior', () => {
@@ -468,6 +510,18 @@ class FakePage implements PlaywrightPage {
     return undefined;
   }
 
+  async goBack(): Promise<unknown> {
+    return undefined;
+  }
+
+  async goForward(): Promise<unknown> {
+    return undefined;
+  }
+
+  async reload(): Promise<unknown> {
+    return undefined;
+  }
+
   url(): string {
     return this.currentUrl;
   }
@@ -511,7 +565,10 @@ class FakePage implements PlaywrightPage {
     return { first: () => ({ click: async () => undefined }), count: async () => 1 };
   }
 
-  readonly mouse = { click: async (_x: number, _y: number) => undefined };
+  readonly mouse = {
+    click: async (_x: number, _y: number) => undefined,
+    wheel: async (_dx: number, _dy: number) => undefined
+  };
   readonly keyboard = {
     type: async (_text: string) => undefined,
     press: async (_key: string) => undefined,
@@ -572,7 +629,7 @@ test('browser_assert is listed with a bounded schema and its permission key', ()
     ['selector', 'text', 'url', 'status']
   );
   assert.ok((BROWSER_TOOL_NAMES as readonly string[]).includes('browser_assert'));
-  assert.equal(browserPermissionKeys().browser_assert, 'allow');
+  assert.equal(browserPermissionKeys().melink_browser_browser_assert, 'allow');
 });
 
 test('an unreachable navigation is an error with the reason in the text', async () => {

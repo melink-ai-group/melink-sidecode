@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import type { BrowserCommand } from './config.ts';
+import {
+  browserAgentCallAllowed,
+  browserEndpointFileName,
+  type BrowserCommand
+} from './config.ts';
 import { BrowserBridge } from './bridge.ts';
 import { BrowserPanel, type BrowserTabState } from './panel.ts';
 import {
@@ -13,8 +17,9 @@ import {
   type BrowserSkillProvider
 } from './policy.ts';
 import { BrowserPage } from './session.ts';
-import { requireWorkspaceRoot, saveScreenshot } from './screenshots.ts';
-import { runBrowserTool, type BrowserActions, type OriginApproval, type ToolResult } from './tools.ts';
+import { preflightNavigation } from './preflight.ts';
+import { saveSnapshotPng } from './snapshot.ts';
+import { runBrowserTool, textResult, type BrowserActions, type OriginApproval, type ToolResult } from './tools.ts';
 import { SKILLS_SECTION } from '../settingsKeys';
 
 /**
@@ -76,7 +81,13 @@ export class BrowserSkill {
     }
     return {
       command: process.execPath,
-      args: [join(this.context.extensionPath, 'dist', 'browser-mcp.js'), '--endpoint-file', this.endpointFile],
+      args: [
+        join(this.context.extensionPath, 'dist', 'browser-mcp.js'),
+        '--endpoint-file',
+        this.endpointFile,
+        '--provider',
+        provider
+      ],
       env: { ELECTRON_RUN_AS_NODE: '1' }
     };
   }
@@ -124,12 +135,12 @@ export class BrowserSkill {
       this.token = randomBytes(24).toString('hex');
     }
     if (!this.bridge) {
-      this.bridge = new BrowserBridge((call) => this.handle(call.name, call.arguments));
+      this.bridge = new BrowserBridge((call) => this.handle(call.name, call.arguments, call.provider));
     }
     const url = await this.bridge.start(this.token);
     const directory = this.context.globalStorageUri.fsPath;
     await mkdir(directory, { recursive: true });
-    this.endpointFile = join(directory, 'browser-endpoint.json');
+    this.endpointFile = join(directory, browserEndpointFileName(this.token));
     await writeFile(this.endpointFile, JSON.stringify({ url, token: this.token }), { mode: 0o600 });
     if (this.stopped) {
       const bridge = this.bridge;
@@ -141,8 +152,8 @@ export class BrowserSkill {
     }
   }
 
-  private async handle(name: string, args: unknown): Promise<ToolResult> {
-    if (!this.enabled()) {
+  private async handle(name: string, args: unknown, provider?: BrowserSkillProvider): Promise<ToolResult> {
+    if (!browserAgentCallAllowed(provider, (candidate) => this.enabled(candidate))) {
       return { content: [{ type: 'text', text: 'Browser control is off for this provider.' }], isError: true };
     }
     if (name === 'browser_assert' && !this.page) {
@@ -152,15 +163,53 @@ export class BrowserSkill {
       };
     }
     try {
+      if (name === 'browser_close') {
+        await this.closeBrowser();
+        return textResult('Closed the browser page. The next navigation opens a new one.');
+      }
+      const preflight = name === 'browser_navigate' ? preflightNavigation(args, this.sessionOrigins) : undefined;
+      let approvedOrigin: string | undefined;
+      let approval: OriginApproval | undefined;
+      if (preflight) {
+        if (preflight.kind === 'missing') {
+          this.panel?.showError('Provide a url.');
+          return textResult('Provide a url.', true);
+        }
+        if (preflight.kind === 'invalid') {
+          this.panel?.showError('Only http and https addresses can be opened.');
+          return textResult('Only http and https addresses can be opened.', true);
+        }
+        if (preflight.kind === 'ask') {
+          approvedOrigin = preflight.origin;
+          approval = await this.askOrigin(preflight.origin);
+          if (approval === 'deny') {
+            this.panel?.showError(`Navigation to ${preflight.origin} was denied.`);
+            return textResult(`Navigation to ${preflight.origin} was denied.`, true);
+          }
+        }
+      }
       const page = await this.ensurePage();
       const actions = this.actions(page);
-      const result = await runBrowserTool(actions, name, args, (origin) => this.askOrigin(origin), this.sessionOrigins);
-      await this.pushState(page);
+      const allow = async (origin: string): Promise<OriginApproval> => {
+        if (approvedOrigin === origin && approval) {
+          return approval;
+        }
+        return this.askOrigin(origin);
+      };
+      const result = await runBrowserTool(actions, name, args, allow, this.sessionOrigins);
+      if (result.isError && name === 'browser_navigate') {
+        this.panel?.showError(errorText(result));
+      } else {
+        await this.pushState(page);
+      }
       return result;
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : 'The browser action failed.';
       this.launchError = message;
       this.launchErrorListener?.();
+      if (name === 'browser_navigate') {
+        this.panel?.showError(message);
+      }
       return { content: [{ type: 'text', text: message }], isError: true };
     }
   }
@@ -175,16 +224,35 @@ export class BrowserSkill {
       },
       snapshot: async () => {
         const shot = await page.snapshot();
-        const root = requireWorkspaceRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
-        const path = await saveScreenshot(root, shot.pngBase64, shot.title, shot.url);
-        return { ...shot, path };
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        return { ...shot, ...(await saveSnapshotPng(root, shot)) };
       },
       click: (input) => page.click(input),
       type: (text, selector) => page.type(text, selector),
       press: (key) => page.press(key),
       console: async () => page.consoleText(),
-      assert: (input) => page.assert(input)
+      assert: (input) => page.assert(input),
+      scroll: (dx, dy) => page.scroll(dx, dy),
+      back: () => page.back(),
+      forward: () => page.forward(),
+      reload: () => page.reload(),
+      close: () => this.closeBrowser()
     };
+  }
+
+  /** Close the page and the tab but keep the bridge, so a later navigate reopens. */
+  private async closeBrowser(): Promise<void> {
+    const opening = this.opening;
+    this.opening = undefined;
+    if (opening) {
+      await opening.catch(() => undefined);
+    }
+    const page = this.page;
+    this.page = undefined;
+    await page?.close();
+    this.panel?.close();
+    this.panel = undefined;
+    this.launchError = undefined;
   }
 
   private async ensurePage(): Promise<BrowserPage> {
@@ -269,6 +337,12 @@ export class BrowserSkill {
     }
     return 'deny';
   }
+}
+
+/** The first text block of a tool result, which is what the panel shows inline. */
+function errorText(result: ToolResult): string {
+  const text = result.content.find((entry) => entry.type === 'text' && entry.text)?.text;
+  return text || 'The browser action failed.';
 }
 
 let current: BrowserSkill | undefined;

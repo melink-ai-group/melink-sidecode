@@ -33,7 +33,7 @@ import {
   ThreadHandle,
   ThreadSummary
 } from './types';
-import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './modes';
+import { effectivePermissionLevel, isDefaultMode, modeInstructionsForTurn } from './modes';
 import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
 import { resolveOpencodeExecutable } from './opencode/resolve';
 import { probeOpencode } from './opencode/status';
@@ -65,12 +65,13 @@ function opencodePrompt(
   request: SendTurnRequest,
   freshSession: boolean,
   summary?: string,
-  recovery?: string
+  recovery?: string,
+  previousMode?: DefaultMode
 ): string {
   const context = request.context;
   const block = freshSession ? context?.snapshot ?? context?.notice : context?.delta ?? context?.notice;
   const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
-  const instructions = modeInstructions(mode, request.context?.frontendStack);
+  const instructions = modeInstructionsForTurn(mode, previousMode, request.context?.frontendStack);
   const preface = !freshSession
     ? undefined
     : recovery?.trim()
@@ -113,6 +114,14 @@ export class OpencodeBackend implements AgentBackend {
   private readonly flights = new Map<string, AbortController>();
   private readonly steerQueues = new Map<string, string[]>();
   private readonly quietStops = new Set<string>();
+  /**
+   * The mode text last applied to each thread in this process. OpenCode keeps
+   * earlier turns in the session history, so a changed mode needs an explicit
+   * revocation sentence, not just a repetition of the new mode text. This is
+   * in-memory only: a session resumed from an earlier process has no recorded
+   * previous mode, so its first turn after resume carries no revocation.
+   */
+  private readonly appliedModes = new Map<string, DefaultMode>();
   private sideFlight?: AbortController;
   private catalogCache?: { at: number; models: BackendModel[]; includePaid: boolean };
 
@@ -543,15 +552,21 @@ export class OpencodeBackend implements AgentBackend {
     let recovery: string | undefined;
     const opencodeCwd = request.context?.workspaceRoot ?? this.cwd;
 
-    const promptFor = (): string =>
-      barePrompt
-        ? visibleText
-        : opencodePrompt(
-            { ...request, text: visibleText },
-            !sessionId,
-            !sessionId && !recovery ? summary : undefined,
-            !sessionId ? recovery : undefined
-          );
+    const promptFor = (): string => {
+      if (barePrompt) {
+        return visibleText;
+      }
+      const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
+      const previousMode = this.appliedModes.get(handle.threadId);
+      this.appliedModes.set(handle.threadId, mode);
+      return opencodePrompt(
+        { ...request, text: visibleText },
+        !sessionId,
+        !sessionId && !recovery ? summary : undefined,
+        !sessionId ? recovery : undefined,
+        previousMode
+      );
+    };
 
     try {
       for (;;) {
@@ -1111,6 +1126,7 @@ export class OpencodeBackend implements AgentBackend {
   dispose(): void {
     this.cancel();
     this.threads.clear();
+    this.appliedModes.clear();
     this.events.dispose();
   }
 }

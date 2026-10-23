@@ -9,7 +9,7 @@
 
 import type { Attachment, ContextPayload, DefaultMode } from '../types.ts';
 import type { FrontendStack } from '../../context/frontendStack.ts';
-import { modeInstructions } from '../modes.ts';
+import { modeInstructionsForTurn } from '../modes.ts';
 import type { UserInput } from '../../../schemas/v2/UserInput.ts';
 
 export interface CodexTurnInput {
@@ -44,12 +44,6 @@ export function planEscapeInstructions(snapshot?: string): string {
   return snapshot && snapshot.trim().length > 0 ? `${notice}\n\n${snapshot}` : notice;
 }
 
-const MODE_NAME: Record<DefaultMode, string> = {
-  agent: 'Agent',
-  plan: 'Plan',
-  ask: 'Ask'
-};
-
 /** The `turn/start` input for one user message. */
 export function buildCodexTurnInput(input: CodexTurnInput): UserInput[] {
   const text = providerText(input);
@@ -58,14 +52,13 @@ export function buildCodexTurnInput(input: CodexTurnInput): UserInput[] {
 
 function providerText(input: CodexTurnInput): string {
   const parts: string[] = [];
-  if (input.revokePlan || (input.bakedMode !== undefined && input.bakedMode !== input.mode)) {
-    const previous =
-      input.bakedMode !== undefined && input.bakedMode !== input.mode ? MODE_NAME[input.bakedMode] : 'Plan';
-    parts.push(
-      `The developer instruction that required ${previous} mode is revoked. It no longer applies, including any rule that prohibited implementation. The active developer instruction for this turn is ${MODE_NAME[input.mode]} mode.`
-    );
-  }
-  const instructions = modeInstructions(input.mode, input.frontendStack);
+  const previousMode =
+    input.bakedMode !== undefined && input.bakedMode !== input.mode
+      ? input.bakedMode
+      : input.revokePlan
+        ? 'plan'
+        : undefined;
+  const instructions = modeInstructionsForTurn(input.mode, previousMode, input.frontendStack);
   if (instructions) {
     parts.push(instructions);
   }

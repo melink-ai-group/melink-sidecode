@@ -3,12 +3,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { OrchestrationFields, type OrchestrationFieldValues } from './OrchestrationFields';
 
 const DEFAULT_VALUES: OrchestrationFieldValues = {
-  testing: false,
-  reviewing: false,
-  styling: true,
-  doubleCheck: true,
-  quickTask: true,
-  planning: true
+  testing: 'on',
+  reviewing: 'auto',
+  styling: 'auto',
+  doubleCheck: 'auto',
+  quickTask: 'off',
+  planning: 'auto'
 };
 
 function renderFields(
@@ -28,64 +28,75 @@ function renderFields(
 }
 
 describe('OrchestrationFields', () => {
-  it('renders the effective summary from the values', () => {
+  it('renders the default tri-state summary', () => {
     renderFields();
-    expect(
-      screen.getByRole('status').textContent
-    ).toBe(
-      'Effective policy: styling, double-check and plan autopilot on · testing and reviewing off · quick tasks skip these passes.'
+    expect(screen.getByRole('status').textContent).toBe(
+      'Effective policy: testing On, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Off.'
     );
   });
 
-  it('renders the intro sentence exactly once', () => {
+  it('renders the intro and the Auto explanation exactly once', () => {
     renderFields();
     expect(screen.getAllByText('Changes apply from the next turn.')).toHaveLength(1);
+    expect(
+      screen.getByText(
+        'Auto runs a pass only when this turn is relevant; On runs it whenever its mode applies; Off never runs it.'
+      )
+    ).toBeTruthy();
   });
 
-  it('reports every toggle change through onChange', () => {
-    const onChange = renderFields({ testing: true });
-    fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Reviewing/ }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Styling check/ }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Double-check/ }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Plan autopilot/ }));
+  it('shows one select per role with the three choices and the stored value', () => {
+    renderFields();
+    const selects = screen.getAllByRole('combobox');
+    expect(selects).toHaveLength(6);
+    expect((screen.getByRole('combobox', { name: /Testing/ }) as HTMLSelectElement).value).toBe('on');
+    expect((screen.getByRole('combobox', { name: /Reviewing/ }) as HTMLSelectElement).value).toBe('auto');
+    expect((screen.getByRole('combobox', { name: /Quick tasks/ }) as HTMLSelectElement).value).toBe('off');
+    for (const select of selects) {
+      expect(Array.from((select as HTMLSelectElement).options).map((option) => option.value)).toEqual([
+        'auto',
+        'on',
+        'off'
+      ]);
+    }
+  });
+
+  it('reports every tri-state change through onChange', () => {
+    const onChange = renderFields();
+    fireEvent.change(screen.getByRole('combobox', { name: /Testing/ }), { target: { value: 'off' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /Reviewing/ }), { target: { value: 'on' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /Styling check/ }), { target: { value: 'off' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /Double-check/ }), { target: { value: 'on' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /Quick tasks/ }), { target: { value: 'auto' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /Plan autopilot/ }), { target: { value: 'off' } });
     expect(onChange.mock.calls).toEqual([
-      ['testing', false],
-      ['reviewing', true],
-      ['styling', false],
-      ['doubleCheck', false],
-      ['planning', false]
+      ['testing', 'off'],
+      ['reviewing', 'on'],
+      ['styling', 'off'],
+      ['doubleCheck', 'on'],
+      ['quickTask', 'auto'],
+      ['planning', 'off']
     ]);
   });
 
-  it('disables and unchecks quick tasks when every pass is off', () => {
-    renderFields({ testing: false, reviewing: false, styling: false, doubleCheck: false, quickTask: true });
-    const quick = screen.getByRole('checkbox', { name: /Quick tasks/ }) as HTMLInputElement;
-    expect(quick.disabled).toBe(true);
-    expect(quick.checked).toBe(false);
-    expect(screen.getByText('Enable at least one pass first.')).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toBe(
-      'Effective policy: plan autopilot on · testing, reviewing, styling and double-check off.'
-    );
-  });
-
-  it('saves quick tasks off when the last pass is turned off', () => {
-    const onChange = renderFields({
-      testing: true,
-      reviewing: false,
-      styling: false,
-      doubleCheck: false,
-      quickTask: true
+  it('keeps Quick editable when every other pass is Off', () => {
+    renderFields({
+      testing: 'off',
+      reviewing: 'off',
+      styling: 'off',
+      doubleCheck: 'off',
+      quickTask: 'off'
     });
-    fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));
-    expect(onChange.mock.calls).toEqual([
-      ['testing', false],
-      ['quickTask', false]
-    ]);
+    const quick = screen.getByRole('combobox', { name: /Quick tasks/ }) as HTMLSelectElement;
+    expect(quick.disabled).toBe(false);
+    expect(quick.value).toBe('off');
+    expect(screen.getByRole('status').textContent).toBe(
+      'Effective policy: testing Off, reviewing Off, styling Off, double-check Off and plan autopilot Auto. Quick bypass always applies; quick notice Off.'
+    );
   });
 
   it('explains a legacy source instead of the normal help', () => {
-    renderFields({ testing: true, reviewing: true }, { legacyTesting: true, legacyReviewing: true });
+    renderFields({ testing: 'on', reviewing: 'on' }, { legacyTesting: true, legacyReviewing: true });
     expect(
       screen.getByText('On from `melink.review.checks.enabled`; saving takes over.')
     ).toBeTruthy();

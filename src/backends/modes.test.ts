@@ -6,7 +6,9 @@ import {
   effectivePermissionLevel,
   modeEnforcement,
   modeForcesReadOnly,
+  modeInstructionsForTurn,
   modeRefusesTools,
+  modeSwitchInstructions,
   supportedModes
 } from './modes.ts';
 
@@ -81,7 +83,11 @@ test('every mode carries the shared plan-document contract', () => {
   for (const text of [agent, plan]) {
     assert.match(text, /\.melink\/plans\//);
     assert.match(text, /\.melink\/reports\//);
-    assert.match(text, /Do not create or write those files in `docs\/` or `reports\/`/);
+    assert.match(text, /put it under `\.melink\/reports\/` by default/i);
+    assert.match(text, /explicitly asks for a specific path in this project/i);
+    assert.match(text, /`reports\/T121-scout\.md`/);
+    assert.match(text, /without such a request, do not write generated documents into `reports\/` or `docs\/`/i);
+    assert.match(text, /do not create a `docs\/` file unless the user asks/i);
     assert.match(text, /Do not create a plan file yourself/);
     assert.match(text, /never name a plan after a thread id or uuid/);
   }
@@ -171,6 +177,35 @@ test('an unknown mode degrades to the agent default', () => {
   assert.equal(isDefaultMode('not-a-mode'), false);
   assert.equal(modeDescriptor('not-a-mode' as never).mode, 'agent');
   assert.equal(modeInstructions('not-a-mode' as never), modeInstructions('agent'));
+});
+
+test('a mode switch revokes the previous mode for every provider', () => {
+  const revocation = modeSwitchInstructions('plan', 'agent');
+  assert.match(revocation, /required Plan mode is revoked/);
+  assert.match(revocation, /no longer applies/);
+  assert.match(revocation, /every earlier mode instruction is retired/);
+  assert.match(revocation, /Follow only the mode described next: Agent mode/);
+  assert.match(revocation, /active developer instruction for this turn is Agent mode/);
+
+  const switched = modeInstructionsForTurn('agent', 'plan') ?? '';
+  assert.ok(switched.startsWith(revocation));
+  assert.ok(switched.endsWith(modeInstructions('agent') ?? ''));
+  assert.equal(switched.split(revocation).length - 1, 1);
+
+  const same = modeInstructionsForTurn('agent', 'agent') ?? '';
+  assert.equal(same, modeInstructions('agent'));
+  assert.equal(same.includes('is revoked'), false);
+
+  const first = modeInstructionsForTurn('ask') ?? '';
+  assert.equal(first, modeInstructions('ask'));
+  assert.equal(first.includes('is revoked'), false);
+});
+
+test('a revoked switch keeps the frontend checklist for the new mode', () => {
+  const switched = modeInstructionsForTurn('agent', 'ask', 'react') ?? '';
+  assert.match(switched, /required Ask mode is revoked/);
+  assert.match(switched, /Follow only the mode described next: Agent mode/);
+  assert.match(switched, /Frontend checklist/);
 });
 
 test('plan and agent honor permission levels; ask enforces read-only', () => {

@@ -378,7 +378,7 @@ export class SettingsService {
     config: vscode.WorkspaceConfiguration
   ): SettingsSnapshot['orchestration'] {
     const inspect = (key: string): ReturnType<vscode.WorkspaceConfiguration['inspect']> =>
-      config.inspect<boolean>(key);
+      config.inspect<unknown>(key);
     return resolveOrchestrationSettings({
       testing: inspect(`${ORCHESTRATION_SECTION}.testing`),
       reviewing: inspect(`${ORCHESTRATION_SECTION}.reviewing`),

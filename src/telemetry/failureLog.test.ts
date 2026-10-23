@@ -207,7 +207,7 @@ test('model, provider, and prompt version fields are capped', async () => {
 });
 
 test('the prompt version constant is used by default and can be overridden explicitly', async () => {
-  assert.equal(MODE_PROMPT_VERSION, '2026-10-21');
+  assert.equal(MODE_PROMPT_VERSION, '2026-10-22');
   const { sink } = sinkWith();
   const fallback = await recordFailureEntry(sink, { ...validDraft, promptVersion: undefined });
   assert.equal(fallback.ok, true);

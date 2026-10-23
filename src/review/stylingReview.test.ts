@@ -108,6 +108,33 @@ test('an unknown brand token is reported only when a brand kit exists', () => {
   assert.equal(noKit.notice, STYLING_NO_BRAND_KIT_NOTICE);
 });
 
+test('the local token rule follows the kit prefix instead of one brand', () => {
+  const result = localStylingReview({
+    request: 'Style the card.',
+    brandKit: [{ path: 'tokens.css', text: ':root { --acme-surface: #123456; }' }],
+    files: [
+      {
+        path: 'src/webview/card.css',
+        diff: '@@ -0,0 +1,2 @@\n+.card { color: var(--acme-surface); }\n+.card__x { color: var(--acme-missing); }'
+      }
+    ]
+  });
+  assert.ok(result.findings.some((finding) => /--acme-missing/.test(finding.message)));
+  assert.equal(result.findings.some((finding) => /--acme-surface/.test(finding.message)), false);
+  // A host/workbench variable is outside the kit's families and is not flagged.
+  const hostVar = localStylingReview({
+    request: 'Style the card.',
+    brandKit: [{ path: 'tokens.css', text: ':root { --acme-surface: #123456; }' }],
+    files: [
+      {
+        path: 'src/webview/card.css',
+        diff: '@@ -0,0 +1,1 @@\n+.card { color: var(--vscode-foreground); }'
+      }
+    ]
+  });
+  assert.deepEqual(hostVar.findings, []);
+});
+
 test('a hardcoded font and !important are advisory findings', () => {
   const result = localStylingReview(
     input({
@@ -128,6 +155,19 @@ test('the prompt carries the brand kit and the changed frontend files', () => {
   assert.match(prompt, /melink-shell/);
   assert.match(prompt, /src\/webview\/Card\.tsx/);
   assert.match(prompt, /read-only styling-consistency reviewer/i);
+});
+
+test('the prompt derives its rules from the kit and assumes no brand', () => {
+  const withKit = buildStylingReviewPrompt(input());
+  assert.match(withKit, /If the brand kit reserves a colour or token for a specific role/i);
+  assert.match(withKit, /when the kit defines no such reservation, do not invent one/i);
+  assert.match(withKit, /never assume a brand name or a token prefix/i);
+  assert.equal(/The brand hue is reserved/i.test(withKit), false);
+  assert.equal(/provider identity and the streaming caret/i.test(withKit), false);
+
+  const withoutKit = buildStylingReviewPrompt(input({ brandKit: [] }));
+  assert.match(withoutKit, /no brand kit found/i);
+  assert.equal(/The brand hue is reserved/i.test(withoutKit), false);
 });
 
 test('a throwing runner becomes a visible, non-blocking failure', async () => {
