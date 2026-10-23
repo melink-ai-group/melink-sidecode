@@ -61,7 +61,8 @@ it('shows collapsed severity counts, expands the complete findings, and sends al
   expect(screen.getByText('Handle the rejected request.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Fix' }));
   const text = vi.mocked(options.onFix).mock.calls[0][0];
-  for (const detail of ['turn-review', 'Info: src/view.tsx:3', 'Warning: src/view.tsx:4',
+  expect(text).not.toContain(options.review.turnId);
+  for (const detail of ['Info: src/view.tsx:3', 'Warning: src/view.tsx:4',
     'Error: src/view.tsx:8', 'npm run typecheck', 'Compilation failed', 'missing property']) {
     expect(text).toContain(detail);
   }
@@ -114,7 +115,7 @@ it('posts Fix as a user turn using the selected backend and preserves the compos
   expect(sent[0].backendId).toBe('codex');
   expect(sent[0].text).toContain('Handle the rejected request.');
   expect(composer.value).toBe('My next request');
-  expect(screen.getAllByText(/Fix the issues reported for the files changed/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/Fix the following issues/).length).toBeGreaterThan(0);
 });
 
 it('keeps restored change cards and their findings through late hydration of the same conversation', async () => {

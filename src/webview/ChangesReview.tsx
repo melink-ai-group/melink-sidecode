@@ -252,7 +252,7 @@ function ChangesReviewView({
       (severity === 'error' ? Math.max(rows.filter((row) => row.failed).length, gate === 'needs-override' ? 1 : 0) : 0)
   })).filter(({ count }) => count > 0);
   const fixMessage = [
-    `Fix the issues reported for the files changed in turn ${review.turnId}. Inspect the current files first, address the findings below, and rerun the relevant checks.`,
+    'Fix the following issues. Inspect the current files first and rerun the relevant checks after making changes.',
     ...reviews.flatMap((view) => [
       ...view.findings.map((finding) => `${finding.severityLabel}: ${finding.location} — ${finding.message}`),
       ...(view.kind === 'failed' ? [`${view.heading} ${view.detail ?? ''}`] : [])
