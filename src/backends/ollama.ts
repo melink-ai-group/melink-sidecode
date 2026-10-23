@@ -39,7 +39,7 @@ import {
   readProbeJson,
   timeoutMessage
 } from './probeTimeout';
-import { effectivePermissionLevel, isDefaultMode, modeInstructions } from './modes';
+import { effectivePermissionLevel, isDefaultMode, modeInstructionsForTurn } from './modes';
 // Type-only imports are erased at compile time, so the off path loads neither
 // the runtime module nor any child-process code; the runtime is dynamically
 // imported inside the enabled branch only. `isFileTool` is a pure predicate
@@ -128,14 +128,15 @@ function opencodePrompt(
   request: SendTurnRequest,
   freshSession: boolean,
   summary?: string,
-  recovery?: string
+  recovery?: string,
+  previousMode?: DefaultMode
 ): string {
   const context = request.context;
   const block = freshSession
     ? context?.snapshot ?? context?.notice
     : context?.delta ?? context?.notice;
   const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
-  const instructions = modeInstructions(mode, request.context?.frontendStack);
+  const instructions = modeInstructionsForTurn(mode, previousMode, request.context?.frontendStack);
   // A fresh session has no memory of the thread. A replacement for a missing
   // session gets the saved chat once. Otherwise the compaction summary is
   // included once; later turns resume the session and do not repeat it.
@@ -291,6 +292,13 @@ export class OllamaBackend implements AgentBackend {
   private readonly steerQueues = new Map<string, string[]>();
   /** Chats whose live OpenCode turn was ended because nothing new arrived. */
   private readonly quietStops = new Set<string>();
+  /**
+   * The mode text last applied to each chat in this process. OpenCode keeps
+   * earlier turns in its session history, so a changed mode needs an explicit
+   * revocation sentence. In-memory only: a session resumed from an earlier
+   * process has no recorded previous mode.
+   */
+  private readonly appliedModes = new Map<string, DefaultMode>();
   /** Compaction and other work that is not a chat turn. */
   private sideFlight?: AbortController;
 
@@ -1020,15 +1028,21 @@ export class OllamaBackend implements AgentBackend {
     // actually ran in.
     const opencodeCwd = request.context?.workspaceRoot ?? this.cwd;
 
-    const promptFor = (): string =>
-      barePrompt
-        ? visibleText
-        : opencodePrompt(
-            { ...request, text: visibleText },
-            !sessionId,
-            !sessionId && !recovery ? summary : undefined,
-            !sessionId ? recovery : undefined
-          );
+    const promptFor = (): string => {
+      if (barePrompt) {
+        return visibleText;
+      }
+      const mode = isDefaultMode(request.mode) ? request.mode : 'agent';
+      const previousMode = this.appliedModes.get(handle.threadId);
+      this.appliedModes.set(handle.threadId, mode);
+      return opencodePrompt(
+        { ...request, text: visibleText },
+        !sessionId,
+        !sessionId && !recovery ? summary : undefined,
+        !sessionId ? recovery : undefined,
+        previousMode
+      );
+    };
 
     try {
       for (;;) {
@@ -1596,6 +1610,7 @@ export class OllamaBackend implements AgentBackend {
   dispose(): void {
     this.cancel();
     this.threads.clear();
+    this.appliedModes.clear();
     this.events.dispose();
   }
 }

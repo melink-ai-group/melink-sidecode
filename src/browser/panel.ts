@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { composeKey } from './keyboard.ts';
+import { urlInputError } from './url.ts';
 
 /** What the editor tab shows above the page. */
 export interface BrowserTabState {
@@ -17,6 +19,7 @@ export class BrowserPanel {
   private panel?: vscode.WebviewPanel;
   private ready = false;
   private pendingState?: BrowserTabState;
+  private pendingError = '';
   private lastFrame?: string;
   private frameTimer?: ReturnType<typeof setTimeout>;
 
@@ -29,6 +32,7 @@ export class BrowserPanel {
 
   show(state: BrowserTabState): void {
     this.pendingState = state;
+    this.pendingError = '';
     if (!this.panel) {
       this.ready = false;
       this.panel = vscode.window.createWebviewPanel('melink.browser', 'Browser', vscode.ViewColumn.Beside, {
@@ -61,6 +65,8 @@ export class BrowserPanel {
       this.panel.onDidDispose(() => {
         this.panel = undefined;
         this.ready = false;
+        this.pendingError = '';
+        this.lastFrame = undefined;
         if (this.frameTimer) {
           clearTimeout(this.frameTimer);
           this.frameTimer = undefined;
@@ -72,8 +78,11 @@ export class BrowserPanel {
 
   /** Coalesce screencast frames to about ten a second. */
   frame(jpegBase64: string): void {
+    if (!this.panel) {
+      return;
+    }
     this.lastFrame = jpegBase64;
-    if (this.frameTimer || !this.panel) {
+    if (this.frameTimer) {
       return;
     }
     this.frameTimer = setTimeout(() => {
@@ -84,23 +93,39 @@ export class BrowserPanel {
 
   state(state: BrowserTabState): void {
     this.pendingState = state;
+    this.pendingError = '';
     if (this.panel) {
       this.panel.title = state.title || 'Browser';
     }
     this.flush();
   }
 
+  /** Show one inline error above the page; the next successful state clears it. */
+  showError(message: string): void {
+    const text = typeof message === 'string' ? message.trim() : '';
+    this.pendingError = text;
+    if (this.ready && this.panel) {
+      void this.panel.webview.postMessage({ type: 'error', message: text });
+    }
+  }
+
   close(): void {
     this.panel?.dispose();
     this.panel = undefined;
     this.ready = false;
+    this.pendingError = '';
+    this.lastFrame = undefined;
+    if (this.frameTimer) {
+      clearTimeout(this.frameTimer);
+      this.frameTimer = undefined;
+    }
   }
 
   private flush(): void {
     if (!this.ready || !this.panel || !this.pendingState) {
       return;
     }
-    void this.panel.webview.postMessage({ type: 'state', ...this.pendingState });
+    void this.panel.webview.postMessage({ type: 'state', ...this.pendingState, error: this.pendingError });
     this.flushFrame();
   }
 
@@ -131,6 +156,7 @@ function html(webview: vscode.Webview): string {
   input { flex: 1; padding: 4px 8px; }
   button { padding: 4px 10px; cursor: pointer; }
   .meta { white-space: nowrap; opacity: 0.8; }
+  .error { padding: 6px 8px; font-size: 12px; color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground)); background: var(--vscode-inputValidation-errorBackground, transparent); border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, transparent); }
   main { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; background: var(--vscode-editor-background); }
   img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: crosshair; }
   p { margin: 0; padding: 24px; opacity: 0.75; }
@@ -142,13 +168,21 @@ function html(webview: vscode.Webview): string {
   <button id="go" type="button">Open</button>
   <span class="meta" id="meta"></span>
 </header>
+<p class="error" id="error" role="alert" hidden></p>
 <main id="stage"><p>The page appears here when the agent opens it.</p></main>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  const composeKey = ${composeKey.toString()};
+  const urlInputError = ${urlInputError.toString()};
   const url = document.getElementById('url');
   const meta = document.getElementById('meta');
+  const errorLine = document.getElementById('error');
   const stage = document.getElementById('stage');
   let img;
+  function showError(text) {
+    errorLine.textContent = text || '';
+    errorLine.hidden = !text;
+  }
   function ensureImage() {
     if (img) return img;
     stage.textContent = '';
@@ -176,19 +210,29 @@ function html(webview: vscode.Webview): string {
   });
   function openUrl() {
     const value = url.value.trim();
-    if (value) vscode.postMessage({ type: 'navigate', url: value });
+    const problem = urlInputError(value);
+    if (problem) {
+      showError(problem);
+      return;
+    }
+    showError('');
+    vscode.postMessage({ type: 'navigate', url: value });
   }
   window.addEventListener('keydown', (event) => {
     if (event.target === url) return;
     event.preventDefault();
-    vscode.postMessage({ type: 'key', key: event.key });
+    const key = composeKey(event);
+    if (key) vscode.postMessage({ type: 'key', key });
   });
   window.addEventListener('message', (event) => {
     const message = event.data;
     if (!message) return;
     if (message.type === 'state') {
       if (document.activeElement !== url) url.value = message.url || '';
-      meta.textContent = message.width && message.height ? message.width + ' × ' + message.height : '';
+      meta.textContent = message.width && message.height ? message.width + ' �- ' + message.height : '';
+      showError(message.error || '');
+    } else if (message.type === 'error') {
+      showError(message.message || '');
     } else if (message.type === 'frame' && message.jpeg) {
       ensureImage().src = 'data:image/jpeg;base64,' + message.jpeg;
     }

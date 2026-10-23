@@ -95,8 +95,16 @@ import { shouldAutoShowPlanPreview } from './planStepMarkdown';
 import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from './backends/defaults';
 import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
-import { planTurn, type TurnPlan } from './orchestration/plan.ts';
+import {
+  orchestrationDiagnostic,
+  orchestrationTurnSnapshot,
+  planTurn,
+  resolvePostTurnRoles,
+  type OrchestrationTurnSnapshot,
+  type TurnPlan
+} from './orchestration/plan.ts';
 import { runTurnEnd } from './orchestration/turnEnd.ts';
+import { logDiagnostic } from './backends/diagnostics';
 import { readOrchestrationSettings } from './orchestration/vscodeSettings.ts';
 import {
   collectDoubleCheck,
@@ -111,13 +119,9 @@ import { ReviewStore, STYLING_REVIEW_STORE_KEY } from './review/reviewStore.ts';
 import {
   DIFF_REVIEW_TIMEOUT_MS,
   runTurnDiffReview,
-  shouldRunDiffReview,
   turnRequestText
 } from './review/turnReview.ts';
-import {
-  shouldRunStylingCheck,
-  type StylingBrandKitFile
-} from './review/stylingReview.ts';
+import type { StylingBrandKitFile } from './review/stylingReview.ts';
 import {
   STYLING_REVIEW_TIMEOUT_MS,
   runTurnStylingReview
@@ -297,6 +301,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private queueWrite: Promise<void> = Promise.resolve();
   /** The policy decided for each started turn, bounded to the newest 32. */
   private readonly turnPlans = new Map<string, TurnPlan>();
+  /**
+   * The newest resolved post-turn decision, exposed in the settings read model.
+   * It is a copy (see `orchestrationTurnSnapshot`), so no map is kept only to be
+   * written to and never read.
+   */
+  private lastOrchestrationTurn?: OrchestrationTurnSnapshot;
   /** One queued continuation per tab, started once that tab's turn releases the lock. */
   private readonly crashContinueQueue = new Map<string, { session: ChatSession; text: string }>();
   /**
@@ -860,25 +870,47 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!set) {
       return;
     }
-    const plan = this.turnPlans.get(turnId);
-    const fallback = plan ? undefined : readOrchestrationSettings();
-    const testing = plan?.testing ?? fallback?.testing ?? false;
-    const reviewing = plan?.reviewing ?? fallback?.reviewing ?? false;
-    const styling = plan?.styling ?? fallback?.styling ?? false;
-    const doubleCheck = plan?.doubleCheck ?? fallback?.doubleCheck ?? true;
-    const shouldReview = shouldRunDiffReview(reviewing, set.entries);
+    const storedPlan = this.turnPlans.get(turnId);
+    const choices = storedPlan?.choices ?? readOrchestrationSettings();
+    const plan = storedPlan ?? {
+      choices,
+      quick: false,
+      quickBypass: false,
+      quickNotice: false,
+      planning: false,
+      reasons: {}
+    };
+    const roles = resolvePostTurnRoles({
+      choices,
+      quick: plan.quick,
+      entries: set.entries
+    });
+    const snapshot = orchestrationTurnSnapshot(plan, roles, {
+      backendId: set.backendId,
+      threadId: set.threadId,
+      turnId
+    });
+    this.lastOrchestrationTurn = snapshot;
+    logDiagnostic(orchestrationDiagnostic(plan, roles));
+    const shouldReview = roles.reviewing;
     // The styling pass is a frontend-only pass: a backend-only turn is skipped
     // before a brand kit is read or a prompt is built.
-    const shouldStyle = shouldRunStylingCheck(styling, set.entries);
+    const shouldStyle = roles.styling;
     // Checks start only for a non-empty, closed change set. A background turn
     // still stores its result; the runner decides whether the visible surface
     // may be repainted.
-    this.startChangeChecks(set, testing);
+    this.startChangeChecks(set, roles.testing);
     // The advisory diagnostics sweep runs for every completed turn, active or
     // background. Its notice is routed to the owning chat (or held for it), so
     // one chat's file names never appear in another.
-    if (doubleCheck && terminus === 'completed') {
+    if (roles.doubleCheck && terminus === 'completed') {
       void this.runDoubleCheck(set);
+    }
+    // A Quick turn stores its notice in the owning transcript before the
+    // background return below, so it neither lands in the visible chat nor
+    // disappears on reload. Off is silent: `quickNotice` is false.
+    if (plan.quickNotice && set.entries.length > 0) {
+      this.postQuickTaskNotice(set);
     }
     // Only the active conversation's own turn is pushed: a background thread's
     // change set must not replace what the visible surface is showing. Its
@@ -903,13 +935,37 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // A turn that just touched files makes its opening message a checkpoint, so
     // the per-message entry point offers it without waiting for a reload.
     await this.postCheckpoints(set.backendId, set.threadId);
-    if (plan?.quick && set.entries.length > 0) {
-      this.post({
-        type: 'notice',
-        level: 'info',
-        message: 'Quick task: skipped post-turn orchestration for this turn.'
-      });
-    }
+  }
+
+  /**
+   * Save the Quick bypass notice in its owning transcript, then publish it.
+   *
+   * The item id is derived from the turn, so a reload replays one notice and a
+   * repaint never duplicates it. It is the same persisted notice item the
+   * double-check result uses.
+   */
+  private postQuickTaskNotice(set: TurnChangeSet): void {
+    const event: Extract<AgentEvent, { type: 'item/started' }> = {
+      type: 'item/started',
+      backendId: set.backendId,
+      threadId: set.threadId,
+      item: {
+        id: `quick-task_${set.turnId}`,
+        kind: 'notice',
+        detail: 'status',
+        text: 'Quick task: skipped post-turn orchestration for this turn.',
+        noticeLevel: 'info',
+        status: 'completed'
+      }
+    };
+    this.store.applyEvent(event);
+    this.post({ type: 'agentEvent', event });
+    const completed: Extract<AgentEvent, { type: 'item/completed' }> = {
+      type: 'item/completed', backendId: set.backendId, threadId: set.threadId,
+      itemId: event.item.id, status: 'completed'
+    };
+    this.store.applyEvent(completed);
+    this.post({ type: 'agentEvent', event: completed });
   }
 
   /**
@@ -966,11 +1022,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'agentEvent', event: completed });
   }
 
-  /** True when the resolved policy has the advisory second-pass review on. */
-  private diffReviewEnabled(): boolean {
-    return readOrchestrationSettings().reviewing;
-  }
-
   /**
    * Run and persist the opt-in review once, at live turn finish. A reload reads
    * the stored result through `postChangeReview` and never calls this.
@@ -990,11 +1041,6 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       store: this.reviewStore,
       timeoutMs: DIFF_REVIEW_TIMEOUT_MS
     });
-  }
-
-  /** True when the resolved policy has the advisory styling check on. */
-  private stylingCheckEnabled(): boolean {
-    return readOrchestrationSettings().styling;
   }
 
   /**
@@ -1139,18 +1185,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * `postPermissions(backendId)`. A reload, an on-demand `changes/list`, and the
    * after-a-decision repaint all go through here, so the review surface can
    * never be left showing three different versions of the same turn.
+   *
+   * Stored evidence is always included: the current orchestration choice gates
+   * only whether a *new* turn runs a pass (see `finishChangeTurn`). Turning
+   * Reviewing or Styling Off must not hide what an earlier turn already found.
    */
   private async postChangeReview(backendId: string, threadId: string, turnId: string): Promise<void> {
     const review = await this.changeStore.view(backendId, threadId, turnId);
     if (!review) {
       return;
     }
-    const diffReview = this.diffReviewEnabled()
-      ? this.reviewStore.get(backendId, threadId, turnId)
-      : undefined;
-    const stylingReview = this.stylingCheckEnabled()
-      ? this.stylingReviewStore.get(backendId, threadId, turnId)
-      : undefined;
+    const diffReview = this.reviewStore.get(backendId, threadId, turnId);
+    const stylingReview = this.stylingReviewStore.get(backendId, threadId, turnId);
     const checks = this.checkStore.get(backendId, threadId, turnId);
     this.post({
       type: 'changes/review',
@@ -3009,6 +3055,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    */
   private async settingsSnapshot(): Promise<import('./protocol').SettingsSnapshot> {
     const snapshot = await this.settings.snapshot();
+    if (this.lastOrchestrationTurn) {
+      // The last resolved turn is host-side state, not a stored setting, so it
+      // is attached to the read model here rather than persisted by the
+      // settings service.
+      snapshot.orchestration = {
+        ...snapshot.orchestration,
+        lastTurn: this.lastOrchestrationTurn
+      };
+    }
     for (const backend of this.registry.snapshot()) {
       if (backend.status === 'available') {
         const result = await this.registry.listModels(backend.id);
@@ -6337,6 +6392,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 }
+
 
 
 

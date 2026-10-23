@@ -1,142 +1,100 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AUTO_EXPLANATION,
   ORCHESTRATION_FIELDS,
   ORCHESTRATION_INTRO,
   ORCHESTRATION_TITLE,
-  QUICK_TASKS_DISABLED_HELP,
-  effectiveQuickTask,
   orchestrationFieldHelp,
   orchestrationSummary,
-  quickTasksAvailable,
   type OrchestrationCopyValues
 } from './orchestrationCopy.ts';
 
 const DEFAULTS: OrchestrationCopyValues = {
-  testing: false,
-  reviewing: false,
-  styling: true,
-  doubleCheck: true,
-  quickTask: true,
-  planning: true
+  testing: 'on',
+  reviewing: 'auto',
+  styling: 'auto',
+  doubleCheck: 'auto',
+  quickTask: 'off',
+  planning: 'auto'
 };
 
 function values(overrides: Partial<OrchestrationCopyValues> = {}): OrchestrationCopyValues {
   return { ...DEFAULTS, ...overrides };
 }
 
-test('title and intro are the documented copy', () => {
+test('title, intro and the Auto explanation are the documented copy', () => {
   assert.equal(ORCHESTRATION_TITLE, 'Orchestration');
   assert.equal(ORCHESTRATION_INTRO, 'Changes apply from the next turn.');
-  assert.equal(ORCHESTRATION_INTRO.includes('Per-turn helpers'), false);
+  assert.equal(
+    AUTO_EXPLANATION,
+    'Auto runs a pass only when this turn is relevant; On runs it whenever its mode applies; Off never runs it.'
+  );
 });
 
 test('the six fields carry the exact labels, help, and defaults', () => {
   assert.deepEqual(
     ORCHESTRATION_FIELDS.map(({ key, label, defaultValue }) => [key, label, defaultValue]),
     [
-      ['testing', 'Testing', false],
-      ['reviewing', 'Reviewing', false],
-      ['styling', 'Styling check', true],
-      ['doubleCheck', 'Double-check', true],
-      ['quickTask', 'Quick tasks', true],
-      ['planning', 'Plan autopilot', true]
+      ['testing', 'Testing', 'on'],
+      ['reviewing', 'Reviewing', 'auto'],
+      ['styling', 'Styling check', 'auto'],
+      ['doubleCheck', 'Double-check', 'auto'],
+      ['quickTask', 'Quick tasks', 'off'],
+      ['planning', 'Plan autopilot', 'auto']
     ]
   );
   assert.deepEqual(
     ORCHESTRATION_FIELDS.map(({ help }) => help),
     [
-      'Run typecheck or lint and the tests after a turn that changes files. (Default: off.)',
-      'Read-only diff review after a turn that changes files. Advisory; never edits or blocks Keep. (Default: off.)',
-      'Check new frontend work against the brand kit, tokens, and existing components. Runs only when a frontend file changed. (Default: on.)',
-      'Sweep changed files for VS Code errors after a turn. No second model call. (Default: on.)',
-      'Skip these passes for short, single-question turns in Agent mode. (Default: on.)',
-      'Continue a built plan step by step after a clean turn. Agent mode only. (Default: on.)'
+      'Run typecheck or lint and the tests after a turn. Auto runs only when code files changed. (Default: On.)',
+      'Read-only diff review after a turn. Auto runs only when code files changed. Advisory; never edits or blocks Keep. (Default: Auto.)',
+      'Check new frontend work against the brand kit, tokens, and existing components. Auto and On both require a frontend file change. (Default: Auto.)',
+      'Sweep changed files for VS Code errors after a turn. Auto runs only when code files changed. No second model call. (Default: Auto.)',
+      'Short single-question Agent turns always bypass the other passes. Off hides the Quick notice; Auto or On shows it. (Default: Off.)',
+      'Continue a built plan step by step after a clean turn. Agent mode and an active plan are required. (Default: Auto.)'
     ]
   );
 });
 
-test('the fresh default policy summary shows testing off', () => {
+test('the default summary spells out every choice and the intrinsic bypass', () => {
   assert.equal(
     orchestrationSummary(values()),
-    'Effective policy: styling, double-check and plan autopilot on · testing and reviewing off · quick tasks skip these passes.'
+    'Effective policy: testing On, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Off.'
   );
 });
 
-test('summary lists every pass that is on and every pass that is off', () => {
+test('the summary follows every choice, including quick notice Auto', () => {
   assert.equal(
-    orchestrationSummary(values({ reviewing: true })),
-    'Effective policy: reviewing, styling, double-check and plan autopilot on · testing off · quick tasks skip these passes.'
-  );
-  assert.equal(
-    orchestrationSummary(values({ reviewing: true, planning: false, doubleCheck: false })),
-    'Effective policy: reviewing and styling on · testing, double-check and plan autopilot off · quick tasks skip these passes.'
+    orchestrationSummary(values({ testing: 'auto', quickTask: 'auto' })),
+    'Effective policy: testing Auto, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Auto.'
   );
   assert.equal(
     orchestrationSummary(
-      values({ testing: false, reviewing: false, styling: false, doubleCheck: false, planning: false })
+      values({ testing: 'off', reviewing: 'off', styling: 'off', doubleCheck: 'off', planning: 'off' })
     ),
-    'Effective policy: no post-turn passes.'
-  );
-});
-
-test('the summary never claims a skip when every pass is off', () => {
-  const allPassesOff = values({ testing: false, reviewing: false, styling: false, doubleCheck: false });
-  assert.equal(effectiveQuickTask(allPassesOff), false);
-  assert.equal(
-    orchestrationSummary(allPassesOff),
-    'Effective policy: plan autopilot on · testing, reviewing, styling and double-check off.'
-  );
-  assert.equal(orchestrationSummary(allPassesOff).includes('quick tasks skip'), false);
-  assert.equal(effectiveQuickTask(values()), true);
-});
-
-test('summary drops the quick suffix when quick tasks are off', () => {
-  assert.equal(
-    orchestrationSummary(values({ quickTask: false })),
-    'Effective policy: styling, double-check and plan autopilot on · testing and reviewing off.'
-  );
-  assert.equal(
-    orchestrationSummary(
-      values({ quickTask: false, testing: false, reviewing: false, styling: false, doubleCheck: false, planning: false })
-    ),
-    'Effective policy: no post-turn passes.'
-  );
-});
-
-test('a single enabled pass is named without a conjunction', () => {
-  assert.equal(
-    orchestrationSummary(
-      values({ testing: true, reviewing: false, styling: false, doubleCheck: false, planning: false })
-    ),
-    'Effective policy: testing on · reviewing, styling, double-check and plan autopilot off · quick tasks skip these passes.'
+    'Effective policy: testing Off, reviewing Off, styling Off, double-check Off and plan autopilot Off. Quick bypass always applies; quick notice Off.'
   );
 });
 
 test('legacy sources replace the field help with the migration copy', () => {
   assert.equal(
-    orchestrationFieldHelp('testing', values({ testing: true, legacyTesting: true })),
+    orchestrationFieldHelp('testing', values({ testing: 'on', legacyTesting: true })),
     'On from `melink.review.checks.enabled`; saving takes over.'
   );
   assert.equal(
-    orchestrationFieldHelp('reviewing', values({ reviewing: true, legacyReviewing: true })),
+    orchestrationFieldHelp('reviewing', values({ reviewing: 'on', legacyReviewing: true })),
     'On from `melink.review.diffReview`; saving takes over.'
   );
   assert.equal(
-    orchestrationFieldHelp('reviewing', values({ legacyReviewing: true })),
+    orchestrationFieldHelp('reviewing', values({ reviewing: 'off', legacyReviewing: true })),
     'Off from `melink.review.diffReview`; saving takes over.'
   );
 });
 
-test('quick tasks is disabled with help when every pass is off', () => {
-  const allPassesOff = values({ testing: false, reviewing: false, styling: false, doubleCheck: false });
-  assert.equal(quickTasksAvailable(allPassesOff), false);
-  assert.equal(orchestrationFieldHelp('quickTask', allPassesOff), QUICK_TASKS_DISABLED_HELP);
-  assert.equal(QUICK_TASKS_DISABLED_HELP, 'Enable at least one pass first.');
-
-  assert.equal(quickTasksAvailable(values({ reviewing: true })), true);
+test('every field without a legacy source keeps its normal help', () => {
   assert.equal(
-    orchestrationFieldHelp('quickTask', values({ reviewing: true })),
-    'Skip these passes for short, single-question turns in Agent mode. (Default: on.)'
+    orchestrationFieldHelp('quickTask', values({ testing: 'off', reviewing: 'off' })),
+    'Short single-question Agent turns always bypass the other passes. Off hides the Quick notice; Auto or On shows it. (Default: Off.)'
   );
 });

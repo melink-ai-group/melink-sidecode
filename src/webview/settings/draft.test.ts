@@ -1,18 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizedQuickTask } from './draft.ts';
-
-const allPassesOff = { testing: false, reviewing: false, styling: false, doubleCheck: false, quickTask: true };
-
-test('a stored quickTask=true opens clean when every pass is off', () => {
-  assert.equal(normalizedQuickTask(allPassesOff), false);
-});
-
-test('quickTask stays true only when it is on and a pass can use it', () => {
-  assert.equal(normalizedQuickTask({ ...allPassesOff, testing: true }), true);
-  assert.equal(normalizedQuickTask({ ...allPassesOff, quickTask: false, reviewing: true }), false);
-});
-
 import { draftFrom, dirtyKeys, patchFrom, type Draft } from './draft.ts';
 import type { SettingsPatch, SettingsSnapshot } from '../../protocol.ts';
 
@@ -55,12 +42,12 @@ function snapshot(): SettingsSnapshot {
       exclude: []
     },
     orchestration: {
-      testing: false,
-      reviewing: false,
-      styling: false,
-      doubleCheck: true,
-      quickTask: true,
-      planning: true,
+      testing: 'on',
+      reviewing: 'auto',
+      styling: 'auto',
+      doubleCheck: 'auto',
+      quickTask: 'off',
+      planning: 'auto',
       legacyTesting: false,
       legacyReviewing: false
     },
@@ -183,11 +170,11 @@ function changedDraft(): Draft {
   draft.mode = 'plan';
   draft.thinking = 'high';
   draft.dictationModel = 'ollama|qwen2.5-coder:7b';
-  draft.orchestrationTesting = true;
-  draft.orchestrationReviewing = true;
-  draft.orchestrationDoubleCheck = false;
-  draft.orchestrationQuickTask = false;
-  draft.orchestrationPlanning = false;
+  draft.orchestrationTesting = 'auto';
+  draft.orchestrationReviewing = 'on';
+  draft.orchestrationDoubleCheck = 'off';
+  draft.orchestrationQuickTask = 'on';
+  draft.orchestrationPlanning = 'off';
   draft.browserCodex = false;
   draft.browserOpencode = false;
   draft.contextIncludeInstructions = false;
@@ -261,7 +248,9 @@ test('the echo clears dirty state, and reopening seeds the saved values', () => 
 
   const reopened = draftFrom(echoed);
   assert.equal(reopened.ollamaDefaultModel, 'kimi-k2:instruct');
-  assert.equal(reopened.orchestrationReviewing, true);
+  assert.equal(reopened.orchestrationReviewing, 'on');
+  assert.equal(reopened.orchestrationTesting, 'auto');
+  assert.equal(reopened.orchestrationQuickTask, 'on');
   assert.equal(reopened.contextMaxKb, '32');
   assert.deepEqual(reopened.contextExclude, ['**/snapshots/**']);
   assert.deepEqual(dirtyKeys(reopened, echoed), []);
@@ -292,3 +281,4 @@ test('whitespace-only edits are not dirty because the patch trims them', () => {
   draft.codexPath = ` ${draft.codexPath} `;
   assert.deepEqual(dirtyKeys(draft, original), []);
 });
+

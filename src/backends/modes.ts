@@ -28,7 +28,7 @@ import { frontendChecklist, type FrontendStack } from '../context/frontendStack.
  * prompt generation produced the behaviour. It is metadata only and is never
  * sent anywhere.
  */
-export const MODE_PROMPT_VERSION = '2026-10-21';
+export const MODE_PROMPT_VERSION = '2026-10-22';
 
 /** Whether a mode forces the workspace read-only, whatever level was chosen. */
 export type ModeEnforcement = 'act' | 'read-only' | 'answer-only';
@@ -73,12 +73,14 @@ const QUESTION_BLOCK =
 
 /**
  * Where generated documents go. Codex and OpenCode both receive the mode text,
- * so this is the one rule for both. The host writes the single plan file at
- * `.melink/plans/<friendly-name>.md` from the reply. The model must not also
- * write a plan, or a thread-id copy appears beside the friendly file.
+ * so this is the one rule for both. A project may keep its own convention (this
+ * repository keeps reports in `reports/`), so an explicitly requested project
+ * path wins over the default. The host writes the single plan file at
+ * `.melink/plans/<kebab-case title>.md` from the reply. The model must not also
+ * write a plan, or a second copy appears beside the host's file.
  */
 const ARTIFACT_HOME =
-  'When you write a report, investigation, design note, or other generated document to disk, save it under `.melink/reports/` and nowhere else. Do not create or write those files in `docs/` or `reports/`. A documentation file the project already keeps stays where it is when the user asks you to edit that file. Do not create a plan file yourself. The host saves the one plan from your reply at `.melink/plans/<kebab-case title>.md`. Never create a second plan file, and never name a plan after a thread id or uuid.';
+  'When you write a report, investigation, design note, or other generated document to disk, put it under `.melink/reports/` by default. If the user explicitly asks for a specific path in this project, such as `reports/T121-scout.md`, write exactly that path instead; without such a request, do not write generated documents into `reports/` or `docs/`. Do not create a `docs/` file unless the user asks for one. A documentation file the project already keeps stays where it is when the user asks you to edit that file. Do not create a plan file yourself. The host saves the one plan from your reply at `.melink/plans/<kebab-case title>.md`. Never create a second plan file, and never name a plan after a thread id or uuid.';
 
 /**
  * The shared engineering definition of done for the modes that may act. It
@@ -128,6 +130,48 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
       `Work in Ask mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Answer the user\u2019s questions using what you can read. Do not run commands, edit files, write or revise the plan document, or propose changes to the workspace; if the user asks you to make a change, explain that Ask mode only answers questions and that the host can switch to Agent or Plan. Do not emit a sidecode-question block. ${REPLY_SHAPE} ${REPLY_CLOSE}`
   }
 ];
+
+/** Display name of a mode, for the sentence that retires the previous one. */
+const MODE_LABEL: Record<DefaultMode, string> = {
+  agent: 'Agent',
+  plan: 'Plan',
+  ask: 'Ask'
+};
+
+/**
+ * The one sentence that retires an earlier mode.
+ *
+ * A provider that repeats the full mode text every turn (OpenCode, Ollama)
+ * leaves the earlier mode in the session history, and repeating the new text
+ * does not by itself cancel the old rules. Codex keeps its own baked mode per
+ * thread. Every provider prefixes this sentence when the mode changed, so the
+ * old instruction is explicitly revoked rather than merely followed by a new
+ * one. The wording is shared so all providers revoke in the same terms.
+ */
+export function modeSwitchInstructions(previous: DefaultMode, next: DefaultMode): string {
+  const from = MODE_LABEL[previous];
+  const to = MODE_LABEL[next];
+  return `The developer instruction that required ${from} mode is revoked. It no longer applies, including any rule that allowed acting or prohibited implementation, and every earlier mode instruction is retired. Follow only the mode described next: ${to} mode. The active developer instruction for this turn is ${to} mode.`;
+}
+
+/**
+ * The mode text actually sent for one turn.
+ *
+ * `previousMode` is the mode whose text the thread last received. When it
+ * differs, the revocation sentence is prepended so the earlier rules cannot
+ * remain in force. The mode's own instructions are unchanged.
+ */
+export function modeInstructionsForTurn(
+  mode: DefaultMode,
+  previousMode?: DefaultMode,
+  frontendStack?: FrontendStack
+): string | undefined {
+  const base = modeInstructions(mode, frontendStack);
+  if (!base || previousMode === undefined || previousMode === mode) {
+    return base;
+  }
+  return `${modeSwitchInstructions(previousMode, mode)}\n\n${base}`;
+}
 
 /** The descriptor for a mode, defaulting to `agent`'s copy. */
 export function modeDescriptor(mode: DefaultMode): ModeDescriptor {

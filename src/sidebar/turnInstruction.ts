@@ -39,6 +39,6 @@ export function buildTurnInstruction(steps: readonly TodoStep[]): string {
     '',
     list,
     '',
-    'Before you finish, verify the work with the project\u2019s own checks: run its lint, typecheck, and tests with the commands you identified from `package.json` scripts and the README or contributor docs, and where a web page or app target exists check its console, runtime, and network errors. Report each command\u2019s result and any failure before you close.'
+    'Before you finish, verify the work with the project\u2019s own scripts: run the install/build, lint, typecheck, test, and run/dev commands you identified from `package.json` scripts and the README or contributor docs, and where a web page or app target exists check its console, runtime, and network errors. Prefer the project\u2019s aggregate verification script when it has one, so the same checker is not run twice. Report each command\u2019s result and any failure before you close.'
   ].join('\n');
 }

@@ -324,10 +324,19 @@ interface CdpSession {
   detach(): Promise<void>;
 }
 
+/** Where the page ended up after a history move or reload. */
+export interface PageLocation {
+  url: string;
+  title: string;
+}
+
 export interface PlaywrightPage {
   on(event: 'console' | 'pageerror' | 'requestfailed' | 'response', handler: (value: unknown) => void): void;
   off?(event: 'console' | 'pageerror' | 'requestfailed' | 'response', handler: (value: unknown) => void): void;
   goto(url: string, options: { waitUntil: 'domcontentloaded'; timeout: number }): Promise<unknown>;
+  goBack(options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<unknown>;
+  goForward(options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<unknown>;
+  reload(options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<unknown>;
   evaluate<T>(probe: () => T): Promise<T>;
   url(): string;
   title(): Promise<string>;
@@ -343,7 +352,7 @@ export interface PlaywrightPage {
     first(): { click(options: { timeout: number }): Promise<void> };
     count(): Promise<number>;
   };
-  mouse: { click(x: number, y: number): Promise<void> };
+  mouse: { click(x: number, y: number): Promise<void>; wheel(deltaX: number, deltaY: number): Promise<void> };
   keyboard: { type(text: string): Promise<void>; press(key: string): Promise<void>; insertText?(text: string): Promise<void> };
   context(): { newCDPSession(page: PlaywrightPage): Promise<CdpSession> };
 }
@@ -376,6 +385,8 @@ export class BrowserPage {
   private readonly diagnostics = new ConsoleBuffer();
   private readonly playwright?: PlaywrightModule;
   private detachDiagnostics?: () => void;
+  /** Kept so a navigation after `close` can open a fresh browser. */
+  private onFrame?: (jpegBase64: string) => void;
 
   /** `playwright` is a test seam; production leaves it undefined and loads the module on open. */
   constructor(playwright?: PlaywrightModule) {
@@ -386,6 +397,7 @@ export class BrowserPage {
 
   /** Launch Edge, then Chrome. Throws a plain message when neither starts. */
   async open(onFrame: (jpegBase64: string) => void): Promise<void> {
+    this.onFrame = onFrame;
     if (this.page) {
       return;
     }
@@ -415,7 +427,7 @@ export class BrowserPage {
   }
 
   async navigate(url: string): Promise<NavigationResult> {
-    const page = this.requirePage();
+    const page = await this.ensureOpen();
     this.diagnostics.clear();
     this.lastStatus = undefined;
     const result = await navigateWithReadiness(page, url);
@@ -424,6 +436,43 @@ export class BrowserPage {
       this.lastStatus = result.status;
     }
     return result;
+  }
+
+  /** Scroll the page by a wheel delta; positive dy scrolls down. */
+  async scroll(dx: number, dy: number): Promise<void> {
+    const page = this.requirePage();
+    await page.mouse.wheel(dx, dy);
+  }
+
+  /** Go back one entry in the page history, failing when there is none. */
+  async back(): Promise<PageLocation> {
+    return this.travel('back');
+  }
+
+  /** Go forward one entry in the page history, failing when there is none. */
+  async forward(): Promise<PageLocation> {
+    return this.travel('forward');
+  }
+
+  /** Reload the current page and report where it landed. */
+  async reload(): Promise<PageLocation> {
+    const page = this.requirePage();
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: NAVIGATION_GOTO_TIMEOUT_MS });
+    this.invalidateNavigation();
+    return this.location();
+  }
+
+  private async travel(direction: 'back' | 'forward'): Promise<PageLocation> {
+    const page = this.requirePage();
+    const options = { waitUntil: 'domcontentloaded' as const, timeout: NAVIGATION_GOTO_TIMEOUT_MS };
+    const response = direction === 'back' ? await page.goBack(options) : await page.goForward(options);
+    if (response === null || response === undefined) {
+      throw new Error(
+        direction === 'back' ? 'There is no previous page in history.' : 'There is no next page in history.'
+      );
+    }
+    this.invalidateNavigation();
+    return this.location();
   }
 
   /** Buffered console, page-error and network diagnostics since the last navigation. */
@@ -571,12 +620,24 @@ export class BrowserPage {
     this.detachDiagnostics?.();
     this.detachDiagnostics = undefined;
     this.diagnostics.clear();
+    this.lastStatus = undefined;
+    this.lastNavigation = undefined;
     const browser = this.browser;
     this.page = undefined;
     this.browser = undefined;
     if (browser) {
       await browser.close().catch(() => undefined);
     }
+  }
+
+  private async ensureOpen(): Promise<PlaywrightPage> {
+    if (!this.page) {
+      if (!this.onFrame) {
+        throw new Error('The browser is not open; navigate first.');
+      }
+      await this.open(this.onFrame);
+    }
+    return this.requirePage();
   }
 
   private requirePage(): PlaywrightPage {

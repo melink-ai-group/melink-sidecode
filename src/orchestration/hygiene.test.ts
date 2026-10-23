@@ -24,12 +24,15 @@ test('the decision modules stay host-free', async () => {
 
 test('the turn pipeline decides once and consumes the stored plan at every seam', async () => {
   const source = await read('src/sidebarView.ts');
-  assert.match(source, /import \{ planTurn, type TurnPlan \} from '\.\/orchestration\/plan\.ts'/);
+  assert.match(source, /planTurn,\s+resolvePostTurnRoles,/);
+  assert.match(source, /from '\.\/orchestration\/plan\.ts'/);
   assert.match(source, /session\.turnPlan = planTurn\(\{/);
   assert.match(source, /this\.turnPlans\.set\(turnId, plan\)/);
-  assert.match(source, /this\.startChangeChecks\(set, testing\)/);
-  assert.match(source, /shouldRunDiffReview\(reviewing, set\.entries\)/);
-  assert.match(source, /if \(doubleCheck && terminus === 'completed'\)/);
+  assert.match(source, /resolvePostTurnRoles\(\{/);
+  assert.match(source, /this\.startChangeChecks\(set, roles\.testing\)/);
+  assert.match(source, /const shouldReview = roles\.reviewing/);
+  assert.match(source, /if \(roles\.doubleCheck && terminus === 'completed'\)/);
+  assert.match(source, /logDiagnostic\(\s*orchestrationDiagnostic\(/);
   // The turn-end decision settles progress for every Agent turn and gates only
   // the continuation on planning.
   assert.match(source, /await runTurnEnd\(/);
@@ -48,4 +51,52 @@ test('the double-check pass reads diagnostics and never sends a model turn', asy
   assert.match(body, /collectDoubleCheck\(/);
   assert.match(body, /readFileDiagnostics/);
   assert.doesNotMatch(body, /sendTurn|backend\.|runTurnDiffReview/);
+});
+
+test('the resolved orchestration plan is exposed in the settings read model', async () => {
+  const source = await read('src/sidebarView.ts');
+  assert.match(source, /orchestrationTurnSnapshot\(plan, roles, \{/);
+  assert.match(source, /this\.lastOrchestrationTurn = snapshot/);
+  assert.match(source, /lastTurn: this\.lastOrchestrationTurn/);
+  assert.match(source, /orchestrationDiagnostic\(plan, roles\)/);
+  // The old write-only map must not come back: a snapshot that is stored and
+  // never read is not observability.
+  assert.doesNotMatch(source, /rememberResolvedRoles|resolvedTurnPlans/);
+});
+
+test('a quick notice is stored in its owning chat before the background return', async () => {
+  const source = await read('src/sidebarView.ts');
+  const start = source.indexOf('private async finishChangeTurn');
+  const end = source.indexOf('  private ', start + 1);
+  assert.ok(start > 0);
+  assert.ok(end > start);
+  const body = source.slice(start, end);
+  const notice = body.indexOf('this.postQuickTaskNotice(set)');
+  const background = body.indexOf('if (this.activeThread?.backendId !== set.backendId');
+  assert.ok(notice > 0, 'finishChangeTurn must post the quick notice');
+  assert.ok(background > notice, 'the quick notice must precede the background early return');
+  assert.match(body, /plan\.quickNotice && set\.entries\.length > 0/);
+
+  const helperStart = source.indexOf('private postQuickTaskNotice');
+  const helperEnd = source.indexOf('  private ', helperStart + 1);
+  assert.ok(helperStart > 0);
+  const helper = source.slice(helperStart, helperEnd);
+  // A persisted notice item replays on reload; a transient `notice` message
+  // does not.
+  assert.match(helper, /type: 'item\/started'/);
+  assert.match(helper, /id: `quick-task_\$\{set\.turnId\}`/);
+  assert.match(helper, /this\.store\.applyEvent\(event\)/);
+  assert.doesNotMatch(helper, /type: 'notice'/);
+});
+
+test('stored review evidence is not gated by the current orchestration choice', async () => {
+  const source = await read('src/sidebarView.ts');
+  const start = source.indexOf('private async postChangeReview');
+  const end = source.indexOf('  private ', start + 1);
+  assert.ok(start > 0);
+  assert.ok(end > start);
+  const body = source.slice(start, end);
+  assert.match(body, /this\.reviewStore\.get\(backendId, threadId, turnId\)/);
+  assert.match(body, /this\.stylingReviewStore\.get\(backendId, threadId, turnId\)/);
+  assert.doesNotMatch(body, /readOrchestrationSettings|diffReviewEnabled|stylingCheckEnabled/);
 });

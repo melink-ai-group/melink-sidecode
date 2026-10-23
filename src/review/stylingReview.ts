@@ -16,6 +16,9 @@
  *   and says so in its notice.
  * - **Read-only and advisory.** Findings never block Keep/Reject and never edit
  *   a file.
+ * - **Local-only in this release.** No model runner is wired, so the pass that
+ *   runs is `localStylingReview`; the prompt builder is reserved and is never
+ *   sent to a model today.
  * - **Deterministic.** Findings are sorted by path, line, severity, and message.
  */
 
@@ -104,7 +107,14 @@ export function shouldRunStylingCheck(
   return enabled && hasFrontendWork(files);
 }
 
-/** Build the read-only reviewer prompt, including the brand kit when present. */
+/**
+ * Build the read-only styling reviewer prompt, including the brand kit when
+ * present.
+ *
+ * Reserved for a model runner. No model runner is wired in this release, so
+ * this prompt is not sent anywhere: the styling check runs
+ * {@link localStylingReview}, a deterministic local pass.
+ */
 export function buildStylingReviewPrompt(input: StylingReviewInput): string {
   const files = boundDiffFiles(
     input.files.map((file) => ({ path: file.path, diff: file.diff })),
@@ -142,8 +152,9 @@ export function buildStylingReviewPrompt(input: StylingReviewInput): string {
     '',
     'Review rules:',
     '- Compare the new UI with the brand kit, the design tokens, and the existing components in this project.',
-    '- Report only real visual inconsistencies introduced or left by this turn: hardcoded colours or fonts, inline styles that bypass shared state treatments, spacing/radius values off the project scale, missing hover/focus/disabled/error states, and brand-hue misuse.',
-    '- The brand hue is reserved for provider identity and the streaming caret; do not spread it through ordinary UI.',
+    '- Report only real visual inconsistencies introduced or left by this turn: hardcoded colours or fonts, inline styles that bypass shared state treatments, spacing/radius values off the project scale, missing hover/focus/disabled/error states, and misuse of a colour the kit reserves for a specific role.',
+    '- If the brand kit reserves a colour or token for a specific role, respect that reservation; when the kit defines no such reservation, do not invent one.',
+    '- Use the kit’s own token names, scales, and state conventions; never assume a brand name or a token prefix.',
     '- Ignore formatting, import order, naming preferences, and subjective taste.',
     '- Use the changed file path exactly as shown above.',
     '- Line numbers are 1-based in the new file.',
@@ -154,15 +165,19 @@ export function buildStylingReviewPrompt(input: StylingReviewInput): string {
 }
 
 /**
- * Run one styling check through an injected runner, with a hard deadline.
- * The default runner is local and deterministic; a future model reviewer can
- * replace it without changing the host or the persisted result shape.
+ * Run one styling check through an injected model runner, with a hard deadline.
+ * With no runner, the deterministic local pass runs and no prompt is built:
+ * there is no model call to make. A future model reviewer can replace the
+ * local pass without changing the host or the persisted result shape.
  */
 export async function runStylingReview(
   input: StylingReviewInput,
-  runner: StylingReviewRunner = (reviewInput) => Promise.resolve(localStylingReview(reviewInput)),
+  runner?: StylingReviewRunner,
   timeoutMs = STYLING_REVIEW_TIMEOUT_MS
 ): Promise<DiffReviewResult> {
+  if (!runner) {
+    return localStylingReview(input);
+  }
   const prompt = buildStylingReviewPrompt(input);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
@@ -214,6 +229,9 @@ export function localStylingReview(input: StylingReviewInput): DiffReviewResult 
     }
   }
   const hasBrandKit = input.brandKit.length > 0;
+  // A project chooses its own token prefix, so the local pass learns the
+  // prefixes the kit actually declares and never assumes one brand's names.
+  const families = tokenFamilies(input.brandKit);
   const findings: DiffReviewFinding[] = [];
 
   for (const file of input.files) {
@@ -237,12 +255,12 @@ export function localStylingReview(input: StylingReviewInput): DiffReviewResult 
       }
       if (/\bfont-family\s*:/.test(text) && !/var\(/.test(text)) {
         findings.push(finding(file.path, line.line, 'warning',
-          'Hardcoded font family; inherit var(--vscode-font-family) unless this is intentional.'));
+          'Hardcoded font family; inherit the project’s font token or the host default instead.'));
       }
       if (hasBrandKit) {
         for (const match of text.matchAll(CUSTOM_PROPERTY)) {
           const token = match[1];
-          if (token.startsWith('--melink-') && !knownTokens.has(token)) {
+          if (!knownTokens.has(token) && families.some((family) => token.startsWith(family))) {
             findings.push(finding(file.path, line.line, 'warning',
               `Custom property ${token} is not defined in the brand kit.`));
           }
@@ -260,6 +278,24 @@ export function localStylingReview(input: StylingReviewInput): DiffReviewResult 
 
 function brandingNotice(input: StylingReviewInput): string | undefined {
   return input.brandKit.length === 0 ? STYLING_NO_BRAND_KIT_NOTICE : undefined;
+}
+
+/**
+ * The token prefixes a brand kit declares (`--acme-`, `--brand-`, ...).
+ * Derived from the kit so an unknown-token finding is scoped to the project's
+ * own design tokens instead of one repository's naming.
+ */
+function tokenFamilies(brandKit: readonly StylingBrandKitFile[]): string[] {
+  const families = new Set<string>();
+  for (const file of brandKit) {
+    for (const token of file.text.match(KNOWN_CUSTOM_PROPERTY) ?? []) {
+      // `--acme-surface` declares the family `--acme-`. A one-segment token
+      // (`--brand`) declares only its own prefix.
+      const lastDash = token.lastIndexOf('-');
+      families.add(lastDash > 1 ? token.slice(0, lastDash + 1) : `${token}-`);
+    }
+  }
+  return [...families];
 }
 
 function addedLines(diff: string): Array<{ line: number; text: string }> {

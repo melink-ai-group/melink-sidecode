@@ -694,9 +694,11 @@ ChangesReview header stays collapsed to one line and always shows the check
 summary; expanding it lists one row per check. These steps verify the stored
 state, the panel text, and the Keep gate.
 
-Testing is **off** in a fresh profile: open **Settings -> Orchestration** and turn
-**Testing** on before starting this pass. An explicit legacy
-`melink.review.checks.enabled: true` also enables it.
+Testing is **On** in a fresh profile, so this pass needs no change. Confirm it
+reads On in **Settings -> Orchestration** before starting; Auto would run only
+after a code (non-documentation) change, and Off would never run. An explicit
+legacy `melink.review.checks.enabled: true` also enables it while the new key is
+unset.
 
 - [ ] 47d. **Passing checks.** In the scratch `package.json`, add:
       ```json
@@ -740,8 +742,9 @@ Testing is **off** in a fresh profile: open **Settings -> Orchestration** and tu
 
 ### Pass 1c - styling check
 
-*Applies to: Codex and opencode (both).* **Styling check** is on in a fresh
-profile. Open **Settings -> Orchestration** and leave it on for this pass.
+*Applies to: Codex and opencode (both).* **Styling check** is **Auto** in a fresh
+profile. Leave it on Auto (or set On) for this pass; both require a frontend file
+change, and Off never runs.
 
 - [ ] 47i. **Frontend work runs the check.** Ask for a small change to a
       component or stylesheet in the webview, for example add a rule with a
@@ -1252,13 +1255,13 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 
 ### Current verification baseline
 
-Measured on the current T106+T110 working tree, so the numbers stay truthful before sign-off:
+Measured on the current T120 working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.0 (`package.json`)
-- **Node test files:** 176 (`src/**/*.test.ts`)
-- **Node tests:** 1695 declarations: 1685 pass, 10 skipped, 0 failures (`npm run test:node`).
+- **Node test files:** 185 (`src/**/*.test.ts`)
+- **Node tests:** 1736 declarations, 1737 executed (the two shim framing cases share one declaration): 1737 pass, 0 skipped, 0 failures (`npm run test:node`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
-- **DOM suite:** 7 files / 38 tests, all passing (`npm run test:dom`). `npm test`
+- **DOM suite:** 9 files / 49 tests, all passing (`npm run test:dom`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`

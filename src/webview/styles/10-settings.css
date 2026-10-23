@@ -410,6 +410,29 @@
   line-height: 1.4;
 }
 
+.orchestration-auto-help {
+  margin-top: -2px;
+}
+
+/* One tri-state row: the label/help share the row with a compact select. The
+   help wraps, so the row survives the 390px viewport without horizontal
+   overflow. */
+.orchestration-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.orchestration-row > .check-body {
+  flex: 1 1 auto;
+}
+
+.orchestration-row .orchestration-choice {
+  flex: 0 0 auto;
+  width: 82px;
+  margin-top: 1px;
+}
+
 .chip--stored,
 .chip--signedin {
   background: color-mix(in srgb, var(--melink-success) 22%, var(--vscode-badge-background));

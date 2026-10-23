@@ -58,7 +58,10 @@ export const SCREENS = Object.freeze([
     expectText: 'Effective policy',
     waitFor: '.settings',
     clickTab: 'Orchestration',
-    afterClickText: 'Effective policy'
+    afterClickText: 'Effective policy',
+    // The six tri-state rows must stay readable at 390px; the help wraps and
+    // the select keeps its own column, so a regression would overflow here.
+    assertNoOverflow: true
   }),
   Object.freeze({
     slug: 'settings-provider-local',

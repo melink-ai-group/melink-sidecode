@@ -253,12 +253,12 @@ function settingsSnapshot() {
       exclude: []
     },
     orchestration: {
-      testing: false,
-      reviewing: false,
-      styling: true,
-      doubleCheck: true,
-      quickTask: true,
-      planning: true,
+      testing: 'on',
+      reviewing: 'auto',
+      styling: 'auto',
+      doubleCheck: 'auto',
+      quickTask: 'off',
+      planning: 'auto',
       legacyTesting: false,
       legacyReviewing: false
     },

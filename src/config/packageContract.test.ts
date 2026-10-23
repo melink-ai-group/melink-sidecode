@@ -142,22 +142,27 @@ test('the local Ollama base URL is application-scoped and restricted', async () 
   assert.equal(restricted.includes('melink.ollamaLocal.baseUrl'), true);
 });
 
-test('the orchestration keys are window-scoped with the designed defaults', async () => {
+test('the orchestration keys are tri-state, window-scoped, with the designed defaults', async () => {
   const pkg = await manifest();
   const properties = pkg.contributes?.configuration?.properties ?? {};
-  const expected: Array<[string, boolean]> = [
-    ['melink.orchestration.testing', false],
-    ['melink.orchestration.reviewing', false],
-    ['melink.orchestration.styling', true],
-    ['melink.orchestration.doubleCheck', true],
-    ['melink.orchestration.quickTask', true],
-    ['melink.orchestration.planning', true]
+  const expected: Array<[string, string]> = [
+    ['melink.orchestration.testing', 'on'],
+    ['melink.orchestration.reviewing', 'auto'],
+    ['melink.orchestration.styling', 'auto'],
+    ['melink.orchestration.doubleCheck', 'auto'],
+    ['melink.orchestration.quickTask', 'off'],
+    ['melink.orchestration.planning', 'auto']
   ];
   for (const [key, value] of expected) {
     const property = properties[key];
     assert.ok(property, `${key} is not contributed`);
-    assert.equal(property.type, 'boolean');
-    assert.equal(property.default, value);
+    assert.deepEqual(property.type, ['boolean', 'string'], `${key} does not accept legacy booleans`);
+    // The enum must also accept the legacy booleans, otherwise an existing
+    // `true`/`false` value is schema-invalid even though the reader normalizes it.
+    assert.deepEqual(property.enum, ['auto', 'on', 'off', true, false], `${key} enum`);
+    assert.equal(typeof property.default, 'string', `${key} default is not a string`);
+    assert.equal(property.default, value, `${key} default`);
+    assert.match(property.markdownDescription ?? '', /Auto/i, `${key} explains Auto`);
     // No explicit scope means VS Code's window scope, matching the review keys.
     assert.equal(property.scope === undefined || property.scope === 'window', true, `${key} is not window-scoped`);
   }

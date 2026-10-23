@@ -60,10 +60,10 @@ arm64 and Linux arm64 are not published.
 
 The sidebar can talk to four providers, independently:
 
-- **Ollama Cloud** — hosted models, needs a token.
-- **Ollama Local** — a local Ollama server; no key, but it must expose `/v1`.
-- **OpenAI Codex CLI** — the local `codex` CLI, needs the CLI installed and signed in.
-- **OpenCode Zen** — the shared `opencode` CLI; free models need no key, and paid
+- **Ollama Cloud** â€” hosted models, needs a token.
+- **Ollama Local** â€” a local Ollama server; no key, but it must expose `/v1`.
+- **OpenAI Codex CLI** â€” the local `codex` CLI, needs the CLI installed and signed in.
+- **OpenCode Zen** â€” the shared `opencode` CLI; free models need no key, and paid
   models need a Zen API key.
 
 There are four possible states per provider:
@@ -72,8 +72,8 @@ There are four possible states per provider:
 |---|---|
 | **available** | Usable now; its models appear in the picker. OpenCode Zen is available with free models even when no key is stored. |
 | **unauthenticated** | Runs, but has no usable credential. Ollama Cloud shows a **Set token** action; Codex jumps to settings. A missing OpenCode Zen key does not make Zen unauthenticated: it only blocks paid models per turn, while free models stay selectable. |
-| **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0–0.163.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
-| **unavailable** | Cannot run at all (e.g. the Codex CLI is not installed, or a local Ollama server is stopped or has no `/v1`). Hidden entirely — never rendered as broken. The provider page shows the actionable reason. |
+| **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0â€“0.163.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
+| **unavailable** | Cannot run at all (e.g. the Codex CLI is not installed, or a local Ollama server is stopped or has no `/v1`). Hidden entirely â€” never rendered as broken. The provider page shows the actionable reason. |
 
 **Providers are isolated.** If one provider is missing, unauthenticated, or
 incompatible, it cannot block the other and produces no error noise in the
@@ -87,7 +87,7 @@ Every Ollama Cloud, Ollama Local, and OpenCode Zen turn runs through
 [opencode](https://opencode.ai), so those models can read the project, edit
 files, and run commands. There is no direct turn adapter and no toggle: the
 direct `/api/chat` API remains only for context compaction and dictation
-cleanup. **Settings → CLI** chooses a CLI source: **Local machine**
+cleanup. **Settings â†’ CLI** chooses a CLI source: **Local machine**
 (path / PATH) or **Bundled** (extension global storage; survives closing VS Code).
 When the CLI is not detected, **Install opencode** downloads the current GitHub
 release into that source's install directory. When opencode is already connected,
@@ -130,14 +130,14 @@ which can leave a custom install on an old version).
   back to a direct adapter.
 
 If the `opencode` CLI is not installed (or `melink.ollama.opencode.path` does
-not resolve), the turn reports a distinct, actionable notice — the missing CLI,
+not resolve), the turn reports a distinct, actionable notice â€” the missing CLI,
 a spawn failure, a rejected generated config, and a rejected token each read
 differently.
 
 You can set all of this from **sideCode: Open settings** without editing JSON:
 the CLI tab carries the **opencode CLI source** and path fields. The status line
-shows one of three distinct states — detected (with the CLI version), missing, or
-not runnable — and an invalid path is refused inline without overwriting a
+shows one of three distinct states â€” detected (with the CLI version), missing, or
+not runnable â€” and an invalid path is refused inline without overwriting a
 previously stored valid one. The **Skills** tab configures **ast-grep** (structural search/rewrite) and
 **zvec-grep** (semantic + keyword search). Each skill has a local or bundled CLI
 source (bundled lives under extension global storage, like opencode). The
@@ -176,7 +176,7 @@ what you see is what was stored.
 
 ### Ollama Local
 
-**Settings → Providers → Ollama Local** points sideCode at a local server.
+**Settings â†’ Providers â†’ Ollama Local** points sideCode at a local server.
 The default base URL is `http://localhost:11434`. Start Ollama with
 `ollama serve`, pull at least one model, then press **Test connection**. The
 status chip reads **Running** only when both the native `/api/tags` API and the
@@ -251,16 +251,16 @@ the current mode, and unsupported modes are never selected.
 Agent replies render as **Markdown**, with a streaming caret while text arrives
 and a copy button on code blocks. Alongside messages you may see:
 
-- **Command cards** — a command or tool invocation the agent ran, with a status
-  chip (*Running* → *Passed*).
-- **File-change cards** — edited files with `+/-` stats and an inline diff.
-- **Reasoning** — the model's reasoning text, when the provider emits it.
-- **Approval cards** — a decision the agent is waiting on. The turn stays paused
+- **Command cards** â€” a command or tool invocation the agent ran, with a status
+  chip (*Running* â†’ *Passed*).
+- **File-change cards** â€” edited files with `+/-` stats and an inline diff.
+- **Reasoning** â€” the model's reasoning text, when the provider emits it.
+- **Approval cards** â€” a decision the agent is waiting on. The turn stays paused
   until you choose **Allow once**, **Allow for this conversation**, **Always
   allow**, or **Reject**. If you do not answer within 120 seconds the request is
   auto-refused with a plain-language reason so the agent can try another
   approach; it is never auto-allowed. See below.
-- **Notices** — see below.
+- **Notices** â€” see below.
 
 Every agent turn shows the provider dot it came from, so a mixed-provider
 conversation is easy to read.
@@ -280,7 +280,7 @@ conversation is easy to read.
 ### Reload resume
 
 Reloading the window **reopens the sidebar tabs** that were open. Each tab
-restores its own conversation: a brief *"Restoring conversation…"* status clears
+restores its own conversation: a brief *"Restoring conversationâ€¦"* status clears
 and the prior turns repaint. A tab that never sent a message comes back as
 sideCode. If a thread is no longer available, that tab shows a notice and stays
 usable.
@@ -299,8 +299,8 @@ useful, an action:
 | Ollama token rejected/expired | *Needs attention* | **Set token** |
 | Network or mid-stream drop | *Needs attention* | **Refresh backends** |
 | Provider error | *Something went wrong* | **Retry** |
-| User canceled a turn | *Response stopped* | — |
-| Stale conversation on reload | *The previous conversation could not be restored…* | — |
+| User canceled a turn | *Response stopped* | â€” |
+| Stale conversation on reload | *The previous conversation could not be restoredâ€¦* | â€” |
 
 The view title, from left to right, is **Refresh project context** (rebuilds the
 workspace snapshot for the next turn), **Refresh backend availability** (re-probes
@@ -349,13 +349,13 @@ settings (**sideCode: Open settings**).
 | `melink.context.exclude` | *(empty)* | Extra glob patterns excluded from the project context snapshot, on top of the built-in ignore set and `files.exclude`/`search.exclude`. |
 | `melink.review.checks.enabled` | `false` | Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit value still wins; an untrusted workspace is always skipped. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands to run. Empty means auto-detect `typecheck` (falling back to `lint`) and `test` from `package.json`; an explicitly saved empty list turns checks off. |
-| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5–600. A timed-out check is killed and reported as timed out. |
-| `melink.orchestration.testing` | `false` | Post-turn typecheck/lint and tests; default off. Falls back to `melink.review.checks.enabled` when unset. |
-| `melink.orchestration.reviewing` | `false` | Advisory read-only diff review. Falls back to `melink.review.diffReview` when unset. |
-| `melink.orchestration.styling` | `true` | Advisory styling check for frontend work. Skipped unless a frontend file changed. Uses the project brand kit and tokens when present. |
-| `melink.orchestration.doubleCheck` | `true` | Sweep changed files for VS Code errors after a turn. |
-| `melink.orchestration.quickTask` | `true` | Skip the post-turn passes for short single-question Agent turns. |
-| `melink.orchestration.planning` | `true` | Continue a built plan after a clean Agent turn. |
+| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5â€“600. A timed-out check is killed and reported as timed out. |
+| `melink.orchestration.testing` | `on` | Post-turn typecheck/lint and tests. `auto` runs only when code (non-documentation) files changed; `on` on any change set; `off` never. Falls back to `melink.review.checks.enabled` when unset. |
+| `melink.orchestration.reviewing` | `auto` | Advisory read-only diff review. `auto` runs only for code changes; `on` for any change set; `off` never. Falls back to `melink.review.diffReview` when unset. |
+| `melink.orchestration.styling` | `auto` | Advisory styling check for frontend work. `auto` and `on` both require a frontend file change; `off` never. Uses the project brand kit and tokens when present. |
+| `melink.orchestration.doubleCheck` | `auto` | Sweep changed files for VS Code errors after a turn. `auto` runs only for code changes; `on` on any change set; `off` never. |
+| `melink.orchestration.quickTask` | `off` | Quick detection always bypasses the post-turn passes for short single-question Agent turns. `off` hides the Quick notice; `auto` or `on` shows it. |
+| `melink.orchestration.planning` | `auto` | Continue a built plan after a clean Agent turn. Agent mode and an active plan are required; `off` never continues. |
 | `melink.context.repoMap` | `false` (off) | Include a bounded per-turn symbol/import map built from the files the snapshot already accepted. Off sends only an explicit disabled marker. |
 | `melink.context.repoMapMaxFiles` | `200` | Maximum source files the repository map may read in one build. |
 | `melink.context.repoMapMaxBytes` | `131072` | Maximum bytes the repository map may read in one build. |
@@ -373,139 +373,12 @@ settings (**sideCode: Open settings**).
 
 The `melink.review.checks.*` values are read directly by the post-turn check host
 for the explicit command list and timeout. Whether the pass runs at all is the
-**Orchestration -> Testing** toggle (`melink.orchestration.testing`), which is off
-by default and falls back to `melink.review.checks.enabled` until you save it. The
+**Orchestration -> Testing** choice (`melink.orchestration.testing`), which
+defaults to **On** and falls back to `melink.review.checks.enabled` until you
+save it. Auto runs only when code files changed; Off never runs. The
 review panel's
 collapsed header shows the run summary and expanding it lists one row per check
 with its status word, duration, and any bounded failure detail or skipped reason.
-
-The same settings are reachable from the in-product **settings screen**
-(gear icon in the title bar), which opens inline in the sidebar rather than as a
-separate window. It groups **Providers** (Ollama Cloud, Ollama Local, and
-OpenCode Zen fields plus the Codex CLI path and login state) above **Defaults**
-(default models, dictation, permission level, mode), with **CLI**,
-**Orchestration**, **Context**, and **Skills** tabs, and offers **Test
-connection** per provider. A value that fails validation shows an inline message
-and is not saved.
-
-### Which settings a workspace may set
-
-A repository can ship a `.vscode/settings.json`, and VS Code merges it over
-your own settings. sideCode does not let a repository decide the three things
-that would make opening a folder a security problem, so those settings are
-**read from your user settings only** and are declared
-`"scope": "application"`:
-
-| Setting | Why it is user-scope only |
-|---|---|
-| `melink.ollama.baseUrl` | The Ollama Cloud bearer token is sent to this host. A workspace must not be able to redirect it. |
-| `melink.ollamaLocal.baseUrl` | The destination of local prompts. A workspace must not redirect them. |
-| `melink.ollama.opencode.path`, `melink.ollama.opencode.cliSource` | The binary a turn spawns. The child runs with the workspace as its working directory. |
-| `melink.codex.path` | The Codex CLI binary a turn spawns. |
-| `melink.skills.zvecGrep`, `melink.skills.zvecGrep.path`, `melink.skills.zvecGrep.cliSource` | Whether the skill runs, and the `zg` binary it spawns. |
-| `melink.skills.astGrep`, `melink.skills.astGrep.path`, `melink.skills.astGrep.cliSource` | Whether the skill runs, and the `ast-grep` binary it spawns. |
-| `melink.defaults.permissionLevel` | The permission a new conversation starts with. A workspace must not be able to raise it to `unrestricted`. |
-
-A workspace value for one of these is ignored even if it was written before
-this restriction, and the **Save to workspace** action writes these to your
-user settings instead, with a short note on the field. Every one of the ten
-fields shows that note. Every other sideCode setting (model names, context
-toggles) keeps its normal workspace-scope behaviour. Skill enable flags are application-scoped with the CLI path they run.
-
-Two further rules apply to the CLI paths, because they name the binary that
-runs: a **relative path** is refused — it would resolve inside the workspace —
-and a **bare command name** (`codex`, `opencode`) is resolved from `PATH`.
-
-"Relative" covers both shapes:
-
-- a relative path with a separator (`./evil`, `..\evil`, `bin/codex`); and
-- the Windows **drive-relative** form (`C:evil.exe`, `C:`, `C:..\evil`). It
-  carries no separator, so a separator-only rule would let it through — but
-  Windows resolves it against the current directory *of that drive*, which is
-  the workspace for a child spawned with it as the working directory. So
-  `C:evil.exe` would run `workspace\evil.exe`.
-
-A true absolute path (`C:\Tools\codex.exe`, `C:/Tools/codex.exe`,
-`\\server\share\codex.exe`) is used as-is. The same rule applies to the
-settings screen's status probes, so a refused value is never launched by the
-probe either.
-
-The extension also declares `capabilities.untrustedWorkspaces` as `limited`, so
-VS Code can mark a workspace as untrusted and warn before a repository's
-settings reach an extension at all. The same ten keys are listed in
-`restrictedConfigurations`, so an untrusted workspace does not hand VS Code a
-workspace-defined value for them at all.
-
-## The settings screen
-
-Open it from the gear in the title bar (or **sideCode: Open settings**). It opens
-inline in the sidebar — the same panel pattern as the model switcher, never a
-floating popover — and groups the settings as **Providers** above **Defaults**.
-
-**Providers**
-
-- **Ollama Cloud** — base URL, and an API key input. The input is always masked
-  and empty; it shows a masked placeholder plus a **Key stored** / **No key**
-  chip so you can tell whether a key exists without the value ever being shown.
-  **Save key** writes a new value, **Clear key** removes it, and both go only to
-  VS Code secret storage (see [Credentials](#credentials)).
-- **Ollama Local** — base URL and default model, with **Test connection** and a
-  **Running** / **Not reachable** chip. No API key exists for this provider.
-- **Codex** — the CLI path override and the current login state, one sentence
-  each about what they affect.
-- **OpenCode Zen** — the default Zen model, and an optional masked Zen API key
-  with **Save key** / **Clear key**. Free models work without a key; a stored key
-  unlocks paid models. Both actions write only to VS Code secret storage.
-- **Test connection** — runs a real authenticated call and reports the outcome
-  in plain language: a rejected key, an unreachable host, and a network problem
-  read differently, so a wrong key is distinguishable from a wrong base URL. A
-  failure never prints a raw stack trace or the key.
-
-**CLI** — the shared `opencode` binary used by Ollama Cloud, Ollama Local, and
-OpenCode Zen: **local** or **bundled**, the local path, and Install / Update.
-Every Ollama turn uses it; there is no opt-out switch.
-
-**Defaults** — the default models (Ollama, OpenCode Zen, Codex), the dictation
-model, permission level, and mode for a new conversation. The app-level thinking
-choice applies when a model has no reported default; a saved per-model choice
-takes precedence.
-
-**Context** — what the agent is told about this workspace before your first
-message. Each category (instruction documents, project shape, editor state,
-current selection, changed files) can be turned off by default, and every change
-applies from the next turn. Turning off **editor state** means the agent knows
-the project but not the current page: no active-file path, language, or
-open-editor list is read or sent, and the composer strip stops naming a current
-file. **Selection** has its own control and an explicit note that selected text
-is sent verbatim, so it is quoted only when you say so. **Maximum context size**
-is editable with the resolved default shown beside it, and the panel states the
-truncation order used when the cap is reached. **Ignore patterns** are additive:
-the panel lists the built-in set for reference and lets you add extra glob
-patterns, which are validated inline and marked "not saved" rather than silently
-ignored. The panel states that these are workspace defaults and that the composer
-can narrow them for a single turn; no per-turn action widens them.
-
-Validation is on demand: a value that fails (for example a base URL without a
-scheme) shows an inline message and is **not** persisted. Unsaved changes are
-never applied to a turn already in progress.
-
-**Save to workspace** writes to this repository's `.vscode/settings.json`. The
-trust-sensitive settings (the credential host, the CLI paths and the permission
-default) are always written to your **user** settings instead, and the field
-carries a short note saying so — the value is persisted, just in the scope that
-is actually read.
-
-**Context** settings apply from the **next turn** of the current conversation:
-saving any of them (or changing a `melink.context` value outside the screen)
-re-primes the open thread, so its next turn is rebuilt from the new include flags,
-cap, and patterns instead of re-sending an earlier snapshot. In particular,
-turning editor state or selection sharing off drops active-file and selected-text
-content from the next turn's payload, not just from a new conversation. A
-stateful CLI session that already consumed an earlier snapshot keeps what it was
-already given (a live session cannot un-receive it), but no further active-file
-or selected-text content is sent, and the corrected snapshot is delivered when
-the session is next primed. The other defaults (model, permission level, mode) are
-read when a conversation starts, so they take effect on the next conversation.
 
 ### Audit: every contributed setting and stored credential
 
@@ -515,12 +388,12 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.review.checks.commands` | *(empty)* | Not yet on the screen - explicit commands; empty means auto-detect |
 | `melink.review.checks.timeoutSeconds` | `120` | Not yet on the screen - per-check timeout, clamped 5-600 |
 | `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
-| `melink.orchestration.testing` | `false` | Orchestration -> Testing |
-| `melink.orchestration.reviewing` | `false` | Orchestration -> Reviewing |
-| `melink.orchestration.styling` | `true` | Orchestration -> Styling check |
-| `melink.orchestration.doubleCheck` | `true` | Orchestration -> Double-check |
-| `melink.orchestration.quickTask` | `true` | Orchestration -> Quick tasks |
-| `melink.orchestration.planning` | `true` | Orchestration -> Plan autopilot |
+| `melink.orchestration.testing` | `on` | Orchestration -> Testing (Auto/On/Off) |
+| `melink.orchestration.reviewing` | `auto` | Orchestration -> Reviewing (Auto/On/Off) |
+| `melink.orchestration.styling` | `auto` | Orchestration -> Styling check (Auto/On/Off) |
+| `melink.orchestration.doubleCheck` | `auto` | Orchestration -> Double-check (Auto/On/Off) |
+| `melink.orchestration.quickTask` | `off` | Orchestration -> Quick tasks (Auto/On/Off) |
+| `melink.orchestration.planning` | `auto` | Orchestration -> Plan autopilot (Auto/On/Off) |
 | `melink.telemetry.failureLog` | `false` | Settings JSON only (application scope): opt-in local missed-issue log; nothing is sent over the network |
 | `melink.ollama.baseUrl` | `https://ollama.com` | Providers -> Ollama Cloud -> Base URL |
 | `melink.ollama.defaultModel` | *(empty)* | Defaults -> Default model |
@@ -561,8 +434,6 @@ read when a conversation starts, so they take effect on the next conversation.
 | `melink.skills.astGrep.path` | `ast-grep` | Skills -> ast-grep -> CLI path |
 | `melink.ollama.token` (secret, not a setting) | *(none)* | Providers -> Ollama Cloud -> API key (Save / Clear); stored in VS Code `SecretStorage` |
 | `melink.opencode.zenToken` (secret, not a setting) | *(none)* | Providers -> OpenCode Zen -> API key (Save / Clear); stored in VS Code `SecretStorage` |
-| `melink.safety.destructivePatterns` | *(empty)* | Not on the settings screen (application scope, user `settings.json`) |
-
 Codex has no stored credential of its own: it signs in through its own CLI, and
 the screen reports that login state rather than holding a secret.
 
@@ -589,14 +460,14 @@ order:
 | Category | What it contains |
 |---|---|
 | **Workspace identity** | Folder name(s) and absolute root path(s) (every root in a multi-root workspace), the git branch and remote `owner/repo` when present, and whether the folder is a git repo at all. |
-| **Project shape** | Language breakdown by file count, a bounded top-level/second-level directory tree, detected manifests and entry points (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `tsconfig.json`, `src/`, `app/`, `cmd/`). Only small structured fields are read from a manifest — never its body. |
+| **Project shape** | Language breakdown by file count, a bounded top-level/second-level directory tree, detected manifests and entry points (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `tsconfig.json`, `src/`, `app/`, `cmd/`). Only small structured fields are read from a manifest â€” never its body. |
 | **Instruction documents** | `AGENTS.md` at the root and in nested packages up to a bounded depth, `README.md`, and `.github/copilot-instructions.md`, each as a bounded excerpt. When none exist the category says **none found** rather than being silently omitted. |
 | **Editor state** | The active file's absolute and workspace-relative path, its language id, and the current selection range with the selected text when there is one; the visible/open editors; dirty files; and the active terminal's cwd when one is open. This is what "current page" means, and it is the cheapest category to refresh. |
 
 When project shape is on, a compact **conventions** block is derived from repository config and manifest metadata: formatter, linter, test runner and test-file pattern, plus indentation, quotes, semicolons and file/component naming only when at least 70% of a bounded sample agrees (at most eight source files, 800 bytes each). Only evidenced facts are named, each with its source path; raw sample bodies are never included. Turning `melink.context.includeShape` off skips both the config reads and the samples.
 
 Every capped category carries a visible marker of the form
-`… truncated (N of M entries)`, so the model is told it is seeing a partial view
+`â€¦ truncated (N of M entries)`, so the model is told it is seeing a partial view
 rather than assuming completeness. An overall cap can trim the open-editor list,
 the instruction documents, and the tree; each drop is marked the same way.
 
@@ -647,16 +518,16 @@ Exclusions are on by default. An excluded path is never read, and a selection
 inside an excluded file is reported as excluded rather than quoted. The built-in
 ignore set is:
 
-- **Secret stores** — `.env`, `.env.*`, `.envrc`, `.npmrc`, `.netrc`,
+- **Secret stores** â€” `.env`, `.env.*`, `.envrc`, `.npmrc`, `.netrc`,
   `.htpasswd`, `credentials`, `secrets.json`.
-- **Key material** — `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, and `.pem`,
+- **Key material** â€” `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, and `.pem`,
   `.key`, `.p12`, `.pfx`, `.jks`, `.keystore`, `.ppk` files.
-- **Dependencies** — `node_modules`, `vendor`, `.venv`, `venv`, `__pycache__`.
-- **VCS** — `.git`; other dot-directories except `.github`.
-- **Build output** — `dist`, `out`, `build`, `coverage`, `bin`, `obj`, `target`,
+- **Dependencies** â€” `node_modules`, `vendor`, `.venv`, `venv`, `__pycache__`.
+- **VCS** â€” `.git`; other dot-directories except `.github`.
+- **Build output** â€” `dist`, `out`, `build`, `coverage`, `bin`, `obj`, `target`,
   `.next`, plus `.min.js`, `.min.css`, and `.map` files.
-- **Binaries** — images, archives, executables, libraries, fonts, and media.
-- **Lockfiles** — `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`,
+- **Binaries** â€” images, archives, executables, libraries, fonts, and media.
+- **Lockfiles** â€” `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`,
   `npm-shrinkwrap.json`, `Cargo.lock`, `go.sum`, `poetry.lock`, `composer.lock`,
   `Gemfile.lock` (the name is listed, the body is never read).
 
@@ -679,7 +550,7 @@ exact: scheme, host and port. Granting `http://localhost:3000` does **not** gran
 | Choice | Effect |
 |---|---|
 | **Allow once** | Opens this one navigation. Nothing is remembered, so the next navigation to the same origin asks again. |
-| **Allow for this session** | Opens this navigation and remembers this exact origin for later navigations until the browser is stopped. Session grants are cleared when the browser skill is stopped — both providers off or extension deactivate — not merely when switching providers. |
+| **Allow for this session** | Opens this navigation and remembers this exact origin for later navigations until the browser is stopped. Session grants are cleared when the browser skill is stopped â€” both providers off or extension deactivate â€” not merely when switching providers. |
 | **Deny** | Does not open the address; the agent gets a clear "navigation was denied" error. |
 
 Approval is for the URL passed to `browser_navigate`. Redirects and in-page link
@@ -812,23 +683,28 @@ read its inline diff. A turn that changed nothing shows no panel at all.
 ### Opt-in diff review
 
 The review is controlled by **Orchestration -> Reviewing**
-(`melink.orchestration.reviewing`), which is **off by default**. Until you save
-that key, it falls back to the older `melink.review.diffReview` value. When it is
-on, a live turn that changed files gets one additional advisory pass before the
-review panel is repainted. It is read-only: it never edits files, runs shell
-commands, asks for approvals, or keeps/rejects changes. **Keep** and **Reject**
+(`melink.orchestration.reviewing`), which defaults to **Auto**: it runs only
+when the turn changed code (non-documentation) files. **On** runs on any change
+set and **Off** never runs. Until you save that key, it falls back to the older
+`melink.review.diffReview` value. A live turn that resolves the role gets one
+additional advisory pass before the review panel is repainted. It is read-only:
+it never edits files, runs shell commands, asks for approvals, or keeps/rejects
+changes. **Keep** and **Reject**
 remain the only actions, and they are unchanged.
 
 The default first pass is local and deterministic. It reads the request that
 opened the turn and the changed paths, and reports explicit paths the request
 named but the turn did not change. It does **not** detect semantic regressions,
 incomplete edits inside a file it did change, or paths mentioned only indirectly.
-The prompt and runner seam is in place for a future model reviewer, but this
-release runs only the local pass and never calls a model; adding one will not
-change the advisory contract.
+The prompt and runner seam is reserved for a future model reviewer: no runner is
+wired, so this release runs only the local pass and never builds or sends a model
+prompt; adding one will not change the advisory contract.
 
 A review is stored per turn and restored on reload; **no reviewer runs again on
-reload**. If the pass throws or misses its 15-second deadline, the section shows
+reload**. Turning **Reviewing** or **Styling check** Off later hides nothing that
+is already stored: the choice gates only whether a *new* turn runs a pass, so an
+earlier turn keeps showing the evidence it produced. If the pass throws or misses
+its 15-second deadline, the section shows
 a visible, non-blocking notice and the change decisions stay available. The new
 orchestration key is window-scoped; the legacy `melink.review.diffReview`
 fallback stays application-scoped, so a workspace cannot turn it on through the
@@ -837,18 +713,18 @@ old key.
 The panel owns a decision per file (and, from the row's actions, per hunk); it
 never decides anything for you. A decision is only made when you click:
 
-- **Keep** — accepts this file. **Keep writes nothing to disk**: the file already
+- **Keep** â€” accepts this file. **Keep writes nothing to disk**: the file already
   holds the agent's change, so accepting only records the decision. A file you
   keep is byte-for-byte what the turn left, and a rejected-then-kept file is
   byte-identical again.
-- **Keep all** — accepts every file in the turn. It also writes nothing.
-- **Reject** — restores this file's **pre-turn content**. Rejecting a modified
+- **Keep all** â€” accepts every file in the turn. It also writes nothing.
+- **Reject** â€” restores this file's **pre-turn content**. Rejecting a modified
   file writes the exact pre-turn bytes back; rejecting a **Created** file deletes
   it; rejecting a **Deleted** file recreates it with its pre-turn bytes. Because
   Reject writes to disk it is destructive and never implicit: it opens a
   confirmation that names the affected path(s) first, and only the explicit
   **Reject file** / **Reject N files** confirms it.
-- **Reject all** — rejects every file in the turn, behind the same confirmation.
+- **Reject all** â€” rejects every file in the turn, behind the same confirmation.
 
 Keep is not undoable from the panel; Reject overwrites what was on disk, so undo
 it with your own tooling (for example `git checkout -- <path>`) if you reject by
@@ -874,7 +750,7 @@ decision:
   with the reason *"Checks were interrupted when the window reloaded."* rather
   than a spinner that never stops.
 - **Bounded output.** Each stream is capped at 64 KiB as it arrives, and the
-  stored result keeps only the last 4,000 characters with a leading `…`. Check
+  stored result keeps only the last 4,000 characters with a leading `â€¦`. Check
   output is shown only in the review surface: it is never sent to a model or
   provider and is never logged.
 - **Keep gating.** While checks are **running**, Keep and Keep all are disabled.
@@ -893,52 +769,62 @@ reply finishes. Changes apply from the **next turn**; the summary at the top of
 the tab spells out the current policy. Every pass is advisory and none of them
 changes the reply, the tools, or the permission level.
 
-- **Testing** (`melink.orchestration.testing`, default off) runs the project's
+Every role has three states. **Auto** runs it only when this turn is relevant;
+**On** runs it whenever the role's hard mode applies; **Off** never runs it. A
+saved `true`/`false` from before this control existed is read as On/Off.
+
+- **Testing** (`melink.orchestration.testing`, default On) runs the project's
   typecheck/lint and tests through the post-turn check runner described above.
-- **Reviewing** (`melink.orchestration.reviewing`, default off) adds the advisory
-  diff review. It falls back to `melink.review.diffReview` until saved.
-- **Styling check** (`melink.orchestration.styling`, default on) runs only when
+  Auto runs only when code (non-documentation) files changed.
+- **Reviewing** (`melink.orchestration.reviewing`, default Auto) adds the
+  advisory diff review. Auto runs only for code changes; On runs on any change
+  set. It falls back to `melink.review.diffReview` until saved.
+- **Styling check** (`melink.orchestration.styling`, default Auto) runs only when
   the turn changed at least one frontend file (`.tsx`, `.jsx`, `.css`, `.scss`,
   `.html`, `.vue`, `.svelte`, and similar). It compares the new work with the
-  brand kit (`tokens.css` / `DESIGN.md` when present), the theme tokens, and the
+  brand kit (`tokens.css`, `DESIGN.md`, `design-tokens.json`, and `brand.json`
+  when present), the theme tokens, and the
   existing components, and lists token, inline-style, font, and state
-  inconsistencies in the same review panel as the diff review. It is read-only,
+  inconsistencies in the same review panel as the diff review. Token rules come
+  from the kit's own names and scales, so the check assumes no particular brand
+  or token prefix. It is read-only,
   never blocks Keep, and says when no brand kit was found so the check's
   evidence is honest.
-- **Double-check** (`melink.orchestration.doubleCheck`, default on) waits 1.5
+- **Double-check** (`melink.orchestration.doubleCheck`, default Auto) waits 1.5
   seconds for VS Code to publish diagnostics, then reads only the files the turn
   changed and posts at most one notice: a clean info line, or a warning with up to
   three file names and the error count. It never calls a model, never blocks Keep,
   and a failed diagnostics read is ignored. A background tab's completed turn gets
   the same sweep; its notice is held and shown when you switch to that tab.
-- **Quick tasks** (`melink.orchestration.quickTask`, default on) skips all of the
-  above for a short single-question turn: Agent mode, a user send, no attachments,
-  no active plan, at most 120 characters and 20 words, one line, no list or
-  multi-step wording, no code-change/action verb, and a question or explanation
-  opening (or a trailing `?`). A quick turn that changed files posts one info
-  notice saying post-turn orchestration was skipped for that turn. The detector
-  never changes the selected mode.
-- **Plan autopilot** (`melink.orchestration.planning`, default on) lets a built
-  plan continue step by step after a clean Agent turn. It is always off outside
-  Agent mode. Turning it off does not stop the turn-end settle: a step the
-  provider left running still returns to pending, so no spinner is left behind.
+- **Quick tasks** (`melink.orchestration.quickTask`, default Off) controls the
+  Quick role/notice, not the bypass. Quick detection always runs and always
+  forces every post-turn role off for a short single-question turn: Agent mode, a
+  user send, no attachments, no active plan, at most 120 characters and 20 words,
+  one line, no list or multi-step wording, no code-change/action verb, and a
+  question or explanation opening (or a trailing `?`). Off is a silent bypass;
+  Auto or On shows the one info notice on a quick turn that changed files. The
+  notice is stored in the owning chat, so it survives a reload and a background
+  tab's turn shows it when you switch to that tab. The
+  detector never changes the selected mode.
+- **Plan autopilot** (`melink.orchestration.planning`, default Auto) lets a built
+  plan continue step by step after a clean Agent turn. Agent mode and an active
+  plan are required; Off never continues. Turning it off does not stop the
+  turn-end settle: a step the provider left running still returns to pending, so
+  no spinner is left behind.
 
-Quick tasks is disabled while Testing, Reviewing, Styling check, and
-Double-check are all off; enable at least one pass first. In that state the toggle is off and is saved as
-off, because there is no pass left to skip. A value that came from an older
-review key shows its source in the field help until you save the orchestration
-key.
+A value that came from an older review key shows its source in the field help
+until you save the orchestration key.
 
 ### Conflicts
 
-If a file changed **on disk after the turn** — a hand edit, a formatter, another
-tool — a Reject does not clobber it. The row switches to the **Conflict: the
+If a file changed **on disk after the turn** â€” a hand edit, a formatter, another
+tool â€” a Reject does not clobber it. The row switches to the **Conflict: the
 file changed on disk. Choose explicitly.** state with two actions and the file
 is left exactly as it is until you choose:
 
-- **Keep what is on disk** — records the rejection and writes nothing; your
+- **Keep what is on disk** â€” records the rejection and writes nothing; your
   later edit survives.
-- **Overwrite with pre-turn** — the only path that writes, restoring the
+- **Overwrite with pre-turn** â€” the only path that writes, restoring the
   pre-turn bytes over your edit.
 
 Nothing overwrites silently, and a conflict is reported, never hidden.
@@ -970,8 +856,8 @@ Every user message whose turn touched files carries a **Restore checkpoint**
 action (a message whose turn touched nothing has none). The checkpoint is the
 state of those files **before that message's turn**.
 
-To restore, open the action, review the confirmation — it names the file count
-and the affected paths — and confirm with **Restore files**. A restore reverts
+To restore, open the action, review the confirmation â€” it names the file count
+and the affected paths â€” and confirm with **Restore files**. A restore reverts
 **files only**: the transcript is untouched, so this message and the rest of the
 conversation stay exactly where they are. Restoring an **earlier** message also
 reverts every file changed by **later** turns, back to the state at that
@@ -986,7 +872,7 @@ checkpoint.
   success.
 - **Local, and not Git.** Checkpoints are recorded **on this machine, separately
   from Git**. They know nothing about branches, commits, remotes, merges, or
-  history, and they are not a substitute for version control — do not rely on
+  history, and they are not a substitute for version control â€” do not rely on
   them to recover work you would expect a commit or a push to protect. Use Git
   for that.
 
@@ -995,7 +881,7 @@ checkpoint.
 The journal behind the review panel and checkpoints is bounded so it cannot grow
 without limit:
 
-- The **turn index** (turn and file metadata — hashes, statuses and blob keys,
+- The **turn index** (turn and file metadata â€” hashes, statuses and blob keys,
   never file content) lives in workspace state under `melink.changeJournal`.
 - The recorded **before/after content** lives under the workspace-scoped
   extension storage (`context.storageUri`), and decision records live under
@@ -1013,7 +899,7 @@ different things:
 
 | Control | What it is | When it acts | What it does to disk |
 |---|---|---|---|
-| **Approval prompt** | A pre-execution gate on one tool call the agent wants to run. | **Before** the tool runs; the turn stays paused until you choose **Allow once**, **Allow for this conversation**, **Always allow**, or **Reject**. | Nothing yet — the tool has not run. Rejecting stops it. |
+| **Approval prompt** | A pre-execution gate on one tool call the agent wants to run. | **Before** the tool runs; the turn stays paused until you choose **Allow once**, **Allow for this conversation**, **Always allow**, or **Reject**. | Nothing yet â€” the tool has not run. Rejecting stops it. |
 | **Changes this turn review panel** | A post-hoc decision about what a turn **already changed**. | **After** the edits have landed. | **Keep** / **Keep all** write nothing. **Reject** / **Reject all** write the pre-turn content back (or delete a created file). |
 | **Checkpoint restore** | Reverting files across turns to their state before a message. | Any time, from a message's **Restore checkpoint**. | Writes the checkpoint content back over every file the affected turns touched. Files only; the conversation stays. |
 
@@ -1033,3 +919,5 @@ rewinds files across turns**.
   (those have crashed the app-server upstream), and if `--listen stdio://` is
   rejected it retries the bare `codex app-server` once. See the
   [README](../README.md#pinned-codex-version).
+
+

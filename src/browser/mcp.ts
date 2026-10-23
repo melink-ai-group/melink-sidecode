@@ -4,6 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
+import { asBrowserProvider } from './config.ts';
 import { BROWSER_TOOLS } from './tools.ts';
 
 interface Endpoint {
@@ -18,7 +19,15 @@ interface RpcMessage {
   params?: unknown;
 }
 
+type Framing = 'line' | 'header';
+
+interface InboundMessage {
+  body: string;
+  framing: Framing;
+}
+
 const file = endpointFile();
+const provider = providerFlag();
 let queue = Promise.resolve();
 let buffer = Buffer.alloc(0);
 
@@ -28,29 +37,64 @@ process.stdin.on('data', (chunk: Buffer) => {
 });
 
 function drain(): void {
-  while (true) {
-    const headerEnd = buffer.indexOf('\r\n\r\n');
-    if (headerEnd < 0) {
-      return;
-    }
-    const header = buffer.subarray(0, headerEnd).toString('ascii');
-    const match = /Content-Length:\s*(\d+)/i.exec(header);
-    if (!match?.[1]) {
-      buffer = Buffer.alloc(0);
-      return;
-    }
-    const length = Number(match[1]);
-    const start = headerEnd + 4;
-    if (buffer.length < start + length) {
-      return;
-    }
-    const body = buffer.subarray(start, start + length).toString('utf8');
-    buffer = buffer.subarray(start + length);
-    queue = queue.then(() => dispatch(body)).catch(() => undefined);
+  for (const message of readMessages(() => buffer, (next) => (buffer = next))) {
+    queue = queue
+      .then(() => dispatch(message.body, message.framing))
+      .catch(() => undefined);
   }
 }
 
-async function dispatch(body: string): Promise<void> {
+/**
+ * Pull complete JSON-RPC payloads out of the buffer.
+ *
+ * OpenCode 1.19.x writes one JSON object per line and expects the reply in the
+ * same framing. Older clients use `Content-Length` headers. Both are read, and
+ * the framing is remembered so each reply matches the request that caused it.
+ */
+function readMessages(get: () => Buffer, set: (next: Buffer) => void): InboundMessage[] {
+  const messages: InboundMessage[] = [];
+  while (true) {
+    const current = get();
+    if (current.length === 0) {
+      return messages;
+    }
+    const prefix = current.subarray(0, Math.min(current.length, 32)).toString('ascii');
+    if (/^\s*[{[]/.test(prefix)) {
+      const newline = current.indexOf(0x0a);
+      if (newline < 0) {
+        return messages;
+      }
+      const line = current.subarray(0, newline).toString('utf8').trim();
+      set(current.subarray(newline + 1));
+      if (line.length > 0) {
+        messages.push({ body: line, framing: 'line' });
+      }
+      continue;
+    }
+    const headerEnd = current.indexOf('\r\n\r\n');
+    if (headerEnd < 0) {
+      return messages;
+    }
+    const header = current.subarray(0, headerEnd).toString('ascii');
+    const match = /Content-Length:\s*(\d+)/i.exec(header);
+    if (!match?.[1]) {
+      set(current.subarray(headerEnd + 4));
+      continue;
+    }
+    const length = Number(match[1]);
+    const start = headerEnd + 4;
+    if (current.length < start + length) {
+      return messages;
+    }
+    messages.push({
+      body: current.subarray(start, start + length).toString('utf8'),
+      framing: 'header'
+    });
+    set(current.subarray(start + length));
+  }
+}
+
+async function dispatch(body: string, framing: Framing): Promise<void> {
   let message: RpcMessage;
   try {
     message = JSON.parse(body) as RpcMessage;
@@ -63,10 +107,10 @@ async function dispatch(body: string): Promise<void> {
   const id = message.id;
   try {
     const result = await call(message);
-    write({ jsonrpc: '2.0', id, result });
+    write({ jsonrpc: '2.0', id, result }, framing);
   } catch (error) {
     const text = error instanceof Error && error.message ? error.message : 'The browser call failed.';
-    write({ jsonrpc: '2.0', id, error: { code: -32000, message: text } });
+    write({ jsonrpc: '2.0', id, error: { code: -32000, message: text } }, framing);
   }
 }
 
@@ -93,7 +137,11 @@ function forward(params: unknown): Promise<unknown> {
   const record = params && typeof params === 'object' ? (params as { name?: unknown; arguments?: unknown }) : {};
   const name = typeof record.name === 'string' ? record.name : '';
   const endpoint = readEndpoint(file);
-  const payload = JSON.stringify({ name, arguments: record.arguments ?? {} });
+  const payload = JSON.stringify({
+    name,
+    arguments: record.arguments ?? {},
+    ...(provider ? { provider } : {})
+  });
   return new Promise((resolve, reject) => {
     const url = new URL(endpoint.url);
     const req = httpRequest(
@@ -106,6 +154,7 @@ function forward(params: unknown): Promise<unknown> {
         headers: {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(payload),
+          connection: 'close',
           authorization: `Bearer ${endpoint.token}`
         }
       },
@@ -155,8 +204,24 @@ function endpointFile(): string {
   return value;
 }
 
-function write(message: unknown): void {
+function providerFlag(): 'codex' | 'opencode' | undefined {
+  const index = process.argv.indexOf('--provider');
+  return asBrowserProvider(index >= 0 ? process.argv[index + 1] : undefined);
+}
+
+/**
+ * Reply in the framing the client used. OpenCode 1.19.x sends and expects
+ * newline-delimited JSON; a header reply there is silently ignored and the
+ * handshake times out. A header request still gets a header reply so older
+ * clients keep working.
+ */
+function write(message: unknown, framing: Framing): void {
   const json = Buffer.from(JSON.stringify(message), 'utf8');
+  if (framing === 'line') {
+    process.stdout.write(json);
+    process.stdout.write('\n');
+    return;
+  }
   process.stdout.write(`Content-Length: ${json.length}\r\n\r\n`);
   process.stdout.write(json);
 }

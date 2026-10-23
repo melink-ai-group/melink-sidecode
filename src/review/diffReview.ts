@@ -7,6 +7,11 @@
  * goes into it, parse the model's JSON findings, and fall back to a
  * deterministic local check when no model review is available.
  *
+ * No model runner is wired in this release. The Reviewer role that actually
+ * runs is the local, deterministic check ({@link localDiffReview}); the prompt
+ * builder and runner seam are reserved for a future model reviewer and are not
+ * sent to any model today.
+ *
  * ## Contracts
  *
  * - **Host-free.** No `vscode`, filesystem, child-process, or network import,
@@ -125,6 +130,11 @@ const PATH_TOKEN_PATTERN = new RegExp(
 /**
  * Build the read-only reviewer prompt for one turn.
  *
+ * Reserved for a model runner. No model runner is wired in this release, so
+ * the prompt is not sent anywhere: the Reviewer role runs `localDiffReview`,
+ * a deterministic local pass. Keep the prompt and its runner seam so a later
+ * wiring does not change the persisted result shape.
+ *
  * The diff is bounded here rather than by the caller so every path into the
  * reviewer carries the same size guarantee.
  */
@@ -223,18 +233,23 @@ export function localDiffReview(input: DiffReviewInput): DiffReviewResult {
 }
 
 /**
- * Review one turn through an injected runner, with a hard deadline.
+ * Review one turn through an injected model runner, with a hard deadline.
  *
- * The runner may return either a findings array or a complete
- * {@link DiffReviewResult}. Empty findings become `no-findings`. A throw or a
- * missed deadline becomes `failed` with a stable notice; this function never
- * throws and never blocks the caller after the deadline.
+ * With no runner, the deterministic local Reviewer runs and no prompt is
+ * built: there is no model call to make. A runner may return either a
+ * findings array or a complete {@link DiffReviewResult}. Empty findings become
+ * `no-findings`. A throw or a missed deadline becomes `failed` with a stable
+ * notice; this function never throws and never blocks the caller after the
+ * deadline.
  */
 export async function runDiffReview(
   input: DiffReviewInput,
-  runner: DiffReviewRunner = (reviewInput) => Promise.resolve(localDiffReview(reviewInput)),
+  runner?: DiffReviewRunner,
   timeoutMs = 15_000
 ): Promise<DiffReviewResult> {
+  if (!runner) {
+    return localDiffReview(input);
+  }
   const prompt = buildDiffReviewPrompt(input);
   let timer: ReturnType<typeof setTimeout> | undefined;
 

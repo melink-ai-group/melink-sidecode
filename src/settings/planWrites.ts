@@ -1,4 +1,4 @@
-﻿import type { SettingsPatch } from '../protocol.ts';
+import type { SettingsPatch } from '../protocol.ts';
 import { PERMISSION_LEVELS } from '../backends/types.ts';
 import { DEFAULT_MODES } from '../backends/modes.ts';
 import { isThinkingLevel } from '../backends/capabilities.ts';
@@ -13,6 +13,7 @@ import {
   MIN_CONTEXT_BYTES,
   contextPatternError
 } from '../context/contextSettings.ts';
+import { normalizeOrchestrationChoice } from '../orchestration/settings.ts';
 
 /**
  * Turn a settings patch into the exact list of configuration writes.
@@ -225,7 +226,7 @@ export function planSettingsWrites(
     }
   }
 
-  const orchestration: Array<[keyof SettingsPatch, string, boolean | undefined]> = [
+  const orchestration: Array<[keyof SettingsPatch, string, unknown]> = [
     ['orchestrationTesting', `${ORCHESTRATION_SECTION}.testing`, patch.orchestrationTesting],
     ['orchestrationReviewing', `${ORCHESTRATION_SECTION}.reviewing`, patch.orchestrationReviewing],
     ['orchestrationStyling', `${ORCHESTRATION_SECTION}.styling`, patch.orchestrationStyling],
@@ -234,8 +235,17 @@ export function planSettingsWrites(
     ['orchestrationPlanning', `${ORCHESTRATION_SECTION}.planning`, patch.orchestrationPlanning]
   ];
   for (const [field, key, value] of orchestration) {
-    if (value !== undefined) {
-      write(field, key, value);
+    if (value === undefined) {
+      continue;
+    }
+    // An older webview (or a hand-edited settings file) may still carry the
+    // pre-T121 boolean. Normalise it on save so the stored form is always one
+    // of the three choices; an unrecognised value is refused, not coerced.
+    const normalized = normalizeOrchestrationChoice(value);
+    if (normalized === undefined) {
+      errors[field] = 'Pick Auto, On, or Off. This value was not saved.';
+    } else {
+      write(field, key, normalized);
     }
   }
 

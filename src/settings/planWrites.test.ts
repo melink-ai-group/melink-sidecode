@@ -62,12 +62,12 @@ const PATCH: Required<SettingsPatch> = {
   mode: 'plan',
   thinking: 'high',
   dictationModel: 'ollama|llama3.2:3b',
-  orchestrationTesting: false,
-  orchestrationReviewing: true,
-  orchestrationStyling: false,
-  orchestrationDoubleCheck: false,
-  orchestrationQuickTask: true,
-  orchestrationPlanning: false,
+  orchestrationTesting: 'off',
+  orchestrationReviewing: 'on',
+  orchestrationStyling: 'auto',
+  orchestrationDoubleCheck: 'off',
+  orchestrationQuickTask: 'on',
+  orchestrationPlanning: 'off',
   opencodeCliSource: 'local',
   opencodePath: 'C:\\Tools\\opencode.exe',
   browserCodex: false,
@@ -102,7 +102,8 @@ test('every patch field becomes exactly one write, including booleans and select
     assert.equal(write.scope, 'global');
   }
 
-  assert.equal(writes.get('orchestrationReviewing')?.value, true);
+  assert.equal(writes.get('orchestrationReviewing')?.value, 'on');
+  assert.equal(writes.get('orchestrationStyling')?.value, 'auto');
   assert.equal(writes.get('mode')?.value, 'plan');
   assert.equal(writes.get('thinking')?.value, 'high');
   assert.equal(writes.get('contextMaxBytes')?.value, 32768);
@@ -240,4 +241,22 @@ test('a folder save still redirects trust-sensitive fields to user settings', ()
   assert.equal(writes.get('contextMaxBytes')?.scope, 'folder');
   assert.equal(writes.get('ollamaBaseUrl')?.scope, 'global');
   assert.match(plan.notices.ollamaBaseUrl ?? '', /user settings/i);
+});
+
+
+test('saved booleans migrate to choices and an unknown value is refused', () => {
+  const legacy = planSettingsWrites({
+    orchestrationTesting: true as unknown as 'on',
+    orchestrationReviewing: false as unknown as 'off'
+  });
+  const writes = byField(legacy.writes);
+  assert.equal(writes.get('orchestrationTesting')?.value, 'on');
+  assert.equal(writes.get('orchestrationReviewing')?.value, 'off');
+  assert.deepEqual(legacy.errors, {});
+
+  const invalid = planSettingsWrites({
+    orchestrationStyling: 'sometimes' as unknown as 'auto'
+  });
+  assert.equal(invalid.writes.length, 0);
+  assert.match(invalid.errors.orchestrationStyling ?? '', /Auto, On, or Off/);
 });

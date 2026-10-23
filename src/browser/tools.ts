@@ -1,6 +1,6 @@
 import { CONSOLE_BUFFER_LIMIT } from './consoleBuffer.ts';
 import { navigationDecision, navigationOrigin } from './policy.ts';
-import type { NavigationResult } from './session.ts';
+import type { NavigationResult, PageLocation } from './session.ts';
 
 /** One MCP tool result. An image is a base64 PNG the model can look at. */
 export interface ToolContent {
@@ -32,12 +32,18 @@ export interface AssertResult {
 export interface BrowserActions {
   navigate(url: string): Promise<NavigationResult>;
   resize(width: number, height: number): Promise<{ width: number; height: number }>;
-  snapshot(): Promise<{ text: string; pngBase64: string; path?: string; url?: string; title?: string }>;
+  snapshot(): Promise<{ text: string; pngBase64: string; path?: string; note?: string; url?: string; title?: string }>;
   click(input: { selector?: string; text?: string; x?: number; y?: number }): Promise<string>;
   type(text: string, selector?: string): Promise<void>;
   press(key: string): Promise<void>;
   console(): Promise<string>;
   assert(input: AssertInput): Promise<AssertResult>;
+  /** Optional until the skill wires the newer tools; the tool reports when absent. */
+  scroll?(dx: number, dy: number): Promise<void>;
+  back?(): Promise<PageLocation>;
+  forward?(): Promise<PageLocation>;
+  reload?(): Promise<PageLocation>;
+  close?(): Promise<void>;
 }
 
 export interface BrowserTool {
@@ -83,6 +89,44 @@ export const BROWSER_TOOLS: readonly BrowserTool[] = [
       ...VIEWPORT,
       required: ['width', 'height']
     }
+  },
+  {
+    name: 'browser_scroll',
+    description:
+      'Scroll the page in the editor browser tab by a wheel delta, in CSS pixels. Positive dx scrolls right; positive dy scrolls down. Provide dx, dy, or both.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dx: { type: 'number', description: 'Horizontal wheel delta in CSS pixels; positive scrolls right.' },
+        dy: { type: 'number', description: 'Vertical wheel delta in CSS pixels; positive scrolls down.' }
+      },
+      anyOf: [{ required: ['dx'] }, { required: ['dy'] }],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'browser_back',
+    description:
+      'Go back one entry in the editor browser history. Fails when there is no previous page. Does not ask for origin approval.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'browser_forward',
+    description:
+      'Go forward one entry in the editor browser history. Fails when there is no next page. Does not ask for origin approval.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'browser_reload',
+    description:
+      'Reload the current page in the editor browser tab. Keeps the console buffer, because a reload is not a new navigation.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'browser_close',
+    description:
+      'Close the page behind the editor browser tab. The next browser_navigate opens a fresh page. This does not turn browser control off.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
     name: 'browser_snapshot',
@@ -175,6 +219,16 @@ export async function runBrowserTool(
         return await navigate(actions, args, allow, grantedOrigins);
       case 'browser_resize':
         return await resize(actions, args);
+      case 'browser_scroll':
+        return await scroll(actions, args);
+      case 'browser_back':
+        return await travel(actions, 'back');
+      case 'browser_forward':
+        return await travel(actions, 'forward');
+      case 'browser_reload':
+        return await reload(actions);
+      case 'browser_close':
+        return await closePage(actions);
       case 'browser_snapshot':
         return await snapshot(actions);
       case 'browser_click':
@@ -237,6 +291,66 @@ async function resize(actions: BrowserActions, args: Record<string, unknown>): P
   return textResult(`Viewport is ${size.width}×${size.height}.`);
 }
 
+async function scroll(actions: BrowserActions, args: Record<string, unknown>): Promise<ToolResult> {
+  if (!actions.scroll) {
+    return unavailable('browser_scroll');
+  }
+  if (args.dx === undefined && args.dy === undefined) {
+    return textResult('Provide dx, dy, or both as finite numbers.', true);
+  }
+  const dx = wheelDelta(args.dx);
+  const dy = wheelDelta(args.dy);
+  if (dx === undefined || dy === undefined) {
+    return textResult('Provide dx, dy, or both as finite numbers.', true);
+  }
+  if (dx === 0 && dy === 0) {
+    return textResult('Provide a non-zero dx or dy to scroll.', true);
+  }
+  await actions.scroll(dx, dy);
+  return textResult(`Scrolled by ${dx}, ${dy}.`);
+}
+
+async function travel(actions: BrowserActions, direction: 'back' | 'forward'): Promise<ToolResult> {
+  const move = direction === 'back' ? actions.back : actions.forward;
+  if (!move) {
+    return unavailable(direction === 'back' ? 'browser_back' : 'browser_forward');
+  }
+  const location = await move.call(actions);
+  return textResult(
+    `Went ${direction} to ${location.url}${location.title ? ` (${location.title})` : ''}.`
+  );
+}
+
+async function reload(actions: BrowserActions): Promise<ToolResult> {
+  if (!actions.reload) {
+    return unavailable('browser_reload');
+  }
+  const location = await actions.reload();
+  return textResult(`Reloaded ${location.url}.`);
+}
+
+async function closePage(actions: BrowserActions): Promise<ToolResult> {
+  if (!actions.close) {
+    return unavailable('browser_close');
+  }
+  await actions.close();
+  return textResult('Closed the browser page. The next navigation opens a new one.');
+}
+
+function unavailable(tool: string): ToolResult {
+  return textResult(`${tool} is not available in this build.`, true);
+}
+
+function wheelDelta(value: unknown): number | undefined {
+  if (value === undefined) {
+    return 0;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.round(value);
+}
+
 async function snapshot(actions: BrowserActions): Promise<ToolResult> {
   const shot = await actions.snapshot();
   const lines = [shot.text || 'The page has no accessibility tree.'];
@@ -245,6 +359,9 @@ async function snapshot(actions: BrowserActions): Promise<ToolResult> {
     lines.push(`Screenshot saved to ${shot.path}${location ? ` (${location})` : ''}.`);
   } else if (location) {
     lines.push(location);
+  }
+  if (shot.note) {
+    lines.push(shot.note);
   }
   return {
     content: [

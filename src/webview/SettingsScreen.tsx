@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { THINKING_LEVELS } from '../backends/types';
 import type { SettingsPatch, SettingsSnapshot } from '../protocol';
+import type { OrchestrationChoice } from '../orchestration/settings.ts';
 import { AlertIcon, BackIcon, CheckIcon, CrossIcon, InfoIcon } from './Icons';
 import { opencodeRuntimeView } from './runtimeStatus';
 import { contextPatternError } from '../context/contextSettings';
@@ -35,7 +36,7 @@ import {
 /**
  * The settings screen: providers, credentials, and app-level defaults.
  *
- * It mirrors the accepted prototype under `.design/` — a stack of inline panels
+ * It mirrors the accepted prototype under `.design/` â€” a stack of inline panels
  * inside the view (never a floating popover), compact density, one primary
  * action at the foot. Color and type come only from `--vscode-*` and the brand
  * tokens; brand hue is confined to the Ollama provider dot.
@@ -432,7 +433,7 @@ export function SettingsScreen({
     quickTask: 'orchestrationQuickTask',
     planning: 'orchestrationPlanning'
   };
-  const changeOrchestration = (key: OrchestrationFieldKey, value: boolean): void => {
+  const changeOrchestration = (key: OrchestrationFieldKey, value: OrchestrationChoice): void => {
     const draftKey = orchestrationDraftKeys[key] as
       | 'orchestrationTesting'
       | 'orchestrationReviewing'
@@ -702,7 +703,7 @@ export function SettingsScreen({
                   id="ollama-api-key"
                   type="password"
                   value={token}
-                  placeholder={settings.ollama.hasToken ? '••••••••••••••••' : ''}
+                  placeholder={settings.ollama.hasToken ? 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢' : ''}
                   autoComplete="off"
                   spellCheck={false}
                   aria-describedby="ollama-key-state"
@@ -886,7 +887,7 @@ export function SettingsScreen({
               </div>
               <p className="field-help">
                 Free OpenCode models work without a key. Add a Zen API key to unlock paid models. Turns and
-                connection tests use the CLI selected under Settings → CLI (local or bundled).
+                connection tests use the CLI selected under Settings â†’ CLI (local or bundled).
               </p>
 
               <label className="field-label" htmlFor="opencode-default-model">
@@ -920,7 +921,7 @@ export function SettingsScreen({
                   id="opencode-zen-api-key"
                   type="password"
                   value={zenToken}
-                  placeholder={settings.opencodeZen.hasToken ? '••••••••••••••••' : ''}
+                  placeholder={settings.opencodeZen.hasToken ? 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢' : ''}
                   autoComplete="off"
                   spellCheck={false}
                   aria-describedby="opencode-zen-key-state"
@@ -979,11 +980,11 @@ export function SettingsScreen({
                   onClick={() => onTestConnection('opencode', draftCliAction)}
                 >
                   <RefreshIconInline />
-                  {opencodeStatus?.pending ? 'Checking…' : 'Check models'}
+                  {opencodeStatus?.pending ? 'Checkingâ€¦' : 'Check models'}
                 </button>
               </div>
               <p className="field-help">
-                Check models probes the CLI selected under Settings → CLI (
+                Check models probes the CLI selected under Settings â†’ CLI (
                 {draft.opencodeCliSource === 'bundled' ? 'bundled' : 'local'}) and refreshes the Zen catalog.
               </p>
               {opencodeStatus?.result ? (
@@ -1224,7 +1225,7 @@ export function SettingsScreen({
                 value={draft.thinking}
                 onChange={(event) => update('thinking', event.target.value as Draft['thinking'])}
               >
-                <option value="">Use each model’s default</option>
+                <option value="">Use each modelâ€™s default</option>
                 {THINKING_LEVELS.map((level) => (
                   <option value={level} key={level}>
                     {level[0]?.toUpperCase()}{level.slice(1)}
@@ -1232,7 +1233,7 @@ export function SettingsScreen({
                 ))}
               </select>
               <p className="field-help">
-                A model’s reported default and its saved per-model choice take precedence. Otherwise this level
+                A modelâ€™s reported default and its saved per-model choice take precedence. Otherwise this level
                 is used; unsupported levels are reduced to the closest level the model supports.
               </p>
             </div>
@@ -1850,5 +1851,6 @@ function draftErrors(draft: Draft): Partial<Record<keyof SettingsPatch, string>>
   }
   return errors;
 }
+
 
 
