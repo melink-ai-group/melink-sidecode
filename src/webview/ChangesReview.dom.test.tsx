@@ -5,6 +5,22 @@ import { App } from './App';
 import { hostMessages, sendHostMessage } from './domSetup';
 import type { ChangeView } from '../protocol';
 
+const replay = [
+  { id: 'user-1', kind: 'message', role: 'user', text: 'Build the view' },
+  { id: 'reply-1', kind: 'message', role: 'assistant', text: 'Updated the view.' }
+];
+
+async function openReviewedConversation(): Promise<void> {
+  render(<App />);
+  act(() => {
+    sendHostMessage({ type: 'snapshot', availability: [{ id: 'codex', label: 'Codex', badge: 'CLI', status: 'available' }] });
+    sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'thread-review', replay });
+    sendHostMessage({ type: 'restoring', value: false });
+    sendHostMessage({ type: 'changes/review', review: review() });
+  });
+  await screen.findByRole('button', { name: 'Fix' });
+}
+
 function review(): ChangeView {
   return {
     backendId: 'codex', threadId: 'thread-review', turnId: 'turn-review', messageId: 'user-1',
@@ -99,4 +115,69 @@ it('posts Fix as a user turn using the selected backend and preserves the compos
   expect(sent[0].text).toContain('Handle the rejected request.');
   expect(composer.value).toBe('My next request');
   expect(screen.getAllByText(/Fix the issues reported for the files changed/).length).toBeGreaterThan(0);
+});
+
+it('keeps restored change cards and their findings through late hydration of the same conversation', async () => {
+  await openReviewedConversation();
+  fireEvent.click(screen.getByRole('button', { name: /Files changed/ }));
+  const panel = screen.getByRole('region', { name: 'Files changed' });
+  act(() => {
+    sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'thread-review', replay: [
+      { id: 'older-user', kind: 'message', role: 'user', text: 'Earlier request' }, ...replay
+    ] });
+  });
+  expect(screen.getByRole('region', { name: 'Files changed' })).toBe(panel);
+  expect(screen.getByText('Add a visible focus state.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: /Files changed/ }).getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Fix' })).toBeTruthy();
+});
+
+it('keeps the final changes and findings when a turn finishes and its conversation is repainted', async () => {
+  await openReviewedConversation();
+  act(() => {
+    sendHostMessage({ type: 'agentEvent', event: { type: 'turn/started', backendId: 'codex', threadId: 'thread-review', turnId: 'next-turn' } });
+  });
+  // Busy is urgent and flushes the queued lifecycle event before checking the panel.
+  act(() => sendHostMessage({ type: 'busy', value: true, backendId: 'codex', threadId: 'thread-review' }));
+  expect((screen.getByRole('button', { name: 'Fix' }) as HTMLButtonElement).disabled).toBe(true);
+  act(() => {
+    sendHostMessage({ type: 'changes/review', review: { ...review(), turnId: 'next-turn' } });
+    sendHostMessage({ type: 'agentEvent', event: { type: 'turn/completed', backendId: 'codex', threadId: 'thread-review', turnId: 'next-turn' } });
+    sendHostMessage({ type: 'busy', value: false, backendId: 'codex', threadId: 'thread-review' });
+    sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'thread-review', replay });
+  });
+  fireEvent.click(screen.getByRole('button', { name: /Files changed/ }));
+  expect(screen.getByText('Handle the rejected request.')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Fix' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('still clears stale cards on a conversation switch or an explicit host reset', async () => {
+  await openReviewedConversation();
+  act(() => sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'another-thread', replay }));
+  expect(screen.queryByRole('button', { name: /Files changed/ })).toBeNull();
+  act(() => {
+    sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'thread-review', replay });
+    sendHostMessage({ type: 'changes/review', review: review() });
+  });
+  await screen.findByRole('button', { name: 'Fix' });
+  act(() => {
+    sendHostMessage({ type: 'changes/changed', backendId: 'codex', threadId: 'thread-review', turnId: '', entries: [] });
+    sendHostMessage({ type: 'restoring', value: false });
+  });
+  expect(screen.queryByRole('button', { name: /Files changed/ })).toBeNull();
+});
+
+it('preserves checkpoint anchors for restored cards that have no message id', async () => {
+  await openReviewedConversation();
+  act(() => {
+    sendHostMessage({ type: 'changes/changed', backendId: 'codex', threadId: 'thread-review', turnId: '', entries: [] });
+    sendHostMessage({ type: 'changes/checkpoints', checkpoints: [{ backendId: 'codex', threadId: 'thread-review',
+      turnId: 'turn-review', messageId: 'user-1', createdAt: 1, fileCount: 1, paths: ['src/view.tsx'] }] });
+    sendHostMessage({ type: 'changes/review', review: { ...review(), messageId: undefined } });
+  });
+  await screen.findByRole('button', { name: 'Fix' });
+  act(() => sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'thread-review', replay }));
+  expect(screen.getByRole('button', { name: /Files changed/ })).toBeTruthy();
+  act(() => sendHostMessage({ type: 'conversation', backendId: 'opencode', threadId: 'thread-review', replay }));
+  expect(screen.queryByRole('button', { name: /Files changed/ })).toBeNull();
 });

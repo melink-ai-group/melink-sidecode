@@ -923,16 +923,16 @@ export function reduce(state: AppState, action: Action): AppState {
         contextWindowTokens: changedModel ? undefined : state.contextWindowTokens,
         // A plan is carried with the conversation so a resumed thread reopens it.
         plan: action.plan,
-        // Turn cards belong to the thread they were recorded for; a switch drops
-        // them rather than showing the previous conversation's files against this
-        // one. The host re-posts the resumed thread's turns right after.
-        turnChanges: [],
+        // Hydration and other same-thread replays replace the transcript without
+        // necessarily reposting its change cards. Keep that evidence until the
+        // host explicitly replaces it; switching conversations still drops it.
+        turnChanges: sameChat ? state.turnChanges : [],
         changeDecision: undefined,
         changeRejectConfirm: undefined,
         changeDeciding: false,
-        // Checkpoints and a restore result belong to the thread they were read
-        // for; a switch drops them rather than showing the previous thread's.
-        checkpoints: undefined,
+        // Some turn cards use checkpoints to find their opening user message.
+        // Preserve those anchors on a replay too; never carry them into a switch.
+        checkpoints: sameChat ? state.checkpoints : undefined,
         restoreResult: undefined,
         restoreConfirmation: undefined
       };
