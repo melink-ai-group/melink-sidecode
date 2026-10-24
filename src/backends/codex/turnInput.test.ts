@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildCodexTurnInput, planEscapeInstructions } from './turnInput.ts';
+import { COMPLETION_CONTRACT } from '../modes.ts';
 import type { Attachment } from '../types.ts';
 
 const image: Attachment = {
@@ -10,6 +11,30 @@ const image: Attachment = {
   mimeType: 'image/png',
   kind: 'image'
 };
+
+test('an Agent turn carries the completion contract to the provider', () => {
+  const [text] = buildCodexTurnInput({
+    mode: 'agent',
+    text: 'adjust the parser and its caller',
+    bakedMode: 'agent'
+  });
+  assert.equal(text.type, 'text');
+  if (text.type === 'text') {
+    assert.ok(text.text.includes(COMPLETION_CONTRACT));
+    assert.match(text.text, /never scan the whole repository/i);
+    assert.match(text.text, /do not re-ask answered questions/i);
+  }
+});
+
+test('Plan and Ask turns do not carry the Agent completion contract', () => {
+  for (const mode of ['plan', 'ask'] as const) {
+    const [text] = buildCodexTurnInput({ mode, text: 'what next' });
+    assert.equal(text.type, 'text');
+    if (text.type === 'text') {
+      assert.equal(text.text.includes(COMPLETION_CONTRACT), false);
+    }
+  }
+});
 
 test('a later turn carries the workspace delta and the viewed file, and keeps the user text', () => {
   const [text] = buildCodexTurnInput({

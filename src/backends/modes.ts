@@ -28,7 +28,7 @@ import { frontendChecklist, type FrontendStack } from '../context/frontendStack.
  * prompt generation produced the behaviour. It is metadata only and is never
  * sent anywhere.
  */
-export const MODE_PROMPT_VERSION = '2026-10-22';
+export const MODE_PROMPT_VERSION = '2026-10-24';
 
 /** Whether a mode forces the workspace read-only, whatever level was chosen. */
 export type ModeEnforcement = 'act' | 'read-only' | 'answer-only';
@@ -104,6 +104,15 @@ const PLAN_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Name the veri
 export const GIT_SAFETY =
   'Git safety. Never run `git commit`, `git push`, `git reset`, `git clean`, or any other git operation that rewrites history or discards work unless the user explicitly requested that exact action in this conversation; a general request such as "fix the bug" or "clean this up" is not permission. Before running ANY git write, including `git add`, `git commit`, `git push`, `git reset`, `git clean`, `git checkout -f`, `git rebase`, `git tag`, `git branch -D`, `git stash drop`, or a force push, state the exact command and ask for the user\u2019s approval. Read-only git (`git status`, `git diff`, `git log`, `git show`) needs no extra approval. Never use git to undo or bypass the host\u2019s Keep, Reject, or checkpoint flow.';
 
+/**
+ * The Agent completion contract: how to bound the code it reads, how to verify
+ * the finished turn, and how to carry decisions made earlier in the same chat.
+ * It references the definition of done rather than repeating it, and it leans on
+ * the reply shape and question block for the visible result and any open answer.
+ */
+export const COMPLETION_CONTRACT =
+  'Completion contract. Before editing, inspect the callers and usages of the code you expect to change and its directly adjacent module or modules, limited to what this request touches; never scan the whole repository. Before finishing, re-check those same bounded areas, fix any mismatch, and state what you checked in brief notes before the closing sentence. Cover every part of the request; if a part is open, state what remains in the single closing result sentence and never call the work finished while a named step is open. Reuse decisions and conventions already established in this chat; do not re-ask answered questions; ask only when the answer cannot be read from the workspace, transcript, or provided context, defer skipped or unanswered answers to the question block, and ask a genuinely ambiguous new decision when needed. Apply the definition of done.';
+
 export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
   {
     mode: 'agent',
@@ -111,7 +120,7 @@ export const MODE_DESCRIPTORS: readonly ModeDescriptor[] = [
     description: 'The agent acts on the workspace.',
     enforcement: 'act',
     developerInstructions:
-      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${AGENT_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${GIT_SAFETY} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK} Ask only when you cannot look the answer up yourself.`
+      `Work in Agent mode. The available modes are Agent (act on the workspace), Plan (investigate and write a plan document, revising it only when the user asks), and Ask (answer questions without acting). Act on the workspace. If you are executing an approved plan, work its steps in order and report each step as it changes by writing one checkbox line on its own line, repeating that step\u2019s text exactly: "- [~] ..." when you start it and "- [x] ..." when you finish it ("- [-] ..." if it was denied). Write that line at the moment the status changes, before you continue, so the plan document and the todo list update while you work. Keep going through every remaining step. Do not stop to ask whether to continue. Do not rewrite the plan prose. ${AGENT_DEFINITION_OF_DONE} ${ARTIFACT_HOME} ${GIT_SAFETY} ${COMPLETION_CONTRACT} ${REPLY_SHAPE} ${REPLY_CLOSE} ${QUESTION_BLOCK}`
   },
   {
     mode: 'plan',

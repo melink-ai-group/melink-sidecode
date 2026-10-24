@@ -120,7 +120,7 @@ async function call(message: RpcMessage): Promise<unknown> {
       return {
         protocolVersion: protocolVersion(message.params),
         capabilities: { tools: {} },
-        serverInfo: { name: 'melink-browser', version: '0.2.0' }
+        serverInfo: { name: 'melink-browser', version: '0.2.1' }
       };
     case 'ping':
       return {};

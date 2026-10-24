@@ -499,15 +499,152 @@ export function planDocumentFromReply(reply: string): PlanDocumentDraft {
   };
 }
 
+/** Heading of the plan's answered-decisions section. */
+export const PLAN_DECISIONS_HEADING = '## Decisions';
+
+/** Most decision lines kept in a plan body. Oldest lines drop first. */
+export const PLAN_DECISION_MAX_LINES = 40;
+
+/** Most characters kept in one decision line, including a trailing ellipsis. */
+export const PLAN_DECISION_MAX_LINE_CHARS = 300;
+
+/** Most characters kept across all decision lines. Oldest lines drop first. */
+export const PLAN_DECISION_MAX_TOTAL_CHARS = 8000;
+
+/** Written after the heading when older decision lines were dropped. */
+export const PLAN_DECISIONS_TRUNCATION_MARKER = '_Earlier decisions were omitted at the storage limit._';
+
+/** The `## Decisions` section's lines, or `found: false` when it is absent. */
+function planDecisionSection(body: unknown): { found: boolean; lines: string[] } {
+  if (typeof body !== 'string' || body.length === 0) {
+    return { found: false, lines: [] };
+  }
+  const lines = body.replace(/\r\n?/g, '\n').split('\n');
+  const start = lines.findIndex((line) => /^##\s+decisions\s*$/i.test(line.trim()));
+  if (start < 0) {
+    return { found: false, lines: [] };
+  }
+  const section: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^#{1,6}\s+/.test(lines[index].trim())) {
+      break;
+    }
+    section.push(lines[index]);
+  }
+  return { found: true, lines: section };
+}
+
+/** Trim and collapse whitespace so a wrapped decision still counts as one line. */
+function normalizePlanDecisionLine(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+}
+
+/** A decision line bounded to the per-line cap, with a trailing ellipsis when cut. */
+function truncatePlanDecisionLine(line: string): string {
+  const chars = Array.from(line);
+  if (chars.length <= PLAN_DECISION_MAX_LINE_CHARS) {
+    return line;
+  }
+  return `${chars.slice(0, PLAN_DECISION_MAX_LINE_CHARS - 1).join('')}…`;
+}
+
+/**
+ * True when the body has a `## Decisions` heading. Distinguishes an empty
+ * section (explicit clear) from an absent section (omission).
+ */
+export function hasPlanDecisionsSection(body: string | undefined): boolean {
+  return planDecisionSection(body).found;
+}
+
+/** True when a previously truncated section still carries the fixed marker. */
+export function hasPlanDecisionsTruncationMarker(body: string | undefined): boolean {
+  return planDecisionSection(body).lines.some(
+    (line) => line.trim() === PLAN_DECISIONS_TRUNCATION_MARKER
+  );
+}
+
+/**
+ * Read only the `## Decisions` section. Each bullet is trimmed and its
+ * whitespace collapsed; blank bullets, the truncation marker and any non-bullet
+ * text are ignored. A missing or malformed body yields `[]` and never throws.
+ */
+export function extractPlanDecisionLines(body: string | undefined): string[] {
+  const section = planDecisionSection(body);
+  if (!section.found) {
+    return [];
+  }
+  const decisions: string[] = [];
+  for (const line of section.lines) {
+    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
+    if (!bullet) {
+      continue;
+    }
+    const text = normalizePlanDecisionLine(bullet[1]);
+    if (text.length === 0 || text === PLAN_DECISIONS_TRUNCATION_MARKER) {
+      continue;
+    }
+    decisions.push(text);
+  }
+  return decisions;
+}
+
+/**
+ * Append new decisions to the stored ones: chronological, exact-line dedupe
+ * first-seen-first (no semantic supersession). Each line is trimmed, whitespace
+ * collapsed and bounded; when the count or total character cap is exceeded the
+ * oldest lines drop and `truncated` says so.
+ */
+export function mergePlanDecisionLines(
+  existing: readonly string[],
+  incoming: readonly string[]
+): { lines: string[]; truncated: boolean } {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const value of [...existing, ...incoming]) {
+    const normalized = normalizePlanDecisionLine(value);
+    if (normalized.length === 0 || normalized === PLAN_DECISIONS_TRUNCATION_MARKER) {
+      continue;
+    }
+    const bounded = truncatePlanDecisionLine(normalized);
+    if (seen.has(bounded)) {
+      continue;
+    }
+    seen.add(bounded);
+    merged.push(bounded);
+  }
+  let total = merged.reduce((sum, line) => sum + line.length, 0);
+  let truncated = false;
+  while (merged.length > PLAN_DECISION_MAX_LINES || total > PLAN_DECISION_MAX_TOTAL_CHARS) {
+    const dropped = merged.shift();
+    if (dropped === undefined) {
+      break;
+    }
+    total -= dropped.length;
+    truncated = true;
+  }
+  return { lines: merged, truncated };
+}
+
 /**
  * Put answered questions into the plan body. A later `## Decisions` section is
- * replaced, so each new round of answers is what the document shows.
+ * replaced, so each new round of answers is what the document shows. When
+ * `truncated` is set, the fixed marker is written after the heading. Empty
+ * `lines` is a no-op: clearing a section is done by persisting a revised body.
  */
-export function applyPlanDecisions(body: string | undefined, lines: readonly string[]): string | undefined {
+export function applyPlanDecisions(
+  body: string | undefined,
+  lines: readonly string[],
+  options?: { truncated?: boolean }
+): string | undefined {
   if (lines.length === 0) {
     return body;
   }
-  const section = ['## Decisions', '', ...lines.map((line) => `- ${line}`)].join('\n');
+  const section = [
+    PLAN_DECISIONS_HEADING,
+    '',
+    ...(options?.truncated ? [PLAN_DECISIONS_TRUNCATION_MARKER, ''] : []),
+    ...lines.map((line) => `- ${line}`)
+  ].join('\n');
   const prose = (body ?? '').replace(/\r\n?/g, '\n').trim();
   if (prose.length === 0) {
     return section;

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { App } from './App';
-import { sendHostMessage } from './domSetup';
+import { hostMessages, sendHostMessage } from './domSetup';
+import type { Attachment, PlanArtifact } from '../backends/types';
+import type { ChangeView } from '../protocol';
 
 const availableBackend = {
   id: 'codex',
@@ -14,12 +16,15 @@ const THREAD_ID = 'thread-orchestration';
 const ORCHESTRATION_TEXT =
   'Continue the remaining steps of this plan. Do not stop to ask whether to continue.\n\n- [ ] Fix the ring';
 
-function openConversation(replay: Parameters<typeof conversationMessage>[0]): void {
+function openConversation(
+  replay: Parameters<typeof conversationMessage>[0],
+  extra: Record<string, unknown> = {}
+): void {
   render(<App />);
   act(() => {
     sendHostMessage({ type: 'snapshot', availability: [availableBackend] });
     sendHostMessage({ type: 'restoring', value: false });
-    sendHostMessage(conversationMessage(replay));
+    sendHostMessage({ ...conversationMessage(replay), ...extra });
   });
 }
 
@@ -178,5 +183,227 @@ describe('injected orchestration entries', () => {
     });
 
     expect(screen.getByText('Starting')).toBeTruthy();
+  });
+});
+
+const PLAN_NOTICE = '2 plan steps still remain.';
+const CHECK_NOTICE = 'The post-turn checks failed. See the change card for details.';
+const PLAN_SENTENCE = 'Continue the remaining steps of this plan.';
+const CHECK_SENTENCE =
+  "The post-turn checks failed. Investigate the failure, fix it, and rerun the project's checks.";
+
+const BASE_REPLAY = [
+  { id: 'user-1' as const, kind: 'message' as const, role: 'user' as const, text: 'Build the ring' },
+  { id: 'reply-1' as const, kind: 'message' as const, role: 'assistant' as const, text: 'Working on it.' }
+];
+
+const ATTACHMENT: Attachment = {
+  id: 'att-1',
+  name: 'guard.png',
+  mimeType: 'image/png',
+  size: 1024,
+  kind: 'image',
+  dataUrl: 'data:image/png;base64,AAAA'
+};
+
+const BUILT_PLAN: PlanArtifact = {
+  path: 'plans/ring.md',
+  title: 'Ring',
+  built: true,
+  updatedAt: 1,
+  steps: [
+    { text: 'Fix the ring', status: 'pending' },
+    { text: 'Check the edge', status: 'pending' }
+  ]
+};
+
+function changeCardReview(): ChangeView {
+  return {
+    backendId: 'codex',
+    threadId: THREAD_ID,
+    turnId: 'turn-attention',
+    messageId: 'user-1',
+    additions: 1,
+    deletions: 0,
+    fullyDecided: false,
+    files: [
+      {
+        path: 'src/ring.ts',
+        absPath: '/workspace/src/ring.ts',
+        status: 'modified',
+        source: 'reported',
+        binary: false,
+        diffable: true,
+        additions: 1,
+        deletions: 0,
+        decision: 'pending',
+        hunks: []
+      }
+    ]
+  };
+}
+
+function messagesOf(type: string): Array<Record<string, unknown>> {
+  return hostMessages().filter(
+    (message): message is Record<string, unknown> =>
+      typeof message === 'object' &&
+      message !== null &&
+      (message as { type?: unknown }).type === type
+  );
+}
+
+function composer(): HTMLTextAreaElement {
+  return screen.getByLabelText('Message the agent') as HTMLTextAreaElement;
+}
+
+function postNotice(
+  action: 'preparePlanFollowUp' | 'prepareCheckFollowUp',
+  message: string
+): HTMLElement {
+  act(() => {
+    sendHostMessage({
+      type: 'notice',
+      level: action === 'prepareCheckFollowUp' ? 'warning' : 'info',
+      message,
+      action
+    });
+  });
+  return screen.getByRole('button', { name: 'Prepare follow-up' });
+}
+
+function expectNoSend(): void {
+  expect(messagesOf('sendTurn')).toHaveLength(0);
+  expect(messagesOf('steerTurn')).toHaveLength(0);
+}
+
+describe('attention follow-up actions', () => {
+  it.each([
+    ['preparePlanFollowUp', PLAN_NOTICE, PLAN_SENTENCE],
+    ['prepareCheckFollowUp', CHECK_NOTICE, CHECK_SENTENCE]
+  ] as const)('renders %s and prefills exactly, without sending', (action, notice, sentence) => {
+    openConversation(BASE_REPLAY);
+    const usersBefore = document.querySelectorAll('.turn--user').length;
+    const button = postNotice(action, notice);
+    expect(button.textContent).toContain('Prepare follow-up');
+
+    fireEvent.click(button);
+
+    const input = composer();
+    expect(input.value).toBe(sentence);
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByText(notice)).toBeNull();
+    expectNoSend();
+    expect(document.querySelectorAll('.turn--user')).toHaveLength(usersBefore);
+  });
+
+  it('leaves a non-empty draft byte-for-byte and points at the plan card', () => {
+    openConversation(BASE_REPLAY);
+    act(() => sendHostMessage({ type: 'plan', plan: BUILT_PLAN }));
+    const input = composer();
+    fireEvent.change(input, { target: { value: '  keep these bytes  ' } });
+
+    fireEvent.click(postNotice('preparePlanFollowUp', PLAN_NOTICE));
+
+    expect(input.value).toBe('  keep these bytes  ');
+    expect(screen.queryByText(PLAN_NOTICE)).toBeNull();
+    expectNoSend();
+    const planCard = document.querySelector('.todo-dock .todo');
+    expect(planCard).toBeTruthy();
+    expect(planCard?.contains(document.activeElement)).toBe(true);
+  });
+
+  it('leaves attachments byte-for-byte and points at the change card', async () => {
+    openConversation(BASE_REPLAY);
+    act(() => sendHostMessage({ type: 'changes/review', review: changeCardReview() }));
+    await screen.findByRole('button', { name: /Files changed/ });
+    const input = composer();
+    fireEvent.change(input, { target: { value: 'my note' } });
+    fireEvent.click(screen.getByLabelText('Attach files'));
+    const request = messagesOf('attachFiles')[0] as { requestId?: string } | undefined;
+    act(() => {
+      sendHostMessage({ type: 'attachmentsPicked', requestId: request?.requestId, attachments: [ATTACHMENT] });
+    });
+    expect(screen.getByLabelText('Attachments')).toBeTruthy();
+
+    fireEvent.click(postNotice('prepareCheckFollowUp', CHECK_NOTICE));
+
+    expect(input.value).toBe('my note');
+    expect(screen.getByLabelText('Attachments')).toBeTruthy();
+    expect(screen.getByLabelText('Remove guard.png')).toBeTruthy();
+    expect(screen.queryByText(CHECK_NOTICE)).toBeNull();
+    expectNoSend();
+    const changeCard = document.querySelector('.turn-changes .changes-review');
+    expect(changeCard).toBeTruthy();
+    expect(changeCard?.contains(document.activeElement)).toBe(true);
+  });
+
+  it.each([
+    [
+      'busy',
+      () => sendHostMessage({ type: 'busy', value: true, backendId: 'codex', threadId: THREAD_ID })
+    ],
+    [
+      'pending approval',
+      () => sendHostMessage({ ...conversationMessage(BASE_REPLAY), pendingApproval: { id: 'approval-1', kind: 'command', method: 'item/commandExecution/requestApproval', command: 'npm run build', origin: '/workspace' } })
+    ],
+    [
+      'pending question',
+      () => sendHostMessage({ type: 'question/asked', request: { id: 'q-1', backendId: 'codex', threadId: THREAD_ID, questions: [{ id: 'q1', prompt: 'Which layout?', options: ['Two columns', 'Single column'] }] } })
+    ],
+    [
+      'mode switch',
+      () => sendHostMessage({ type: 'modeSwitchPrompt', requestId: 'switch-1', from: 'agent', to: 'plan' })
+    ]
+  ] as const)('does not prefill while %s', (_label, setup) => {
+    openConversation(BASE_REPLAY);
+    act(setup);
+    fireEvent.click(postNotice('preparePlanFollowUp', PLAN_NOTICE));
+
+    expect(composer().value).toBe('');
+    expect(screen.queryByText(PLAN_NOTICE)).toBeNull();
+    expectNoSend();
+  });
+
+  it('keeps a running turn busy when its attention action is blocked', () => {
+    openConversation(BASE_REPLAY);
+    act(() =>
+      sendHostMessage({ type: 'busy', value: true, backendId: 'codex', threadId: THREAD_ID })
+    );
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+
+    fireEvent.click(postNotice('preparePlanFollowUp', PLAN_NOTICE));
+
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^(Send|Queue message)$/ })).toBeNull();
+    expectNoSend();
+  });
+
+  it('does not prefill while restoring, and keeps the notice for later', () => {
+    openConversation(BASE_REPLAY);
+    const button = postNotice('preparePlanFollowUp', PLAN_NOTICE);
+
+    act(() => sendHostMessage({ type: 'restoring', value: true }));
+    expect(screen.queryByText(PLAN_NOTICE)).toBeNull();
+    fireEvent.click(button);
+    expect(composer().value).toBe('');
+    expectNoSend();
+
+    act(() => sendHostMessage({ type: 'restoring', value: false }));
+    expect(screen.getByText(PLAN_NOTICE)).toBeTruthy();
+    expect(composer().value).toBe('');
+    expectNoSend();
+  });
+
+  it('drops the attention action when the chat switches', () => {
+    openConversation(BASE_REPLAY);
+    postNotice('prepareCheckFollowUp', CHECK_NOTICE);
+
+    act(() =>
+      sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'thread-other', replay: [] })
+    );
+
+    expect(screen.queryByText(CHECK_NOTICE)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Prepare follow-up' })).toBeNull();
+    expectNoSend();
   });
 });

@@ -301,6 +301,13 @@ useful, an action:
 | Provider error | *Something went wrong* | **Retry** |
 | User canceled a turn | *Response stopped* | â€” |
 | Stale conversation on reload | *The previous conversation could not be restoredâ€¦* | â€” |
+| Plan steps remain after an Agent turn | *N plan steps still remain.* | **Prepare follow-up** |
+| Post-turn checks failed | *The post-turn checks failed. See the change card for details.* | **Prepare follow-up** |
+
+**Prepare follow-up** only fills a free composer with a fixed next-step sentence;
+it never sends. An existing draft or attachment is left untouched, and while a
+turn, restore, question, approval or mode switch is active it points at the plan
+or change card instead of prefilling.
 
 The view title, from left to right, is **Refresh project context** (rebuilds the
 workspace snapshot for the next turn), **Refresh backend availability** (re-probes

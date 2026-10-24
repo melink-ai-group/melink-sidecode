@@ -31,9 +31,11 @@ import {
   skillToggleAction,
   visibleModeSnapshot,
   type ItemStatus,
+  type NoticeAction,
   type TranscriptItemView,
   type TurnChange
 } from './state';
+import { attentionFollowUpText, type AttentionKind } from '../orchestration/completion.ts';
 import { setPrettyPathRoots } from './prettyPath.ts';
 import { groupTranscript, speakerRows, turnElapsedNotes, type TranscriptEntry } from './activityGroups.ts';
 import { placeTurnChanges } from './turnChanges.ts';
@@ -118,6 +120,26 @@ export function App(): JSX.Element {
   useEffect(() => () => clearSettingsSaveWatchdog(), []);
   setPrettyPathRoots(state.workspaceRoots);
   const [draft, setDraft] = useState('');
+  /** A request to focus the card a notice points at, after the notice is gone. */
+  const [attentionFocus, setAttentionFocus] = useState<{ kind: AttentionKind; nonce: number }>();
+  const attentionFocusSeq = useRef(0);
+  useLayoutEffect(() => {
+    if (!attentionFocus) {
+      return;
+    }
+    const cards = document.querySelectorAll<HTMLElement>(
+      attentionFocus.kind === 'plan-remaining'
+        ? '.todo-dock .todo, .plan-card'
+        : '.turn-changes .changes-review, .turn-changes .changed-files'
+    );
+    const card = cards[cards.length - 1];
+    if (!card) {
+      return;
+    }
+    card.scrollIntoView?.({ block: 'nearest' });
+    const target = card.querySelector<HTMLElement>('button:not([disabled]), .plan-doc') ?? card;
+    target.focus();
+  }, [attentionFocus]);
   /** True between queueing a message and the host's `queuedTurns` echo. */
   const [queuePending, setQueuePending] = useState(false);
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
@@ -1504,10 +1526,42 @@ export function App(): JSX.Element {
     });
   };
 
-  const runNoticeAction = (
-    action: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion',
-    noticeText?: string
-  ): void => {
+  const dismissNoticeRow = (noticeText?: string, preserveBusy = false): void => {
+    if (noticeText) {
+      dispatch({ type: 'dismissStatusNotice', text: noticeText, preserveBusy });
+    } else {
+      dispatch({ type: 'dismissNotice' });
+    }
+  };
+
+  // Point at the evidence that already exists in its owning card. Focusing a
+  // control inside the card keeps the target real without adding a tab stop.
+  const focusAttentionEvidence = (kind: AttentionKind): void => {
+    attentionFocusSeq.current += 1;
+    setAttentionFocus({ kind, nonce: attentionFocusSeq.current });
+  };
+
+  const runNoticeAction = (action: NoticeAction, noticeText?: string): void => {
+    if (action === 'preparePlanFollowUp' || action === 'prepareCheckFollowUp') {
+      const kind: AttentionKind = action === 'preparePlanFollowUp' ? 'plan-remaining' : 'check-failed';
+      // Existing draft or files are the user's own work: never replace them.
+      if (draft.length > 0 || state.attachments.length > 0) {
+        dismissNoticeRow(noticeText, true);
+        focusAttentionEvidence(kind);
+        return;
+      }
+      // The composer is not free to accept text: leave it empty and point at
+      // the card the notice is about. A running turn keeps running.
+      if (state.busy || state.restoring || pending || state.pendingQuestion || state.modeSwitch) {
+        dismissNoticeRow(noticeText, true);
+        focusAttentionEvidence(kind);
+        return;
+      }
+      setDraft(attentionFollowUpText(kind));
+      dismissNoticeRow(noticeText, true);
+      composerInputRef.current?.focus();
+      return;
+    }
     if (action === 'retry') {
       retryLastTurn(noticeText ?? '');
       return;

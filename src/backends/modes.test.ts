@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_MODES, GIT_SAFETY, isDefaultMode, modeDescriptor, modeInstructions } from './modes.ts';
+import { COMPLETION_CONTRACT, DEFAULT_MODES, GIT_SAFETY, isDefaultMode, modeDescriptor, modeInstructions } from './modes.ts';
 import {
   backendSupportsMode,
   effectivePermissionLevel,
@@ -92,6 +92,84 @@ test('every mode carries the shared plan-document contract', () => {
     assert.match(text, /never name a plan after a thread id or uuid/);
   }
   assert.equal(ask.includes('.melink/plans/'), false);
+});
+
+test('agent carries the completion contract and no other mode does', () => {
+  const agent = modeInstructions('agent') ?? '';
+  const plan = modeInstructions('plan') ?? '';
+  const ask = modeInstructions('ask') ?? '';
+
+  assert.ok(COMPLETION_CONTRACT.trim().length > 0);
+  // Interpolated once, not copy-pasted, and appended only to Agent.
+  assert.equal(agent.split(COMPLETION_CONTRACT).length - 1, 1);
+  assert.equal(plan.includes(COMPLETION_CONTRACT), false);
+  assert.equal(ask.includes(COMPLETION_CONTRACT), false);
+
+  // (a) bounded inspection of related code before editing, no whole-repo scan.
+  assert.match(agent, /before editing, inspect the callers and usages/i);
+  assert.match(agent, /directly adjacent module or modules/i);
+  assert.match(agent, /limited to what this request touches/i);
+  assert.match(agent, /never scan the whole repository/i);
+
+  // (b) re-check the same bounded areas, fix mismatches, note them before the close.
+  assert.match(agent, /before finishing, re-check those same bounded areas/i);
+  assert.match(agent, /fix any mismatch/i);
+  assert.match(agent, /state what you checked in brief notes before the closing sentence/i);
+
+  // (c) cover the request; keep one honest result sentence.
+  assert.match(agent, /cover every part of the request/i);
+  assert.match(agent, /state what remains in the single closing result sentence/i);
+  assert.match(agent, /never call the work finished while a named step is open/i);
+
+  // (d) reuse same-chat decisions and delegate unreadable or skipped answers.
+  assert.match(agent, /reuse decisions and conventions already established in this chat/i);
+  assert.match(agent, /do not re-ask answered questions/i);
+  assert.match(agent, /ask only when the answer cannot be read from the workspace, transcript, or provided context/i);
+  assert.match(agent, /defer skipped or unanswered answers to the question block/i);
+  assert.match(agent, /ask a genuinely ambiguous new decision when needed/i);
+
+  // The existing question block and single close keep their own form.
+  assert.match(agent, /sidecode-question/);
+  assert.match(agent, /last thing the user reads/);
+});
+
+test('the completion contract is the only no-reask rule and does not restate the definition of done', () => {
+  const agent = modeInstructions('agent') ?? '';
+  const oldSentence = 'Ask only when you cannot look the answer up yourself';
+
+  assert.equal(agent.includes(oldSentence), false);
+  assert.equal(agent.match(/ask only when/gi)?.length, 1);
+  assert.equal(COMPLETION_CONTRACT.match(/definition of done/gi)?.length, 1);
+  assert.equal(agent.match(/never claim a check passed/gi)?.length, 1);
+  assert.equal(COMPLETION_CONTRACT.includes('package.json'), false);
+  assert.equal(COMPLETION_CONTRACT.includes('never claim'), false);
+});
+
+test('plan is outside the completion contract by scope, not read-only safety', () => {
+  const plan = modeInstructions('plan') ?? '';
+  assert.equal(plan.includes('Completion contract'), false);
+  assert.equal(plan.includes('brief notes before the closing sentence'), false);
+  // Plan still acts at the caller-selected level; unchanged here for scope only.
+  assert.equal(modeEnforcement('plan'), 'act');
+  assert.equal(modeForcesReadOnly('plan'), false);
+  assert.equal(effectivePermissionLevel('plan', 'unrestricted'), 'unrestricted');
+  assert.match(plan, /do not implement the plan/i);
+});
+
+test('ask carries none of the completion contract', () => {
+  const ask = modeInstructions('ask') ?? '';
+  assert.equal(ask.includes('Completion contract'), false);
+  for (const clause of [
+    /callers and usages/i,
+    /directly adjacent module/i,
+    /re-check those same bounded areas/i,
+    /cover every part of the request/i,
+    /reuse decisions and conventions/i,
+    /do not re-ask answered questions/i,
+    /defer skipped or unanswered answers/i
+  ]) {
+    assert.doesNotMatch(ask, clause);
+  }
 });
 
 test('agent and plan carry the one shared git-safety rule', () => {

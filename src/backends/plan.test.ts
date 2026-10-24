@@ -26,6 +26,14 @@ import {
   renderPlanMarkdown,
   sanitizeThreadId,
   applyPlanDecisions,
+  extractPlanDecisionLines,
+  hasPlanDecisionsSection,
+  hasPlanDecisionsTruncationMarker,
+  mergePlanDecisionLines,
+  PLAN_DECISION_MAX_LINES,
+  PLAN_DECISION_MAX_LINE_CHARS,
+  PLAN_DECISION_MAX_TOTAL_CHARS,
+  PLAN_DECISIONS_TRUNCATION_MARKER,
   hasPlanStepsHeading,
   shouldAutoOpenPlanDocument,
   stepMarker,
@@ -401,6 +409,160 @@ test('answered questions replace a decisions section and stay ahead of later hea
   assert.equal(applyPlanDecisions(undefined, []), undefined);
   assert.equal(hasPlanStepsHeading('## Steps\n\n- [ ] Go'), true);
   assert.equal(hasPlanStepsHeading('No steps here'), false);
+});
+
+test('decision storage exposes the documented caps and fixed marker', () => {
+  assert.equal(PLAN_DECISION_MAX_LINES, 40);
+  assert.equal(PLAN_DECISION_MAX_LINE_CHARS, 300);
+  assert.equal(PLAN_DECISION_MAX_TOTAL_CHARS, 8000);
+  assert.equal(PLAN_DECISIONS_TRUNCATION_MARKER, '_Earlier decisions were omitted at the storage limit._');
+});
+
+test('decisions are read only from their own section and never from prose', () => {
+  const body = [
+    '# Plan',
+    '',
+    'Intro prose with a bullet.',
+    '',
+    '- this is prose, not a decision',
+    '',
+    '## Decisions',
+    '',
+    '- 1. Which label?: Develop',
+    '-   2.   Where?:   Settings ',
+    '',
+    '## Risks',
+    '',
+    '- this later bullet is not a decision'
+  ].join('\n');
+  assert.deepEqual(extractPlanDecisionLines(body), ['1. Which label?: Develop', '2. Where?: Settings']);
+  assert.equal(hasPlanDecisionsSection(body), true);
+  assert.equal(hasPlanDecisionsTruncationMarker(body), false);
+});
+
+test('a missing, empty, malformed or non-string body yields no decisions without throwing', () => {
+  assert.deepEqual(extractPlanDecisionLines(undefined), []);
+  assert.deepEqual(extractPlanDecisionLines(''), []);
+  assert.deepEqual(extractPlanDecisionLines('No decisions section here.'), []);
+  assert.deepEqual(extractPlanDecisionLines('## Decisions\n\nnot a bullet\n\n-   \n\n**bold**'), []);
+  assert.deepEqual(extractPlanDecisionLines(42 as unknown as string), []);
+  assert.equal(hasPlanDecisionsSection(undefined), false);
+  assert.equal(hasPlanDecisionsSection('No decisions section here.'), false);
+  assert.equal(hasPlanDecisionsTruncationMarker(42 as unknown as string), false);
+});
+
+test('two stored rounds plus a reload and one new round keep all three in order', () => {
+  const firstBody = applyPlanDecisions(undefined, ['1. Which label?: Develop']);
+  const firstReload = extractPlanDecisionLines(firstBody);
+  const second = mergePlanDecisionLines(firstReload, ['2. Where?: Settings']);
+  const secondBody = applyPlanDecisions(firstBody, second.lines, { truncated: second.truncated });
+  assert.deepEqual(extractPlanDecisionLines(secondBody), [
+    '1. Which label?: Develop',
+    '2. Where?: Settings'
+  ]);
+  const third = mergePlanDecisionLines(extractPlanDecisionLines(secondBody), ['3. When?: Now']);
+  const thirdBody = applyPlanDecisions(secondBody, third.lines, { truncated: third.truncated });
+  assert.deepEqual(extractPlanDecisionLines(thirdBody), [
+    '1. Which label?: Develop',
+    '2. Where?: Settings',
+    '3. When?: Now'
+  ]);
+});
+
+test('merge is append-only, exact-line deduped first-seen-first, with stable order', () => {
+  const merged = mergePlanDecisionLines(['one', 'two'], ['two', 'three', 'one  ', 'two', 'four']);
+  assert.deepEqual(merged.lines, ['one', 'two', 'three', 'four']);
+  assert.equal(merged.truncated, false);
+  // Differently worded equivalents are not superseded: only exact lines dedupe.
+  assert.deepEqual(mergePlanDecisionLines(['use tabs'], ['use spaces']).lines, ['use tabs', 'use spaces']);
+  // Whitespace is trimmed and collapsed before the exact comparison.
+  assert.deepEqual(mergePlanDecisionLines(['one two'], ['  one   two  ']).lines, ['one two']);
+});
+
+test('an overlong decision line is bounded to the cap with a trailing ellipsis', () => {
+  const merged = mergePlanDecisionLines([], ['x'.repeat(350)]);
+  assert.equal(merged.lines.length, 1);
+  assert.equal(Array.from(merged.lines[0] ?? '').length, PLAN_DECISION_MAX_LINE_CHARS);
+  assert.ok((merged.lines[0] ?? '').endsWith('…'));
+  assert.equal(merged.truncated, false);
+});
+
+test('the count cap drops the oldest decision lines and reports truncation', () => {
+  const incoming = Array.from({ length: 45 }, (_, index) => `${index + 1}. Q: A`);
+  const merged = mergePlanDecisionLines([], incoming);
+  assert.equal(merged.lines.length, PLAN_DECISION_MAX_LINES);
+  assert.equal(merged.lines[0], '6. Q: A');
+  assert.equal(merged.lines[PLAN_DECISION_MAX_LINES - 1], '45. Q: A');
+  assert.equal(merged.truncated, true);
+});
+
+test('the total character cap drops the oldest decision lines and reports truncation', () => {
+  const lines = Array.from({ length: 30 }, (_, index) => `${String(index).padStart(2, '0')}: ${'x'.repeat(295)}`);
+  const merged = mergePlanDecisionLines([], lines);
+  assert.equal(merged.lines.length, 26);
+  assert.ok(merged.lines[0]?.startsWith('04:'));
+  assert.ok(merged.lines.reduce((sum, line) => sum + line.length, 0) <= PLAN_DECISION_MAX_TOTAL_CHARS);
+  assert.equal(merged.truncated, true);
+});
+
+test('the truncation marker is written after the heading and ignored by extraction', () => {
+  const body = applyPlanDecisions('Prose.', ['1. A'], { truncated: true });
+  assert.equal(
+    body,
+    `Prose.\n\n## Decisions\n\n${PLAN_DECISIONS_TRUNCATION_MARKER}\n\n- 1. A`
+  );
+  assert.equal(hasPlanDecisionsTruncationMarker(body), true);
+  assert.deepEqual(extractPlanDecisionLines(body), ['1. A']);
+  // A replacement without the flag drops a marker left by an earlier round.
+  assert.equal(hasPlanDecisionsTruncationMarker(applyPlanDecisions(body, ['2. B'])), false);
+});
+
+test('a prior marker survives reload and later rounds until an explicit revision clears it', () => {
+  const truncatedBody = applyPlanDecisions('Prose.', ['1. A'], { truncated: true });
+  const next = mergePlanDecisionLines(extractPlanDecisionLines(truncatedBody), ['2. B']);
+  assert.equal(next.truncated, false);
+  const priorMarker = hasPlanDecisionsTruncationMarker(truncatedBody);
+  const persisted = applyPlanDecisions(truncatedBody, next.lines, {
+    truncated: priorMarker || next.truncated
+  });
+  assert.equal(hasPlanDecisionsTruncationMarker(persisted), true);
+  assert.deepEqual(extractPlanDecisionLines(persisted), ['1. A', '2. B']);
+  const revised = parsePlanBody(
+    '# Plan\n\nProse.\n\n## Decisions\n\n- 2. B\n\n## Steps\n\n- [ ] Go'
+  );
+  assert.equal(hasPlanDecisionsTruncationMarker(revised), false);
+  assert.deepEqual(extractPlanDecisionLines(revised), ['2. B']);
+});
+
+test('an empty revised decisions section clears all and is persisted directly, not via the empty no-op', () => {
+  const cleared = parsePlanBody('# Plan\n\nProse.\n\n## Decisions\n\n## Steps\n\n- [ ] Go');
+  assert.equal(hasPlanDecisionsSection(cleared), true);
+  assert.deepEqual(extractPlanDecisionLines(cleared), []);
+  assert.match(cleared ?? '', /## Decisions/);
+  // applyPlanDecisions() no-ops on empty lines, so the revised body itself is written.
+  assert.equal(applyPlanDecisions(cleared, []), cleared);
+});
+
+test('an absent decisions section is an omission that keeps accumulated lines', () => {
+  const omitted = parsePlanBody('# Plan\n\nProse.\n\n## Steps\n\n- [ ] Go');
+  assert.equal(hasPlanDecisionsSection(omitted), false);
+  const reapplied = applyPlanDecisions(omitted, ['1. A', '2. B']);
+  assert.deepEqual(extractPlanDecisionLines(reapplied), ['1. A', '2. B']);
+  // Removing only the heading is handled the same way: it is not a clear.
+  assert.equal(hasPlanDecisionsSection(parsePlanBody('# Plan\n\nProse.')), false);
+});
+
+test('a populated revised decisions section is authoritative and does not resurrect removed lines', () => {
+  const edited = parsePlanBody(
+    '# Plan\n\nProse.\n\n## Decisions\n\n- 2. B\n\n## Steps\n\n- [ ] Go'
+  );
+  assert.equal(hasPlanDecisionsSection(edited), true);
+  assert.deepEqual(extractPlanDecisionLines(edited), ['2. B']);
+  const afterEdit = mergePlanDecisionLines(extractPlanDecisionLines(edited), ['3. C']);
+  assert.deepEqual(afterEdit.lines, ['2. B', '3. C']);
+  const reloaded = extractPlanDecisionLines(applyPlanDecisions(edited, afterEdit.lines));
+  assert.equal(reloaded.includes('1. A'), false);
+  assert.deepEqual(reloaded, ['2. B', '3. C']);
 });
 
 test('a revision is recognised only when the user asks to change the plan', () => {

@@ -197,6 +197,18 @@ test('a conversation notice survives an empty replay', () => {
   assert.equal(state.transcript[0]?.noticeAction, 'retryQuestion');
 });
 
+test('the attention follow-up actions survive the notice reducer', () => {
+  for (const action of ['preparePlanFollowUp', 'prepareCheckFollowUp'] as const) {
+    const state = reduce(initialState, {
+      type: 'notice',
+      level: 'info',
+      message: 'Plan steps remain.',
+      action
+    });
+    assert.equal(state.transcript.at(-1)?.noticeAction, action);
+  }
+});
+
 test('a settled approval collapses to a decided card and clears the pending request', () => {
   const open = request({ id: 'req_live' });
   const requested: AppState = reduce(initialState, {
@@ -1505,6 +1517,28 @@ test('the same provider failure is one status line, and Retry can clear it', () 
   const cleared = reduce(distinct, { type: 'dismissStatusNotice', text: message });
   assert.equal(cleared.transcript.some((item) => item.text === message), false);
   assert.equal(cleared.transcript.some((item) => item.text === 'The Codex turn failed.'), true);
+});
+
+test('an attention-only dismissal can leave a running turn busy', () => {
+  const active = reduce(initialState, { type: 'conversation', backendId: 'codex', threadId: 't1' });
+  const busy = reduce(active, { type: 'busy', value: true, backendId: 'codex', threadId: 't1' });
+  const attention = reduce(busy, {
+    type: 'notice',
+    level: 'info',
+    message: 'The plan still has work left.',
+    action: 'preparePlanFollowUp'
+  });
+  const dismissed = reduce(attention, {
+    type: 'dismissStatusNotice',
+    text: 'The plan still has work left.',
+    preserveBusy: true
+  });
+  assert.equal(dismissed.busy, true);
+  assert.equal(dismissed.startingTurn, busy.startingTurn);
+  assert.equal(
+    dismissed.transcript.some((item) => item.text === 'The plan still has work left.'),
+    false
+  );
 });
 
 test('a warning with a recovery action is a transcript line, not a pinned banner', () => {
