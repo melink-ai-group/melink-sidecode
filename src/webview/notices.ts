@@ -23,6 +23,9 @@ export function noticeActionLabel(action: NoticeAction): string {
       return 'Retry';
     case 'retryQuestion':
       return 'Retry question';
+    case 'preparePlanFollowUp':
+    case 'prepareCheckFollowUp':
+      return 'Prepare follow-up';
   }
 }
 

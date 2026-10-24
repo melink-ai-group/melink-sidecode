@@ -14,6 +14,7 @@ test('the decision modules stay host-free', async () => {
     'src/orchestration/plan.ts',
     'src/orchestration/turnEnd.ts',
     'src/orchestration/doubleCheck.ts',
+    'src/orchestration/completion.ts',
     'src/webview/settings/orchestrationCopy.ts'
   ]) {
     const source = await read(file);
@@ -29,7 +30,7 @@ test('the turn pipeline decides once and consumes the stored plan at every seam'
   assert.match(source, /session\.turnPlan = planTurn\(\{/);
   assert.match(source, /this\.turnPlans\.set\(turnId, plan\)/);
   assert.match(source, /resolvePostTurnRoles\(\{/);
-  assert.match(source, /this\.startChangeChecks\(set, roles\.testing\)/);
+  assert.match(source, /this\.startChangeChecks\(set, roles\.testing, \{/);
   assert.match(source, /const shouldReview = roles\.reviewing/);
   assert.match(source, /if \(roles\.doubleCheck && terminus === 'completed'\)/);
   assert.match(source, /logDiagnostic\(\s*orchestrationDiagnostic\(/);
@@ -38,7 +39,8 @@ test('the turn pipeline decides once and consumes the stored plan at every seam'
   assert.match(source, /await runTurnEnd\(/);
   assert.match(source, /settle: \(\) => this\.flushBuiltPlanProgress\(/);
   assert.match(source, /isStillCurrent: \(\) =>/);
-  assert.match(source, /continue: \(\) => this\.continuePlanIfReady\(/);
+  assert.match(source, /continue: \(\) => \{/);
+  assert.match(source, /continuation = this\.continuePlanIfReady\(session, backendId, threadId\)/);
 });
 
 test('the double-check pass reads diagnostics and never sends a model turn', async () => {
@@ -99,4 +101,35 @@ test('stored review evidence is not gated by the current orchestration choice', 
   assert.match(body, /this\.reviewStore\.get\(backendId, threadId, turnId\)/);
   assert.match(body, /this\.stylingReviewStore\.get\(backendId, threadId, turnId\)/);
   assert.doesNotMatch(body, /readOrchestrationSettings|diffReviewEnabled|stylingCheckEnabled/);
+});
+
+test('the completion decision reads status only and never sends a turn', async () => {
+  const completion = await read('src/orchestration/completion.ts');
+  assert.doesNotMatch(completion, /from ['"]vscode['"]/);
+  assert.doesNotMatch(completion, /from ['"].*protocol/);
+  assert.doesNotMatch(completion, /from ['"](node:)?(fs|child_process|net|http|https)['"]/);
+  assert.doesNotMatch(completion, /localDiffReview|extractMentionedPaths/);
+  assert.doesNotMatch(completion, /from ['"][^'"]*(review|checkStore|checkHost|checks)[^'"]*['"]/);
+  assert.doesNotMatch(completion, /\.results\b|\bresults\s*:|\bstdout\b|\bstderr\b|\boutput\s*:/);
+
+  const source = await read('src/sidebarView.ts');
+  const start = source.indexOf('private async postAttentionNotice');
+  const end = source.indexOf('  private ', start + 1);
+  assert.ok(start > 0);
+  assert.ok(end > start);
+  const body = source.slice(start, end);
+  assert.match(body, /const key = attentionKey\(expected\.backendId, expected\.threadId, expected\.turnId\)/);
+  assert.match(body, /this\.attentionNotified\.claim\(key\)/);
+  assert.match(body, /this\.post\(\{ type: 'notice'/);
+  assert.doesNotMatch(body, /sendTurn|backend\.|planAutopilotQueue|flushQueuedTurns|userTurnQueues/);
+  assert.doesNotMatch(body, /runTurnDiffReview|reviewFinishedTurn|stylingReviewFinishedTurn/);
+  assert.doesNotMatch(body, /turnBusy|turnOpen/);
+
+  const checksStart = source.indexOf('private startChangeChecks');
+  const checksEnd = source.indexOf('  private ', checksStart + 1);
+  assert.ok(checksStart > 0);
+  assert.ok(checksEnd > checksStart);
+  const checksBody = source.slice(checksStart, checksEnd);
+  assert.match(checksBody, /view\.status !== 'failed'/);
+  assert.doesNotMatch(checksBody, /view\.(results|output|summary)/);
 });

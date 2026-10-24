@@ -46,7 +46,14 @@ import type {
 /** Lifecycle of one transcript item, driving its status affordance. */
 export type ItemStatus = 'streaming' | 'completed' | 'failed' | 'warning' | 'canceled' | 'pending';
 
-export type NoticeAction = 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion';
+export type NoticeAction =
+  | 'setToken'
+  | 'clearToken'
+  | 'refresh'
+  | 'retry'
+  | 'retryQuestion'
+  | 'preparePlanFollowUp'
+  | 'prepareCheckFollowUp';
 
 /** The files one chat turn changed, plus the review snapshot once the host sends it. */
 export interface TurnChange {
@@ -379,8 +386,12 @@ export type Action =
   | { type: 'restoring'; value: boolean }
   | { type: 'busy'; value: boolean; backendId?: string; threadId?: string }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string; action?: NoticeAction }
-  /** Remove the status line a Retry or refresh click is answering. */
-  | { type: 'dismissStatusNotice'; text: string }
+  /**
+   * Remove the status line a Retry or refresh click is answering. A recovery
+   * action ends the failed turn, so it also clears the busy flag; action-only
+   * notices pass `preserveBusy` to leave a running turn untouched.
+   */
+  | { type: 'dismissStatusNotice'; text: string; preserveBusy?: boolean }
   | { type: 'dismissNotice' }
   /** Add picked/pasted files to the pending message; duplicates are ignored. */
   | { type: 'addAttachments'; attachments: Attachment[] }
@@ -1000,8 +1011,8 @@ export function reduce(state: AppState, action: Action): AppState {
       return {
         ...state,
         notice: undefined,
-        busy: false,
-        startingTurn: false,
+        busy: action.preserveBusy ? state.busy : false,
+        startingTurn: action.preserveBusy ? state.startingTurn : false,
         transcript
       };
     }

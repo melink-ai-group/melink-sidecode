@@ -75,9 +75,13 @@ import {
   completeStepsBeforeFrontier,
   continuePlanInstruction,
   decidePlanAutopilot,
+  extractPlanDecisionLines,
+  hasPlanDecisionsSection,
+  hasPlanDecisionsTruncationMarker,
   hasPlanStepsHeading,
   isLoosePlanFile,
   mergeCheckboxStatuses,
+  mergePlanDecisionLines,
   mergeReportedStepStatuses,
   canonicalPlanPath,
   planDocumentFromReply,
@@ -88,7 +92,8 @@ import {
   shouldAutoOpenPlanDocument,
   shouldDismissCompletedPlan,
   updateStepStatus,
-  userAsksToRevisePlan
+  userAsksToRevisePlan,
+  type PlanAutopilotDecision
 } from './backends/plan';
 import { PlanPreview, planPreviewState } from './planPreview';
 import { shouldAutoShowPlanPreview } from './planStepMarkdown';
@@ -104,6 +109,13 @@ import {
   type TurnPlan
 } from './orchestration/plan.ts';
 import { runTurnEnd } from './orchestration/turnEnd.ts';
+import {
+  AttentionLedger,
+  attentionKey,
+  decideAttention,
+  type AttentionNotice,
+  type AttentionTrigger
+} from './orchestration/completion.ts';
 import { logDiagnostic } from './backends/diagnostics';
 import { readOrchestrationSettings } from './orchestration/vscodeSettings.ts';
 import {
@@ -229,6 +241,22 @@ import { workspaceTranscriptTail } from './backends/transcriptTail.ts';
  */
 /** A save that misses this bound is reported as failed; the host never hangs the footer. */
 const SETTINGS_SAVE_DEADLINE_MS = 15000;
+
+interface PlanContinuation {
+  decision: PlanAutopilotDecision;
+  built: boolean;
+  remaining: number;
+}
+
+interface AttentionExpectation {
+  backendId: string;
+  threadId: string;
+  turnId: string;
+  session: ChatSession;
+  planEpoch: number;
+  trigger: AttentionTrigger;
+}
+
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'melinkAgent.chat';
 
@@ -301,6 +329,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private queueWrite: Promise<void> = Promise.resolve();
   /** The policy decided for each started turn, bounded to the newest 32. */
   private readonly turnPlans = new Map<string, TurnPlan>();
+  /** The newest turn id per active backend/thread, bounded, for late-notice identity. */
+  private readonly latestTurnIds = new Map<string, string>();
+  /** One attention notice per backend/thread/turn, first trigger wins. */
+  private readonly attentionNotified = new AttentionLedger();
   /**
    * The newest resolved post-turn decision, exposed in the settings read model.
    * It is a copy (see `orchestrationTurnSnapshot`), so no map is kept only to be
@@ -776,6 +808,24 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     return this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId;
   }
 
+  private rememberLatestTurn(backendId: string, threadId: string, turnId: string): void {
+    const key = `${backendId}:${threadId}`;
+    this.latestTurnIds.delete(key);
+    this.latestTurnIds.set(key, turnId);
+    while (this.latestTurnIds.size > 64) {
+      const oldest = this.latestTurnIds.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.latestTurnIds.delete(oldest);
+    }
+  }
+
+  private isGenuinelyNewerTurn(backendId: string, threadId: string, turnId: string): boolean {
+    const latest = this.latestTurnIds.get(`${backendId}:${threadId}`);
+    return latest !== undefined && latest !== turnId;
+  }
+
   /**
    * Open the change boundary for a turn. The candidate set is seeded with the
    * paths a pre-turn snapshot is worth taking of: the files currently open in
@@ -786,6 +836,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * turn end, so it never outlives one turn.
    */
   private beginChangeTurn(backendId: string, threadId: string, turnId: string): void {
+    this.rememberLatestTurn(backendId, threadId, turnId);
     const session = this.session;
     const plan = session?.turnPlan;
     if (plan && session) {
@@ -899,7 +950,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // Checks start only for a non-empty, closed change set. A background turn
     // still stores its result; the runner decides whether the visible surface
     // may be repainted.
-    this.startChangeChecks(set, roles.testing);
+    this.startChangeChecks(set, roles.testing, {
+      terminus,
+      quick: plan.quick
+    });
     // The advisory diagnostics sweep runs for every completed turn, active or
     // background. Its notice is routed to the owning chat (or held for it), so
     // one chat's file names never appear in another.
@@ -935,6 +989,41 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // A turn that just touched files makes its opening message a checkpoint, so
     // the per-message entry point offers it without waiting for a reload.
     await this.postCheckpoints(set.backendId, set.threadId);
+  }
+
+  private async postAttentionNotice(
+    expected: AttentionExpectation,
+    notice: AttentionNotice
+  ): Promise<void> {
+    await Promise.resolve();
+    if (!this.attentionStillCurrent(expected)) {
+      return;
+    }
+    const key = attentionKey(expected.backendId, expected.threadId, expected.turnId);
+    if (!this.attentionNotified.claim(key)) {
+      return;
+    }
+    this.post({ type: 'notice', level: notice.level, message: notice.message, action: notice.action });
+  }
+
+  private attentionStillCurrent(expected: AttentionExpectation): boolean {
+    const session = expected.session;
+    if (this.session !== session || session.disposed) {
+      return false;
+    }
+    const active = this.activeThread;
+    if (
+      active?.backendId !== expected.backendId ||
+      active.threadId !== expected.threadId ||
+      session.pendingQuestion !== undefined ||
+      session.pendingApproval !== undefined
+    ) {
+      return false;
+    }
+    if (this.isGenuinelyNewerTurn(expected.backendId, expected.threadId, expected.turnId)) {
+      return false;
+    }
+    return expected.trigger !== 'plan' || session.planEpoch === expected.planEpoch;
   }
 
   /**
@@ -1108,7 +1197,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * callback repaints through the existing review path only while this turn is
    * still the visible one.
    */
-  private startChangeChecks(set: TurnChangeSet, enabled: boolean): void {
+  private startChangeChecks(
+    set: TurnChangeSet,
+    enabled: boolean,
+    context: { terminus: 'completed' | 'interrupted'; quick: boolean }
+  ): void {
     if (set.entries.length === 0 || !enabled) {
       return;
     }
@@ -1123,8 +1216,42 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // disabled policy never reaches here, so `shouldRun` stays unused on
         // this path instead of duplicating the same flag.
         enabledOverride: enabled,
-        onUpdate: () => {
+        onUpdate: (view) => {
           void this.postChangeReview(set.backendId, set.threadId, set.turnId);
+          if (view.status !== 'failed' || context.terminus !== 'completed' || context.quick) {
+            return;
+          }
+          const session = this.session;
+          if (!session) {
+            return;
+          }
+          const notice = decideAttention({
+            trigger: 'check',
+            mode: session.mode,
+            terminus: context.terminus,
+            quick: context.quick,
+            sameSession: this.session === session && !session.disposed,
+            sameThread:
+              this.activeThread?.backendId === set.backendId &&
+              this.activeThread.threadId === set.threadId,
+            currentTurn: !this.isGenuinelyNewerTurn(set.backendId, set.threadId, set.turnId),
+            pendingQuestion: session.pendingQuestion !== undefined,
+            pendingApproval: session.pendingApproval !== undefined,
+            check: { status: 'failed' }
+          });
+          if (notice) {
+            void this.postAttentionNotice(
+              {
+                backendId: set.backendId,
+                threadId: set.threadId,
+                turnId: set.turnId,
+                session,
+                planEpoch: session.planEpoch,
+                trigger: 'check'
+              },
+              notice
+            );
+          }
         }
       })
       .catch(() => undefined);
@@ -1759,6 +1886,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     view.onDidDispose(() => {
       messages.dispose();
       this.dictation.dispose();
+      this.attentionNotified.clear();
       this.declinePendingModeSwitches();
       this.clearWebviewMountTimers();
       // A disposed webview is not a shutdown: the extension host may still be
@@ -1912,6 +2040,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   private createSession(init: ChatTabState): ChatSession {
+    // The persisted plan body is the source of truth, so a resumed chat derives
+    // its answers from that body rather than a separately stored tab array.
+    const restoredPlanBody =
+      init.backendId && init.threadId
+        ? this.store.getPlanState(init.backendId, init.threadId)?.body
+        : undefined;
     const session: ChatSession = {
       id: init.tabId && !this.sessions.some((entry) => entry.id === init.tabId) ? init.tabId : this.nextTabId(),
       title: init.title ?? DEFAULT_TAB_TITLE,
@@ -1924,7 +2058,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       modelSettings: copyModelSettings(init.modelSettings),
       nativePlanThisTurn: false,
       revisePlanThisTurn: false,
-      planDecisions: [],
+      planDecisions: extractPlanDecisionLines(restoredPlanBody),
       planEpoch: 0,
       planRunAutomatic: false,
       planHold: false,
@@ -5432,11 +5566,27 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const title = draft.title || existing?.title || this.store.getActiveThread()?.title || 'Plan';
+    const replyBody = draft.body;
+    let body: string | undefined;
+    if (hasPlanDecisionsSection(replyBody)) {
+      // A populated section is an explicit edited revision and authoritative:
+      // take exactly what it lists. An empty section is an explicit clear all;
+      // both persist the revised body directly, because applyPlanDecisions()
+      // is a no-op on empty lines. Removing only the heading is not a clear.
+      this.planDecisions = extractPlanDecisionLines(replyBody);
+      body = replyBody;
+    } else {
+      // No section is an omission, not a clear: reapply the accumulated buffer
+      // and keep a prior truncation marker.
+      body = applyPlanDecisions(replyBody ?? existing?.body, this.planDecisions, {
+        truncated: hasPlanDecisionsTruncationMarker(existing?.body)
+      });
+    }
     const artifact = await this.plans.write({
       threadId,
       title,
       summary: draft.summary ?? existing?.summary,
-      body: applyPlanDecisions(draft.body ?? existing?.body, this.planDecisions),
+      body,
       steps,
       path: existing?.path
     });
@@ -5473,6 +5623,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
     const plan = this.turnPlans.get(turnId);
     const epoch = session.planEpoch;
+    const planning = plan?.planning ?? readOrchestrationSettings().planning !== 'off';
+    let continuation: PlanContinuation | undefined;
     await runTurnEnd(
       {
         mode: session.mode,
@@ -5486,9 +5638,40 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         settle: () => this.flushBuiltPlanProgress(backendId, threadId),
         isStillCurrent: () =>
           this.session === session && !session.disposed && session.planEpoch === epoch,
-        continue: () => this.continuePlanIfReady(session, backendId, threadId)
+        continue: () => {
+          continuation = this.continuePlanIfReady(session, backendId, threadId);
+        }
       }
     );
+    if (!continuation) {
+      return;
+    }
+    const notice = decideAttention({
+      trigger: 'plan',
+      mode: session.mode,
+      terminus: 'completed',
+      quick: plan?.quick ?? false,
+      sameSession: this.session === session && !session.disposed,
+      sameThread:
+        this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId,
+      currentTurn: !this.isGenuinelyNewerTurn(backendId, threadId, turnId),
+      pendingQuestion: session.pendingQuestion !== undefined,
+      pendingApproval: session.pendingApproval !== undefined,
+      plan: {
+        built: continuation.built,
+        planning,
+        remaining: continuation.remaining,
+        epochCurrent: this.session === session && !session.disposed && session.planEpoch === epoch,
+        hold: session.planHold,
+        autopilot: continuation.decision
+      }
+    });
+    if (notice) {
+      await this.postAttentionNotice(
+        { backendId, threadId, turnId, session, planEpoch: epoch, trigger: 'plan' },
+        notice
+      );
+    }
   }
 
   /** Queue the next automatic turn for a built plan this chat still owns. */
@@ -5496,13 +5679,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     session: ChatSession,
     backendId: string,
     threadId: string
-  ): void {
+  ): PlanContinuation | undefined {
     if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
-      return;
+      return undefined;
     }
     const existing = this.store.getPlanState(backendId, threadId);
     if (!existing) {
-      return;
+      return undefined;
     }
     const decision = decidePlanAutopilot({
       built: existing.built === true,
@@ -5513,14 +5696,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       blocked: session.planHold || session.pendingQuestion !== undefined || session.pendingApproval !== undefined
     });
     session.planRunSignature = decision.signature;
+    const remaining = existing.steps.filter(
+      (step) => step.status === 'pending' || step.status === 'inProgress'
+    ).length;
+    const continuation = { decision: decision.decision, built: existing.built === true, remaining };
     if (decision.decision !== 'continue') {
-      return;
+      return continuation;
     }
     this.planAutopilotQueue.set(session.id, {
       session,
       text: continuePlanInstruction(existing.steps)
     });
     this.flushQueuedTurns();
+    return continuation;
   }
 
   /**
@@ -6272,8 +6460,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     const text = formatQuestionAnswers(pending.request.questions, answers);
     const revisingPlan = this.mode === 'plan';
     if (revisingPlan) {
-      this.planDecisions = [...this.planDecisions, ...planDecisionLines(pending.request.questions, answers)];
-      await this.applyDecisionsToPlan();
+      // Recompute the base from the authoritative persisted body, then append
+      // this round. The in-memory buffer is only a derived view.
+      const currentBody = this.store.getPlanState(
+        pending.request.backendId,
+        pending.request.threadId
+      )?.body;
+      const merge = mergePlanDecisionLines(extractPlanDecisionLines(currentBody), [
+        ...this.planDecisions,
+        ...planDecisionLines(pending.request.questions, answers)
+      ]);
+      this.planDecisions = merge.lines;
+      const truncated = hasPlanDecisionsTruncationMarker(currentBody) || merge.truncated;
+      await this.applyDecisionsToPlan(truncated);
     }
     if (pending.source === 'native') {
       if (revisingPlan) {
@@ -6300,7 +6499,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * A plan that does not exist yet keeps the answers until the next reply
    * creates the file.
    */
-  private async applyDecisionsToPlan(): Promise<void> {
+  private async applyDecisionsToPlan(truncated = false): Promise<void> {
     if (!this.activeThread || this.planDecisions.length === 0) {
       return;
     }
@@ -6309,7 +6508,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!existing || existing.steps.length === 0) {
       return;
     }
-    const body = applyPlanDecisions(existing.body ?? existing.summary, this.planDecisions);
+    const body = applyPlanDecisions(existing.body ?? existing.summary, this.planDecisions, {
+      truncated
+    });
     if (body === existing.body) {
       return;
     }

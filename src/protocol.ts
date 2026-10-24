@@ -443,7 +443,14 @@ export type HostToWebviewMessage =
       notice?: {
         level: 'info' | 'warning' | 'error';
         message: string;
-        action?: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion';
+        action?:
+          | 'setToken'
+          | 'clearToken'
+          | 'refresh'
+          | 'retry'
+          | 'retryQuestion'
+          | 'preparePlanFollowUp'
+          | 'prepareCheckFollowUp';
       };
       /** The thread's plan, so a resumed thread reopens its plan surface. */
       plan?: PlanArtifact;
@@ -594,7 +601,14 @@ export type HostToWebviewMessage =
       level: 'info' | 'warning' | 'error';
       message: string;
       /** Optional one-click recovery affordance, e.g. re-entering a token. */
-      action?: 'setToken' | 'clearToken' | 'refresh' | 'retry' | 'retryQuestion';
+      action?:
+        | 'setToken'
+        | 'clearToken'
+        | 'refresh'
+        | 'retry'
+        | 'retryQuestion'
+        | 'preparePlanFollowUp'
+        | 'prepareCheckFollowUp';
     }
   /**
    * The project-context read model for the composer strip and its inline
