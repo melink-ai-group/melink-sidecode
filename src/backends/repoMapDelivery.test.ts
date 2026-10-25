@@ -19,12 +19,12 @@ test('the ollama turn prompt includes the repo map next to the per-turn delta', 
   // Every Ollama turn uses the OpenCode prompt, which primes the turn text and
   // includes the map. There is no direct /api/chat turn builder any more.
   assert.equal(/buildContextMessages\(/.test(text), false);
-  assert.match(text, /block, context\?\.repoMap, context\?\.attachedFile, request\.text/);
+  assert.match(text, /block, repoMapPrompt\(context\?\.repoMap\), context\?\.attachedFile, request\.text/);
 });
 
 test('the opencode provider prompt includes the repo map next to the delta', async () => {
   const text = await source('backends/opencodeBackend.ts');
-  assert.match(text, /block, context\?\.repoMap, context\?\.attachedFile, request\.text/);
+  assert.match(text, /block, repoMapPrompt\(context\?\.repoMap\), context\?\.attachedFile, request\.text/);
 });
 
 test('the context host reads every repo-map setting and clamps its count', async () => {

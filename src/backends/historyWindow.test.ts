@@ -131,6 +131,31 @@ test('a user message sent after the server snapshot stays at the end', () => {
   );
 });
 
+test('a repeated message sent after a snapshot keeps its own id across reloads', () => {
+  const stored = [item('user_1', 'user', 'continue'), item('user_2', 'user', 'continue')];
+  const replay = withStoredHistory([item('server-user', 'user', 'continue')], stored);
+  assert.deepEqual(replay.map((entry) => entry.id), ['user_1', 'user_2']);
+  assert.deepEqual(withStoredHistory(replay, replay), replay);
+});
+
+test('a coalesced provider prompt restores the recorded message boundaries and metadata', () => {
+  const stored = [
+    { ...item('user_1', 'user', 'first request'), sentAt: 123, workedMs: 456 },
+    { ...item('user_2', 'user', 'a follow-up'), orchestration: true },
+    item('user_3', 'user', 'another follow-up')
+  ];
+  const server = [item('server-user', 'user', 'first request\na follow-up\nanother follow-up'), item('reply', 'assistant', 'done')];
+  const replay = withStoredHistory(server, stored);
+  assert.deepEqual(replay, [...stored, server[1]]);
+  assert.deepEqual(withStoredHistory(server, replay), replay);
+});
+
+test('legacy injected notices do not prevent restored user ids from matching', () => {
+  const stored = [item('user_1', 'user', 'check it')];
+  const server = [item('server-user', 'user', 'Repo map: disabled (melink.context.repoMap is off).\n\ncheck it')];
+  assert.deepEqual(withStoredHistory(server, stored), stored);
+});
+
 test('older pages prepend unseen rows and reveal one page', () => {
   const items = [item('keep', 'assistant', 'visible')];
   const older = [item('user-old', 'user', 'earlier'), item('reason'), item('keep', 'assistant', 'visible')];

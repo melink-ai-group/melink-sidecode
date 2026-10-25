@@ -15,7 +15,7 @@ import { takeAttachmentSection } from '../backends/userPrompt.ts';
 import { hideQuestionFence } from '../questions.ts';
 
 const CLOSED_BLOCK =
-  /<(project-context|project-context-update|attached-file)>[\s\S]*?<\/\1>/g;
+  /<(project-context|project-context-update|attached-file|repo-map)>[\s\S]*?<\/\1>/g;
 
 const MODE_LINE = /^Work in (?:Agent|Plan|Ask) mode\.[^\n]*$/gm;
 
@@ -25,7 +25,10 @@ const REVOKED_MODE = /^The developer instruction that required [\s\S]*?(?=\n\n|$
 /** The sentence in front of a replacement project snapshot. */
 const SNAPSHOT_INTRO = /^The project context below replaces the project context from the start of this thread\.\n*/;
 
-const OPEN_BLOCK = /<(project-context|project-context-update|attached-file)>/;
+const OPEN_BLOCK = /<(project-context|project-context-update|attached-file|repo-map)>/;
+
+/** Exact legacy status lines, before repository maps were wrapped in tags. */
+const LEGACY_REPO_MAP = /^Repo map: (?:disabled \(melink\.context\.repoMap is off\)|unavailable \(no workspace snapshot or file reads\)|failed \(one or more files could not be read\)|no matching files for this request|no source files found|limited \(caps files=\d+, bytes=\d+, ms=\d+, symbols=\d+\))\.$/;
 
 const PROVIDER_LINE = new Set<string>(PROVIDER_ONLY_LINES);
 
@@ -46,7 +49,7 @@ export function visibleTranscriptText(text: string): string {
 function stripProviderLines(text: string): string {
   return text
     .split('\n')
-    .filter((line) => !PROVIDER_LINE.has(line.trim()))
+    .filter((line) => !PROVIDER_LINE.has(line.trim()) && !LEGACY_REPO_MAP.test(line.trim()))
     .join('\n');
 }
 

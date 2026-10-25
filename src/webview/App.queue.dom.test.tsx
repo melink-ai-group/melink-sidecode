@@ -74,6 +74,30 @@ function setBusy(backendId = 'codex'): void {
 }
 
 describe('busy composer queueing', () => {
+  it('repaints distinct user messages after remount without internal prompt text', () => {
+    const replay = [
+      { id: 'user_1', kind: 'message', role: 'user', text: 'Repo map: disabled (melink.context.repoMap is off).\n\nfirst request', status: 'completed' },
+      { id: 'user_2', kind: 'message', role: 'user', text: '<repo-map>\nsrc/auth.ts: login\n</repo-map>\n\ncontinue', status: 'completed' },
+      { id: 'user_3', kind: 'message', role: 'user', text: 'continue', status: 'completed' }
+    ];
+    for (let reload = 0; reload < 2; reload += 1) {
+      const view = render(<App />);
+      act(() => {
+        sendHostMessage({ type: 'snapshot', availability: AVAILABILITY });
+        sendHostMessage({ type: 'restoring', value: false });
+        sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: 'thread-queue', replay });
+      });
+      const rows = [...document.querySelectorAll('.turn--user')];
+      expect(rows.map((row) => row.getAttribute('data-user-message'))).toEqual(['user_1', 'user_2', 'user_3']);
+      expect(rows[0]?.textContent).toContain('first request');
+      expect(rows[1]?.textContent).toContain('continue');
+      expect(rows[2]?.textContent).toContain('continue');
+      expect(document.body.textContent).not.toContain('Repo map:');
+      expect(document.body.textContent).not.toContain('src/auth.ts: login');
+      view.unmount();
+    }
+  });
+
   it.each(AVAILABILITY)('switches between Stop and the draft action while $id is busy', ({ id }) => {
     const composer = renderComposer(id);
     setBusy(id);

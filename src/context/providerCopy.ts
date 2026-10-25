@@ -31,3 +31,8 @@ export const PROVIDER_ONLY_LINES = [
   ATTACHED_FILE_REFERENT,
   ATTACHED_FILE_SNAPSHOT_LINE
 ] as const;
+
+/** Keep variable per-turn repository details inside a provider-only block. */
+export function repoMapPrompt(text: string | undefined): string | undefined {
+  return text?.trim() ? `<repo-map>\n${text}\n</repo-map>` : undefined;
+}

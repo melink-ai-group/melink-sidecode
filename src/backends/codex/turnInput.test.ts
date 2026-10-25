@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { buildCodexTurnInput, planEscapeInstructions } from './turnInput.ts';
 import { COMPLETION_CONTRACT } from '../modes.ts';
 import type { Attachment } from '../types.ts';
+import { visibleTranscriptText } from '../../webview/visibleTranscript.ts';
 
 const image: Attachment = {
   id: 'a1',
@@ -74,6 +75,8 @@ test('a later turn carries the repo map next to the delta', () => {
   }
   assert.match(text.text, /project-context-update/);
   assert.match(text.text, /Repo map: src\/auth\.ts: login, logout/);
+  assert.match(text.text, /<repo-map>\nRepo map: src\/auth\.ts: login, logout\n<\/repo-map>/);
+  assert.equal(visibleTranscriptText(text.text), 'fix login');
   assert.ok(
     text.text.indexOf('project-context-update') < text.text.indexOf('Repo map:'),
     'the repo map follows the delta'
