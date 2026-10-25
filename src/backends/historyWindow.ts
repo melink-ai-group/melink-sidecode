@@ -1,5 +1,6 @@
 import type { Attachment, TranscriptItem } from './types.ts';
 import { takeAttachmentSection } from './userPrompt.ts';
+import { visibleTranscriptText } from '../webview/visibleTranscript.ts';
 
 /**
  * How many older items the provider asks for per page when the reader scrolls
@@ -86,9 +87,9 @@ export function transcriptWithNewer(
 export function withStoredUserIds(serverItems: readonly TranscriptItem[], stored: readonly TranscriptItem[]): TranscriptItem[] {
   const storedUsers = stored.filter((item) => item.kind === 'message' && item.role === 'user');
   let cursor = 0;
-  const overlaid = serverItems.map((item) => {
+  const overlaid = serverItems.flatMap((item): TranscriptItem[] => {
     if (item.kind !== 'message' || item.role !== 'user') {
-      return item;
+      return [item];
     }
     const text = promptKey(item.text);
     let found = -1;
@@ -99,21 +100,31 @@ export function withStoredUserIds(serverItems: readonly TranscriptItem[], stored
       }
     }
     if (found === -1) {
-      return item;
+      // A provider can coalesce the opening prompt and mid-turn steers into
+      // one historical row. Recover boundaries only from an exact sequence
+      // of locally recorded messages, never by splitting arbitrary prose.
+      const sequence = coalescedUsers(storedUsers, text, cursor);
+      if (sequence) {
+        cursor = sequence.end;
+        return storedUsers.slice(sequence.start, cursor);
+      }
+      return [item];
     }
     const match = storedUsers[found];
     cursor = found + 1;
-    return {
+    const attachments = preferStoredAttachments(match.attachments, item.attachments);
+    return [{
       ...item,
       id: match.id,
       text: match.text ?? item.text,
-      attachments: preferStoredAttachments(match.attachments, item.attachments),
+      ...(attachments ? { attachments } : {}),
+      ...(match.orchestration ? { orchestration: true } : {}),
       ...(match.sentAt != null ? { sentAt: match.sentAt } : {}),
       ...(match.workedMs != null ? { workedMs: match.workedMs } : {})
-    };
+    }];
   });
-  const seen = new Set(overlaid.filter((item) => item.kind === 'message' && item.role === 'user').map((item) => promptKey(item.text)));
-  const rest = storedUsers.slice(cursor).filter((item) => !seen.has(promptKey(item.text)));
+  const seen = new Set(overlaid.map((item) => item.id));
+  const rest = storedUsers.slice(cursor).filter((item) => !seen.has(item.id));
   return rest.length > 0 ? [...overlaid, ...rest] : overlaid;
 }
 
@@ -147,6 +158,11 @@ function storedPrefixLength(serverItems: readonly TranscriptItem[], stored: read
     if (start >= 0) {
       return start;
     }
+    const users = stored.filter((item) => item.kind === 'message' && item.role === 'user');
+    const sequence = coalescedUsers(users, key, 0);
+    if (sequence) {
+      return stored.indexOf(users[sequence.start]);
+    }
   }
   const serverIds = new Set(serverItems.map((item) => item.id));
   for (let index = 0; index < stored.length; index += 1) {
@@ -157,9 +173,32 @@ function storedPrefixLength(serverItems: readonly TranscriptItem[], stored: read
   return 0;
 }
 
+/** Match only whole recorded messages joined as provider text parts. */
+function coalescedUsers(users: readonly TranscriptItem[], text: string, cursor: number): { start: number; end: number } | undefined {
+  for (let start = cursor; start < users.length; start += 1) {
+    const first = promptKey(users[start].text);
+    if (!first || !text.startsWith(first)) {
+      continue;
+    }
+    for (const separator of ['\n', '\n\n']) {
+      let combined = first;
+      for (let end = start + 1; end < users.length; end += 1) {
+        combined += separator + promptKey(users[end].text);
+        if (combined === text) {
+          return { start, end: end + 1 };
+        }
+        if (!text.startsWith(combined)) {
+          break;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 /** The words the user typed, without the provider's attachment list. */
 function promptKey(text: string | undefined): string {
-  return takeAttachmentSection(text ?? '').text.trim();
+  return visibleTranscriptText(takeAttachmentSection(text ?? '').text);
 }
 
 /**

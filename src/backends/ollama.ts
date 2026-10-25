@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { repoMapPrompt } from '../context/providerCopy.ts';
 import { createId, Emitter } from './base';
 import { OLLAMA_TOKEN_SECRET_KEY } from './secrets';
 import type { ThreadStore } from './threadStore';
@@ -147,7 +148,7 @@ function opencodePrompt(
       : summary
         ? compactionPreface(summary)
         : undefined;
-  const parts = [instructions, preface, block, context?.repoMap, context?.attachedFile, request.text].filter(
+  const parts = [instructions, preface, block, repoMapPrompt(context?.repoMap), context?.attachedFile, request.text].filter(
     (part): part is string => Boolean(part && part.trim().length > 0)
   );
   return parts.join('\n\n');

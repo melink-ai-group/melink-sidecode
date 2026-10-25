@@ -42,6 +42,23 @@ test('a user message without instructions is unchanged', () => {
   assert.equal(visibleTranscriptText('widen the autopilot modal'), 'widen the autopilot modal');
 });
 
+test('legacy repo-map status and tagged map content stay out of the transcript', () => {
+  for (const map of [
+    'Repo map: disabled (melink.context.repoMap is off).',
+    'Repo map: unavailable (no workspace snapshot or file reads).',
+    'Repo map: failed (one or more files could not be read).',
+    'Repo map: no matching files for this request.',
+    'Repo map: no source files found.',
+    'Repo map: limited (caps files=200, bytes=131072, ms=750, symbols=2000).',
+    '<repo-map>\nsrc/auth.ts: login, logout\n</repo-map>'
+  ]) {
+    assert.equal(visibleTranscriptText(`${MODE}\n\n${map}\n\ncheck the sidebar`), 'check the sidebar');
+  }
+  assert.equal(visibleTranscriptText('<repo-map>\npartial map'), '');
+  const request = 'Please check "Repo map: disabled (melink.context.repoMap is off)." in history.';
+  assert.equal(visibleTranscriptText(request), request);
+});
+
 test('an echoed viewed-file notice is hidden and the reply remains', () => {
   const text = [
     'Current file: not attached. The user did not include the file they are viewing. Do not treat any other file as "this file".',

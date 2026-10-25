@@ -9,6 +9,7 @@
 
 import type { Attachment, ContextPayload, DefaultMode } from '../types.ts';
 import type { FrontendStack } from '../../context/frontendStack.ts';
+import { repoMapPrompt } from '../../context/providerCopy.ts';
 import { modeInstructionsForTurn } from '../modes.ts';
 import type { UserInput } from '../../../schemas/v2/UserInput.ts';
 
@@ -75,7 +76,7 @@ function providerText(input: CodexTurnInput): string {
     parts.push(context.delta);
   }
   if (context?.repoMap) {
-    parts.push(context.repoMap);
+    parts.push(repoMapPrompt(context.repoMap)!);
   }
   if (context?.attachedFile) {
     parts.push(context.attachedFile);
