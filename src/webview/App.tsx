@@ -1616,7 +1616,7 @@ export function App(): JSX.Element {
         ? 'Click to stop'
         : 'Click to dictate, or hold to talk';
   const micTitle = !state.settings
-    ? 'Loading settingsâ€¦'
+    ? 'Loading settings…'
     : !dictationModel
       ? 'Choose a dictation model in Settings.'
       : dictationStatus && micGestureHint
@@ -2866,7 +2866,7 @@ export function App(): JSX.Element {
                     controlsLocked
                       ? controlsLockedReason
                       : thinkingLabel
-                        ? `Model settings Â· ${thinkingLabel}`
+                        ? `Model settings · ${thinkingLabel}`
                         : 'Model settings'
                   }
                   disabled={Boolean(pending) || asking || controlsLocked}

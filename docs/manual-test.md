@@ -1258,8 +1258,8 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.1 (`package.json`)
-- **Node test files:** 186 (`src/**/*.test.ts`)
-- **Node tests:** 1781 declarations, 1800 executed (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1800 pass, 0 skipped, 0 failures (`npm run test:node`).
+- **Node test files:** 187 (`src/**/*.test.ts`)
+- **Node tests:** 1783 declarations, 1802 executed (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1802 pass, 0 skipped, 0 failures (`npm run test:node`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 10 files / 73 tests, all passing (`npm run test:dom`). `npm test`
   runs the node, tools and DOM suites together.
