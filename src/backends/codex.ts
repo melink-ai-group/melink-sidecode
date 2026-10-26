@@ -70,6 +70,7 @@ import {
   describeCodexAuth
 } from './codex/auth';
 import { buildCodexTurnInput } from './codex/turnInput';
+import { isRetryableCodexFailure } from './codex/turnFailure.ts';
 import { isMissingThreadError, recoveryHandover, recoveryInstructions, threadRecoveredNotice } from './threadRecovery';
 import { refreshStoredChatgptAuth } from './codex/tokenRefresh';
 import { browserCommand } from '../browser/skill.ts';
@@ -1373,7 +1374,14 @@ export class CodexBackend implements AgentBackend {
         // This arrives while the turn is still open. Codex then completes the
         // turn with the same error, and it may send the notification once per
         // automatic retry. Only the final failure is a banner, and only once.
-        if (note.willRetry || !this.claimTurnFailure(note.threadId, note.turnId)) {
+        // A transient host failure is not a banner at all: the failed
+        // `turn/completed` hands it to the automatic continuation, so showing
+        // it here would claim the turn stopped before it was retried.
+        if (
+          note.willRetry ||
+          isRetryableCodexFailure(note.error) ||
+          !this.claimTurnFailure(note.threadId, note.turnId)
+        ) {
           break;
         }
         this.events.fire({
@@ -1455,6 +1463,30 @@ export class CodexBackend implements AgentBackend {
         });
         break;
       case 'failed':
+        // A transient host failure (the model host is full, an upstream rate
+        // limit, a dropped response stream, an internal server error) is not a
+        // finished turn. Codex has already retried it internally by now, so the
+        // remaining recovery is the host's own bounded continuation: rejecting
+        // the waiter makes `sendTurn` behave exactly like a provider failure
+        // that never started, which re-runs the turn instead of leaving a Retry
+        // card and a plan that looks stopped. A genuinely terminal failure
+        // (usage limit, context window, auth, policy) keeps the banner.
+        if (isRetryableCodexFailure(turn.error) && this.pendingTurns.has(threadId)) {
+          this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId, turnId: turn.id });
+          const pending = this.pendingTurns.get(threadId);
+          if (pending) {
+            this.pendingTurns.delete(threadId);
+            const failure = new BackendError(
+              'provider',
+              this.errorMessage(turn.error?.message, 'The Codex turn failed.')
+            );
+            // The structured kind, not the provider wording, is what allows
+            // the host to continue: a newer CLI may reword the message.
+            failure.retryable = true;
+            pending.reject(failure);
+          }
+          return;
+        }
         // The `error` notification may already have reported this turn. A
         // second event would repeat the same sentence under the reply.
         if (this.claimTurnFailure(threadId, turn.id)) {

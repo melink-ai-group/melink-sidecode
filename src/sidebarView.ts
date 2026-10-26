@@ -56,10 +56,12 @@ import {
   continueAfterStopInstruction,
   isMissingThreadError,
   isQuietTurnError,
+  isTransientProviderError,
   quietContinueNotice,
   shouldAutoContinue,
   stopContinueNotice,
-  threadRecoveredNotice
+  threadRecoveredNotice,
+  transientContinueNotice
 } from './backends/threadRecovery';
 import {
   prependOlderHistory,
@@ -4860,7 +4862,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           level: 'info',
           message: isQuietTurnError(error)
             ? quietContinueNotice(this.session.stopContinueAttempts)
-            : stopContinueNotice(this.session.stopContinueAttempts)
+            : isTransientProviderError(error)
+              ? transientContinueNotice(this.session.stopContinueAttempts)
+              : stopContinueNotice(this.session.stopContinueAttempts)
         });
       } else if (error instanceof BackendError && error.code === 'unauthenticated') {
         this.post({ type: 'notice', level: 'warning', message: error.message, action: 'setToken' });
