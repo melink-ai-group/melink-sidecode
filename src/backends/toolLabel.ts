@@ -177,6 +177,53 @@ function firstLine(value: string): string {
   return value.split(/\r?\n/, 1)[0]?.trim() || value.trim();
 }
 
+/** Display-only: unwrap known shell launchers without changing the executed command. */
+function commandTitle(command: string): string {
+  let current = command.trim();
+  for (let depth = 0; depth < 4; depth += 1) {
+    const launcher = /^(?:"([^"]+)"|'([^']+)'|(\S+))\s+([\s\S]+)$/.exec(current);
+    if (!launcher) {
+      break;
+    }
+    const executable = (launcher[1] ?? launcher[2] ?? launcher[3]).replace(/\\/g, '/').split('/').pop()?.toLowerCase();
+    const args = launcher[4];
+    let payload: string | undefined;
+    if (/^(?:powershell|pwsh)(?:\.exe)?$/.test(executable ?? '')) {
+      payload = /^(?:(?:-NoLogo|-NoProfile|-NonInteractive|-Login)\s+|-(?:ExecutionPolicy|WindowStyle)\s+\S+\s+)*-(?:Command|c)\s+([\s\S]+)$/i.exec(args)?.[1];
+    } else if (/^(?:bash|sh|zsh|dash|ksh)(?:\.exe)?$/.test(executable ?? '')) {
+      payload = /^(?:(?:--login|--noprofile|--norc|-[li]+)\s+)*-[li]*c[li]*\s+([\s\S]+)$/.exec(args)?.[1];
+      // POSIX -c consumes one argument, not the rest of the command line.
+      // Preserve unquoted payloads rather than mistake positional arguments for script text.
+      if (payload && !payload.startsWith('"') && !payload.startsWith("'")) {
+        break;
+      }
+    } else if (/^cmd(?:\.exe)?$/.test(executable ?? '')) {
+      payload = /^(?:(?:\/d|\/s|\/q)\s+)*\/[ck]\s+([\s\S]+)$/i.exec(args)?.[1];
+    }
+    if (!payload) {
+      break;
+    }
+    payload = payload.trim();
+    if (payload.startsWith('"') || payload.startsWith("'")) {
+      const quote = payload[0];
+      if (!payload.endsWith(quote) || payload.length < 3) {
+        break;
+      }
+      // Extra shell arguments after a quoted script are ambiguous; keep the invocation.
+      const extraArguments = quote === "'" ? /'\s+\S/ : /(?<![\\`])"\s+\S/;
+      if (extraArguments.test(payload.slice(1, -1))) {
+        break;
+      }
+      payload = payload.slice(1, -1).trim();
+    }
+    if (!payload) {
+      break;
+    }
+    current = payload;
+  }
+  return firstLine(current);
+}
+
 function humanizeTool(tool: string): string {
   const words = tool.replace(/[._:-]+/g, ' ').trim();
   if (!words) {
@@ -214,7 +261,7 @@ export function friendlyToolTitle(tool: string, target?: string): string {
     case 'command':
     case 'exec':
     case 'powershell':
-      return name ? `Running ${firstLine(name)}` : 'Running command';
+      return name ? `Running ${commandTitle(name)}` : 'Running command';
     case 'edit':
     case 'patch':
     case 'strreplace':
@@ -272,6 +319,9 @@ export function toolCardPresentation(item: {
   const fromDetail = detail && !detail.includes('\n') && detail.length <= 200 ? detail : undefined;
   const target = command ?? fromDetail;
   const raw = item.title?.trim();
+  if (target && raw === `Running ${firstLine(target)}`) {
+    return { title: friendlyToolTitle('command', target), detail: target };
+  }
   if (!raw || raw === 'Command' || isRawToolName(raw)) {
     const tool = !raw || raw === 'Command' ? 'command' : raw;
     return { title: friendlyToolTitle(tool, target), detail: target };
