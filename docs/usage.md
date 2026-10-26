@@ -705,13 +705,11 @@ it never edits files, runs shell commands, asks for approvals, or keeps/rejects
 changes. **Keep** and **Reject**
 remain the only actions, and they are unchanged.
 
-The default first pass is local and deterministic. It reads the request that
-opened the turn and the changed paths, and reports explicit paths the request
-named but the turn did not change. It does **not** detect semantic regressions,
-incomplete edits inside a file it did change, or paths mentioned only indirectly.
-The prompt and runner seam is reserved for a future model reviewer: no runner is
-wired, so this release runs only the local pass and never builds or sends a model
-prompt; adding one will not change the advisory contract.
+Completed Agent turns use a separate read-only subagent on the selected provider
+and model. It receives a bounded diff, the opening request, and available
+reference files. It assesses correctness and requested changes; a file mentioned
+only as a reference does not need to be edited. Invalid output, provider failures,
+and deadlines produce a visible failed assessment, never a false clean result.
 
 A review is stored per turn and restored on reload; **no reviewer runs again on
 reload**. Turning **Reviewing** or **Styling check** Off later hides nothing that
@@ -779,25 +777,35 @@ decision:
 
 The **Orchestration** tab in the settings screen decides what sideCode does once a
 reply finishes. Changes apply from the **next turn**; the summary at the top of
-the tab spells out the current policy. Every pass is advisory and none of them
-changes the reply, the tools, or the permission level.
+the tab spells out the current policy. Reviews are advisory and do not change
+Keep/Reject or raise permissions. Relevant findings or failed host checks can
+return to the main Agent for one automatic correction turn per user request.
 
 Every role has three states. **Auto** runs it only when this turn is relevant;
 **On** runs it whenever the role's hard mode applies; **Off** never runs it. A
 saved `true`/`false` from before this control existed is read as On/Off.
 
+The main Agent can optionally request up to three host-managed read-only analysis
+workers per batch, with two batches per user request. Their evidence returns to
+the main Agent; workers never own edits or user decisions. This is separate from
+OpenCode's native `task` tool and workspace-defined agents, which remain denied
+at restricted permission levels. Compact expandable rows show worker reasons,
+progress and results. Stop cancels workers and checks; closing a chat cancels its
+workers. An extension-host restart marks unfinished worker rows Cancelled.
+
 - **Testing** (`melink.orchestration.testing`, default On) runs the project's
   typecheck/lint and tests through the post-turn check runner described above.
   Auto runs only when code (non-documentation) files changed.
 - **Reviewing** (`melink.orchestration.reviewing`, default Auto) adds the
-  advisory diff review. Auto runs only for code changes; On runs on any change
+  advisory diff-review subagent on completed Agent turns. Auto runs only for code changes; On runs on any change
   set. It falls back to `melink.review.diffReview` until saved.
 - **Styling check** (`melink.orchestration.styling`, default Auto) runs only when
   the turn changed at least one frontend file (`.tsx`, `.jsx`, `.css`, `.scss`,
   `.html`, `.vue`, `.svelte`, and similar). It compares the new work with the
   brand kit (`tokens.css`, `DESIGN.md`, `design-tokens.json`, and `brand.json`
   when present), the theme tokens, and the
-  existing components, and lists token, inline-style, font, and state
+  existing components and reference pages using a read-only subagent on completed
+  Agent turns. Explicit user style requests take precedence. It lists token, inline-style, font, and state
   inconsistencies in the same review panel as the diff review. Token rules come
   from the kit's own names and scales, so the check assumes no particular brand
   or token prefix. It is read-only,

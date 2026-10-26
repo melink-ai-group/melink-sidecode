@@ -96,6 +96,7 @@ export interface TranscriptItemView {
   status: ItemStatus;
   /** Status-line notices: severity. Errors stay red; the line has no title. */
   noticeLevel?: 'info' | 'warning' | 'error';
+  agentActivity?: TranscriptItem['agentActivity'];
   /** Status-line notices: recovery control, when the line offers one. */
   noticeAction?: NoticeAction;
 }
@@ -1425,6 +1426,7 @@ function toTranscriptItemView(backendId: string) {
     id: item.id,
     kind: item.kind,
     noticeLevel: item.noticeLevel,
+    agentActivity: item.agentActivity,
     backendId,
     role: item.role,
     title: item.title,
@@ -1564,6 +1566,15 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
       // output once the runtime reports it; it must not open a second card.
       const existing = state.transcript.find((item) => item.id === event.item.id);
       if (existing) {
+        if (existing.agentActivity && event.item.agentActivity) {
+          return {
+            ...state,
+            transcript: state.transcript.map((item) => item.id === event.item.id
+              ? { ...item, agentActivity: event.item.agentActivity, text: event.item.text ?? item.text,
+                  status: event.item.status ?? item.status }
+              : item)
+          };
+        }
         if (existing.kind !== 'tool' && existing.kind !== 'file-change') {
           return state;
         }
@@ -1584,6 +1595,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
             id: event.item.id,
             kind: event.item.kind,
             noticeLevel: event.item.noticeLevel,
+            agentActivity: event.item.agentActivity,
             backendId: event.backendId,
             role: event.item.role,
             title: event.item.title,

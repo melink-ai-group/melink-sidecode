@@ -13,6 +13,7 @@ import { ApprovalPrompt, ApprovalResolvedCard } from './ApprovalCards';
 import { ToolCard } from './ActivityCards';
 import { FileChangeCard } from './FileChangeCard';
 import { ReasoningCard } from './Reasoning';
+import { AgentActivityCard } from './AgentActivityCard';
 import { StatusMark, copyText } from './shared';
 
 export const TranscriptRow = memo(function TranscriptRow({
@@ -106,6 +107,10 @@ export const TranscriptRow = memo(function TranscriptRow({
 
   if (item.kind === 'approval-denied') {
     return <ApprovalResolvedCard item={item} approved={false} onOpenRules={onOpenRules} />;
+  }
+
+  if (item.kind === 'notice' && item.agentActivity) {
+    return <AgentActivityCard activity={item.agentActivity} />;
   }
 
   if (item.kind === 'notice' && item.detail === 'status') {

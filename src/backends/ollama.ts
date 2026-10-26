@@ -663,6 +663,9 @@ export class OllamaBackend implements AgentBackend {
 
   async startThread(options?: StartThreadOptions): Promise<ThreadHandle> {
     const threadId = createId('ollama_thread');
+    if (options?.internalSubagent) {
+      this.store?.markInternalThread(this.id, threadId);
+    }
     this.threads.add(threadId);
     let model = options?.model ?? this.defaultModel;
     // Local has no app-level model until one is chosen, so an empty default
@@ -712,6 +715,9 @@ export class OllamaBackend implements AgentBackend {
       });
     }
     for (const threadId of this.threads) {
+      if (this.store?.isInternalThread(this.id, threadId)) {
+        continue;
+      }
       if (!summaries.has(threadId)) {
         summaries.set(threadId, { threadId });
       }
@@ -1208,6 +1214,9 @@ export class OllamaBackend implements AgentBackend {
     ask: OpencodePermissionAsk,
     signal: AbortSignal
   ): Promise<'once' | 'always' | 'reject'> {
+    if (this.store?.isInternalThread(this.id, threadId)) {
+      return Promise.resolve('reject');
+    }
     const request = approvalFromOpencode(ask, this.cwd);
     // Safety precedes stored rules: a destructive command must not be answered
     // by a broad first-token rule. `block` refuses before a card exists; `ask`

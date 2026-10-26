@@ -282,8 +282,10 @@ Record the installed CLI first: `opencode --version` (the T69 regression used
       leaves the file unwritten and the request unmade). Select **Unrestricted**
       (after the labelled confirmation), attempt a workspace write, and confirm
       it is performed. At **Read-only**, **Default**, and **Ask**, also ask the
-      agent to delegate to a subagent and confirm delegation is refused (a
+      agent to call OpenCode's native `task` tool for a workspace-defined subagent
+      and confirm that tool is refused (a
       workspace `opencode.json` may define its own permissive subagent).
+      This does not disable sideCode's separate host-managed read-only workers.
 - [ ] 14i. **Reasoning and context.** With a model that reports reasoning, set a
       thinking level and a max context and confirm the turn still completes.
       Select a model that reports **no** reasoning control, set a thinking level,
@@ -744,7 +746,9 @@ unset.
 
 *Applies to: Codex and opencode (both).* **Styling check** is **Auto** in a fresh
 profile. Leave it on Auto (or set On) for this pass; both require a frontend file
-change, and Off never runs.
+change, and Off never runs. Use Agent mode and an authenticated selected model.
+The check now uses a model worker; its activity should show a reason and status.
+Model failures should show Failed, not an empty clean assessment.
 
 - [ ] 47i. **Frontend work runs the check.** Ask for a small change to a
       component or stylesheet in the webview, for example add a rule with a
@@ -757,6 +761,16 @@ change, and Off never runs.
       TypeScript file, not UI code, and finish the turn.
       - **Expected:** no **Styling check** section and no brand-kit read; the
         diff review, checks, and Keep/Reject behave exactly as before.
+
+- [ ] 47k. **Optional analysis workers.** In Agent mode ask for two independent
+      read-only investigations before edits. Confirm each worker has its own
+      activity row and reason, results return to the same main chat, and no
+      worker appears as a separate history conversation.
+- [ ] 47l. **Cancellation.** Stop while workers are queued or running, including
+      immediately after the main response ends. No check or worker should start
+      afterward and no automatic correction should send. Already captured changes
+      remain reviewable. Repeat with a tab closure and a window reload; unfinished
+      worker rows should replay as Cancelled after the reload.
 
 
 ### Pass 2 — multi-file turn, counts, and bulk decisions
@@ -1258,10 +1272,10 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.1 (`package.json`)
-- **Node test files:** 188 (`src/**/*.test.ts`)
-- **Node tests:** 1798 declarations, 1817 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1807 pass, 10 skipped, 0 failures (Node suite within `npm test`).
+- **Node test files:** 192 (`src/**/*.test.ts`)
+- **Node tests:** 1820 declarations, 1839 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1829 pass, 10 skipped, 0 failures (Node suite within `npm test`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
-- **DOM suite:** 10 files / 74 tests, all passing (DOM suite within `npm test`). `npm test`
+- **DOM suite:** 10 files / 80 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`

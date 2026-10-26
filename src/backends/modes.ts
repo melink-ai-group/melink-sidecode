@@ -1,5 +1,6 @@
 import { DEFAULT_MODES, type DefaultMode, type PermissionLevel } from './types.ts';
 import { frontendChecklist, STYLING_CONSISTENCY_INSTRUCTIONS, type FrontendStack } from '../context/frontendStack.ts';
+import { DELEGATION_INSTRUCTIONS } from '../orchestration/delegation.ts';
 
 /**
  * The one place the shared `DefaultMode` is translated into Codex's own
@@ -91,7 +92,7 @@ const ENGINEERING_DEFINITION_OF_DONE =
   'Definition of done: read the project\u2019s `package.json` scripts and its README or contributor docs to identify the actual install/build, lint, typecheck, test, and run/dev commands; never assume another repository\u2019s commands.';
 
 /** Agent must run the checks it found, not just name them. */
-const AGENT_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Run every applicable check from that set, and when the target is a web page or app also inspect its console, runtime, and network errors. Report each check\u2019s result or failure before your closing sentence; never claim a check passed without running it. ${STYLING_CONSISTENCY_INSTRUCTIONS}`;
+const AGENT_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Run every applicable check from that set, and when the target is a web page or app also inspect its console, runtime, and network errors. Report each check\u2019s result or failure before your closing sentence; never claim a check passed without running it. ${STYLING_CONSISTENCY_INSTRUCTIONS} ${DELEGATION_INSTRUCTIONS}`;
 
 /** Plan names its verification and puts it in the plan; it still does not run it. */
 const PLAN_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Name the verification commands this plan depends on, include verification with its expected result in the plan body and steps, and do not run those commands while planning. Include the following styling checks in the frontend plan and its verification steps: ${STYLING_CONSISTENCY_INSTRUCTIONS}`;

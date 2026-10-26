@@ -361,6 +361,40 @@ function baseMessages({ title, threadId, model = 'qwen3-coder:480b', replay = []
 
 export function screenMessages(slug) {
   switch (slug) {
+    case 'subagent-activity':
+      return baseMessages({
+        title: 'Style the account form', threadId: THREAD_ID,
+        replay: [
+          userItem('Style the account form consistently with our existing pages.'),
+          assistantItem('Updated the form with the shared controls. Independent reviewers are checking the changes.'),
+          { id: 'review-agent', kind: 'notice', agentActivity: {
+            role: 'Review agent', reason: 'Code changed', status: 'running',
+            detail: 'Checking affected callers and request coverage.'
+          } },
+          { id: 'styling-agent', kind: 'notice', agentActivity: {
+            role: 'Styling agent', reason: 'Frontend files changed', status: 'running',
+            detail: 'Checking shared controls across existing pages.'
+          } },
+          { id: 'test-check', kind: 'notice', agentActivity: {
+            role: 'Tests (host check)', reason: 'Code changed', status: 'completed',
+            detail: 'Typecheck and tests passed.'
+          } },
+          { id: 'diagnostic-check', kind: 'notice', agentActivity: {
+            role: 'Diagnostics (host check)', reason: 'Changed files', status: 'completed',
+            detail: 'No errors in the changed files.'
+          } },
+          { id: 'queued-agent', kind: 'notice', agentActivity: {
+            role: 'Accessibility agent', reason: 'Main agent requested a keyboard audit', status: 'queued'
+          } },
+          { id: 'failed-agent', kind: 'notice', agentActivity: {
+            role: 'Reference agent', reason: 'Main agent requested reference research', status: 'failed',
+            detail: 'The provider could not complete the request.'
+          } },
+          { id: 'cancelled-agent', kind: 'notice', agentActivity: {
+            role: 'Copy agent', reason: 'Main agent cancelled this duplicate check', status: 'cancelled'
+          } }
+        ]
+      });
     case 'chat-idle':
       return baseMessages({ title: 'New chat' });
     case 'stream-reasoning': {

@@ -74,6 +74,39 @@ function setBusy(backendId = 'codex'): void {
 }
 
 describe('busy composer queueing', () => {
+  it.each(['codex', 'opencode'])('escalates a queued message by id for %s and waits for the host echo', (backendId) => {
+    renderComposer(backendId);
+    setBusy(backendId);
+    act(() => sendHostMessage({ type: 'queuedTurns', entries: [
+      { id: 'q1', textPreview: 'first', attachmentCount: 0 },
+      { id: 'q2', textPreview: 'second', attachmentCount: 0 }
+    ] }));
+    const button = screen.getByRole('button', { name: 'Send queued message now: second' });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    expect(messagesOf('escalateQueuedTurn')).toEqual([{ type: 'escalateQueuedTurn', id: 'q2' }]);
+    expect(screen.getByText('second')).toBeTruthy();
+    act(() => sendHostMessage({ type: 'queuedTurns', entries: [
+      { id: 'q1', textPreview: 'first', attachmentCount: 0 }
+    ] }));
+    expect(screen.queryByText('second')).toBeNull();
+    expect(screen.getByText('first')).toBeTruthy();
+  });
+
+  it('disables escalation for attachments and idle turns', () => {
+    renderComposer();
+    setBusy();
+    act(() => sendHostMessage({ type: 'queuedTurns', entries: [
+      { id: 'q1', textPreview: 'file', attachmentCount: 1 },
+      { id: 'q2', textPreview: 'text', attachmentCount: 0 }
+    ] }));
+    expect((screen.getByRole('button', { name: 'Send queued message now: file' }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => sendHostMessage({ type: 'busy', value: false, backendId: 'codex', threadId: 'thread-queue' }));
+    expect((screen.getByRole('button', { name: 'Send queued message now: text' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(messagesOf('escalateQueuedTurn')).toHaveLength(0);
+  });
+
   it('repaints distinct user messages after remount without internal prompt text', () => {
     const replay = [
       { id: 'user_1', kind: 'message', role: 'user', text: 'Repo map: disabled (melink.context.repoMap is off).\n\nfirst request', status: 'completed' },

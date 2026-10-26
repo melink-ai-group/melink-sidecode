@@ -72,6 +72,11 @@ export class BackendRegistry implements Disposable {
     for (const backend of this.backends) {
       this.disposables.push(
         backend.onEvent((event) => {
+          // Workers subscribe directly to their backend. Their raw events must
+          // never reach the main chat, change tracker, approval UI, or history.
+          if (event.threadId && this.store.isInternalThread(event.backendId, event.threadId)) {
+            return;
+          }
           // Record renderable content so a reload can repaint the transcript.
           this.store.applyEvent(event);
           this.agentEventEmitter.fire(event);
@@ -117,7 +122,7 @@ export class BackendRegistry implements Disposable {
       return [];
     }
     try {
-      return await backend.listThreads();
+      return (await backend.listThreads()).filter((thread) => !this.store.isInternalThread(id, thread.threadId));
     } catch {
       return this.store.listThreads(id).map((ref) => ({
         threadId: ref.threadId,

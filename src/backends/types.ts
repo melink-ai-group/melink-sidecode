@@ -239,6 +239,8 @@ export interface ContextPayload {
 }
 
 export interface StartThreadOptions {
+  /** Internal delegated worker; never a sidebar conversation or persisted chat. */
+  internalSubagent?: boolean;
   model?: string;
   /** Permission policy the thread runs under; falls back to the backend default. */
   permissionLevel?: PermissionLevel;
@@ -498,11 +500,22 @@ export interface Attachment {
   kind: AttachmentKind;
 }
 
+/** Compact, persisted lifecycle of a host-managed subagent or orchestration check. */
+export interface AgentActivity {
+  role: string;
+  reason: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  detail?: string;
+  findings?: string[];
+}
+
 export interface TranscriptItem {
   id: string;
   kind: TranscriptItemKind;
   /** Persisted status notice severity and optional recovery control. */
   noticeLevel?: 'info' | 'warning' | 'error';
+  /** Present on a notice representing one subagent or host check. */
+  agentActivity?: AgentActivity;
   /** Present when `kind` is `message`. */
   role?: MessageRole;
   /** Short label, e.g. a tool name or a model name. */

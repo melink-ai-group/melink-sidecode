@@ -11,6 +11,14 @@ export const VIEWPORTS = Object.freeze([
 
 export const SCREENS = Object.freeze([
   Object.freeze({
+    slug: 'subagent-activity',
+    title: 'Orchestration / subagents and host checks',
+    expectText: 'Checking shared controls across existing pages.',
+    waitFor: '.agent-activity',
+    keyboardDisclosure: '.agent-activity > summary[aria-label="Styling agent: Running"]',
+    assertNoOverflow: true
+  }),
+  Object.freeze({
     slug: 'chat-idle',
     title: 'Composer / chat idle',
     expectText: 'sideCode',

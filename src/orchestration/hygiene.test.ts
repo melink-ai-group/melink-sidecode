@@ -31,6 +31,9 @@ test('the turn pipeline decides once and consumes the stored plan at every seam'
   assert.match(source, /this\.turnPlans\.set\(turnId, plan\)/);
   assert.match(source, /resolvePostTurnRoles\(\{/);
   assert.match(source, /this\.startChangeChecks\(set, roles\.testing, \{/);
+  assert.match(source, /runner: async \(input, prompt\) => modelReviewFindings\(await this\.runVisibleSubagent\(set,/);
+  assert.match(source, /await this\.checkRuns\.get\(turnId\)/);
+  assert.match(source, /session\.turnBusy \|\| this\.subagentRuns\.has\(session\.id\)/);
   assert.match(source, /const shouldReview = roles\.reviewing/);
   assert.match(source, /if \(roles\.doubleCheck && terminus === 'completed'\)/);
   assert.match(source, /logDiagnostic\(\s*orchestrationDiagnostic\(/);

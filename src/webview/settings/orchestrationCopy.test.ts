@@ -47,10 +47,10 @@ test('the six fields carry the exact labels, help, and defaults', () => {
   assert.deepEqual(
     ORCHESTRATION_FIELDS.map(({ help }) => help),
     [
-      'Run typecheck or lint and the tests after a turn. Auto runs only when code files changed. (Default: On.)',
-      'Read-only diff review after a turn. Auto runs only when code files changed. Advisory; never edits or blocks Keep. (Default: Auto.)',
-      'Check new frontend work against the brand kit, tokens, and existing components. Auto and On both require a frontend file change. (Default: Auto.)',
-      'Sweep changed files for VS Code errors after a turn. Auto runs only when code files changed. No second model call. (Default: Auto.)',
+      'Run typecheck or lint and the tests as host checks after a turn. Auto runs only when code files changed. (Default: On.)',
+      'Spawn a read-only review subagent using the selected model after a turn. Auto runs only when code files changed. Advisory; never edits or blocks Keep. (Default: Auto.)',
+      'Spawn a read-only styling subagent using the selected model to compare frontend work with other pages, shared controls, and design tokens. Explicit user style requests take precedence. Auto and On both require a frontend file change. (Default: Auto.)',
+      'Sweep changed files for VS Code errors as a host check after a turn. Auto runs only when code files changed. No second model call. (Default: Auto.)',
       'Short single-question Agent turns always bypass the other passes. Off hides the Quick notice; Auto or On shows it. (Default: Off.)',
       'Continue a built plan step by step after a clean turn. Agent mode and an active plan are required. (Default: Auto.)'
     ]
