@@ -341,3 +341,12 @@
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: 1px;
 }
+
+.composer-queue__escalate .ico {
+  transform: rotate(-90deg);
+}
+
+.composer-queue__escalate:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

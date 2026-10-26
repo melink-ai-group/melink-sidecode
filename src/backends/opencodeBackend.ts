@@ -297,6 +297,9 @@ export class OpencodeBackend implements AgentBackend {
 
   async startThread(options?: StartThreadOptions): Promise<ThreadHandle> {
     const threadId = createId('opencode_thread');
+    if (options?.internalSubagent) {
+      this.store?.markInternalThread(this.id, threadId);
+    }
     this.threads.add(threadId);
     const model = options?.model ?? this.defaultModel;
     const handle: ThreadHandle = { backendId: this.id, threadId, model: model || undefined };
@@ -330,6 +333,9 @@ export class OpencodeBackend implements AgentBackend {
       });
     }
     for (const threadId of this.threads) {
+      if (this.store?.isInternalThread(this.id, threadId)) {
+        continue;
+      }
       if (!summaries.has(threadId)) {
         summaries.set(threadId, { threadId });
       }
@@ -712,6 +718,9 @@ export class OpencodeBackend implements AgentBackend {
     ask: OpencodePermissionAsk,
     signal: AbortSignal
   ): Promise<'once' | 'always' | 'reject'> {
+    if (this.store?.isInternalThread(this.id, threadId)) {
+      return Promise.resolve('reject');
+    }
     const request = approvalFromOpencode(ask, this.cwd);
     // Safety precedes stored rules: a destructive command must not be answered
     // by a broad first-token rule. `block` refuses before a card exists; `ask`

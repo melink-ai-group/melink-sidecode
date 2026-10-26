@@ -2699,7 +2699,14 @@ export function App(): JSX.Element {
         ) : null}
         <div className="composer-box">
           {state.queuedTurns.length > 0 ? (
-            <QueuedTurns entries={state.queuedTurns} onCancel={cancelQueuedTurn} />
+            <QueuedTurns
+              entries={state.queuedTurns}
+              onCancel={cancelQueuedTurn}
+              onEscalate={active?.id === 'codex' || active?.id === 'opencode'
+                ? (id) => bridge.post({ type: 'escalateQueuedTurn', id })
+                : undefined}
+              canEscalate={state.busy && active?.status === 'available' && !state.restoring && !pending && !asking && !state.modeSwitch}
+            />
           ) : null}
           {state.attachments.length > 0 ? (
             <AttachmentList

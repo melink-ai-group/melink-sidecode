@@ -13,6 +13,7 @@
 import { PROVIDER_ONLY_LINES } from '../context/providerCopy.ts';
 import { takeAttachmentSection } from '../backends/userPrompt.ts';
 import { hideQuestionFence } from '../questions.ts';
+import { hideSubagentFence } from '../orchestration/delegation.ts';
 
 const CLOSED_BLOCK =
   /<(project-context|project-context-update|attached-file|repo-map)>[\s\S]*?<\/\1>/g;
@@ -42,6 +43,7 @@ export function visibleTranscriptText(text: string): string {
   next = stripProviderLines(next);
   next = stripUnclosedPrompt(next);
   next = hideQuestionFence(next);
+  next = hideSubagentFence(next);
   return next.replace(/\n{3,}/g, '\n\n').trim();
 }
 

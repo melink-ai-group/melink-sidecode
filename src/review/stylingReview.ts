@@ -16,9 +16,8 @@
  *   and says so in its notice.
  * - **Read-only and advisory.** Findings never block Keep/Reject and never edit
  *   a file.
- * - **Local-only in this release.** No model runner is wired, so the pass that
- *   runs is `localStylingReview`; the prompt builder is reserved and is never
- *   sent to a model today.
+ * - **Model or local.** Live orchestration injects a read-only model worker;
+ *   callers without a runner retain `localStylingReview`.
  * - **Deterministic.** Findings are sorted by path, line, severity, and message.
  */
 
@@ -111,9 +110,8 @@ export function shouldRunStylingCheck(
  * Build the read-only styling reviewer prompt, including the brand kit when
  * present.
  *
- * Reserved for a model runner. No model runner is wired in this release, so
- * this prompt is not sent anywhere: the styling check runs
- * {@link localStylingReview}, a deterministic local pass.
+ * The host sends this through a read-only model worker. With no runner,
+ * {@link localStylingReview} remains a deterministic local pass.
  */
 export function buildStylingReviewPrompt(input: StylingReviewInput): string {
   const files = boundDiffFiles(
@@ -195,7 +193,9 @@ export async function runStylingReview(
       timeout
     ]);
     if (Array.isArray(raw)) {
-      return resultFromFindings(raw, brandingNotice(input));
+      return resultFromFindings(raw, input.brandKit.length === 0
+        ? 'No brand kit was found; cross-page conclusions are limited to the supplied reference evidence.'
+        : undefined);
     }
     const result = raw as DiffReviewResult;
     if (result.status === 'failed') {

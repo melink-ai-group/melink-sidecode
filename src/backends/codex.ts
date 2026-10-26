@@ -204,6 +204,8 @@ export class CodexBackend implements AgentBackend {
    * open chat is not given a second conversation. Other chats keep their events.
    */
   private replacementStarts = 0;
+  /** Delay native startup announcements until the response identifies its owner. */
+  private managedThreadStarts = 0;
   /** Codex thread ids whose lifecycle is hidden until they are mapped onto a chat. */
   private readonly hiddenThreadIds = new Set<string>();
   /** Backwards cursors for a resumed thread, so older turns can load on scroll. */
@@ -472,8 +474,11 @@ export class CodexBackend implements AgentBackend {
     // clamped to read-only, while Plan and Agent honor the selected level.
     const level = effectivePermissionLevel(mode, requestedLevel);
     const mapping = codexPermissionMapping(level);
+    const browserFields = options?.internalSubagent ? {} : await this.browserThreadFields();
+    this.managedThreadStarts += 1;
     const response = await connection
       .startThread({
+        ...(options?.internalSubagent ? { ephemeral: true } : {}),
         model: model || null,
         // The workspace root is the thread's cwd, so Codex's own file access and
         // `AGENTS.md` discovery work from the right place. The snapshot service's
@@ -496,10 +501,14 @@ export class CodexBackend implements AgentBackend {
         developerInstructions: instructionsWithHandover(options?.context?.snapshot, options?.handover),
         // Browser control is one MCP server on the thread. Quiet turns never
         // call this, and an off skill omits the field entirely.
-        ...(await this.browserThreadFields())
+        ...browserFields
       })
-      .catch((error: unknown) => this.fail(error));
+      .catch((error: unknown) => this.fail(error))
+      .finally(() => { this.managedThreadStarts -= 1; });
     const threadId = response.thread.id;
+    if (options?.internalSubagent) {
+      this.store?.markInternalThread(this.id, threadId);
+    }
     this.hiddenThreadIds.delete(threadId);
     this.threads.add(threadId);
     this.threadPermissions.set(threadId, requestedLevel);
@@ -635,7 +644,7 @@ export class CodexBackend implements AgentBackend {
     const response = await connection
       .listThreads({ cwd: this.cwd, sortKey: 'updated_at', sortDirection: 'desc', limit: 25 })
       .catch((error: unknown) => this.fail(error));
-    return response.data.map((thread) => ({
+    return response.data.filter((thread) => !this.store?.isInternalThread(this.id, thread.id)).map((thread) => ({
       threadId: thread.id,
       title: thread.name ?? thread.preview ?? undefined,
       model: thread.model ?? undefined,
@@ -1202,6 +1211,12 @@ export class CodexBackend implements AgentBackend {
 
   private handleNotification(notification: { method: string; params?: unknown }): void {
     const rawThreadId = this.rawThreadId(notification.method, notification.params);
+    // thread/started can precede thread/start's response. Announcing here would
+    // persist a worker before startThread can mark it internal. Each managed
+    // start explicitly announces after receiving and classifying its own id.
+    if (notification.method === 'thread/started' && this.managedThreadStarts > 0 && rawThreadId && !this.threads.has(rawThreadId)) {
+      return;
+    }
     // A replacement thread's own startup must not open a second conversation.
     // Events for every other chat still pass through.
     if (
@@ -1548,7 +1563,7 @@ export class CodexBackend implements AgentBackend {
       return;
     }
     const { threadId, request: approval } = translated;
-    if (this.quietThreads.has(threadId)) {
+    if (this.quietThreads.has(threadId) || this.store?.isInternalThread(this.id, threadId)) {
       this.answerApproval(
         { threadId, requestId: approval.id, rpcId: request.id, request: approval, settled: true },
         'reject'

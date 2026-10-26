@@ -29,28 +29,28 @@ export const ORCHESTRATION_FIELDS: readonly OrchestrationFieldCopy[] = [
     key: 'testing',
     label: 'Testing',
     help:
-      'Run typecheck or lint and the tests after a turn. Auto runs only when code files changed. (Default: On.)',
+      'Run typecheck or lint and the tests as host checks after a turn. Auto runs only when code files changed. (Default: On.)',
     defaultValue: 'on'
   },
   {
     key: 'reviewing',
     label: 'Reviewing',
     help:
-      'Read-only diff review after a turn. Auto runs only when code files changed. Advisory; never edits or blocks Keep. (Default: Auto.)',
+      'Spawn a read-only review subagent using the selected model after a turn. Auto runs only when code files changed. Advisory; never edits or blocks Keep. (Default: Auto.)',
     defaultValue: 'auto'
   },
   {
     key: 'styling',
     label: 'Styling check',
     help:
-      'Check new frontend work against the brand kit, tokens, and existing components. Auto and On both require a frontend file change. (Default: Auto.)',
+      'Spawn a read-only styling subagent using the selected model to compare frontend work with other pages, shared controls, and design tokens. Explicit user style requests take precedence. Auto and On both require a frontend file change. (Default: Auto.)',
     defaultValue: 'auto'
   },
   {
     key: 'doubleCheck',
     label: 'Double-check',
     help:
-      'Sweep changed files for VS Code errors after a turn. Auto runs only when code files changed. No second model call. (Default: Auto.)',
+      'Sweep changed files for VS Code errors as a host check after a turn. Auto runs only when code files changed. No second model call. (Default: Auto.)',
     defaultValue: 'auto'
   },
   {

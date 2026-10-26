@@ -140,6 +140,8 @@ export interface PostTurnInput {
   /** Quick detection is checked here too, so a stale plan can never bypass it. */
   quick: boolean;
   entries: readonly { path: string }[];
+  mode?: string;
+  terminus?: 'completed' | 'interrupted';
 }
 
 /** The plan facts the diagnostic and the debug snapshot read. */
@@ -196,6 +198,14 @@ export function resolvePostTurnRoles(input: PostTurnInput): PostTurnRoles {
   const reasons: Partial<Record<PostTurnRole, string>> = {};
 
   const resolve = (key: PostTurnRole): boolean => {
+    if (input.terminus === 'interrupted') {
+      reasons[key] = 'turn-interrupted';
+      return false;
+    }
+    if (input.mode !== undefined && input.mode !== 'agent' && (key === 'reviewing' || key === 'styling')) {
+      reasons[key] = 'mode-not-agent';
+      return false;
+    }
     if (input.quick) {
       reasons[key] = 'quick-bypass';
       return false;

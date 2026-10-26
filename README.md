@@ -54,11 +54,10 @@ adds an advisory second pass to the **Changes this turn** panel. Until that key
 is saved it falls back to the older application-scoped
 `melink.review.diffReview`. The review is strictly read-only: it never edits
 files, runs shell commands, requests approvals, or keeps/rejects anything, and
-**Keep** / **Reject** behave exactly as before. The first pass is local and
-deterministic: it flags explicit paths the request named but the turn did not
-change. It does not claim to find semantic regressions. The prompt/runner seam is
-reserved for a future model reviewer: no runner is wired, so no model prompt is
-sent and the Reviewer role is the local pass. Turn reviews are stored per turn
+**Keep** / **Reject** behave exactly as before. Completed Agent turns use a
+separate read-only subagent on the selected provider and model to assess the
+bounded diff and reference files. Its compact activity row shows why it started,
+its status, and expandable findings. Turn reviews are stored per turn
 and restored on reload; switching **Reviewing** Off later does not hide a stored
 review, because the choice gates only new turns. A failed or timed-out pass is a
 visible, non-blocking notice.
@@ -77,8 +76,15 @@ token rules from that kit rather than assuming a particular brand or prefix. It
 is read-only, never blocks Keep, and when no brand kit exists it says so rather
 than inventing evidence. Results are stored per turn next to the diff review and
 restored on reload; switching **Styling check** Off later hides nothing already
-stored. The prompt/runner seam is reserved and no model prompt is
-sent.
+stored. Completed Agent turns use a read-only styling subagent to compare shared
+controls and available reference pages, respecting explicit user style requests.
+
+The main Agent can also request up to three read-only analysis subagents per
+batch, with at most two batches per user request. Their results return to the
+main Agent for decisions and edits. Review findings or failed host checks can
+trigger one automatic correction turn per user request. Stop cancels workers and
+host checks. Worker failures are visible; no local heuristic is silently reported
+as a completed model review. Testing and diagnostics remain host checks.
 
 A turn that changed files can also run **post-turn checks** before you keep it.
 By default sideCode detects `typecheck` (or `lint` when there is no typecheck)

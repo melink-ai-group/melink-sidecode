@@ -4,6 +4,7 @@ import { workspaceTranscriptIndex } from './transcriptTail.ts';
 import { mergeTranscriptTool } from './transcriptTool.ts';
 import { PERMISSION_LEVELS, type AgentEvent, type DefaultMode, type PermissionLevel, type TodoStep, type TranscriptItem } from './types';
 import { mergeThreadRef } from './threadRef.ts';
+import { recoverSubagentActivities } from '../orchestration/modelReview.ts';
 
 /**
  * Persists the small amount of state needed to reconnect after a window reload:
@@ -111,8 +112,18 @@ export class ThreadStore implements vscode.Disposable {
   private plans?: PlanStateIndex;
   private flushTimer?: ReturnType<typeof setTimeout>;
   private readonly dirty = new Set<string>();
+  private readonly internalThreads = new Set<string>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  /** Internal workers stay in memory and never appear in workspace history. */
+  markInternalThread(backendId: string, threadId: string): void {
+    this.internalThreads.add(transcriptKey(backendId, threadId));
+  }
+
+  isInternalThread(backendId: string, threadId: string): boolean {
+    return this.internalThreads.has(transcriptKey(backendId, threadId));
+  }
 
   /** The conversation the sidebar should reconnect to on activation. */
   getActiveThread(): PersistedThreadRef | undefined {
@@ -120,6 +131,9 @@ export class ThreadStore implements vscode.Disposable {
   }
 
   async setActiveThread(ref: PersistedThreadRef): Promise<void> {
+    if (this.isInternalThread(ref.backendId, ref.threadId)) {
+      return;
+    }
     await this.context.workspaceState.update(ACTIVE_THREAD_KEY, ref);
     await this.rememberThread(ref);
   }
@@ -133,6 +147,9 @@ export class ThreadStore implements vscode.Disposable {
    * after a reload or a switch to a new conversation.
    */
   async rememberThread(ref: PersistedThreadRef): Promise<void> {
+    if (this.isInternalThread(ref.backendId, ref.threadId)) {
+      return;
+    }
     const index = this.loadThreadIndex();
     const existing = index[ref.backendId] ?? [];
     const previous = existing.find((thread) => thread.threadId === ref.threadId);
@@ -161,6 +178,9 @@ export class ThreadStore implements vscode.Disposable {
    * rather than being reused.
    */
   async setOpencodeSession(backendId: string, threadId: string, sessionId: string | undefined): Promise<void> {
+    if (this.isInternalThread(backendId, threadId)) {
+      return;
+    }
     const index = this.loadThreadIndex();
     const threads = index[backendId] ?? [];
     index[backendId] = threads.map((entry) =>
@@ -259,6 +279,9 @@ export class ThreadStore implements vscode.Disposable {
 
   /** Replaces a thread's stored transcript; used when resuming from a live source. */
   setTranscript(backendId: string, threadId: string, items: TranscriptItem[]): void {
+    if (this.isInternalThread(backendId, threadId)) {
+      return;
+    }
     const index = this.loadTranscripts();
     index[transcriptKey(backendId, threadId)] = items.slice();
     this.markDirty(transcriptKey(backendId, threadId));
@@ -299,7 +322,7 @@ export class ThreadStore implements vscode.Disposable {
         }
         const ids = new Set(parsed.map((item: TranscriptItem) => item?.id));
         const extra = current.filter((item) => item && !ids.has(item.id));
-        index[key] = extra.length > 0 ? [...(parsed as TranscriptItem[]), ...extra] : (parsed as TranscriptItem[]);
+        index[key] = recoverSubagentActivities(extra.length > 0 ? [...(parsed as TranscriptItem[]), ...extra] : (parsed as TranscriptItem[]));
       } catch {
         // Keep the workspaceState tail when a file cannot be read.
       }
@@ -343,6 +366,9 @@ export class ThreadStore implements vscode.Disposable {
    * turn also records how long it ran, on the user message that opened it.
    */
   applyEvent(event: AgentEvent): void {
+    if (event.threadId && this.isInternalThread(event.backendId, event.threadId)) {
+      return;
+    }
     switch (event.type) {
       case 'item/started': {
         const stored = this.getTranscript(event.backendId, event.threadId);
@@ -516,6 +542,9 @@ export class ThreadStore implements vscode.Disposable {
   private loadTranscripts(): TranscriptIndex {
     if (!this.transcripts) {
       this.transcripts = this.context.workspaceState.get<TranscriptIndex>(TRANSCRIPTS_KEY) ?? {};
+      for (const key of Object.keys(this.transcripts)) {
+        this.transcripts[key] = recoverSubagentActivities(this.transcripts[key]);
+      }
     }
     return this.transcripts;
   }

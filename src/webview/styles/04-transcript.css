@@ -1,3 +1,69 @@
+/* ---- Orchestration workers ---- */
+
+.agent-activity {
+  min-width: 0;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.agent-activity > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.agent-activity > summary:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.agent-activity > summary::before {
+  content: '\203A';
+  flex: 0 0 auto;
+}
+
+.agent-activity[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.agent-activity__role {
+  color: var(--vscode-foreground);
+  font-weight: 500;
+}
+
+.agent-activity__reason {
+  min-width: 0;
+  flex: 1 1 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-activity__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.agent-activity__body {
+  padding: 0 0 4px 14px;
+  overflow-wrap: anywhere;
+}
+
+.agent-activity__body p {
+  margin: 4px 0;
+}
+
+.agent-activity__body ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
 /* ---- Restoring state ---- */
 
 .restoring {

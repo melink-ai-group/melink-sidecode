@@ -7,10 +7,8 @@
  * goes into it, parse the model's JSON findings, and fall back to a
  * deterministic local check when no model review is available.
  *
- * No model runner is wired in this release. The Reviewer role that actually
- * runs is the local, deterministic check ({@link localDiffReview}); the prompt
- * builder and runner seam are reserved for a future model reviewer and are not
- * sent to any model today.
+ * The host supplies a read-only model worker for live orchestration. Callers
+ * without a runner retain the deterministic local check ({@link localDiffReview}).
  *
  * ## Contracts
  *
@@ -130,10 +128,8 @@ const PATH_TOKEN_PATTERN = new RegExp(
 /**
  * Build the read-only reviewer prompt for one turn.
  *
- * Reserved for a model runner. No model runner is wired in this release, so
- * the prompt is not sent anywhere: the Reviewer role runs `localDiffReview`,
- * a deterministic local pass. Keep the prompt and its runner seam so a later
- * wiring does not change the persisted result shape.
+ * Live orchestration sends this prompt through a read-only model worker.
+ * Callers without a runner retain `localDiffReview`.
  *
  * The diff is bounded here rather than by the caller so every path into the
  * reviewer carries the same size guarantee.
@@ -166,7 +162,7 @@ export function buildDiffReviewPrompt(input: DiffReviewInput): string {
     'Review rules:',
     '- Report only defects introduced or left by this turn that matter to the request.',
     '- Ignore style nits: formatting, naming preferences, import ordering, and subjective taste.',
-    '- Check that every file the original request explicitly names was actually changed.',
+    '- Verify the changes the user requested. A file named only as a reference, comparison, or read-only context does not need to be changed.',
     '- Use the changed file path exactly as shown above.',
     '- Line numbers are 1-based in the new file.',
     '- Return ONLY a JSON array of findings. No prose, no markdown fences, no explanations.',

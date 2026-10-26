@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { App } from './App';
 import { hostMessages, sendHostMessage } from './domSetup';
-import type { Attachment, PlanArtifact } from '../backends/types';
+import type { AgentActivity, Attachment, PlanArtifact } from '../backends/types';
 import type { ChangeView } from '../protocol';
+import { AgentActivityCard } from './transcript/AgentActivityCard';
 
 const availableBackend = {
   id: 'codex',
@@ -15,6 +16,62 @@ const availableBackend = {
 const THREAD_ID = 'thread-orchestration';
 const ORCHESTRATION_TEXT =
   'Continue the remaining steps of this plan. Do not stop to ask whether to continue.\n\n- [ ] Fix the ring';
+
+describe('subagent activity', () => {
+  const running: AgentActivity = {
+    role: 'Styling agent', reason: 'Frontend files changed', status: 'running',
+    detail: 'Comparing buttons and inputs with existing pages.'
+  };
+
+  it('shows a compact keyboard-focusable disclosure with honest lifecycle and empty findings', () => {
+    const { container, rerender } = render(<AgentActivityCard activity={running} />);
+    const summary = screen.getByLabelText('Styling agent: Running');
+    const disclosure = container.querySelector('details')!;
+    expect(disclosure.open).toBe(false);
+    summary.focus();
+    expect(document.activeElement).toBe(summary);
+    fireEvent.click(summary);
+    expect(disclosure.open).toBe(true);
+    expect(screen.getByText('Comparing buttons and inputs with existing pages.')).toBeTruthy();
+    rerender(<AgentActivityCard activity={{ ...running, status: 'completed', findings: [] }} />);
+    expect(disclosure.open).toBe(true);
+    expect(screen.getByLabelText('Styling agent: Completed')).toBeTruthy();
+    expect(screen.getByText('No findings.')).toBeTruthy();
+    expect(screen.queryByLabelText('Running')).toBeNull();
+  });
+
+  it('renders queued, failed and cancelled states without stale findings', () => {
+    const { rerender } = render(<AgentActivityCard activity={{ ...running, status: 'queued' }} />);
+    expect(screen.getByLabelText('Styling agent: Queued')).toBeTruthy();
+    rerender(<AgentActivityCard activity={{ ...running, status: 'failed', detail: 'The provider is unavailable.' }} />);
+    expect(screen.getByText('The provider is unavailable.')).toBeTruthy();
+    expect(screen.queryByText('No findings.')).toBeNull();
+    rerender(<AgentActivityCard activity={{ role: running.role, reason: running.reason, status: 'cancelled' }} />);
+    expect(screen.getByText('The worker was cancelled.')).toBeTruthy();
+    expect(screen.queryByText('The provider is unavailable.')).toBeNull();
+  });
+
+  it('replays activity and updates one row in place while keeping the main turn idle', async () => {
+    render(<App />);
+    act(() => {
+      sendHostMessage({ type: 'snapshot', availability: [availableBackend] });
+      sendHostMessage({ type: 'restoring', value: false });
+      sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: THREAD_ID,
+        replay: [{ id: 'agent-1', kind: 'notice', agentActivity: running }] });
+    });
+    expect(screen.getByLabelText('Styling agent: Running')).toBeTruthy();
+    act(() => sendHostMessage({ type: 'agentEvent', event: {
+      type: 'item/started', backendId: 'codex', threadId: THREAD_ID,
+      item: { id: 'agent-1', kind: 'notice', status: 'completed',
+        agentActivity: { ...running, status: 'completed', findings: ['Use the shared input radius.'] } }
+    } }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+    expect(document.querySelectorAll('.agent-activity')).toHaveLength(1);
+    expect(screen.getByLabelText('Styling agent: Completed')).toBeTruthy();
+    expect(screen.getByText('Use the shared input radius.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
+});
 
 function openConversation(
   replay: Parameters<typeof conversationMessage>[0],

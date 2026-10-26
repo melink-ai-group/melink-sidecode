@@ -47,7 +47,7 @@ async function assertNoOverflow(page, label) {
     const wide = doc.scrollWidth > doc.clientWidth + 1;
     const offenders = [];
     for (const element of document.querySelectorAll(
-      '.settings .panel--fill, .settings .panel__body, .skill-panel, .skill-controls, .skill-actions'
+      '.settings .panel--fill, .settings .panel__body, .skill-panel, .skill-controls, .skill-actions, .agent-activity, .agent-activity__body'
     )) {
       if (element.offsetParent === null) {
         continue;
@@ -178,6 +178,22 @@ export async function captureScreen({ browser, baseUrl, screen, viewport, outDir
 
     if (screen.click) {
       await step(label, `click ${screen.click}`, () => page.locator(screen.click).first().click());
+    }
+    if (screen.keyboardDisclosure) {
+      await step(label, 'expand and collapse worker details with the keyboard', async () => {
+        const summary = page.locator(screen.keyboardDisclosure).first();
+        await summary.focus();
+        if (!(await summary.evaluate((element) => document.activeElement === element))) {
+          throw new Error('worker disclosure did not receive keyboard focus');
+        }
+        await summary.press('Enter');
+        await page.waitForFunction((selector) => document.querySelector(selector)?.parentElement?.open === true,
+          screen.keyboardDisclosure);
+        await summary.press('Space');
+        await page.waitForFunction((selector) => document.querySelector(selector)?.parentElement?.open === false,
+          screen.keyboardDisclosure);
+        await summary.press('Enter');
+      });
     }
     for (const tab of screen.clickTabs ?? []) {
       await step(label, `click tab ${tab}`, () =>

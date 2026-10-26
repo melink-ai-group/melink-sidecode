@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import type { QueuedTurnEntryView } from '../../protocol';
-import { CrossIcon, PaperclipIcon } from '../Icons';
+import { ArrowIcon, CrossIcon, PaperclipIcon } from '../Icons';
 
 /**
  * Queued user turns for the visible chat, above the composer. A queued turn is
@@ -8,10 +8,14 @@ import { CrossIcon, PaperclipIcon } from '../Icons';
  */
 export function QueuedTurns({
   entries,
-  onCancel
+  onCancel,
+  onEscalate,
+  canEscalate = false
 }: {
   entries: QueuedTurnEntryView[];
   onCancel: (id: string) => void;
+  onEscalate?: (id: string) => void;
+  canEscalate?: boolean;
 }): JSX.Element {
   const several = entries.length !== 1;
   return (
@@ -35,6 +39,18 @@ export function QueuedTurns({
                 {attachmentLabel(entry)}
               </span>
             ) : null}
+            {onEscalate ? (
+              <button
+                className="composer-queue__remove composer-queue__escalate"
+                type="button"
+                aria-label={`Send queued message now: ${entry.textPreview || 'attachment only'}`}
+                title={entry.attachmentCount > 0 ? 'Messages with attachments send when the turn ends' : 'Send now to the active turn'}
+                disabled={!canEscalate || entry.attachmentCount > 0}
+                onClick={() => onEscalate(entry.id)}
+              >
+                <ArrowIcon className="ico ico--xs" />
+              </button>
+            ) : null}
             <button
               className="composer-queue__remove"
               type="button"
@@ -49,6 +65,7 @@ export function QueuedTurns({
       </ul>
       <span className="sr-only">
         {several ? 'These messages send in the order shown.' : 'This message sends when the turn ends.'}
+        {onEscalate ? ' Use Send queued message now to add a text message to the active turn.' : ''}
       </span>
     </div>
   );

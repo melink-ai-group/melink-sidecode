@@ -145,6 +145,15 @@ test('On runs on any closed change set; styling still needs a frontend file', ()
   const frontend = resolvePostTurnRoles({ choices: ALL_ON, quick: false, entries: FRONTEND });
   assert.equal(frontend.styling, true);
   assert.equal(frontend.reasons.styling, 'on-frontend-change');
+  const interrupted = resolvePostTurnRoles({ choices: ALL_ON, quick: false, entries: FRONTEND, mode: 'agent', terminus: 'interrupted' });
+  for (const role of ['testing', 'reviewing', 'styling', 'doubleCheck'] as const) {
+    assert.equal(interrupted[role], false);
+    assert.equal(interrupted.reasons[role], 'turn-interrupted');
+  }
+  const planning = resolvePostTurnRoles({ choices: ALL_ON, quick: false, entries: FRONTEND, mode: 'plan', terminus: 'completed' });
+  assert.equal(planning.reviewing, false);
+  assert.equal(planning.styling, false);
+  assert.equal(planning.reasons.styling, 'mode-not-agent');
 });
 
 test('Auto runs testing, reviewing and double-check only for code changes', () => {

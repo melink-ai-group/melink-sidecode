@@ -770,6 +770,8 @@ export type WebviewToHostMessage =
       queue?: boolean;
     }
   | { type: 'steerTurn'; text: string }
+  /** Deliver one queued text message into the active turn. */
+  | { type: 'escalateQueuedTurn'; id: string }
   /** Remove one queued turn. Ignored once it has started dispatching. */
   | { type: 'cancelQueuedTurn'; id: string }
   /**
