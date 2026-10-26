@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync, gzipSync } from 'node:zlib';
 import { extractOpencodeBinary, installOpencodeRelease, opencodeReleaseFilename } from './install.ts';
-import { OPENCODE_SHA256, OPENCODE_VERSION, opencodeReleaseUrl, sha256Hex } from '../cliManifest.ts';
+import { sha256Hex } from '../cliManifest.ts';
 
 test('release asset names follow the official install script', () => {
   assert.equal(
@@ -56,28 +56,66 @@ test('a gzip tar yields the opencode binary', () => {
   assert.deepEqual(extractOpencodeBinary(archive), payload);
 });
 
-test('install writes the downloaded CLI into the install directory', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'opencode-install-'));
-  const payload = Buffer.from('installed-cli');
-  const archive = gzipSync(tarArchive('./opencode', payload));
-  let requested = '';
+const filename = 'opencode-linux-x64.tar.gz';
+const platform = { os: 'linux' as const, arch: 'x64' as const, baseline: false, musl: false };
+const releaseApi = 'https://api.github.com/repos/anomalyco/opencode/releases/latest';
+
+function releaseMetadata(archive: Buffer, version = '1.19.4') {
+  return {
+    tag_name: `v${version}`, draft: false, prerelease: false,
+    assets: [{ name: filename, digest: `sha256:${sha256Hex(archive)}`,
+      browser_download_url: `https://github.com/anomalyco/opencode/releases/download/v${version}/${filename}` }]
+  };
+}
+
+test('install follows latest stable metadata for current and future versions using exact tagged downloads', async () => {
+  for (const version of ['1.19.4', '1.20.0', '2.0.0']) {
+    const dir = await mkdtemp(join(tmpdir(), 'opencode-install-'));
+    const payload = Buffer.from(`installed-cli-${version}`);
+    const archive = gzipSync(tarArchive('./opencode', payload));
+    const metadata = releaseMetadata(archive, version);
+    const requests: string[] = [];
+    try {
+      const result = await installOpencodeRelease({
+        platform, installDir: dir, persistPath: false,
+        fetchImpl: async (input) => {
+          requests.push(String(input));
+          return String(input) === releaseApi ? Response.json(metadata) : new Response(archive);
+        }
+      });
+      assert.equal(result.ok, true, result.message);
+      assert.equal(result.version, version);
+      assert.deepEqual(requests, [releaseApi, metadata.assets[0].browser_download_url]);
+      const installedName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
+      assert.equal(result.executablePath, join(dir, installedName));
+      assert.deepEqual(await readFile(result.executablePath!), payload);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('Update replaces an existing executable using a newly resolved release on each action', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencode-upgrade-'));
+  const executablePath = join(dir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
   try {
-    const result = await installOpencodeRelease({
-      platform: { os: 'linux', arch: 'x64', baseline: false, musl: false },
-      installDir: dir,
-      persistPath: false,
-      checksums: { 'opencode-linux-x64.tar.gz': sha256Hex(archive) },
-      fetchImpl: async (input) => {
-        requested = String(input);
-        return new Response(archive, { status: 200 });
-      }
-    });
-    assert.equal(result.ok, true);
-    assert.match(requested, /\/releases\/download\/v1\.1\.65\/opencode-linux-x64\.tar\.gz$/);
-    assert.doesNotMatch(requested, /latest/i);
-    const installedName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
-    assert.equal(result.executablePath, join(dir, installedName));
-    assert.deepEqual(await readFile(result.executablePath ?? ''), payload);
+    await writeFile(executablePath, 'old-cli');
+    for (const version of ['1.19.4', '1.20.0']) {
+      const archive = gzipSync(tarArchive('./opencode', Buffer.from(version)));
+      const result = await installOpencodeRelease({
+        platform, installDir: dir, persistPath: false,
+        fetchImpl: async (input, options) => {
+          if (String(input) === releaseApi) {
+            assert.equal(options?.cache, 'no-store');
+            return Response.json(releaseMetadata(archive, version));
+          }
+          return new Response(archive);
+        }
+      });
+      assert.equal(result.ok, true, result.message);
+      assert.equal(result.version, version);
+      assert.equal(await readFile(executablePath, 'utf8'), version);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -85,115 +123,108 @@ test('install writes the downloaded CLI into the install directory', async () =>
 
 test('a checksum mismatch leaves an existing executable untouched', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'opencode-install-mismatch-'));
-  const installedName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
-  const executablePath = join(dir, installedName);
+  const executablePath = join(dir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
   const original = Buffer.from('existing-cli');
+  const archive = gzipSync(tarArchive('./opencode', Buffer.from('downloaded-cli')));
+  const metadata = releaseMetadata(archive);
+  metadata.assets[0].digest = `sha256:${'0'.repeat(64)}`;
   try {
     await writeFile(executablePath, original);
-    const archive = gzipSync(tarArchive('./opencode', Buffer.from('downloaded-cli')));
     const result = await installOpencodeRelease({
-      platform: { os: 'linux', arch: 'x64', baseline: false, musl: false },
-      installDir: dir,
-      persistPath: false,
-      checksums: { 'opencode-linux-x64.tar.gz': '0'.repeat(64) },
-      fetchImpl: async () => new Response(archive, { status: 200 })
+      platform, installDir: dir, persistPath: false,
+      fetchImpl: async (input) => String(input) === releaseApi ? Response.json(metadata) : new Response(archive)
     });
     assert.equal(result.ok, false);
-    assert.match(result.message, /SHA-256 mismatch.*1\.1\.65.*opencode-linux-x64\.tar\.gz/);
+    assert.match(result.message, /SHA-256 mismatch.*1\.19\.4.*opencode-linux-x64\.tar\.gz/);
     assert.deepEqual(await readFile(executablePath), original);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('a missing checksum entry fails before download and without writing the executable', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'opencode-install-missing-'));
-  const installedName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
-  let fetched = false;
+test('invalid release metadata fails before archive download and leaves existing files untouched', async () => {
+  const archive = gzipSync(tarArchive('./opencode', Buffer.from('downloaded-cli')));
+  const valid = releaseMetadata(archive);
+  const invalid = [
+    null, {}, { ...valid, prerelease: true }, { ...valid, draft: true },
+    { ...valid, tag_name: 'v2.0.0-beta.1' }, { ...valid, tag_name: '../evil' },
+    { ...valid, assets: [] }, { ...valid, assets: [null] },
+    { ...valid, assets: [valid.assets[0], valid.assets[0]] },
+    { ...valid, assets: [{ ...valid.assets[0], digest: null }] },
+    { ...valid, assets: [{ ...valid.assets[0], digest: 'sha256:invalid' }] },
+    { ...valid, assets: [{ ...valid.assets[0], browser_download_url: 'https://example.com/cli.zip' }] }
+  ];
+  const dir = await mkdtemp(join(tmpdir(), 'opencode-install-invalid-'));
+  const executablePath = join(dir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
   try {
-    const archive = gzipSync(tarArchive('./opencode', Buffer.from('downloaded-cli')));
-    const result = await installOpencodeRelease({
-      platform: { os: 'linux', arch: 'x64', baseline: false, musl: false },
-      installDir: dir,
-      persistPath: false,
-      checksums: {},
-      fetchImpl: async () => {
-        fetched = true;
-        return new Response(archive, { status: 200 });
-      }
-    });
-    assert.equal(result.ok, false);
-    assert.equal(fetched, false);
-    assert.match(result.message, /No SHA-256 is pinned.*opencode-linux-x64\.tar\.gz.*\(version 1\.1\.65\).*not supported by the pinned release.*Nothing was installed/);
-    assert.equal(result.executablePath, undefined);
-    await assert.rejects(readFile(join(dir, installedName)), /ENOENT/);
+    await writeFile(executablePath, 'existing-cli');
+    for (const metadata of invalid) {
+      let fetched = 0;
+      const result = await installOpencodeRelease({
+        platform, installDir: dir, persistPath: false,
+        fetchImpl: async () => { fetched++; return Response.json(metadata); }
+      });
+      assert.equal(result.ok, false, JSON.stringify(metadata));
+      assert.match(result.message, /Nothing was installed/);
+      assert.equal(fetched, 1);
+      assert.equal(await readFile(executablePath, 'utf8'), 'existing-cli');
+      assert.deepEqual(await readdir(dir), [process.platform === 'win32' ? 'opencode.exe' : 'opencode']);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('an unsupported Windows arm64 platform fails before download and creates nothing', async () => {
+test('a missing platform asset fails before archive download and creates nothing', async () => {
   const parent = await mkdtemp(join(tmpdir(), 'opencode-install-arm64-'));
   const installDir = join(parent, 'not-created');
-  let fetched = false;
+  let fetched = 0;
   try {
     const result = await installOpencodeRelease({
       platform: { os: 'windows', arch: 'arm64', baseline: false, musl: false },
-      installDir,
-      persistPath: false,
-      fetchImpl: async () => {
-        fetched = true;
-        return new Response('unexpected', { status: 404 });
-      }
+      installDir, persistPath: false,
+      fetchImpl: async () => { fetched++; return Response.json(releaseMetadata(Buffer.from('archive'))); }
     });
-    assert.equal(fetched, false);
+    assert.equal(fetched, 1);
     assert.equal(result.ok, false);
-    assert.match(result.message, /No SHA-256 is pinned.*opencode-windows-arm64\.zip.*\(version 1\.1\.65\).*not supported by the pinned release.*Nothing was installed/);
-    assert.equal(result.executablePath, undefined);
+    assert.match(result.message, /1\.19\.4.*does not provide opencode-windows-arm64\.zip/);
     await assert.rejects(readdir(installDir), /ENOENT/);
   } finally {
     await rm(parent, { recursive: true, force: true });
   }
 });
 
-test('every supported opencode asset name has a pinned digest', () => {
-  const supported = [
-    { os: 'windows' as const, arch: 'x64' as const, baseline: false, musl: false },
-    { os: 'windows' as const, arch: 'x64' as const, baseline: true, musl: false },
-    { os: 'darwin' as const, arch: 'x64' as const, baseline: false, musl: false },
-    { os: 'darwin' as const, arch: 'x64' as const, baseline: true, musl: false },
-    { os: 'darwin' as const, arch: 'arm64' as const, baseline: false, musl: false },
-    { os: 'linux' as const, arch: 'x64' as const, baseline: false, musl: false },
-    { os: 'linux' as const, arch: 'x64' as const, baseline: true, musl: false },
-    { os: 'linux' as const, arch: 'x64' as const, baseline: false, musl: true },
-    { os: 'linux' as const, arch: 'x64' as const, baseline: true, musl: true },
-    { os: 'linux' as const, arch: 'arm64' as const, baseline: false, musl: false },
-    { os: 'linux' as const, arch: 'arm64' as const, baseline: false, musl: true }
-  ];
-  assert.equal(Object.keys(OPENCODE_SHA256).length, 11);
-  for (const platform of supported) {
-    const filename = opencodeReleaseFilename(platform);
-    assert.match(OPENCODE_SHA256[filename] ?? '', /^[0-9a-f]{64}$/, `${filename} is missing a digest`);
-    assert.equal(opencodeReleaseUrl(filename), `https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/${filename}`);
+test('metadata HTTP, network, malformed JSON and size failures return actionable errors', async () => {
+  for (const fetchImpl of [
+    async () => new Response('rate limited', { status: 403 }),
+    async () => new Response('unavailable', { status: 503 }),
+    async () => { throw new Error('offline'); },
+    async () => new Response('{broken'),
+    async () => new Response('x'.repeat(2 * 1024 * 1024 + 1))
+  ]) {
+    const result = await installOpencodeRelease({ platform, persistPath: false, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /Could not check|could not be read/);
+    assert.equal(result.executablePath, undefined);
   }
 });
 
-test('opencode release URLs use the pinned tag instead of latest', () => {
-  const url = opencodeReleaseUrl('opencode-linux-x64.tar.gz');
-  assert.equal(url, 'https://github.com/anomalyco/opencode/releases/download/v1.1.65/opencode-linux-x64.tar.gz');
-  assert.doesNotMatch(url, /latest/i);
-});
-
-test('a failed download is a message and does not throw', async () => {
-  const result = await installOpencodeRelease({
-    platform: { os: 'darwin', arch: 'arm64', baseline: false, musl: false },
-    installDir: join(tmpdir(), 'opencode-install-unused'),
-    persistPath: false,
-    fetchImpl: async () => new Response('missing', { status: 404 })
-  });
-  assert.equal(result.ok, false);
-  assert.match(result.message, /could not be downloaded/);
-  assert.equal(result.executablePath, undefined);
+test('a failed archive download returns an error and creates no install directory', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'opencode-install-network-'));
+  const installDir = join(parent, 'not-created');
+  try {
+    const result = await installOpencodeRelease({
+      platform, installDir, persistPath: false,
+      fetchImpl: async (input) => String(input) === releaseApi
+        ? Response.json(releaseMetadata(Buffer.from('archive')))
+        : new Response('missing', { status: 404 })
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /could not be downloaded/);
+    await assert.rejects(readdir(installDir), /ENOENT/);
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
 });
 
 function zipArchive(files: { name: string; data: Buffer; method?: number }[]): Buffer {

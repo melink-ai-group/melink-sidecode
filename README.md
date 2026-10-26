@@ -427,15 +427,17 @@ The OpenCode and Codex paths were verified against the versions below.
   why Codex priming is native at start/resume and left to Codex's own file access
   mid-thread. The supported protocol window is `0.154.0â€“0.163.x`; a server
   outside it is reported as `incompatible` with its version rather than used.
-- **opencode: `1.19.x`** â€” the installer tracks `releases/latest`, and the T69
+- **opencode: `1.19.x`** â€” Install and Update resolve the latest stable GitHub release, and the T69
   regression ran against the bundled 1.19.x CLI. `opencode run --help` exposes
   no system/instructions flag, so the snapshot is delivered by priming the turn
   text. This is a deliberate fallback, not an oversight.
 
-The bundled opencode and ast-grep installers download these exact tags and
-verify each archive's SHA-256 before writing. See
-[docs/cli-pins.md](docs/cli-pins.md) for the pinned digests and the bump
-procedure.
+The opencode installer resolves the latest stable release from the official
+GitHub API, downloads its exact tagged asset, and verifies GitHub's SHA-256
+digest before writing. Future releases do not require a sideCode version bump.
+The ast-grep installer uses a pinned tag and digest. See
+[docs/cli-pins.md](docs/cli-pins.md) for release verification and the ast-grep
+bump procedure.
 
 Both child-process paths are spawned with the workspace root as their working
 directory, so their own project discovery reads the real `AGENTS.md` even when the
@@ -802,7 +804,7 @@ capability flag.
 
 The Ollama (Cloud and Local) and OpenCode Zen runtime is a per-turn, short-lived
 child process. Sidebar turns use `opencode serve` with the installed CLI
-(the installer tracks `releases/latest`; the T69 regression used 1.19.x).
+(Install and Update resolve the latest stable release; the T69 regression used 1.19.x).
 Notes:
 
 - Reasoning snapshots and text deltas from the live bus update one reasoning
@@ -823,7 +825,7 @@ Notes:
   no credential: its generated provider reads a fixed `local-no-key` placeholder
   that is never sent as a user secret.
 
-When the installed CLI is newer than this pin, re-check `opencode run --help`
+When the installed CLI is newer than the tested version, re-check `opencode run --help`
 and the JSON event shapes before relying on these assumptions.
 
 ### Project layout

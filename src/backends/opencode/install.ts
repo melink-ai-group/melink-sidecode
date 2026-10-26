@@ -4,13 +4,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
-import {
-  OPENCODE_MANIFEST,
-  OPENCODE_SHA256,
-  opencodeReleaseUrl,
-  requirePinnedChecksum,
-  verifyArchiveSha256
-} from '../cliManifest.ts';
+import { sha256Hex } from '../cliManifest.ts';
 
 /**
  * Download the official opencode CLI and install it for the settings screen.
@@ -35,6 +29,8 @@ export interface OpencodeInstallPlatform {
 export interface OpencodeInstallResult {
   ok: boolean;
   message: string;
+  /** Exact stable release selected before the download. */
+  version?: string;
   /** Absolute path of the installed binary when `ok` is true. */
   executablePath?: string;
 }
@@ -49,16 +45,54 @@ export interface InstallOpencodeOptions {
    * a fixture install cannot change the machine running the suite.
    */
   persistPath?: boolean;
-  /**
-   * @internal Test-only override for the pinned asset digests. Defaults to
-   * OPENCODE_SHA256; product callers never pass it.
-   */
-  checksums?: Readonly<Record<string, string>>;
 }
 
 /** Hard cap so a bad response cannot fill memory. The release archives are smaller. */
 const MAX_ARCHIVE_BYTES = 120 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 180_000;
+const RELEASE_API = 'https://api.github.com/repos/anomalyco/opencode/releases/latest';
+
+/** Resolve once, then download the exact tag so a concurrent release cannot mix bytes and digest. */
+async function latestReleaseAsset(filename: string, fetchImpl: typeof fetch): Promise<{
+  version: string; url: string; sha256: string;
+}> {
+  let response: Response;
+  try {
+    response = await fetchImpl(RELEASE_API, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'melink-sidecode' },
+      signal: AbortSignal.timeout(20_000),
+      cache: 'no-store'
+    });
+  } catch {
+    throw new Error('Could not check the latest opencode release. Check the network and try again.');
+  }
+  if (!response.ok) {
+    throw new Error(`Could not check the latest opencode release (HTTP ${response.status}). Try again later.`);
+  }
+  let release;
+  try {
+    release = JSON.parse((await readLimited(response, 2 * 1024 * 1024)).toString('utf8'));
+  } catch {
+    throw new Error('The opencode release metadata could not be read. Nothing was installed.');
+  }
+  if (!release || typeof release.tag_name !== 'string' || !/^v\d+\.\d+\.\d+$/.test(release.tag_name) ||
+      release.draft !== false || release.prerelease !== false || !Array.isArray(release.assets)) {
+    throw new Error('The latest opencode release metadata is invalid. Nothing was installed.');
+  }
+  const version = release.tag_name.slice(1);
+  const matches = release.assets.filter((asset: { name?: unknown } | null) => asset?.name === filename);
+  if (matches.length !== 1) {
+    throw new Error(`opencode ${version} does not provide ${filename} for this machine. Nothing was installed.`);
+  }
+  const asset = matches[0];
+  // Never follow an arbitrary URL from metadata; require the official tagged asset.
+  const url = `https://github.com/anomalyco/opencode/releases/download/${release.tag_name}/${filename}`;
+  if (asset.browser_download_url !== url || typeof asset.digest !== 'string' ||
+      !/^sha256:[0-9a-f]{64}$/i.test(asset.digest)) {
+    throw new Error(`No verified SHA-256 release asset is available for opencode ${version} ${filename}. Nothing was installed.`);
+  }
+  return { version, url, sha256: asset.digest.slice(7).toLowerCase() };
+}
 
 /** Asset file name for one platform, matching the official install script. */
 export function opencodeReleaseFilename(platform: OpencodeInstallPlatform): string {
@@ -99,11 +133,12 @@ export async function installOpencodeRelease(
     const platform = options.platform ?? (await detectOpencodePlatform());
     const installDir = options.installDir ?? join(homedir(), '.opencode', 'bin');
     const filename = opencodeReleaseFilename(platform);
-    const manifest = { ...OPENCODE_MANIFEST, checksums: options.checksums ?? OPENCODE_SHA256 };
-    // Fail before the network for a platform the pinned release does not ship.
-    requirePinnedChecksum(filename, manifest);
-    const archive = await downloadRelease(opencodeReleaseUrl(filename), options.fetchImpl ?? fetch);
-    verifyArchiveSha256(filename, archive, manifest);
+    const fetchImpl = options.fetchImpl ?? fetch;
+    const release = await latestReleaseAsset(filename, fetchImpl);
+    const archive = await downloadRelease(release.url, fetchImpl);
+    if (sha256Hex(archive) !== release.sha256) {
+      throw new Error(`SHA-256 mismatch for opencode ${release.version} asset ${filename}, so it was not installed.`);
+    }
     const binary = extractOpencodeBinary(archive);
     const executableName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
     const executablePath = join(installDir, executableName);
@@ -130,7 +165,7 @@ export async function installOpencodeRelease(
     if (options.persistPath !== false) {
       await rememberInstallDir(installDir);
     }
-    return { ok: true, message: 'opencode installed.', executablePath };
+    return { ok: true, message: `opencode ${release.version} installed.`, executablePath, version: release.version };
   } catch (error) {
     return { ok: false, message: installErrorMessage(error) };
   }

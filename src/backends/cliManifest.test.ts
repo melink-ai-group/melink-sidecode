@@ -4,19 +4,14 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AST_GREP_VERSION,
-  OPENCODE_VERSION,
-  OPENCODE_MANIFEST,
+  AST_GREP_MANIFEST,
   astGrepReleaseUrl,
-  opencodeReleaseUrl,
   sha256Hex,
   verifyArchiveSha256
 } from './cliManifest.ts';
 
-test('the manifest pins both CLI versions in one place', () => {
-  assert.equal(OPENCODE_VERSION, '1.1.65');
+test('the manifest pins the ast-grep release', () => {
   assert.equal(AST_GREP_VERSION, '0.51.0');
-  assert.equal(OPENCODE_MANIFEST.version, OPENCODE_VERSION);
-  assert.equal(opencodeReleaseUrl('asset.zip'), 'https://github.com/anomalyco/opencode/releases/download/v1.1.65/asset.zip');
   assert.equal(astGrepReleaseUrl('asset.zip'), 'https://github.com/ast-grep/ast-grep/releases/download/0.51.0/asset.zip');
 });
 
@@ -27,22 +22,22 @@ test('sha256Hex matches the known digest of a fixed byte string', () => {
 test('verifyArchiveSha256 rejects a missing digest and a mismatch with a plain message', () => {
   const archive = Buffer.from('archive-bytes');
   assert.throws(
-    () => verifyArchiveSha256('unknown.zip', archive, { ...OPENCODE_MANIFEST, checksums: {} }),
+    () => verifyArchiveSha256('unknown.zip', archive, { ...AST_GREP_MANIFEST, checksums: {} }),
     (error: Error) => {
-      assert.match(error.message, /No SHA-256 is pinned.*unknown\.zip.*\(version 1\.1\.65\).*not supported by the pinned release.*Nothing was installed/);
+      assert.match(error.message, /No SHA-256 is pinned.*unknown\.zip.*\(version 0\.51\.0\).*not supported by the pinned release.*Nothing was installed/);
       return true;
     }
   );
   assert.throws(
-    () => verifyArchiveSha256('unknown.zip', archive, { ...OPENCODE_MANIFEST, checksums: { 'unknown.zip': '0'.repeat(64) } }),
+    () => verifyArchiveSha256('unknown.zip', archive, { ...AST_GREP_MANIFEST, checksums: { 'unknown.zip': '0'.repeat(64) } }),
     (error: Error) => {
-      assert.match(error.message, /SHA-256 mismatch.*1\.1\.65.*unknown\.zip/);
+      assert.match(error.message, /SHA-256 mismatch.*0\.51\.0.*unknown\.zip/);
       return true;
     }
   );
 });
 
-test('installers and the manifest never use a moving latest release URL', async () => {
+test('archive downloads never use a moving latest release URL', async () => {
   const sources = [
     join('src', 'backends', 'cliManifest.ts'),
     join('src', 'backends', 'opencode', 'install.ts'),
