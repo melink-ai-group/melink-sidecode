@@ -1,4 +1,5 @@
 import type { TranscriptItem } from './types.ts';
+import { BackendError } from './types.ts';
 import { compactionSource, fitCompactionSource } from './compaction.ts';
 
 /**
@@ -39,6 +40,27 @@ export function quietContinueNotice(attempt: number, max = STOP_CONTINUE_ATTEMPT
   return `Nothing new arrived, so this continues automatically (${attempt} of ${max}).`;
 }
 
+/**
+ * Provider wording for a temporary host failure: the model host was full, an
+ * upstream rate limit answered, the response stream dropped, or the server
+ * returned an internal error. These are exactly the failures a fresh turn can
+ * survive, so they join the automatic continuation instead of stopping.
+ * Deliberately narrow: no bare `limit` (a usage limit must not loop) and no
+ * auth wording.
+ */
+const TRANSIENT_PROVIDER_FAILURE =
+  /at capacity|overloaded|over capacity|rate limit|too many requests|\b429\b|temporarily unavailable|service unavailable|bad gateway|internal server error|server had an error|stream (disconnected|ended)|connection (reset|refused|closed|failed|aborted)/i;
+
+/** Status line when a temporary provider failure is continued on its own. */
+export function transientContinueNotice(attempt: number, max = STOP_CONTINUE_ATTEMPTS): string {
+  return `The provider had a temporary failure. Continuing automatically (${attempt} of ${max}).`;
+}
+
+/** True when this failure is a temporary provider failure, not a terminal one. */
+export function isTransientProviderError(error: unknown): boolean {
+  return (error instanceof BackendError && error.retryable) || TRANSIENT_PROVIDER_FAILURE.test(errorText(error));
+}
+
 /** True when this failure is a quiet OpenCode turn, not a crash. */
 export function isQuietTurnError(error: unknown): boolean {
   return /went quiet before it finished/i.test(errorText(error));
@@ -59,7 +81,17 @@ export function shouldAutoContinue(error: unknown, attempts: number, max = STOP_
   if (/unauthor|unauthenticated|api key|not found at /i.test(message) && !isMissingThreadError(error)) {
     return false;
   }
+  // A backend that knows the provider's structured error kind marks the
+  // failure retryable itself. This is the exact signal for Codex's
+  // `serverOverloaded` and friends, whose message may be reworded by a newer
+  // CLI; the auth and cancel guards above still win.
+  if (error instanceof BackendError && error.retryable) {
+    return true;
+  }
   if (isMissingThreadError(error)) {
+    return true;
+  }
+  if (TRANSIENT_PROVIDER_FAILURE.test(message)) {
     return true;
   }
   return /stopped unexpectedly|exited unexpectedly|connection closed|not accepting requests|session could not be started or resumed|stream ended before the turn completed|reached the output limit|went quiet before it finished/i.test(

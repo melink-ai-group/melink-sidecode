@@ -72,7 +72,7 @@ There are four possible states per provider:
 |---|---|
 | **available** | Usable now; its models appear in the picker. OpenCode Zen is available with free models even when no key is stored. |
 | **unauthenticated** | Runs, but has no usable credential. Ollama Cloud shows a **Set token** action; Codex jumps to settings. A missing OpenCode Zen key does not make Zen unauthenticated: it only blocks paid models per turn, while free models stay selectable. |
-| **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0â€“0.163.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
+| **incompatible** | Runs, but reports a protocol version outside the range this build supports (pin: `codex-cli 0.156.1`, window `0.154.0â€“0.164.x`). Shown with the version and an **Open settings** action, so a CLI update that breaks Codex is diagnosable instead of silent. |
 | **unavailable** | Cannot run at all (e.g. the Codex CLI is not installed, or a local Ollama server is stopped or has no `/v1`). Hidden entirely â€” never rendered as broken. The provider page shows the actionable reason. |
 
 **Providers are isolated.** If one provider is missing, unauthenticated, or
@@ -303,6 +303,12 @@ useful, an action:
 | Stale conversation on reload | *The previous conversation could not be restoredâ€¦* | â€” |
 | Plan steps remain after an Agent turn | *N plan steps still remain.* | **Prepare follow-up** |
 | Post-turn checks failed | *The post-turn checks failed. See the change card for details.* | **Prepare follow-up** |
+
+A temporary provider failure never waits for a click: when the model host is
+full, an upstream rate limit answers, or the response stream drops, the same
+turn is continued automatically (up to three times) with a notice naming the
+attempt. **Retry** is for a failure that needs you, such as a usage limit, a
+rejected credential, or a request the provider refused.
 
 **Prepare follow-up** only fills a free composer with a fixed next-step sentence;
 it never sends. An existing draft or attachment is left untouched, and while a

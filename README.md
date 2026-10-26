@@ -425,7 +425,7 @@ The OpenCode and Codex paths were verified against the versions below.
   expose `baseInstructions`/`developerInstructions` on `thread/start` and
   `thread/resume`, and no per-turn instructions field on `turn/start`. That is
   why Codex priming is native at start/resume and left to Codex's own file access
-  mid-thread. The supported protocol window is `0.154.0â€“0.163.x`; a server
+  mid-thread. The supported protocol window is `0.154.0â€“0.164.x`; a server
   outside it is reported as `incompatible` with its version rather than used.
 - **opencode: `1.19.x`** â€” Install and Update resolve the latest stable GitHub release, and the T69
   regression ran against the bundled 1.19.x CLI. `opencode run --help` exposes
@@ -752,7 +752,7 @@ Generated protocol bindings are checked in under `schemas/` and the extension
 compiles against them, so a protocol drift surfaces as a build/type error rather
 than a runtime mystery. At runtime, the server's own version (from the
 `initialize` user agent, or `codex --version` when the handshake times out) is
-checked against the pinned protocol window: a version outside `0.154.0â€“0.163.x`
+checked against the pinned protocol window: a version outside `0.154.0â€“0.164.x`
 is reported as the specific `incompatible` status carrying that version, never the
 generic `unavailable` state and never a silent no-op.
 
@@ -784,6 +784,12 @@ capability flag.
   `incompatible` with the CLI's own `codex --version`, not as a silent timeout.
 - **Backoff.** A `-32001` / "Server overloaded; retry later." response is retried
   with exponential backoff plus jitter, up to a capped attempt count.
+- **Failed turns.** Codex has already retried internally when a turn ends
+  `failed`. A transient `codexErrorInfo` (`serverOverloaded`,
+  `rateLimitExceeded`, `internalServerError`, or a dropped response stream or
+  connection) therefore joins the host's bounded automatic continuation instead
+  of stopping for a **Retry** click. A usage limit, context-window, auth or
+  policy failure is shown as a terminal error.
 - **Shutdown.** `dispose()` closes stdin, then sends SIGTERM, then a bounded
   SIGKILL; `deactivate` awaits it so no orphaned `codex` process survives a
   window reload or extension-host restart.

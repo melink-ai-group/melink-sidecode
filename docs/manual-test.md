@@ -66,7 +66,7 @@ readiness rules, assertion tool, and screenshot storage.
 - [ ] 0.2 Restart the host so `deactivate`/`activate` run against a clean state.
 - [ ] 0.3 Record the Codex CLI version: `codex --version`
       (expected baseline: `codex-cli 0.156.1`; the supported protocol window is
-      `0.154.0–0.163.x`). ............
+      `0.154.0–0.164.x`). ............
 - [ ] 0.4 Record the exact CLI path: `where codex` (Windows) / `which codex`
       (macOS/Linux). ............
 - [ ] 0.5 Note the "known good" Codex login state: `codex login status`
@@ -1258,8 +1258,8 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.1 (`package.json`)
-- **Node test files:** 187 (`src/**/*.test.ts`)
-- **Node tests:** 1787 declarations, 1806 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1796 pass, 10 skipped, 0 failures (Node suite within `npm test`).
+- **Node test files:** 188 (`src/**/*.test.ts`)
+- **Node tests:** 1798 declarations, 1817 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1807 pass, 10 skipped, 0 failures (Node suite within `npm test`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 10 files / 74 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.

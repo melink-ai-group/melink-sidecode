@@ -51,6 +51,19 @@ test('the auth code maps the API-key rejection to its own status and never logs'
   assert.equal(/\boutputChannel\b/i.test(auth), false);
 });
 
+test('a transient failed turn continues instead of leaving the chat stopped', async () => {
+  const codex = await source('backends/codex.ts');
+  // The `error` notification for a transient kind must not become a terminal
+  // banner before the failed `turn/completed` is classified.
+  assert.match(codex, /isRetryableCodexFailure\(note\.error\)/);
+  const finish = codex.slice(codex.indexOf('private finishTurn'));
+  // A retryable failed turn hands the waiter back to the host as a failure, and
+  // marks it so the bounded automatic continuation runs rather than a Retry card.
+  assert.match(finish, /isRetryableCodexFailure\(turn\.error\)/);
+  assert.match(finish, /failure\.retryable = true/);
+  assert.match(finish, /pending\.reject\(failure\)/);
+});
+
 test('a resumed Plan thread starts a new Codex thread so the saved Plan instruction is not inherited', async () => {
   const codex = await source('backends/codex.ts');
   assert.match(codex, /needsPlanEscape/);

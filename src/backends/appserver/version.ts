@@ -20,13 +20,19 @@ export const PINNED_CODEX_VERSION = '0.156.1';
 /**
  * The range of server versions this pin is known to interoperate with, as
  * `major`/`minor` numbers. The window spans the previously verified pin
- * (`0.154.0`) through `0.163.x` (Codex app-server `0.163.0`). A patch inside
+ * (`0.154.0`) through `0.164.x` (Codex app-server `0.164.0`). A patch inside
  * that window is accepted; a minor bump past it is reported precisely instead
  * of silently wedging. The checked-in `schemas/` remain generated from the pin.
+ *
+ * `0.164.0` was verified by generating its own TypeScript bindings and
+ * diffing them against `schemas/`: every change was additive (new optional
+ * request fields and new notification methods), no field or notification the
+ * adapter reads was removed or renamed, and a live app-server run completed a
+ * plain turn and a tool turn with the documented shapes.
  */
 export const SUPPORTED_CODEX_MAJOR = 0;
 export const SUPPORTED_CODEX_MINOR_MIN = 154;
-export const SUPPORTED_CODEX_MINOR_MAX = 163;
+export const SUPPORTED_CODEX_MINOR_MAX = 164;
 
 /** A parsed `major.minor.patch`, with the exact server-reported text kept. */
 export interface CodexVersion {
@@ -94,7 +100,7 @@ export function isSupportedCodexVersion(version: CodexVersion | string | undefin
 }
 
 /**
- * The human-readable protocol window, e.g. `0.154.0–0.163.x`, used in the
+ * The human-readable protocol window, e.g. `0.154.0–0.164.x`, used in the
  * plain-language `incompatible` status so the drift is named, not just detected.
  */
 export function supportedCodexVersionRange(): string {

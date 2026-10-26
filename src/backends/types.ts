@@ -1064,6 +1064,14 @@ export class BackendError extends Error {
   readonly code: BackendErrorCode;
   /** The server-reported version, carried only for `incompatible`. */
   readonly version?: string;
+  /**
+   * True when this attempt failed for a transient reason (the model host was
+   * full, an upstream rate limit, a dropped stream, an internal server error)
+   * and re-sending the same turn can recover. Set by the adapter that knows
+   * the provider's structured error kind; the host uses it to continue
+   * automatically instead of stopping for a Retry click.
+   */
+  retryable = false;
 
   constructor(code: BackendErrorCode, message: string, cause?: unknown, version?: string) {
     super(message);
