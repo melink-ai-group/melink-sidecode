@@ -155,6 +155,11 @@ test('the prompt carries the brand kit and the changed frontend files', () => {
   assert.match(prompt, /melink-shell/);
   assert.match(prompt, /src\/webview\/Card\.tsx/);
   assert.match(prompt, /read-only styling-consistency reviewer/i);
+  assert.match(prompt, /buttons, inputs, checkboxes, textareas, selects/i);
+  assert.match(prompt, /other existing pages and shared components/i);
+  assert.match(prompt, /If reference pages are unavailable, do not claim they were checked/i);
+  assert.match(prompt, /user explicitly requests a specific style, redesign, or other departure/i);
+  assert.match(prompt, /Do not report a user-requested style departure as an inconsistency/i);
 });
 
 test('the prompt derives its rules from the kit and assumes no brand', () => {

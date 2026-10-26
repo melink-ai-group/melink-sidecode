@@ -151,6 +151,8 @@ export function buildStylingReviewPrompt(input: StylingReviewInput): string {
     diffText,
     '',
     'Review rules:',
+    '- Compare buttons, inputs, checkboxes, textareas, selects, and other repeated controls against comparable controls on other existing pages and shared components, using the supplied evidence. Check typography, colours, spacing, sizing, borders, radii, and hover/focus/disabled/error states. If reference pages are unavailable, do not claim they were checked or invent cross-page findings.',
+    '- If the user explicitly requests a specific style, redesign, or other departure, respect it for its stated scope and check consistency elsewhere. Do not report a user-requested style departure as an inconsistency.',
     '- Compare the new UI with the brand kit, the design tokens, and the existing components in this project.',
     '- Report only real visual inconsistencies introduced or left by this turn: hardcoded colours or fonts, inline styles that bypass shared state treatments, spacing/radius values off the project scale, missing hover/focus/disabled/error states, and misuse of a colour the kit reserves for a specific role.',
     '- If the brand kit reserves a colour or token for a specific role, respect that reservation; when the kit defines no such reservation, do not invent one.',

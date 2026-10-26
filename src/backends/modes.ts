@@ -1,5 +1,5 @@
 import { DEFAULT_MODES, type DefaultMode, type PermissionLevel } from './types.ts';
-import { frontendChecklist, type FrontendStack } from '../context/frontendStack.ts';
+import { frontendChecklist, STYLING_CONSISTENCY_INSTRUCTIONS, type FrontendStack } from '../context/frontendStack.ts';
 
 /**
  * The one place the shared `DefaultMode` is translated into Codex's own
@@ -28,7 +28,7 @@ import { frontendChecklist, type FrontendStack } from '../context/frontendStack.
  * prompt generation produced the behaviour. It is metadata only and is never
  * sent anywhere.
  */
-export const MODE_PROMPT_VERSION = '2026-10-24';
+export const MODE_PROMPT_VERSION = '2026-10-26';
 
 /** Whether a mode forces the workspace read-only, whatever level was chosen. */
 export type ModeEnforcement = 'act' | 'read-only' | 'answer-only';
@@ -91,10 +91,10 @@ const ENGINEERING_DEFINITION_OF_DONE =
   'Definition of done: read the project\u2019s `package.json` scripts and its README or contributor docs to identify the actual install/build, lint, typecheck, test, and run/dev commands; never assume another repository\u2019s commands.';
 
 /** Agent must run the checks it found, not just name them. */
-const AGENT_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Run every applicable check from that set, and when the target is a web page or app also inspect its console, runtime, and network errors. Report each check\u2019s result or failure before your closing sentence; never claim a check passed without running it.`;
+const AGENT_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Run every applicable check from that set, and when the target is a web page or app also inspect its console, runtime, and network errors. Report each check\u2019s result or failure before your closing sentence; never claim a check passed without running it. ${STYLING_CONSISTENCY_INSTRUCTIONS}`;
 
 /** Plan names its verification and puts it in the plan; it still does not run it. */
-const PLAN_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Name the verification commands this plan depends on, include verification with its expected result in the plan body and steps, and do not run those commands while planning.`;
+const PLAN_DEFINITION_OF_DONE = `${ENGINEERING_DEFINITION_OF_DONE} Name the verification commands this plan depends on, include verification with its expected result in the plan body and steps, and do not run those commands while planning. Include the following styling checks in the frontend plan and its verification steps: ${STYLING_CONSISTENCY_INSTRUCTIONS}`;
 
 /**
  * The one git-safety rule for every mode that can act. Git writes can discard
