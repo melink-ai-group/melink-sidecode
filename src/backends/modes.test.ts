@@ -32,6 +32,15 @@ test('agent and plan carry the engineering definition of done', () => {
     assert.match(text, /test/);
     assert.match(text, /run\/dev/);
     assert.match(text, /never assume another repository/i);
+    // Applies even without a detected framework (plain HTML/CSS, for example).
+    assert.match(text, /inspect comparable controls on other existing pages/i);
+    assert.match(text, /buttons, inputs, checkboxes, textareas, selects/i);
+    assert.match(text, /reuse established components, variants, and design tokens/i);
+    assert.match(text, /Before finishing, compare the changed UI/i);
+    assert.match(text, /user explicitly requests a specific style, redesign, or other departure/i);
+    assert.match(text, /for its stated scope and preserve existing consistency elsewhere/i);
+    assert.match(text, /If no comparable page exists/i);
+    assert.match(text, /do not invent a reference or restyle unrelated pages/i);
   }
   // Agent runs the checks and reports each result before it closes.
   assert.match(agent, /run every applicable check/i);
@@ -43,6 +52,7 @@ test('agent and plan carry the engineering definition of done', () => {
   assert.match(plan, /include verification with its expected result/i);
   assert.match(plan, /do not run those commands while planning/i);
   assert.match(plan, /do not implement the plan/i);
+  assert.doesNotMatch(modeInstructions('ask') ?? '', /Styling consistency:/);
 });
 
 test('ask is answer-only and carries no engineering definition of done', () => {

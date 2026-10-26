@@ -86,9 +86,12 @@ export function detectFrontendStack(snapshot: ProjectSnapshot): FrontendStack {
 }
 
 /**
- * The shared checklist every frontend change gets, whatever the framework.
- * Kept short enough to append to a mode prompt without crowding it.
+ * Cross-page styling guidance for acting modes, even without a detected stack.
  */
+export const STYLING_CONSISTENCY_INSTRUCTIONS =
+  'Styling consistency: for frontend work, inspect comparable controls on other existing pages and their shared components and styles before choosing a style. Compare buttons, inputs, checkboxes, textareas, selects, and other repeated controls; reuse established components, variants, and design tokens for typography, colours, spacing, sizing, borders, and radii, including hover, focus, disabled, and error states. Before finishing, compare the changed UI against those reference pages and correct unintended drift. If the user explicitly requests a specific style, redesign, or other departure, follow that request for its stated scope and preserve existing consistency elsewhere. If no comparable page exists, use the available design system or nearest shared component and state that limitation; do not invent a reference or restyle unrelated pages.';
+
+/** The shared checklist appended for every detected frontend framework. */
 const BASE_CHECKLIST =
   'Frontend checklist: check loading, empty, and error states for every async view; validate input and show field-level errors; verify accessible labels, focus order, and keyboard reachability; check responsive layout and horizontal overflow at narrow widths; keep the console free of errors, uncaught exceptions, and failed network requests; keep copy and terminology consistent across the UI.';
 
