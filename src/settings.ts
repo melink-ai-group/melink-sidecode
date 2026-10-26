@@ -978,7 +978,7 @@ export class SettingsService {
     });
     const installed = await installOpencodeRelease({
       installDir,
-      // Bundled stays inside the extension tree; do not rewrite the user PATH.
+      // Bundled stays in extension global storage; do not rewrite the user PATH.
       persistPath: target.source === 'local'
     });
     if (!installed.ok || !installed.executablePath) {
@@ -989,6 +989,12 @@ export class SettingsService {
       return {
         ok: false,
         message: 'opencode was downloaded, but it did not start. Check the path, then try again.'
+      };
+    }
+    if (after.version !== installed.version) {
+      return {
+        ok: false,
+        message: `Expected opencode ${installed.version}, but the installed executable reports ${after.version ?? 'an unknown version'}. Check the path, then try again.`
       };
     }
     await config.update(
@@ -1007,7 +1013,8 @@ export class SettingsService {
     return {
       ok: true,
       message: `opencode${version} ${verb}.`,
-      executablePath: installed.executablePath
+      executablePath: installed.executablePath,
+      version: installed.version
     };
   }
 
