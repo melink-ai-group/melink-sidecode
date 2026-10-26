@@ -1273,7 +1273,7 @@ Measured on the current working tree, so the numbers stay truthful before sign-o
 
 - **Package version:** 0.2.1 (`package.json`)
 - **Node test files:** 192 (`src/**/*.test.ts`)
-- **Node tests:** 1820 declarations, 1839 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1829 pass, 10 skipped, 0 failures (Node suite within `npm test`).
+- **Node tests:** 1823 declarations, 1842 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1832 pass, 10 skipped, 0 failures (Node suite within `npm test`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 10 files / 80 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.

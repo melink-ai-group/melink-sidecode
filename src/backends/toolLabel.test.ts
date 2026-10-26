@@ -21,6 +21,64 @@ test('a missing target stays a verb and never invents a path', () => {
   assert.equal(friendlyToolTitle('grep', 'completed'), 'Searching');
 });
 
+test('command titles unwrap common shell launchers and keep command quoting', () => {
+  const cases = [
+    ['"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content package.json"', 'Get-Content package.json'],
+    ["pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command 'npm run build'", 'npm run build'],
+    ['powershell.exe -c "npm test"', 'npm test'],
+    ["/bin/bash -lc 'npm run lint && npm test'", 'npm run lint && npm test'],
+    ['sh -c "echo hello"', 'echo hello'],
+    ["zsh --login -c 'git status'", 'git status'],
+    ['cmd.exe /d /s /c "npm run build"', 'npm run build'],
+    ['cmd /c dir src', 'dir src'],
+    ['bash -c "pwsh -Command npm test"', 'npm test'],
+    ["bash -lc 'rg \"two words\" src'", 'rg "two words" src'],
+    ['pwsh -Command "Get-Content package.json\nGet-Location"', 'Get-Content package.json'],
+    ['npm test', 'npm test']
+  ];
+  for (const [command, expected] of cases) {
+    for (const tool of ['command', 'bash', 'shell', 'exec', 'powershell']) {
+      assert.equal(friendlyToolTitle(tool, command), `Running ${expected}`, command);
+    }
+  }
+});
+
+test('unsupported, incomplete and script-file launchers retain their original title', () => {
+  for (const command of [
+    'pwsh -EncodedCommand bm9wZQ==',
+    'powershell -File build.ps1',
+    'bash build.sh',
+    'bash -c',
+    'bash -c ""',
+    'bash -c "npm test',
+    "bash -c 'echo hello' argument",
+    'bash -c "npm test" "argument"',
+    'bash -c npm test',
+    '/bin/sh -c echo hello',
+    'zsh -lc npm run build',
+    'dash -c npm test',
+    'ksh -c npm test',
+    'custom-shell -c "npm test"',
+    'echo powershell -Command npm test'
+  ]) {
+    assert.equal(friendlyToolTitle('command', command), `Running ${command}`);
+  }
+});
+
+test('live and replayed command cards simplify only the title and preserve full detail', () => {
+  const command = '"C:/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe" -Command "npm run build"';
+  for (const title of ['command', `Running ${command}`, friendlyToolTitle('command', command)]) {
+    assert.deepEqual(toolCardPresentation({ title, command, detail: 'build output' }), {
+      title: 'Running npm run build',
+      detail: command
+    });
+  }
+  assert.deepEqual(toolCardPresentation({ title: 'Checking the build', command }), {
+    title: 'Checking the build',
+    detail: command
+  });
+});
+
 test('tool targets come from the call payload, not the status', () => {
   assert.equal(targetForTool('read', { filePath: 'src/App.tsx' }), 'src/App.tsx');
   assert.equal(targetForTool('grep', { pattern: 'token', path: 'src' }), 'token');
