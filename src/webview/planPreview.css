@@ -45,9 +45,9 @@ body {
   margin-left: auto;
   min-height: 28px;
   padding: 4px 16px;
-  border: 1px solid var(--melink-primary-blue);
+  border: 1px solid var(--melink-primary);
   border-radius: var(--melink-radius-md, 6px);
-  background: var(--melink-primary-blue);
+  background: var(--melink-primary);
   color: var(--melink-surface);
   font: inherit;
   font-size: 13px;
@@ -56,8 +56,8 @@ body {
 }
 
 .plan-preview__build:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
-  background: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
+  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
+  background: color-mix(in srgb, var(--melink-primary) 85%, black);
 }
 
 .plan-preview__build:focus-visible {

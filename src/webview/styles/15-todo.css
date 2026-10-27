@@ -94,7 +94,7 @@
 .todo__fill {
   display: block;
   height: 100%;
-  background: var(--vscode-descriptionForeground);
+  background: var(--melink-primary);
   transition: width 0.2s ease;
 }
 
@@ -130,9 +130,11 @@
   margin-top: 0;
 }
 
+/* The running step is the plan's one highlight: a sideCode-blue tint keeps it
+ * distinct from a plain hovered row without competing with the transcript. */
 .todo__item--active {
-  border-color: var(--vscode-widget-border, var(--vscode-panel-border));
-  background: var(--vscode-list-hoverBackground);
+  border-color: color-mix(in srgb, var(--melink-shell) 40%, var(--vscode-widget-border, var(--vscode-panel-border)));
+  background: color-mix(in srgb, var(--melink-shell) 10%, var(--vscode-editorWidget-background));
 }
 
 /* A denied step never ran. The red cross sits with the label, and the word

@@ -235,13 +235,13 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
-  color: white;
   font-size: 13px;
   line-height: 1.5;
   padding: 10px 12px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border: 1px solid color-mix(in srgb, var(--melink-shell) 30%, var(--vscode-widget-border, var(--vscode-panel-border)));
   border-radius: var(--melink-radius-lg, 8px);
-  background: color-mix(in srgb, var(--vscode-list-hoverBackground) 75%, transparent);
+  background: color-mix(in srgb, var(--melink-shell) 10%, var(--vscode-sideBar-background));
+  color: var(--vscode-foreground);
 }
 
 .user-pin__text--fade {
@@ -250,7 +250,7 @@
 }
 
 .user-pin:hover .user-pin__text {
-  border-color: var(--vscode-focusBorder);
+  border-color: var(--melink-primary);
 }
 
 .user-pin:focus-visible {
@@ -356,15 +356,16 @@
   gap: 8px;
   min-width: 0;
   padding: 8px 8px 8px 10px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border: 1px solid color-mix(in srgb, var(--melink-shell) 30%, var(--vscode-widget-border, var(--vscode-panel-border)));
+  border-left: 2px solid var(--melink-primary);
   border-radius: var(--melink-radius-lg, 8px);
-  background: color-mix(in srgb, var(--vscode-list-hoverBackground) 75%, transparent);
-  color: white;
+  background: color-mix(in srgb, var(--melink-shell) 10%, var(--vscode-sideBar-background));
+  color: var(--vscode-foreground);
 }
 
 .turn-user-box > .turn-body {
   flex: 1 1 auto;
-  color: white;
+  color: var(--vscode-foreground);
 }
 
 .turn--user .turn-body .md,
@@ -372,7 +373,7 @@
 .turn--user .turn-body .md__heading,
 .turn--user .turn-body .md__list,
 .turn--user .turn-body .md__quote {
-  color: white;
+  color: var(--vscode-foreground);
 }
 
 .turn--user .turn-body .md > * {
