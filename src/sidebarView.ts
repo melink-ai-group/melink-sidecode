@@ -5155,6 +5155,28 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Add one host-captured image to the open chat's composer.
+   *
+   * The browser tab writes the PNG and hands the attachment here. False means
+   * no chat tab is open, so the browser tab can say so instead of dropping the
+   * capture. The typed text is untouched; the chip is appended through
+   * `attachmentsAdded` and the draft is persisted with the tab.
+   */
+  attachBrowserImage(attachment: Attachment): boolean {
+    const session = this.visible;
+    if (!session || session.disposed) {
+      return false;
+    }
+    const key = attachment.path ?? attachment.id;
+    if (!session.composerAttachments.some((item) => (item.path ?? item.id) === key)) {
+      session.composerAttachments = [...session.composerAttachments, attachment];
+    }
+    this.queueComposerPersist(session);
+    this.post({ type: 'attachmentsAdded', tabId: session.id, attachments: [attachment] });
+    return true;
+  }
+
+  /**
    * Opens a native multi-select file picker for attachments and answers with
    * the chosen files' metadata. A dismissed picker answers `cancelled`, which
    * leaves the composer unchanged; nothing is logged and no file is read.

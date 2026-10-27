@@ -17,7 +17,8 @@ import {
   SessionOrigins,
   type BrowserSkillProvider
 } from './policy.ts';
-import type { DefaultMode } from '../backends/types.ts';
+import type { Attachment, DefaultMode } from '../backends/types.ts';
+import { browserImageAttachment } from './capture.ts';
 import { BrowserPage } from './session.ts';
 import { preflightNavigation } from './preflight.ts';
 import { saveSnapshotPng } from './snapshot.ts';
@@ -42,6 +43,11 @@ export class BrowserSkill {
   private readonly sessionOrigins = new SessionOrigins();
   private launchErrorListener?: () => void;
   private modeProvider?: () => DefaultMode;
+  private attachmentSink?: (attachment: Attachment) => Promise<boolean> | boolean;
+  /** Page input is serialized so a drag never overtakes its own press. */
+  private inputChain: Promise<void> = Promise.resolve();
+  private hoverPending?: { x: number; y: number };
+  private hoverRunning = false;
   launchError?: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
@@ -56,6 +62,15 @@ export class BrowserSkill {
    */
   setModeProvider(read: () => DefaultMode): void {
     this.modeProvider = read;
+  }
+
+  /**
+   * Where a snippet or whole-view capture goes. The host adds it to the open
+   * chat's composer and returns false when no chat tab is open, so the browser
+   * tab can say so instead of dropping the image.
+   */
+  setAttachmentSink(sink: (attachment: Attachment) => Promise<boolean> | boolean): void {
+    this.attachmentSink = sink;
   }
 
   /** Whether this call must surface the origin approval prompt. */
@@ -305,20 +320,24 @@ export class BrowserSkill {
 
   private ensurePanel(location: { url: string; title: string }): void {
     if (!this.panel) {
-      this.panel = new BrowserPanel(
-        (x, y) => {
-          void this.page?.clickFraction(x, y);
-        },
-        (key) => {
-          void this.page?.press(key);
-        },
-        (url) => {
+      this.panel = new BrowserPanel({
+        navigate: (url) => {
           void this.handle('browser_navigate', { url });
         },
-        (width, height) => {
+        resize: (width, height) => {
           void this.handle('browser_resize', { width, height });
-        }
-      );
+        },
+        pointer: (action, x, y, options) => this.pointer(action, x, y, options),
+        wheel: (x, y, dx, dy) => this.wheel(x, y, dx, dy),
+        keyDown: (key) => this.keyDown(key),
+        keyUp: (key) => this.keyUp(key),
+        insertText: (text) => this.insertText(text),
+        paste: () => this.paste(),
+        hover: (x, y) => this.hover(x, y),
+        leave: () => this.leave(),
+        capture: (rect) => void this.attachCapture(rect),
+        blur: () => this.releaseKeys()
+      });
     }
     const viewport = this.page?.viewport() ?? { width: 1280, height: 800 };
     const state: BrowserTabState = {
@@ -338,6 +357,160 @@ export class BrowserSkill {
       title: location.title || 'Browser',
       ...page.viewport()
     });
+  }
+
+  /** Queue one page input so a drag's move never runs before its press. */
+  private queueInput(task: () => Promise<void>): void {
+    this.inputChain = this.inputChain.then(task, task).catch(() => undefined);
+  }
+
+  private pointer(
+    action: 'move' | 'down' | 'up',
+    x: number,
+    y: number,
+    options?: { button?: number; clickCount?: number }
+  ): void {
+    const button = options?.button === 1 ? 'middle' : options?.button === 2 ? 'right' : 'left';
+    const clickCount = options?.clickCount && options.clickCount > 1 ? options.clickCount : 1;
+    this.queueInput(async () => {
+      const page = this.page;
+      if (!page) {
+        return;
+      }
+      if (action === 'move') {
+        await page.moveFraction(x, y);
+        return;
+      }
+      if (action === 'down') {
+        await page.downFraction(x, y, { button, clickCount });
+        return;
+      }
+      await page.upFraction(x, y, { button, clickCount });
+    });
+  }
+
+  private wheel(x: number, y: number, dx: number, dy: number): void {
+    this.queueInput(async () => {
+      await this.page?.wheelFraction(x, y, dx, dy);
+    });
+  }
+
+  private keyDown(key: string): void {
+    this.queueInput(async () => {
+      await this.page?.keyDown(key);
+    });
+  }
+
+  private keyUp(key: string): void {
+    this.queueInput(async () => {
+      await this.page?.keyUp(key);
+    });
+  }
+
+  private insertText(text: string): void {
+    this.queueInput(async () => {
+      await this.page?.insertText(text);
+    });
+  }
+
+  /**
+   * Paste the OS clipboard into the page.
+   *
+   * The panel is not an editable field, so the webview's own paste event does
+   * not fire there; the host reads the clipboard and inserts it, which also
+   * works for a page input that has focus in the headless browser.
+   */
+  private paste(): void {
+    this.queueInput(async () => {
+      try {
+        const text = await vscode.env.clipboard.readText();
+        if (text) {
+          await this.page?.insertText(text);
+        }
+      } catch {
+        // A clipboard that cannot be read leaves the page unchanged.
+      }
+    });
+  }
+
+  private releaseKeys(): void {
+    this.queueInput(async () => {
+      await this.page?.releaseKeys();
+    });
+  }
+
+  /**
+   * The page's cursor under the pointer, coalesced.
+   *
+   * A move can arrive faster than a cursor read; only the latest position is
+   * kept, and a slow page never builds an unbounded queue behind the pointer.
+   */
+  private hover(x: number, y: number): void {
+    this.hoverPending = { x, y };
+    if (this.hoverRunning) {
+      return;
+    }
+    this.hoverRunning = true;
+    this.queueInput(async () => {
+      try {
+        while (this.hoverPending) {
+          const point = this.hoverPending;
+          this.hoverPending = undefined;
+          const page = this.page;
+          if (!page) {
+            break;
+          }
+          await page.moveFraction(point.x, point.y);
+          this.panel?.cursor(await page.cursorAtFraction(point.x, point.y));
+        }
+      } finally {
+        this.hoverRunning = false;
+      }
+    });
+  }
+
+  /** Clear the page's hover state when the pointer leaves the image. */
+  private leave(): void {
+    this.queueInput(async () => {
+      await this.page?.leavePointer();
+    });
+  }
+
+  /**
+   * Save and attach one capture. No rect means the whole viewport.
+   *
+   * The PNG goes under `.melink/reports/browser/` when a workspace is open;
+   * otherwise the inline data URL is the attachment and the draft writer keeps
+   * the bytes. The chat sink returns false when no tab is open.
+   */
+  private async attachCapture(rect?: { x: number; y: number; width: number; height: number }): Promise<void> {
+    const page = this.page;
+    if (!page) {
+      this.panel?.attachError('The browser is not open.');
+      return;
+    }
+    try {
+      const shot = await page.capture(rect);
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const saved = await saveSnapshotPng(root, shot);
+      const attachment = browserImageAttachment({
+        pngBase64: shot.pngBase64,
+        title: shot.title,
+        url: shot.url,
+        kind: rect ? 'snippet' : 'page',
+        ...(saved.path ? { path: saved.path } : {})
+      });
+      const sink = this.attachmentSink;
+      const attached = sink ? await sink(attachment) : false;
+      if (!attached) {
+        this.panel?.attachError('Open a chat tab, then capture again.');
+        return;
+      }
+      this.panel?.attached(`Attached ${attachment.name} to the chat.`);
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : 'The capture failed.';
+      this.panel?.attachError(message);
+    }
   }
 
   /**

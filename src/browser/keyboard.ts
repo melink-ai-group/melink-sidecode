@@ -1,39 +1,29 @@
 /**
- * Turn a webview keydown event into the chord Playwright's `keyboard.press`
- * accepts, such as `Control+Shift+ArrowLeft`. Pure and self-contained so the
- * same source can be serialized into the panel's script.
+ * Key names for the browser panel's user input.
+ *
+ * The panel forwards each keydown/keyup with the DOM's `event.key`, so held
+ * modifiers reach the same Playwright page as a click or shortcut. Composition
+ * keys and dead keys produce text through `compositionend`/paste instead, so
+ * they are not key presses.
  */
-export interface KeyEventLike {
-  key: string;
-  ctrlKey?: boolean;
-  altKey?: boolean;
-  metaKey?: boolean;
-  shiftKey?: boolean;
-}
 
-export function composeKey(event: KeyEventLike): string {
-  const key = typeof event.key === 'string' ? event.key : '';
-  if (!key) {
-    return '';
+/**
+ * A DOM `KeyboardEvent.key` as the key name Playwright's `keyboard.down` and
+ * `keyboard.up` accept. Undefined means "do not forward this key".
+ */
+export function normalizeKey(key: string): string | undefined {
+  const value = typeof key === 'string' ? key : '';
+  if (!value) {
+    return undefined;
   }
-  if (key === 'Control' || key === 'Alt' || key === 'Meta' || key === 'Shift') {
-    return key;
+  if (value === ' ' || value === 'Spacebar') {
+    return 'Space';
   }
-  const parts: string[] = [];
-  if (event.ctrlKey) {
-    parts.push('Control');
+  if (value === 'Esc') {
+    return 'Escape';
   }
-  if (event.altKey) {
-    parts.push('Alt');
+  if (value === 'Unidentified' || value === 'Dead' || value === 'Process' || value === 'AltGraph') {
+    return undefined;
   }
-  if (event.metaKey) {
-    parts.push('Meta');
-  }
-  if (event.shiftKey) {
-    parts.push('Shift');
-  }
-  if (parts.length === 0) {
-    return key;
-  }
-  return [...parts, key].join('+');
+  return value;
 }

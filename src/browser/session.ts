@@ -4,6 +4,7 @@
  */
 
 import { ConsoleBuffer, attachPageDiagnostics } from './consoleBuffer.ts';
+import { normalizeKey } from './keyboard.ts';
 import type { AssertInput, AssertResult } from './tools.ts';
 
 const CHANNELS = ['msedge', 'chrome'] as const;
@@ -330,6 +331,23 @@ export interface PageLocation {
   title: string;
 }
 
+/** A mouse button the panel can send; the DOM's left, middle, right. */
+export type MouseButton = 'left' | 'middle' | 'right';
+
+/** One pointer press from the panel, with the browser's click count. */
+export interface PointerOptions {
+  button?: MouseButton;
+  clickCount?: number;
+}
+
+/** A viewport selection from the panel, from 0 to 1. */
+export interface SelectionRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface PlaywrightPage {
   on(event: 'console' | 'pageerror' | 'requestfailed' | 'response', handler: (value: unknown) => void): void;
   off?(event: 'console' | 'pageerror' | 'requestfailed' | 'response', handler: (value: unknown) => void): void;
@@ -337,12 +355,15 @@ export interface PlaywrightPage {
   goBack(options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<unknown>;
   goForward(options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<unknown>;
   reload(options?: { waitUntil?: 'domcontentloaded'; timeout?: number }): Promise<unknown>;
-  evaluate<T>(probe: () => T): Promise<T>;
+  evaluate<T, A = undefined>(probe: (arg: A) => T, arg?: A): Promise<T>;
   url(): string;
   title(): Promise<string>;
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   viewportSize(): { width: number; height: number } | null;
-  screenshot(options: { type: 'png' }): Promise<Buffer>;
+  screenshot(options: {
+    type: 'png';
+    clip?: { x: number; y: number; width: number; height: number };
+  }): Promise<Buffer>;
   locator(selector: string): {
     ariaSnapshot(): Promise<string>;
     click(options: { timeout: number }): Promise<void>;
@@ -352,8 +373,20 @@ export interface PlaywrightPage {
     first(): { click(options: { timeout: number }): Promise<void> };
     count(): Promise<number>;
   };
-  mouse: { click(x: number, y: number): Promise<void>; wheel(deltaX: number, deltaY: number): Promise<void> };
-  keyboard: { type(text: string): Promise<void>; press(key: string): Promise<void>; insertText?(text: string): Promise<void> };
+  mouse: {
+    click(x: number, y: number, options?: PointerOptions): Promise<void>;
+    move(x: number, y: number, options?: { steps?: number }): Promise<void>;
+    down(options?: PointerOptions): Promise<void>;
+    up(options?: PointerOptions): Promise<void>;
+    wheel(deltaX: number, deltaY: number): Promise<void>;
+  };
+  keyboard: {
+    type(text: string): Promise<void>;
+    press(key: string): Promise<void>;
+    down?(key: string): Promise<void>;
+    up?(key: string): Promise<void>;
+    insertText?(text: string): Promise<void>;
+  };
   context(): { newCDPSession(page: PlaywrightPage): Promise<CdpSession> };
 }
 
@@ -376,6 +409,14 @@ export interface PlaywrightModule {
   };
 }
 
+/** Only forward the fields the page needs; one click stays the default count. */
+function pointerOptions(options?: PointerOptions): PointerOptions {
+  return {
+    ...(options?.button ? { button: options.button } : {}),
+    ...(options?.clickCount && options.clickCount > 1 ? { clickCount: options.clickCount } : {})
+  };
+}
+
 export class BrowserPage {
   private browser?: PlaywrightBrowser;
   private page?: PlaywrightPage;
@@ -384,6 +425,8 @@ export class BrowserPage {
   private height = 800;
   private readonly diagnostics = new ConsoleBuffer();
   private readonly playwright?: PlaywrightModule;
+  /** Keys the panel is holding down, so blur or close can release them. */
+  private readonly heldKeys = new Set<string>();
   private detachDiagnostics?: () => void;
   /** Kept so a navigation after `close` can open a fresh browser. */
   private onFrame?: (jpegBase64: string) => void;
@@ -568,14 +611,202 @@ export class BrowserPage {
     throw new Error('Provide a selector, visible text, or both x and y.');
   }
 
-  /** `x` and `y` are fractions of the viewport, from the editor tab. */
-  async clickFraction(x: number, y: number): Promise<void> {
+  /**
+   * A viewport fraction as CSS pixels inside the page.
+   *
+   * Fractions come from the panel and may be exactly 1; the last addressable
+   * pixel is width - 1, so the point stays inside the viewport.
+   */
+  private fractionPoint(x: number, y: number): { px: number; py: number } {
+    const page = this.requirePage();
+    const size = page.viewportSize() ?? { width: this.width, height: this.height };
+    return {
+      px: Math.min(size.width - 1, Math.max(0, x * size.width)),
+      py: Math.min(size.height - 1, Math.max(0, y * size.height))
+    };
+  }
+
+  /** Move the page pointer to a viewport fraction. */
+  async moveFraction(x: number, y: number): Promise<void> {
+    const page = this.requirePage();
+    const { px, py } = this.fractionPoint(x, y);
+    await page.mouse.move(px, py);
+  }
+
+  /** Move the page pointer outside the viewport so hover styles clear. */
+  async leavePointer(): Promise<void> {
+    const page = this.page;
+    if (!page) {
+      return;
+    }
+    try {
+      await page.mouse.move(-1, -1);
+    } catch {
+      // A page that refuses the out-of-view point keeps the last hover.
+    }
+  }
+
+  /** Press a button at a viewport fraction; the release arrives separately. */
+  async downFraction(x: number, y: number, options?: PointerOptions): Promise<void> {
     const page = this.requirePage();
     this.invalidateNavigation();
+    const { px, py } = this.fractionPoint(x, y);
+    await page.mouse.move(px, py);
+    await page.mouse.down(pointerOptions(options));
+  }
+
+  /** Release a button at a viewport fraction, ending a click or a drag. */
+  async upFraction(x: number, y: number, options?: PointerOptions): Promise<void> {
+    const page = this.requirePage();
+    this.invalidateNavigation();
+    const { px, py } = this.fractionPoint(x, y);
+    await page.mouse.move(px, py);
+    await page.mouse.up(pointerOptions(options));
+  }
+
+  /** Scroll at a viewport fraction, so the wheel acts under the pointer. */
+  async wheelFraction(x: number, y: number, dx: number, dy: number): Promise<void> {
+    const page = this.requirePage();
+    const { px, py } = this.fractionPoint(x, y);
+    await page.mouse.move(px, py);
+    await page.mouse.wheel(dx, dy);
+  }
+
+  /**
+   * The page's own cursor at a viewport fraction, for the image cursor.
+   * Unreadable pages fall back to the default cursor instead of failing input.
+   */
+  async cursorAtFraction(x: number, y: number): Promise<string> {
+    const page = this.requirePage();
+    const { px, py } = this.fractionPoint(x, y);
+    try {
+      const value = await withDeadline(
+        page.evaluate(
+          ([pointX, pointY]: [number, number]) => {
+            const element = document.elementFromPoint(pointX, pointY);
+            if (!element) {
+              return 'default';
+            }
+            const style = getComputedStyle(element);
+            if (style.cursor && style.cursor !== 'auto') {
+              return style.cursor;
+            }
+            // `auto` is the UA default, not a pointer; text controls and
+            // editable content read as text, everything else as the arrow.
+            if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || (element as HTMLElement).isContentEditable) {
+              return 'text';
+            }
+            return 'default';
+          },
+          [px, py] as [number, number]
+        ),
+        PAGE_METADATA_TIMEOUT_MS,
+        'The page cursor did not respond.'
+      );
+      return typeof value === 'string' && value ? value : 'default';
+    } catch {
+      return 'default';
+    }
+  }
+
+  /** Hold a key down so modifiers stay held for a click or shortcut. */
+  async keyDown(key: string): Promise<void> {
+    const name = normalizeKey(key);
+    const page = this.page;
+    if (!name || !page || !page.keyboard.down) {
+      return;
+    }
+    this.invalidateNavigation();
+    this.heldKeys.add(name);
+    try {
+      await page.keyboard.down(name);
+    } catch {
+      this.heldKeys.delete(name);
+    }
+  }
+
+  /** Release one key, ignoring keys the page no longer holds. */
+  async keyUp(key: string): Promise<void> {
+    const name = normalizeKey(key);
+    const page = this.page;
+    if (!name || !page) {
+      return;
+    }
+    this.heldKeys.delete(name);
+    try {
+      await page.keyboard.up?.(name);
+    } catch {
+      // A key that composition or the page already released has nothing to do.
+    }
+  }
+
+  /** Release every held key, for a window blur or a panel close. */
+  async releaseKeys(): Promise<void> {
+    const page = this.page;
+    const names = [...this.heldKeys];
+    this.heldKeys.clear();
+    if (!page) {
+      return;
+    }
+    for (const name of names) {
+      try {
+        await page.keyboard.up?.(name);
+      } catch {
+        // Best effort; closing the page also releases the key state.
+      }
+    }
+  }
+
+  /** Insert composed or pasted text without synthesizing key presses. */
+  async insertText(text: string): Promise<void> {
+    const page = this.page;
+    const value = typeof text === 'string' ? text : '';
+    if (!page || !value) {
+      return;
+    }
+    this.invalidateNavigation();
+    if (page.keyboard.insertText) {
+      await page.keyboard.insertText(value);
+      return;
+    }
+    await page.keyboard.type(value);
+  }
+
+  /**
+   * A PNG of the viewport, or of one selected area.
+   *
+   * The panel sends viewport fractions; Playwright's `clip` is in page
+   * coordinates, so the current scroll offset is added. `undefined` captures
+   * the whole viewport.
+   */
+  async capture(rect?: SelectionRect): Promise<{ pngBase64: string; url: string; title: string }> {
+    const page = this.requirePage();
     const size = page.viewportSize() ?? { width: this.width, height: this.height };
-    const px = Math.min(size.width - 1, Math.max(0, x * size.width));
-    const py = Math.min(size.height - 1, Math.max(0, y * size.height));
-    await page.mouse.click(px, py);
+    const title = await withDeadline(
+      page.title(),
+      PAGE_METADATA_TIMEOUT_MS,
+      'The page title did not respond.'
+    ).catch(() => '');
+    let clip: { x: number; y: number; width: number; height: number } | undefined;
+    if (rect) {
+      const scroll = await page
+        .evaluate(() => ({ x: window.scrollX, y: window.scrollY }))
+        .catch(() => ({ x: 0, y: 0 }));
+      const scrollX = Number.isFinite(scroll?.x) ? scroll.x : 0;
+      const scrollY = Number.isFinite(scroll?.y) ? scroll.y : 0;
+      const left = Math.min(size.width - 1, Math.max(0, rect.x * size.width));
+      const top = Math.min(size.height - 1, Math.max(0, rect.y * size.height));
+      const rawWidth = Math.min(size.width, left + rect.width * size.width) - left;
+      const rawHeight = Math.min(size.height, top + rect.height * size.height) - top;
+      if (!(rawWidth >= 1) || !(rawHeight >= 1)) {
+        throw new Error('Select a larger area.');
+      }
+      const width = Math.max(1, Math.round(rawWidth));
+      const height = Math.max(1, Math.round(rawHeight));
+      clip = { x: Math.round(scrollX + left), y: Math.round(scrollY + top), width, height };
+    }
+    const png = await page.screenshot({ type: 'png', ...(clip ? { clip } : {}) });
+    return { pngBase64: png.toString('base64'), url: page.url(), title };
   }
 
   async type(text: string, selector?: string): Promise<void> {
@@ -619,6 +850,7 @@ export class BrowserPage {
     }
     this.detachDiagnostics?.();
     this.detachDiagnostics = undefined;
+    this.heldKeys.clear();
     this.diagnostics.clear();
     this.lastStatus = undefined;
     this.lastNavigation = undefined;

@@ -28,6 +28,7 @@ const URGENT_HOST_MESSAGES = new Set([
   'question/asked',
   'question/cleared',
   'composerDraft',
+  'attachmentsAdded',
   'dictationCleaned',
   'dictationError',
   'dictationStatus',

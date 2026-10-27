@@ -550,6 +550,25 @@ any pattern you add to `melink.context.exclude`, is honored.
 No project-derived content from the picture is written to disk, logs, output
 channels, telemetry, or error text.
 
+## The browser tab
+
+The browser tab is interactive. Clicks, drags, double-clicks, right-clicks,
+wheel scrolling, typing, clipboard paste, and shortcuts are forwarded to the
+page the agent is driving, and the page's cursor appears over the image. Escape
+leaves snippet mode, or returns focus from the image to the address bar.
+
+The toolbar sets the page viewport: enter a width (200-3840) and height
+(200-2160), then choose **Apply**. The label beside the controls shows the
+current size.
+
+**Snippet** turns the page into a selection surface. Drag over one area and the
+selection becomes a PNG attachment in the open chat's composer, ready to send
+with your next message. **Capture page** attaches the whole visible viewport the
+same way. Captures are written under `.melink/reports/browser/` (local and
+gitignored) when a workspace is open; without a workspace the image stays inline
+with the draft. If no chat tab is open, the tab says so instead of dropping the
+capture.
+
 ## Browser origin approvals
 
 Browser tools open a tab in the editor that you watch. Only **Ask mode** asks for

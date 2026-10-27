@@ -294,6 +294,13 @@ export function App(): JSX.Element {
         case 'composerDraft':
           onComposerDraftRef.current(message);
           break;
+        case 'attachmentsAdded':
+          if (message.tabId !== activeChatTabIdRef.current) {
+            break;
+          }
+          markComposerEdited();
+          dispatch({ type: 'addAttachments', attachments: message.attachments });
+          break;
         case 'agentEvent':
           dispatch({ type: 'agentEvent', event: message.event });
           if (message.event.type === 'approval/decided') {

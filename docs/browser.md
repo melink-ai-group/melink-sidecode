@@ -32,6 +32,35 @@ server for this repository.
   file in global storage, so two windows never share a browser. The file is
   removed when that window stops the skill.
 
+## Interacting in the tab
+
+The image is an input surface, not a picture: pointer moves, presses, drags,
+wheel deltas, and keyboard events are forwarded to the same Playwright page, and
+the page's own cursor is mirrored on the image. The image never starts a native
+image drag; selecting text in the tab does nothing.
+
+- Click, drag, double-click, and right-click work. Ctrl/Shift/Alt/Meta stay held
+  across a click, so link modifiers and shortcuts behave as in the page.
+- Wheel scrolling acts under the pointer; line and page deltas are converted to
+  pixels.
+- Typing, Tab/Shift+Tab, arrows, Escape, and shortcuts reach the page while the
+  image has focus. Composed (IME) text and pasted text are inserted directly.
+- Escape leaves snippet mode. With snippet mode off, it blurs the image and
+  returns focus to the address bar.
+- **Width** and **Height** set the viewport, from 200 to 3840 × 200 to 2160 CSS
+  px, and **Apply** resizes the page. The meta label shows the current size.
+- **Snippet** turns the image into a selection surface: drag over the area and
+  it is captured as a PNG and added to the open chat's composer. **Capture page**
+  attaches the whole viewport the same way.
+- Captures are saved under `.melink/reports/browser/` (gitignored) when a
+  workspace is open. With no workspace the inline PNG is the attachment and the
+  host keeps it beside the draft. A capture with no open chat tab reports that
+  instead of dropping the image.
+
+Headless pages still do not show native browser UI. JavaScript dialogs, file
+pickers, and browser context menus are outside the page image; a page that opens
+one can look stuck.
+
 ## Tools
 
 All tools act on the page in the editor tab the user is watching.

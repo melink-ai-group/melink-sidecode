@@ -19,7 +19,7 @@ import {
   originApprovalRequired,
   SessionOrigins
 } from './policy.ts';
-import { BrowserPage, type PlaywrightModule, type PlaywrightPage } from './session.ts';
+import { BrowserPage, type PlaywrightModule, type PlaywrightPage, type PointerOptions } from './session.ts';
 import { BROWSER_TOOLS, runBrowserTool, type BrowserActions, type OriginApproval, type ToolResult } from './tools.ts';
 import { buildOpencodeConfig } from '../backends/opencode/config.ts';
 
@@ -446,6 +446,102 @@ test('non-navigation actions do not clear buffered diagnostics', async () => {
   await browserPage.close();
 });
 
+test('pointer fractions map onto the viewport and keep drag order', async () => {
+  const { module, browsers } = fakePlaywright();
+  const browserPage = new BrowserPage(module);
+  await browserPage.open(() => undefined);
+  const page = browsers[0]?.pages[0];
+  assert.ok(page);
+
+  await browserPage.moveFraction(0.5, 0.25);
+  await browserPage.downFraction(0.5, 0.25, { button: 'left', clickCount: 2 });
+  await browserPage.moveFraction(0.75, 0.5);
+  await browserPage.upFraction(0.75, 0.5, { button: 'left', clickCount: 2 });
+  await browserPage.wheelFraction(0.75, 0.5, 10, -20);
+
+  assert.deepEqual(page.mouseCalls, [
+    'move:640,200',
+    'move:640,200',
+    'down:left:2',
+    'move:960,400',
+    'move:960,400',
+    'up:left:2',
+    'move:960,400',
+    'wheel:10,-20'
+  ]);
+  await browserPage.close();
+});
+
+test('the page cursor is read at the pointer and degrades to default', async () => {
+  const { module, browsers } = fakePlaywright();
+  const browserPage = new BrowserPage(module);
+  await browserPage.open(() => undefined);
+  const page = browsers[0]?.pages[0];
+  assert.ok(page);
+
+  page.evaluateResult = 'pointer';
+  assert.equal(await browserPage.cursorAtFraction(0.5, 0.5), 'pointer');
+  page.evaluateResult = 42;
+  assert.equal(await browserPage.cursorAtFraction(0.5, 0.5), 'default');
+  page.evaluateResult = undefined;
+  assert.equal(await browserPage.cursorAtFraction(0.5, 0.5), 'default');
+  await browserPage.close();
+});
+
+test('keys stay held until release and composed text is inserted directly', async () => {
+  const { module, browsers } = fakePlaywright();
+  const browserPage = new BrowserPage(module);
+  await browserPage.open(() => undefined);
+  const page = browsers[0]?.pages[0];
+  assert.ok(page);
+
+  await browserPage.keyDown('Control');
+  await browserPage.keyDown(' ');
+  await browserPage.keyUp(' ');
+  await browserPage.keyDown('a');
+  await browserPage.keyDown('a');
+  await browserPage.keyUp('a');
+  await browserPage.insertText('é');
+  await browserPage.releaseKeys();
+
+  assert.deepEqual(page.keyCalls, [
+    'down:Control',
+    'down:Space',
+    'up:Space',
+    'down:a',
+    'down:a',
+    'up:a',
+    'insert:é',
+    'up:Control'
+  ]);
+  await browserPage.close();
+});
+
+test('a full capture is the viewport and a snippet is an unscrolled clip', async () => {
+  const { module, browsers } = fakePlaywright();
+  const browserPage = new BrowserPage(module);
+  await browserPage.open(() => undefined);
+  const page = browsers[0]?.pages[0];
+  assert.ok(page);
+
+  const full = await browserPage.capture();
+  assert.equal(full.pngBase64, Buffer.from('png').toString('base64'));
+  assert.deepEqual(page.screenshotCalls[0], { type: 'png' });
+
+  page.evaluateResult = { x: 0, y: 120 };
+  await browserPage.capture({ x: 0.25, y: 0.25, width: 0.5, height: 0.5 });
+  assert.deepEqual(page.screenshotCalls[1], {
+    type: 'png',
+    clip: { x: 320, y: 320, width: 640, height: 400 }
+  });
+
+  await assert.rejects(
+    browserPage.capture({ x: 0.5, y: 0.5, width: 0.0001, height: 0.0001 }),
+    /larger area/i
+  );
+  await browserPage.close();
+});
+
 function firstLineCount(text: string): number {
   return text === EMPTY_CONSOLE_TEXT ? 0 : text.split('\n').length;
 }
@@ -537,8 +633,10 @@ class FakePage implements PlaywrightPage {
     return 'Page';
   }
 
-  async evaluate<T>(_probe: () => T): Promise<T> {
-    return { state: 'complete', hasBody: true, hasContent: true } as T;
+  evaluateResult: unknown = { state: 'complete', hasBody: true, hasContent: true };
+
+  async evaluate<T, A = undefined>(_probe: (arg: A) => T, _arg?: A): Promise<T> {
+    return this.evaluateResult as T;
   }
 
   async setViewportSize(size: { width: number; height: number }): Promise<void> {
@@ -549,7 +647,16 @@ class FakePage implements PlaywrightPage {
     return this.size;
   }
 
-  async screenshot(): Promise<Buffer> {
+  readonly screenshotCalls: Array<{
+    type: 'png';
+    clip?: { x: number; y: number; width: number; height: number };
+  }> = [];
+
+  async screenshot(options: {
+    type: 'png';
+    clip?: { x: number; y: number; width: number; height: number };
+  }): Promise<Buffer> {
+    this.screenshotCalls.push(options);
     return Buffer.from('png');
   }
 
@@ -572,14 +679,41 @@ class FakePage implements PlaywrightPage {
     return { first: () => ({ click: async () => undefined }), count: async () => 1 };
   }
 
+  readonly mouseCalls: string[] = [];
   readonly mouse = {
-    click: async (_x: number, _y: number) => undefined,
-    wheel: async (_dx: number, _dy: number) => undefined
+    click: async (x: number, y: number) => {
+      this.mouseCalls.push(`click:${x},${y}`);
+    },
+    move: async (x: number, y: number) => {
+      this.mouseCalls.push(`move:${x},${y}`);
+    },
+    down: async (options?: PointerOptions) => {
+      this.mouseCalls.push(`down:${options?.button ?? 'left'}:${options?.clickCount ?? 1}`);
+    },
+    up: async (options?: PointerOptions) => {
+      this.mouseCalls.push(`up:${options?.button ?? 'left'}:${options?.clickCount ?? 1}`);
+    },
+    wheel: async (dx: number, dy: number) => {
+      this.mouseCalls.push(`wheel:${dx},${dy}`);
+    }
   };
+  readonly keyCalls: string[] = [];
   readonly keyboard = {
-    type: async (_text: string) => undefined,
-    press: async (_key: string) => undefined,
-    insertText: async (_text: string) => undefined
+    type: async (text: string) => {
+      this.keyCalls.push(`type:${text}`);
+    },
+    press: async (key: string) => {
+      this.keyCalls.push(`press:${key}`);
+    },
+    down: async (key: string) => {
+      this.keyCalls.push(`down:${key}`);
+    },
+    up: async (key: string) => {
+      this.keyCalls.push(`up:${key}`);
+    },
+    insertText: async (text: string) => {
+      this.keyCalls.push(`insert:${text}`);
+    }
   };
 
   context(): { newCDPSession(page: PlaywrightPage): Promise<FakeCdp> } {

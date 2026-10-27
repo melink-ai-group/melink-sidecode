@@ -52,6 +52,14 @@ readiness rules, assertion tool, and screenshot storage.
 - [ ] B4. Screenshots: `browser_snapshot` keeps the inline image and writes a
       PNG under `.melink/reports/browser/` (gitignored, local only). The text
       shows the absolute path plus the URL/title.
+- [ ] B5. Interactions: clicking a button on the page works, dragging does not
+      start an image drag, the page's cursor appears over hover targets, the
+      wheel scrolls under the pointer, and typing/paste reach the page. Escape
+      while the image has focus returns to the address bar.
+- [ ] B6. Resolution and captures: Width/Height plus **Apply** resize the page;
+      **Snippet** drags a selection that becomes an attachment chip in the open
+      chat, and **Capture page** attaches the whole viewport. A capture with no
+      chat tab reports that instead of dropping the image.
 
 ---
 
@@ -1272,8 +1280,8 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.1 (`package.json`)
-- **Node test files:** 192 (`src/**/*.test.ts`)
-- **Node tests:** 1824 declarations, 1843 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1833 pass, 10 skipped, 0 failures (Node suite within `npm test`).
+- **Node test files:** 194 (`src/**/*.test.ts`)
+- **Node tests:** 1841 declarations, 1860 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1850 pass, 10 skipped, 0 failures (Node suite within `npm test`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 10 files / 80 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.
