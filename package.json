@@ -135,6 +135,11 @@
           "scope": "application",
           "markdownDescription": "Base URL for the Ollama Cloud API. The token set via **sideCode: Set Ollama Cloud token** is sent as a bearer credential to this host. This setting is read from your user settings only, so a workspace cannot redirect the token to another host."
         },
+        "melink.ollama.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Ollama Cloud in the model picker and use it for new conversations."
+        },
         "melink.ollama.defaultModel": {
           "type": "string",
           "default": "",
@@ -146,6 +151,11 @@
           "scope": "application",
           "markdownDescription": "Base URL for a local Ollama server. No credential is sent. This setting is read from your user settings only, so a workspace cannot redirect local prompts to another host."
         },
+        "melink.ollamaLocal.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Ollama Local in the model picker and use it for new conversations."
+        },
         "melink.ollamaLocal.defaultModel": {
           "type": "string",
           "default": "",
@@ -155,6 +165,11 @@
           "type": "string",
           "default": "",
           "description": "Default OpenCode Zen model. Empty means the first model the app's catalog shows is used: the free list without a Zen API key, or the full live list with one. Free models work without a key; paid models require sideCode: Set OpenCode Zen API key."
+        },
+        "melink.opencode.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show OpenCode Zen in the model picker and use it for new conversations."
         },
         "melink.ollama.opencode.path": {
           "type": "string",
@@ -186,6 +201,11 @@
           "default": "codex",
           "scope": "application",
           "description": "Path to the OpenAI Codex CLI executable. Resolved from PATH when it is a bare name. A relative path is refused, including the Windows drive-relative form (C:evil.exe), because it would run a file from the workspace. Read from your user settings only, so a workspace cannot choose the binary that runs."
+        },
+        "melink.codex.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Codex in the model picker and use it for new conversations."
         },
         "melink.codex.defaultModel": {
           "type": "string",

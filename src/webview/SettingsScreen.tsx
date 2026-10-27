@@ -641,6 +641,13 @@ export function SettingsScreen({
               </div>
               <p className="field-help">The base URL and API key the agent uses for every Ollama Cloud model.</p>
 
+              <ProviderEnable
+                id="ollama-enabled"
+                label="Ollama Cloud"
+                checked={draft.ollamaEnabled}
+                onChange={(value) => update('ollamaEnabled', value)}
+              />
+
               <label className="field-label" htmlFor="ollama-base-url">
                 Base URL
               </label>
@@ -790,6 +797,13 @@ export function SettingsScreen({
                 A local Ollama server. No API key is used; turns run through the shared OpenCode binary.
               </p>
 
+              <ProviderEnable
+                id="ollama-local-enabled"
+                label="Ollama Local"
+                checked={draft.ollamaLocalEnabled}
+                onChange={(value) => update('ollamaLocalEnabled', value)}
+              />
+
               <label className="field-label" htmlFor="ollama-local-base-url">
                 Base URL
               </label>
@@ -889,6 +903,13 @@ export function SettingsScreen({
                 Free OpenCode models work without a key. Add a Zen API key to unlock paid models. Turns and
                 connection tests use the CLI selected under Settings → CLI (local or bundled).
               </p>
+
+              <ProviderEnable
+                id="opencode-enabled"
+                label="OpenCode Zen"
+                checked={draft.opencodeEnabled}
+                onChange={(value) => update('opencodeEnabled', value)}
+              />
 
               <label className="field-label" htmlFor="opencode-default-model">
                 Default model
@@ -1014,6 +1035,13 @@ export function SettingsScreen({
                 </span>
               </div>
               <p className="field-help">The CLI the agent launches for Codex models, and whether it is signed in.</p>
+
+              <ProviderEnable
+                id="codex-enabled"
+                label="Codex"
+                checked={draft.codexEnabled}
+                onChange={(value) => update('codexEnabled', value)}
+              />
 
               <label className="field-label" htmlFor="codex-path">
                 Codex CLI path
@@ -1731,6 +1759,42 @@ function ScopeNotice({ id, notice }: { id: string; notice?: string }): JSX.Eleme
 
 
 
+/** One provider's on/off switch, sharing the checkbox row used by Skills. */
+function ProviderEnable({
+  id,
+  label,
+  checked,
+  onChange
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}): JSX.Element {
+  return (
+    <div className="provider-enable">
+      <label className="check" htmlFor={id}>
+        <input
+          className="check-input"
+          id={id}
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <span className="check-box" aria-hidden="true">
+          <CheckIcon />
+        </span>
+        <span className="check-body">
+          <span className="check-label">Enabled</span>
+          <span className="check-text">
+            Off hides {label} from the model picker and from new conversations.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 type SettingsTabId = 'cli' | 'providers' | 'defaults' | 'orchestration' | 'context' | 'skills';
 type SkillTabId = 'skill-browser' | 'skill-ast-grep' | 'skill-zvec-grep';
 
@@ -1744,14 +1808,18 @@ interface FieldDestination {
 /** The section and nested page that owns one settings field. */
 function fieldDestination(field: keyof SettingsPatch): FieldDestination {
   switch (field) {
+    case 'ollamaEnabled':
     case 'ollamaBaseUrl':
     case 'ollamaDefaultModel':
       return { tab: 'providers', label: 'Providers', providerTab: 'provider-ollama' };
+    case 'ollamaLocalEnabled':
     case 'ollamaLocalBaseUrl':
     case 'ollamaLocalDefaultModel':
       return { tab: 'providers', label: 'Providers', providerTab: 'provider-local' };
+    case 'opencodeEnabled':
     case 'opencodeDefaultModel':
       return { tab: 'providers', label: 'Providers', providerTab: 'provider-opencode' };
+    case 'codexEnabled':
     case 'codexPath':
     case 'codexDefaultModel':
       return { tab: 'providers', label: 'Providers', providerTab: 'provider-codex' };

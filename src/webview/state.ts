@@ -624,10 +624,14 @@ export function skillToggleAction(
 export function reduce(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'snapshot': {
+      // A disabled provider is still in the snapshot so Settings can report its
+      // state, but it is not a valid selection for the composer. Keep the
+      // current provider only when the user left it enabled.
+      const enabled = action.availability.filter((b) => b.enabled !== false);
       const selected =
-        state.selectedBackendId && action.availability.some((b) => b.id === state.selectedBackendId)
+        state.selectedBackendId && enabled.some((b) => b.id === state.selectedBackendId)
           ? state.selectedBackendId
-          : action.availability.find((b) => b.status === 'available')?.id;
+          : enabled.find((b) => b.status === 'available')?.id;
       // Model lists are always live from `/api/tags`: drop the cache on every
       // availability change so a server-side removal is visible after refresh.
       // A model choice survives re-probing only when the backend is unchanged;

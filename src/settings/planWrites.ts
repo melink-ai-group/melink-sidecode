@@ -128,6 +128,22 @@ export function planSettingsWrites(
     }
   };
 
+  if (patch.ollamaEnabled !== undefined) {
+    write('ollamaEnabled', `${OLLAMA_SECTION}.enabled`, patch.ollamaEnabled === true);
+  }
+
+  if (patch.ollamaLocalEnabled !== undefined) {
+    write('ollamaLocalEnabled', `${OLLAMA_LOCAL_SECTION}.enabled`, patch.ollamaLocalEnabled === true);
+  }
+
+  if (patch.opencodeEnabled !== undefined) {
+    write('opencodeEnabled', `${OPENCODE_SECTION}.enabled`, patch.opencodeEnabled === true);
+  }
+
+  if (patch.codexEnabled !== undefined) {
+    write('codexEnabled', `${CODEX_SECTION}.enabled`, patch.codexEnabled === true);
+  }
+
   if (patch.ollamaBaseUrl !== undefined) {
     const value = patch.ollamaBaseUrl.trim();
     if (!isHttpUrl(value)) {

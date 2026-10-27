@@ -63,8 +63,11 @@ server and reads `zg status`.
 
 | Key | Type / default | On the screen | Consumer |
 |---|---|---|---|
+| `melink.ollama.enabled` | boolean, `true` | **Present** - Providers -> Ollama Cloud -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides Ollama Cloud from the model picker and new-chat selection |
 | `melink.ollama.defaultModel` | string, *(empty)* | **Present** â€” Providers â†’ Ollama Cloud â†’ Default model | `OllamaBackend.defaultModel`, used when no model is selected |
+| `melink.ollamaLocal.enabled` | boolean, `true` | **Present** - Providers -> Ollama Local -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides Ollama Local from the model picker and new-chat selection |
 | `melink.ollamaLocal.defaultModel` | string, *(empty)* | **Present** â€” Providers â†’ Ollama Local â†’ Default model | `OllamaBackend.defaultModel` (Local); empty resolves to the first `/api/tags` model |
+| `melink.codex.enabled` | boolean, `true` | **Present** - Providers -> Codex -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides Codex from the model picker and new-chat selection |
 | `melink.codex.defaultModel` | string, *(empty)* | **Present** â€” Providers â†’ Codex â†’ Default model | `CodexBackend.defaultModel`, used when no model is selected |
 | `melink.defaults.mode` | enum, `agent` | **Present** â€” Defaults â†’ Default mode | `readDefaultMode()` â†’ `CodexBackend.startThread` applies `developerInstructions`; `agent` adds none |
 | `melink.safety.destructiveCommands` | enum, `ask` (`off` / `ask` / `block`), application scope | **Not on the screen** â€” user `settings.json` only, so a workspace cannot turn the check off | `readSafeModeSettings()` â†’ `safeModeDecision()` in `CodexBackend.handleServerRequest`, `OllamaBackend.decideOpencodePermission`, `OpencodeBackend.decideOpencodePermission`, before any stored-rule match |
@@ -78,6 +81,7 @@ server and reads `zg status`.
 | `melink.context.maxBytes` | number, `20480` | **Present** â€” Context â†’ Maximum context size | `contextSettings()` â†’ `ProjectContext` overall cap and `ContextDelivery` render budget |
 | `melink.context.exclude` | array, *(empty)* | **Present** â€” Context â†’ Ignore patterns | `VscodeProjectContextHost.userExclude()` â†’ `ProjectContext` glob options, additive to the built-in set |
 | `melink.review.diffReview` | boolean, `false`, application scope | **Legacy fallback** - surfaced in Orchestration -> Reviewing; read only while `melink.orchestration.reviewing` is unset | `SidebarViewProvider.diffReviewEnabled()` -> `reviewFinishedTurn()` on live turn finish; off means no input is built, no runner is called, and nothing is stored |
+| `melink.opencode.enabled` | boolean, `true` | **Present** - Providers -> OpenCode Zen -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides OpenCode Zen from the model picker and new-chat selection |
 | `melink.opencode.defaultModel` | string, *(empty)* | **Present** - Providers -> OpenCode Zen -> Default model | `buildZenOpencodeConfig` model default; empty uses the first catalog model |
 | `melink.ollama.opencode.zvecGrep` | boolean, `false` | **Not on the screen** - legacy | read only when `melink.skills.zvecGrep` is unset |
 | `melink.defaults.dictationModel` | string, *(empty)* | **Present** - Defaults -> Dictation model | dictation cleanup model (`provider / model`); empty disables the microphone |

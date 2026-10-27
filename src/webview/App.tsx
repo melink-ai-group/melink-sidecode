@@ -876,11 +876,15 @@ export function App(): JSX.Element {
     }
   }, [state.activeThreadId, state.selectedBackendId, turnsNeedingReview]);
 
-  // Providers the switcher may show: those reporting `available` or
-  // `unauthenticated`. A provider with no usable integration (Codex CLI not
-  // installed) is omitted entirely rather than shown as broken.
+  // Providers the switcher may show: those the user left enabled and that
+  // report `available` or `unauthenticated`. A provider switched off under
+  // Settings > Providers, or with no usable integration (Codex CLI not
+  // installed), is omitted entirely rather than shown as broken.
   const providers = useMemo(
-    () => state.availability.filter((backend) => backend.status !== 'unavailable'),
+    () =>
+      state.availability.filter(
+        (backend) => backend.enabled !== false && backend.status !== 'unavailable'
+      ),
     [state.availability]
   );
 

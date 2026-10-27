@@ -856,6 +856,27 @@ test('a finished turn clears an in-flight revision that never echoed a plan', ()
   assert.equal(done.planRevising, false);
 });
 
+test('a disabled provider is never selected for the composer', () => {
+  const chosen = reduce(initialState, {
+    type: 'snapshot',
+    availability: [
+      { id: 'ollama', label: 'Ollama Cloud', badge: 'Ollama', enabled: false, status: 'available' },
+      { id: 'codex', label: 'OpenAI Codex CLI', badge: 'Codex', enabled: true, status: 'available' }
+    ]
+  });
+  assert.equal(chosen.selectedBackendId, 'codex');
+
+  const switchedOff = reduce(chosen, {
+    type: 'snapshot',
+    availability: [
+      { id: 'ollama', label: 'Ollama Cloud', badge: 'Ollama', enabled: false, status: 'available' },
+      { id: 'codex', label: 'OpenAI Codex CLI', badge: 'Codex', enabled: false, status: 'available' }
+    ]
+  });
+  assert.equal(switchedOff.selectedBackendId, undefined);
+  assert.equal(switchedOff.selectedModel, undefined);
+});
+
 test('a failed Codex auth while Ollama is selected surfaces no status in the UI', () => {
   const ollamaSelected = reduce(initialState, {
     type: 'snapshot',

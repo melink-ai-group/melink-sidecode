@@ -35,6 +35,12 @@ export interface BackendAvailability {
   id: string;
   label: string;
   badge: string;
+  /**
+   * False when the user switched this provider off under Settings > Providers.
+   * The provider is still probed so the settings screen can report its state,
+   * but it is not offered in the model picker. Absent means enabled.
+   */
+  enabled?: boolean;
   status: BackendStatus;
   /** Human-readable reason, usually the message of a caught failure. */
   detail?: string;

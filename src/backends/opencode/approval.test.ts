@@ -113,6 +113,77 @@ test('a streaming text part is held until it finishes', () => {
   assert.equal(parseOpencodeEvent(done).kind, 'text');
 });
 
+test('the prompt the user typed is never painted as assistant output', () => {
+  const roles = new Map<string, string>();
+  const userMessage = {
+    type: 'message.updated',
+    properties: { sessionID: 'ses_1', info: { id: 'msg_user', role: 'user', sessionID: 'ses_1' } }
+  };
+  assert.equal(busPayloadToOpencodeLine(userMessage, new Map(), roles), undefined);
+  const promptPart = {
+    type: 'message.part.updated',
+    properties: {
+      sessionID: 'ses_1',
+      part: {
+        id: 'prt_user',
+        messageID: 'msg_user',
+        sessionID: 'ses_1',
+        type: 'text',
+        text: 'reply with the single word: pong',
+        time: { start: 1, end: 2 }
+      }
+    }
+  };
+  assert.equal(busPayloadToOpencodeLine(promptPart, new Map(), roles), undefined);
+
+  // The assistant message and its text are a different message, so they still
+  // reach the transcript.
+  busPayloadToOpencodeLine(
+    { type: 'message.updated', properties: { sessionID: 'ses_1', info: { id: 'msg_reply', role: 'assistant', sessionID: 'ses_1' } } },
+    new Map(),
+    roles
+  );
+  const reply = busPayloadToOpencodeLine(
+    {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'ses_1',
+        part: {
+          id: 'prt_reply',
+          messageID: 'msg_reply',
+          sessionID: 'ses_1',
+          type: 'text',
+          text: 'pong',
+          time: { start: 3, end: 4 }
+        }
+      }
+    },
+    new Map(),
+    roles
+  );
+  assert.ok(reply);
+  const event = parseOpencodeEvent(reply);
+  assert.equal(event.kind, 'text');
+  if (event.kind === 'text') {
+    assert.equal(event.text, 'pong');
+  }
+});
+
+test('a delta that belongs to a user message is dropped before it is forwarded', () => {
+  const roles = new Map<string, string>([['msg_user', 'user']]);
+  const delta = {
+    type: 'message.part.delta',
+    properties: {
+      sessionID: 'ses_1',
+      messageID: 'msg_user',
+      partID: 'prt_user',
+      field: 'text',
+      delta: 'pong'
+    }
+  };
+  assert.equal(busPayloadToOpencodeLine(delta, new Map(), roles), undefined);
+});
+
 test('live reasoning survives snapshots, deltas, completion and prompt-body replay without duplication', () => {
   const parts = new Map<string, Record<string, unknown>>();
   const received: OpencodeEvent[] = [];
