@@ -58,7 +58,7 @@ export interface TurnPlan {
 
 export function planTurn(input: TurnPlanInput): TurnPlan {
   const choices = normalizedChoices(input.settings);
-  const decision = input.quick && input.origin === 'user'
+  const decision = input.quick && input.origin === 'user' && input.mode === 'agent'
     ? { quick: true, reason: 'user-requested' as const }
     : detectQuickTask({
       text: input.text,

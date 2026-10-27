@@ -82,6 +82,11 @@ test('explicit quick send bypasses every role even with an active plan and attac
   assert.equal(roles.styling, false);
   assert.equal(roles.doubleCheck, false);
   assert.equal(planTurn(input({ quick: true, origin: 'autopilot' })).quickBypass, false);
+  for (const mode of ['ask', 'plan']) {
+    const nonAgent = planTurn(input({ quick: true, mode }));
+    assert.equal(nonAgent.quickBypass, false);
+    assert.equal(nonAgent.quickReason, 'mode-not-agent');
+  }
 });
 
 test('Off removes a role from the plan and On/Auto keep it potential', () => {

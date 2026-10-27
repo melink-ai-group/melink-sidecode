@@ -9,8 +9,8 @@
  *
  * One plan artifact, two treatments that never compete: the review card while a
  * plan is pending, and the todo list once it is built. Colors are tokens only;
- * the sideCode blue is reserved for the build action and the running step. State
- * is conveyed by label and glyph, never by hue alone.
+ * the plan yellow marks the build action and the running step. State is conveyed
+ * by label and glyph, never by hue alone.
  */
 
 .plan-card {
@@ -79,13 +79,21 @@
   text-overflow: ellipsis;
 }
 
-/* Keep the compact size, but inherit the shared primary button colour so the
- * plan's build action matches every other primary action. */
+/* Keep the compact size, but carry the plan yellow so the build action reads as
+ * part of plan mode rather than a generic primary action. */
 .plan-card__build {
   flex: 0 0 auto;
   min-height: 22px;
   padding: 2px 12px;
+  border-color: var(--melink-yellow);
+  background: var(--melink-yellow);
+  color: var(--melink-on-accent);
   font-size: 12px;
+}
+
+.plan-card__build:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--melink-yellow) 85%, black);
+  background: color-mix(in srgb, var(--melink-yellow) 85%, black);
 }
 
 .plan-revising {

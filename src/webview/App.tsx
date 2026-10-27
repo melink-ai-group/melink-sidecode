@@ -2999,7 +2999,7 @@ export function App(): JSX.Element {
                 <SendButton
                   className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}
                   disabled={!canSend}
-                  allowQuick={Boolean(draft.trim())}
+                  allowQuick={state.mode === 'agent' && Boolean(draft.trim())}
                   resetKey={JSON.stringify([
                     draft, state.attachments.map((item) => item.id), activeChatTabId,
                     state.activeThreadId, state.selectedBackendId, state.selectedModel,

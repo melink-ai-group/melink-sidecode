@@ -45,10 +45,10 @@ body {
   margin-left: auto;
   min-height: 28px;
   padding: 4px 16px;
-  border: 1px solid var(--melink-primary);
+  border: 1px solid var(--melink-yellow);
   border-radius: var(--melink-radius-md, 6px);
-  background: var(--melink-primary);
-  color: var(--melink-surface);
+  background: var(--melink-yellow);
+  color: var(--melink-on-accent);
   font: inherit;
   font-size: 13px;
   font-weight: 650;
@@ -56,8 +56,8 @@ body {
 }
 
 .plan-preview__build:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--melink-primary) 85%, black);
-  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  border-color: color-mix(in srgb, var(--melink-yellow) 85%, black);
+  background: color-mix(in srgb, var(--melink-yellow) 85%, black);
 }
 
 .plan-preview__build:focus-visible {
