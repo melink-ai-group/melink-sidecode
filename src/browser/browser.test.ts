@@ -16,6 +16,7 @@ import {
   configuredSettingValue,
   navigationDecision,
   originApprovalCopy,
+  originApprovalRequired,
   SessionOrigins
 } from './policy.ts';
 import { BrowserPage, type PlaywrightModule, type PlaywrightPage } from './session.ts';
@@ -46,6 +47,12 @@ test('configuredSettingValue ignores package defaults', () => {
   assert.equal(configuredSettingValue({ defaultValue: true } as { globalValue?: boolean }), undefined);
   assert.equal(configuredSettingValue({ globalValue: false }), false);
   assert.equal(configuredSettingValue({ workspaceValue: true, globalValue: false }), true);
+});
+
+test('only Ask mode asks for an origin', () => {
+  assert.equal(originApprovalRequired('ask'), true);
+  assert.equal(originApprovalRequired('agent'), false);
+  assert.equal(originApprovalRequired('plan'), false);
 });
 
 test('navigation asks for localhost too until that exact origin is granted', () => {
