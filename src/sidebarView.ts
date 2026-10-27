@@ -956,6 +956,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       await this.finishChangeTurn(turnId, terminus, run.controller.signal);
       await this.checkRuns.get(turnId);
       if (run.controller.signal.aborted || session.disposed || session.planHold || session.planEpoch !== run.epoch) { return; }
+      if (this.turnPlans.get(turnId)?.quickReason === 'user-requested') {
+        await this.flushBuiltPlanProgress(backendId, threadId);
+        return;
+      }
       const transcript = this.store.getTranscript(backendId, threadId);
       let userIndex = transcript.length - 1;
       while (userIndex >= 0 && !(transcript[userIndex].kind === 'message' && transcript[userIndex].role === 'user')) { userIndex -= 1; }
@@ -2793,7 +2797,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           message.backendId,
           message.updatePlan,
           'user',
-          message.queue === true
+          message.queue === true,
+          false,
+          message.quick === true
         );
         break;
       case 'steerTurn':
@@ -4227,7 +4233,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     updatePlan?: boolean,
     origin: 'user' | 'autopilot' | 'continue' | 'instruction' = 'user',
     queueRequested = false,
-    queuedDispatch = false
+    queuedDispatch = false,
+    quick = false
   ): Promise<void> {
     const session = this.session;
     if (origin === 'user' && session && (session.turnBusy || this.subagentRuns.has(session.id)) && !queuedDispatch) {
@@ -4273,7 +4280,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         backendId,
         updatePlan,
         origin,
-        announceUserMessage
+        announceUserMessage,
+        quick
       );
     } finally {
       if (session) {
@@ -4919,7 +4927,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     backendId?: string,
     updatePlan?: boolean,
     origin: 'user' | 'autopilot' | 'continue' | 'instruction' = 'user',
-    announceUserMessage = false
+    announceUserMessage = false,
+    quick = false
   ): Promise<boolean> {
     const openedAt = Date.now();
     if (origin === 'user' && this.session) {
@@ -5030,6 +5039,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (this.session) {
       this.session.turnPlan = planTurn({
         text,
+        quick,
         mode,
         origin,
         hasAttachments: (attachments?.length ?? 0) > 0,
@@ -5144,7 +5154,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.session.turnOpen = false;
         this.session.turnPlan = undefined;
       }
-      if (this.session && shouldAutoContinue(error, this.session.stopContinueAttempts)) {
+      if (!quick && this.session && shouldAutoContinue(error, this.session.stopContinueAttempts)) {
         this.session.stopContinueAttempts += 1;
         this.crashContinueQueue.set(this.session.id, {
           session: this.session,

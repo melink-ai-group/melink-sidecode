@@ -7,6 +7,9 @@ import type { JSX, SVGProps } from 'react';
 
 type IconProps = SVGProps<SVGSVGElement> & { className?: string };
 
+export const QuickSendIcon = (props: IconProps): JSX.Element =>
+  solid('ico ico--sm', props, <path d="M13 2 4 14h7l-1 8L21 9h-8z" />);
+
 function solid(className: string, props: IconProps, children: JSX.Element): JSX.Element {
   const { className: extra, ...rest } = props;
   return (

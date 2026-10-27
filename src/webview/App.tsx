@@ -17,6 +17,7 @@ import {
   StopSolidIcon
 } from './Icons';
 import { SettingsScreen } from './SettingsScreen';
+import { SendButton } from './composer/SendButton';
 import { ContextMeter, ContextStrip } from './ContextStrip';
 import { ChangesReview } from './ChangesReview';
 import { ChangedFilesStrip } from './ChangedFilesStrip';
@@ -1330,7 +1331,7 @@ export function App(): JSX.Element {
     setModelSettingsOpen(false);
   }, [state.busy, state.queuedTurns.length]);
 
-  const send = (): void => {
+  const send = (quick = false): void => {
     const text = draft.trim();
     const intent = sendIntent({
       busy: state.busy,
@@ -1410,7 +1411,8 @@ export function App(): JSX.Element {
       backendId,
       model,
       permissionLevel,
-      attachments
+      attachments,
+      ...(quick ? { quick: true } : {})
     });
     publishComposer(activeChatTabIdRef.current, '', []);
   };
@@ -2988,22 +2990,23 @@ export function App(): JSX.Element {
                     }
                     aria-busy={queuePending || undefined}
                     disabled={!canSend}
-                    onClick={send}
+                    onClick={() => send()}
                   >
                     <SendSolidIcon />
                   </button>
                 )
               ) : showMic ? null : (
-                <button
+                <SendButton
                   className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}
-                  type="button"
-                  aria-label="Send"
-                  title="Send"
                   disabled={!canSend}
-                  onClick={send}
-                >
-                  <SendSolidIcon />
-                </button>
+                  allowQuick={Boolean(draft.trim())}
+                  resetKey={JSON.stringify([
+                    draft, state.attachments.map((item) => item.id), activeChatTabId,
+                    state.activeThreadId, state.selectedBackendId, state.selectedModel,
+                    state.permissionLevel, state.mode
+                  ])}
+                  onSend={send}
+                />
               )}
             </div>
           </div>
