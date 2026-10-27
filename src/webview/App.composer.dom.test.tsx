@@ -39,6 +39,21 @@ function renderComposer(): HTMLTextAreaElement {
 describe('composer Enter handling', () => {
   afterEach(() => vi.useRealTimers());
 
+  it.each(['ask', 'plan'] as const)('sends immediately without quick send in %s mode', (mode) => {
+    vi.useFakeTimers();
+    const composer = renderComposer();
+    act(() => sendHostMessage({
+      type: 'conversation', backendId: 'codex', threadId: 'thread-composer', replay: [], mode
+    }));
+    fireEvent.change(composer, { target: { value: 'Explain the requested changes' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.queryByRole('button', { name: 'Send quick request' })).toBeNull();
+    expect(sendTurnMessages()).toHaveLength(1);
+    expect(sendTurnMessages()[0]?.quick).toBeUndefined();
+    act(() => vi.advanceTimersByTime(700));
+    expect(sendTurnMessages()).toHaveLength(1);
+  });
+
   it('offers quick send for 600 ms before sending normally', () => {
     vi.useFakeTimers();
     const composer = renderComposer();

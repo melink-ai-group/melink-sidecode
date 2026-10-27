@@ -5036,6 +5036,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // Plan and Agent honor the selected permission level.
     const mode = this.resolveMode(activeBackendId, this.mode);
     this.mode = mode;
+    quick = quick && mode === 'agent';
     if (this.session) {
       this.session.turnPlan = planTurn({
         text,

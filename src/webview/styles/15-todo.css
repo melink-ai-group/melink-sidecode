@@ -87,14 +87,20 @@
 
 .todo__track {
   height: 3px;
-  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
+  background: var(--vscode-panel-border, var(--vscode-widget-border));
   overflow: hidden;
 }
 
 .todo__fill {
   display: block;
   height: 100%;
-  background: var(--melink-primary);
+  background: var(--melink-yellow);
+  /* Keep the plan fill pure and mark its trailing edge with the established
+   * widget border, so the bright yellow and the finished/warning fills stay
+   * separable from the neutral track token. */
+  box-shadow:
+    inset 0 -1px 0 var(--vscode-widget-border, var(--vscode-panel-border)),
+    inset -1px 0 0 var(--vscode-widget-border, var(--vscode-panel-border));
   transition: width 0.2s ease;
 }
 
@@ -130,11 +136,11 @@
   margin-top: 0;
 }
 
-/* The running step is the plan's one highlight: a sideCode-blue tint keeps it
+/* The running step is the plan's one highlight: a plan-yellow tint keeps it
  * distinct from a plain hovered row without competing with the transcript. */
 .todo__item--active {
-  border-color: color-mix(in srgb, var(--melink-shell) 40%, var(--vscode-widget-border, var(--vscode-panel-border)));
-  background: color-mix(in srgb, var(--melink-shell) 10%, var(--vscode-editorWidget-background));
+  border-color: color-mix(in srgb, var(--melink-yellow) 55%, var(--vscode-widget-border, var(--vscode-panel-border)));
+  background: color-mix(in srgb, var(--melink-yellow) 12%, var(--vscode-editorWidget-background));
 }
 
 /* A denied step never ran. The red cross sits with the label, and the word

@@ -1,11 +1,5 @@
 /* ---- Buttons ---- */
 
-/* SideCode blue for text accents. The shell hue is pulled toward the theme
- * foreground so the same brand blue stays legible on light and dark workbenches. */
-:root {
-  --melink-blue-ink: color-mix(in srgb, var(--melink-shell) 70%, var(--vscode-foreground));
-}
-
 .btn {
   display: inline-flex;
   align-items: center;
@@ -330,7 +324,7 @@
 
 .mode-menu__option--plan,
 .control-trigger.control-trigger--plan {
-  color: var(--melink-blue-ink);
+  color: var(--melink-yellow);
 }
 
 .mode-menu__option--agent,
@@ -359,7 +353,7 @@
 }
 
 .control-trigger.control-trigger--plan:hover:not(:disabled) {
-  color: var(--melink-blue-ink);
+  color: var(--melink-yellow);
 }
 
 .control-trigger.control-trigger--agent:hover:not(:disabled) {
@@ -418,8 +412,8 @@
 }
 
 .composer-row .composer-action--mode-plan {
-  --composer-mode: var(--melink-primary);
-  --composer-mode-ink: var(--melink-surface);
+  --composer-mode: var(--melink-yellow);
+  --composer-mode-ink: var(--melink-text-primary);
 }
 
 .composer-row .composer-action--mode-agent {
@@ -504,16 +498,16 @@
   }
 }
 
-/* Clarifying question, in the composer column, in the sideCode blue. */
+/* Clarifying question, in the composer column, in the plan yellow. */
 .question-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 8px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--melink-shell) 45%, var(--vscode-panel-border));
+  border: 1px solid color-mix(in srgb, var(--melink-yellow) 55%, var(--vscode-panel-border));
   border-radius: var(--melink-radius-md, 6px);
-  background: color-mix(in srgb, var(--melink-shell) 8%, var(--vscode-sideBar-background));
+  background: color-mix(in srgb, var(--melink-yellow) 12%, var(--vscode-sideBar-background));
 }
 
 .question-card:focus {
@@ -528,7 +522,7 @@
 }
 
 .question-card__title {
-  color: var(--melink-blue-ink);
+  color: var(--melink-yellow);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -567,13 +561,13 @@
 }
 
 .question-card__option:has(input:checked) {
-  border-color: color-mix(in srgb, var(--melink-blue-ink) 55%, transparent);
-  background: color-mix(in srgb, var(--melink-shell) 14%, transparent);
+  border-color: color-mix(in srgb, var(--melink-yellow) 70%, transparent);
+  background: color-mix(in srgb, var(--melink-yellow) 18%, transparent);
 }
 
 .question-card__option input {
   margin-top: 2px;
-  accent-color: var(--melink-blue-ink);
+  accent-color: var(--melink-yellow);
 }
 
 .question-card__option-text {
@@ -585,7 +579,7 @@
 
 .question-card__chip {
   flex: 0 0 auto;
-  color: var(--melink-blue-ink);
+  color: var(--melink-yellow);
   font-size: 11px;
   font-weight: 700;
 }
@@ -594,7 +588,7 @@
   width: 100%;
   min-height: 52px;
   padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--melink-blue-ink) 45%, var(--vscode-input-border, var(--vscode-panel-border)));
+  border: 1px solid color-mix(in srgb, var(--melink-yellow) 45%, var(--vscode-input-border, var(--vscode-panel-border)));
   border-radius: var(--melink-radius-sm, 4px);
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground, var(--vscode-foreground));
@@ -636,8 +630,8 @@
   padding: 4px 14px;
   border: 0;
   border-radius: var(--melink-radius-sm, 4px);
-  background: var(--melink-primary);
-  color: var(--melink-surface);
+  background: var(--melink-yellow);
+  color: var(--melink-on-accent);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -645,7 +639,7 @@
 }
 
 .question-card__continue:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--melink-primary) 85%, black);
+  background: color-mix(in srgb, var(--melink-yellow) 85%, black);
 }
 
 .question-card__continue:disabled {

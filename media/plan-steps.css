@@ -22,9 +22,11 @@
   color: var(--vscode-descriptionForeground);
 }
 
-/* Keep spinning when the OS asks for reduced motion. A frozen ring reads as a stuck step. */
+/* Keep spinning when the OS asks for reduced motion. A frozen ring reads as a stuck step.
+ * The webviews load tokens.css; the markdown preview does not, so the fallback
+ * mirrors --melink-yellow exactly instead of using a different workbench hue. */
 .melink-step--progress {
-  color: var(--vscode-progressBar-background, var(--vscode-textLink-foreground));
+  color: var(--melink-yellow, #f5c518);
   border-color: color-mix(in srgb, currentColor 30%, transparent);
   border-top-color: currentColor;
   transform-origin: center;
