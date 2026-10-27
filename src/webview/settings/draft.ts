@@ -4,11 +4,15 @@ import type { OrchestrationChoice } from '../../orchestration/settings.ts';
 
 /** Local draft state; the host snapshot is the source of truth on save. */
 export interface Draft {
+  ollamaEnabled: boolean;
   ollamaBaseUrl: string;
   ollamaDefaultModel: string;
+  ollamaLocalEnabled: boolean;
   ollamaLocalBaseUrl: string;
   ollamaLocalDefaultModel: string;
+  opencodeEnabled: boolean;
   opencodeDefaultModel: string;
+  codexEnabled: boolean;
   codexPath: string;
   codexDefaultModel: string;
   permissionLevel: SettingsSnapshot['defaults']['permissionLevel'];
@@ -42,11 +46,15 @@ export interface Draft {
 /** Seed the draft from a host snapshot; used on load, echo, and reset. */
 export function draftFrom(settings: SettingsSnapshot): Draft {
   return {
+    ollamaEnabled: settings.ollama.enabled,
     ollamaBaseUrl: settings.ollama.baseUrl,
     ollamaDefaultModel: settings.ollama.defaultModel,
+    ollamaLocalEnabled: settings.ollamaLocal.enabled,
     ollamaLocalBaseUrl: settings.ollamaLocal.baseUrl,
     ollamaLocalDefaultModel: settings.ollamaLocal.defaultModel,
+    opencodeEnabled: settings.opencodeZen.enabled,
     opencodeDefaultModel: settings.opencodeZen.defaultModel,
+    codexEnabled: settings.codex.enabled,
     codexPath: settings.codex.path,
     codexDefaultModel: settings.codex.defaultModel,
     permissionLevel: settings.defaults.permissionLevel,
@@ -82,11 +90,15 @@ export function draftFrom(settings: SettingsSnapshot): Draft {
 export function patchFrom(draft: Draft): Required<SettingsPatch> {
   const maxKb = Number(draft.contextMaxKb.trim());
   return {
+    ollamaEnabled: draft.ollamaEnabled,
     ollamaBaseUrl: draft.ollamaBaseUrl.trim(),
     ollamaDefaultModel: draft.ollamaDefaultModel.trim(),
+    ollamaLocalEnabled: draft.ollamaLocalEnabled,
     ollamaLocalBaseUrl: draft.ollamaLocalBaseUrl.trim(),
     ollamaLocalDefaultModel: draft.ollamaLocalDefaultModel.trim(),
+    opencodeEnabled: draft.opencodeEnabled,
     opencodeDefaultModel: draft.opencodeDefaultModel.trim(),
+    codexEnabled: draft.codexEnabled,
     codexPath: draft.codexPath.trim(),
     codexDefaultModel: draft.codexDefaultModel.trim(),
     permissionLevel: draft.permissionLevel,
@@ -128,11 +140,15 @@ export function patchFrom(draft: Draft): Required<SettingsPatch> {
  */
 function storedPatch(settings: SettingsSnapshot): Required<SettingsPatch> {
   return {
+    ollamaEnabled: settings.ollama.enabled,
     ollamaBaseUrl: settings.ollama.baseUrl,
     ollamaDefaultModel: settings.ollama.defaultModel,
+    ollamaLocalEnabled: settings.ollamaLocal.enabled,
     ollamaLocalBaseUrl: settings.ollamaLocal.baseUrl,
     ollamaLocalDefaultModel: settings.ollamaLocal.defaultModel,
+    opencodeEnabled: settings.opencodeZen.enabled,
     opencodeDefaultModel: settings.opencodeZen.defaultModel,
+    codexEnabled: settings.codex.enabled,
     codexPath: settings.codex.path,
     codexDefaultModel: settings.codex.defaultModel,
     permissionLevel: settings.defaults.permissionLevel,

@@ -16,11 +16,15 @@ import { resolveWriteScope } from '../config/trust.ts';
  * control.
  */
 const ALL_FIELDS: Array<keyof SettingsPatch> = [
+  'ollamaEnabled',
   'ollamaBaseUrl',
   'ollamaDefaultModel',
+  'ollamaLocalEnabled',
   'ollamaLocalBaseUrl',
   'ollamaLocalDefaultModel',
+  'opencodeEnabled',
   'opencodeDefaultModel',
+  'codexEnabled',
   'codexPath',
   'codexDefaultModel',
   'permissionLevel',
@@ -51,11 +55,15 @@ const ALL_FIELDS: Array<keyof SettingsPatch> = [
 ];
 
 const PATCH: Required<SettingsPatch> = {
+  ollamaEnabled: false,
   ollamaBaseUrl: 'https://ollama.example',
   ollamaDefaultModel: 'qwen3-coder:480b',
+  ollamaLocalEnabled: true,
   ollamaLocalBaseUrl: 'http://localhost:11434',
   ollamaLocalDefaultModel: 'qwen2.5-coder:7b',
+  opencodeEnabled: true,
   opencodeDefaultModel: 'big-pickle',
+  codexEnabled: false,
   codexPath: 'C:\\Tools\\codex.exe',
   codexDefaultModel: 'gpt-5-codex',
   permissionLevel: 'read-only',
@@ -108,6 +116,8 @@ test('every patch field becomes exactly one write, including booleans and select
   assert.equal(writes.get('thinking')?.value, 'high');
   assert.equal(writes.get('contextMaxBytes')?.value, 32768);
   assert.equal(writes.get('browserOpencode')?.value, true);
+  assert.equal(writes.get('ollamaEnabled')?.value, false);
+  assert.equal(writes.get('opencodeEnabled')?.value, true);
 });
 
 test('a workspace save writes the effective scope and redirects trust-sensitive fields to user settings', () => {

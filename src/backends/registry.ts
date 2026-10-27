@@ -28,6 +28,23 @@ import {
 } from './types';
 
 /**
+ * The user-facing on/off switch for each provider, stored under the provider's
+ * own settings section. Absent or a non-boolean value means enabled, so an
+ * older settings file keeps every provider available.
+ */
+const PROVIDER_ENABLED_KEYS: Record<string, string> = {
+  ollama: 'melink.ollama.enabled',
+  'ollama-local': 'melink.ollamaLocal.enabled',
+  opencode: 'melink.opencode.enabled',
+  codex: 'melink.codex.enabled'
+};
+
+function providerEnabled(id: string): boolean {
+  const key = PROVIDER_ENABLED_KEYS[id];
+  return key === undefined || vscode.workspace.getConfiguration().get<boolean>(key, true) !== false;
+}
+
+/**
  * Owns both adapters and publishes a provider-neutral availability snapshot.
  *
  * The UI reads *only* `snapshot()` and `onEvent()`: a backend that fails to
@@ -150,7 +167,12 @@ export class BackendRegistry implements Disposable {
    * This is the function that guarantees providers fail as data, not throws.
    */
   private async probe(backend: AgentBackend): Promise<BackendAvailability> {
-    const base = { id: backend.id, label: backend.label, badge: backend.badge };
+    const base = {
+      id: backend.id,
+      label: backend.label,
+      badge: backend.badge,
+      enabled: providerEnabled(backend.id)
+    };
     try {
       // Prefer the backend's own richer auth report when it has one: it can name
       // the active auth mode and flag a mismatch (for example an API key where

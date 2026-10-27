@@ -123,14 +123,18 @@ const LEGACY_REVIEWING_KEY = 'melink.review.diffReview';
  * `.vscode/settings.json` (or folder settings) already overrides any of them.
  */
 const SETTINGS_KEYS: readonly string[] = [
+  `${OLLAMA_SECTION}.enabled`,
   `${OLLAMA_SECTION}.baseUrl`,
   `${OLLAMA_SECTION}.defaultModel`,
+  `${OLLAMA_LOCAL_SECTION}.enabled`,
   `${OLLAMA_LOCAL_SECTION}.baseUrl`,
   `${OLLAMA_LOCAL_SECTION}.defaultModel`,
+  `${OPENCODE_SECTION}.enabled`,
   `${OPENCODE_SECTION}.defaultModel`,
   `${OLLAMA_OPENCODE_SECTION}.path`,
   `${OLLAMA_OPENCODE_SECTION}.cliSource`,
   `${OLLAMA_OPENCODE_SECTION}.zvecGrep`,
+  `${CODEX_SECTION}.enabled`,
   `${CODEX_SECTION}.path`,
   `${CODEX_SECTION}.defaultModel`,
   `${DEFAULTS_SECTION}.permissionLevel`,
@@ -242,6 +246,7 @@ export class SettingsService {
         baseUrl: readTrustedBaseUrl(),
         defaultModel: config.get<string>(`${OLLAMA_SECTION}.defaultModel`, ''),
         hasToken,
+        enabled: config.get<boolean>(`${OLLAMA_SECTION}.enabled`, true) !== false,
         status: ollamaStatus.status,
         detail: ollamaStatus.detail
       },
@@ -249,12 +254,14 @@ export class SettingsService {
         // No credential is sent, but the destination is still user-scoped.
         baseUrl: readTrustedOllamaLocalBaseUrl(),
         defaultModel: config.get<string>(`${OLLAMA_LOCAL_SECTION}.defaultModel`, ''),
+        enabled: config.get<boolean>(`${OLLAMA_LOCAL_SECTION}.enabled`, true) !== false,
         status: ollamaLocalStatus.status,
         detail: ollamaLocalStatus.detail
       },
       opencodeZen: {
         defaultModel: config.get<string>(`${OPENCODE_SECTION}.defaultModel`, ''),
         hasToken: hasZenToken,
+        enabled: config.get<boolean>(`${OPENCODE_SECTION}.enabled`, true) !== false,
         status: opencodeStatus.status,
         detail: opencodeStatus.detail
       },
@@ -262,6 +269,7 @@ export class SettingsService {
         // The CLI path is trust-sensitive: it is the binary that is spawned.
         path: readTrustedCodexPath(),
         defaultModel: config.get<string>(`${CODEX_SECTION}.defaultModel`, ''),
+        enabled: config.get<boolean>(`${CODEX_SECTION}.enabled`, true) !== false,
         status: codexStatus.status,
         detail: codexStatus.detail,
         version: codexStatus.version,

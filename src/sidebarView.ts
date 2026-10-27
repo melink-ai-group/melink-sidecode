@@ -3589,7 +3589,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async postFreshConversation(): Promise<void> {
     this.clearHistory(this.session);
     const last = this.store.getLastUsedModel();
-    const fallbackBackend = last && this.registry.get(last.backendId) ? last.backendId : this.defaultBackendId();
+    // A provider the user switched off must not seed a new conversation, even
+    // if it was the last one used before it was turned off.
+    const lastEnabled =
+      last !== undefined &&
+      this.registry.snapshot().find((backend) => backend.id === last.backendId)?.enabled !== false;
+    const fallbackBackend =
+      last && lastEnabled && this.registry.get(last.backendId) ? last.backendId : this.defaultBackendId();
     const fallbackModel = last?.backendId === fallbackBackend && last.modelId ? last.modelId : undefined;
     const choice = this.composerSelection(fallbackBackend, fallbackModel);
     this.mode = this.resolveMode(choice.backendId, this.mode);
@@ -3670,7 +3676,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   private defaultBackendId(): string {
-    return this.registry.snapshot().find((backend) => backend.status === 'available')?.id ?? 'ollama';
+    return (
+      this.registry
+        .snapshot()
+        .find((backend) => backend.enabled !== false && backend.status === 'available')?.id ?? 'ollama'
+    );
   }
 
   /**

@@ -11,15 +11,17 @@ function snapshot(): SettingsSnapshot {
       baseUrl: 'https://ollama.com',
       defaultModel: 'qwen3-coder:480b',
       hasToken: true,
+      enabled: true,
       status: 'available'
     },
     ollamaLocal: {
       baseUrl: 'http://localhost:11434',
       defaultModel: 'qwen2.5-coder:7b',
+      enabled: true,
       status: 'available'
     },
-    opencodeZen: { defaultModel: 'big-pickle', hasToken: false, status: 'available' },
-    codex: { path: 'codex', defaultModel: 'gpt-5-codex', status: 'available' },
+    opencodeZen: { defaultModel: 'big-pickle', hasToken: false, enabled: true, status: 'available' },
+    codex: { path: 'codex', defaultModel: 'gpt-5-codex', enabled: true, status: 'available' },
     opencode: {
       cliSource: 'local',
       path: 'opencode',
@@ -85,20 +87,24 @@ function applied(settings: SettingsSnapshot, patch: SettingsPatch): SettingsSnap
     ...settings,
     ollama: {
       ...settings.ollama,
+      enabled: patch.ollamaEnabled ?? settings.ollama.enabled,
       baseUrl: patch.ollamaBaseUrl ?? settings.ollama.baseUrl,
       defaultModel: patch.ollamaDefaultModel ?? settings.ollama.defaultModel
     },
     ollamaLocal: {
       ...settings.ollamaLocal,
+      enabled: patch.ollamaLocalEnabled ?? settings.ollamaLocal.enabled,
       baseUrl: patch.ollamaLocalBaseUrl ?? settings.ollamaLocal.baseUrl,
       defaultModel: patch.ollamaLocalDefaultModel ?? settings.ollamaLocal.defaultModel
     },
     opencodeZen: {
       ...settings.opencodeZen,
+      enabled: patch.opencodeEnabled ?? settings.opencodeZen.enabled,
       defaultModel: patch.opencodeDefaultModel ?? settings.opencodeZen.defaultModel
     },
     codex: {
       ...settings.codex,
+      enabled: patch.codexEnabled ?? settings.codex.enabled,
       path: patch.codexPath ?? settings.codex.path,
       defaultModel: patch.codexDefaultModel ?? settings.codex.defaultModel
     },
@@ -165,6 +171,8 @@ function applied(settings: SettingsSnapshot, patch: SettingsPatch): SettingsSnap
 
 function changedDraft(): Draft {
   const draft = draftFrom(snapshot());
+  draft.ollamaEnabled = false;
+  draft.codexEnabled = false;
   draft.ollamaDefaultModel = 'kimi-k2:instruct';
   draft.permissionLevel = 'read-only';
   draft.mode = 'plan';
@@ -195,7 +203,9 @@ test('every changed toggle, select and input is in the patch and in dirty keys',
   const draft = changedDraft();
   const patch = patchFrom(draft);
   for (const field of [
+    'ollamaEnabled',
     'ollamaDefaultModel',
+    'codexEnabled',
     'permissionLevel',
     'mode',
     'thinking',
@@ -223,6 +233,8 @@ test('every changed toggle, select and input is in the patch and in dirty keys',
   }
   const dirty = dirtyKeys(draft, snapshot());
   for (const field of [
+    'ollamaEnabled',
+    'codexEnabled',
     'orchestrationTesting',
     'orchestrationReviewing',
     'orchestrationDoubleCheck',

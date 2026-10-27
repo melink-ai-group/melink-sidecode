@@ -108,14 +108,29 @@ export function approvalFromOpencode(ask: OpencodePermissionAsk, origin: string)
  * Turn one server-bus payload into the NDJSON line `parseOpencodeEvent` already
  * understands. Text waits for a finished part; reasoning snapshots are forwarded
  * live and the publisher removes repeated prefixes before appending them.
+ *
+ * The bus carries the user's own prompt as a text part too. `messageRoles`
+ * remembers the role every `message.updated` reports, so a part that belongs
+ * to a user message is never converted into assistant output.
  */
 export function busPayloadToOpencodeLine(
   payload: Record<string, unknown>,
-  reasoningParts = new Map<string, Record<string, unknown>>()
+  reasoningParts = new Map<string, Record<string, unknown>>(),
+  messageRoles = new Map<string, string>()
 ): string | undefined {
   const type = asString(payload.type);
   const properties = asRecord(payload.properties) ?? {};
+  if (type === 'message.updated') {
+    const info = asRecord(properties.info) ?? properties;
+    const id = asString(info.id);
+    const role = asString(info.role);
+    if (id && role) {
+      messageRoles.set(id, role);
+    }
+    return undefined;
+  }
   if (type === 'message.part.delta' && properties.field === 'text') {
+    if (isUserMessage(messageRoles, asString(properties.messageID))) return undefined;
     const partId = asString(properties.partID);
     const previous = partId ? reasoningParts.get(partId) : undefined;
     const delta = asString(properties.delta);
@@ -128,6 +143,9 @@ export function busPayloadToOpencodeLine(
     const part = asRecord(properties.part);
     const partType = asString(part?.type);
     if (!part || !partType) {
+      return undefined;
+    }
+    if (isUserMessage(messageRoles, asString(part.messageID))) {
       return undefined;
     }
     const sessionID = asString(part.sessionID);
@@ -226,6 +244,10 @@ export function opencodeListenUrl(text: string): string | undefined {
     return undefined;
   }
   return match[1].replace(/\u001b\[[0-9;]*m/g, '').replace(/[),.;]+$/, '');
+}
+
+function isUserMessage(messageRoles: ReadonlyMap<string, string>, messageId: string | undefined): boolean {
+  return messageId !== undefined && messageRoles.get(messageId) === 'user';
 }
 
 function partStillStreaming(part: Record<string, unknown>): boolean {

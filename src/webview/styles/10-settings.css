@@ -216,7 +216,8 @@
   margin: 0;
 }
 
-.skill-enable {
+.skill-enable,
+.provider-enable {
   display: flex;
   align-items: flex-start;
   gap: 4px;
@@ -227,7 +228,8 @@
   background: var(--vscode-editorWidget-background);
 }
 
-.skill-enable > .check {
+.skill-enable > .check,
+.provider-enable > .check {
   flex: 1 1 auto;
   min-width: 0;
 }

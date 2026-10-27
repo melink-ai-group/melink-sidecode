@@ -100,6 +100,8 @@ export interface SettingsSnapshot {
     baseUrl: string;
     defaultModel: string;
     hasToken: boolean;
+    /** False hides this provider from the model picker for new turns. */
+    enabled: boolean;
     status: BackendStatus;
     detail?: string;
   };
@@ -110,12 +112,16 @@ export interface SettingsSnapshot {
   ollamaLocal: {
     baseUrl: string;
     defaultModel: string;
+    /** False hides this provider from the model picker for new turns. */
+    enabled: boolean;
     status: BackendStatus;
     detail?: string;
   };
   codex: {
     path: string;
     defaultModel: string;
+    /** False hides this provider from the model picker for new turns. */
+    enabled: boolean;
     status: BackendStatus;
     detail?: string;
     /** The server-reported version, present only when `status` is `incompatible`. */
@@ -133,6 +139,8 @@ export interface SettingsSnapshot {
   opencodeZen: {
     defaultModel: string;
     hasToken: boolean;
+    /** False hides this provider from the model picker for new turns. */
+    enabled: boolean;
     status: BackendStatus;
     detail?: string;
   };
@@ -272,11 +280,15 @@ export interface ContextSettingsSnapshot {
 
 /** Fields the settings screen may persist. Every field is optional. */
 export interface SettingsPatch {
+  ollamaEnabled?: boolean;
   ollamaBaseUrl?: string;
   ollamaDefaultModel?: string;
+  ollamaLocalEnabled?: boolean;
   ollamaLocalBaseUrl?: string;
   ollamaLocalDefaultModel?: string;
+  opencodeEnabled?: boolean;
   opencodeDefaultModel?: string;
+  codexEnabled?: boolean;
   codexPath?: string;
   codexDefaultModel?: string;
   permissionLevel?: PermissionLevel;

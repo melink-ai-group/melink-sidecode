@@ -338,14 +338,18 @@ settings (**sideCode: Open settings**).
 | Setting | Default | Purpose |
 |---|---|---|
 | `melink.ollama.baseUrl` | `https://ollama.com` | Base URL for the Ollama Cloud API. The token is sent only to this host. |
+| `melink.ollama.enabled` | `true` | Show Ollama Cloud in the model picker and use it for new conversations. |
 | `melink.ollama.defaultModel` | *(empty)* | Default Ollama model; empty uses the first model reported. |
 | `melink.ollamaLocal.baseUrl` | `http://localhost:11434` | Local Ollama server address. Application scope: a workspace cannot redirect local prompts. |
+| `melink.ollamaLocal.enabled` | `true` | Show Ollama Local in the model picker and use it for new conversations. |
 | `melink.ollamaLocal.defaultModel` | *(empty)* | Default local model; empty uses the first model the local server reports. |
+| `melink.opencode.enabled` | `true` | Show OpenCode Zen in the model picker and use it for new conversations. |
 | `melink.opencode.defaultModel` | *(empty)* | Default OpenCode Zen model; empty uses the first model in the catalog the app can show (free list without a key, full list with one). |
 | `melink.ollama.opencode.cliSource` | `local` | Shared opencode CLI source: `local` uses the path / PATH; `bundled` uses the sideCode download in extension global storage (survives closing VS Code). |
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`; a bare name is resolved from `PATH`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy zvec-grep switch, read only when `melink.skills.zvecGrep` is unset. Prefer the skills key. |
 | `melink.codex.path` | `codex` | Path to the Codex CLI executable; a bare name is resolved from `PATH`. |
+| `melink.codex.enabled` | `true` | Show Codex in the model picker and use it for new conversations. |
 | `melink.codex.defaultModel` | *(empty)* | Default model for Codex; empty uses the CLI default. |
 | `melink.defaults.permissionLevel` | `default` | Permission level for a new conversation (`read-only` / `default` / `unrestricted`). A per-conversation choice overrides it; `unrestricted` must be confirmed. |
 | `melink.safety.destructiveCommands` | `ask` | What to do with a recognised destructive command (`off` / `ask` / `block`). This runs before stored approval rules. |
@@ -409,14 +413,18 @@ with its status word, duration, and any bounded failure detail or skipped reason
 | `melink.orchestration.planning` | `auto` | Orchestration -> Plan autopilot (Auto/On/Off) |
 | `melink.telemetry.failureLog` | `false` | Settings JSON only (application scope): opt-in local missed-issue log; nothing is sent over the network |
 | `melink.ollama.baseUrl` | `https://ollama.com` | Providers -> Ollama Cloud -> Base URL |
+| `melink.ollama.enabled` | `true` | Providers -> Ollama Cloud -> Enabled |
 | `melink.ollama.defaultModel` | *(empty)* | Defaults -> Default model |
 | `melink.ollamaLocal.baseUrl` | `http://localhost:11434` | Providers -> Ollama Local -> Base URL |
+| `melink.ollamaLocal.enabled` | `true` | Providers -> Ollama Local -> Enabled |
 | `melink.ollamaLocal.defaultModel` | *(empty)* | Providers -> Ollama Local -> Default model |
+| `melink.opencode.enabled` | `true` | Providers -> OpenCode Zen -> Enabled |
 | `melink.opencode.defaultModel` | *(empty)* | Defaults -> Default model (OpenCode Zen) |
 | `melink.ollama.opencode.cliSource` | `local` | CLI -> Source |
 | `melink.ollama.opencode.path` | `opencode` | CLI -> opencode CLI path |
 | `melink.ollama.opencode.zvecGrep` | `false` | Settings JSON only (legacy zvec-grep switch) |
 | `melink.codex.path` | `codex` | Providers -> Codex -> Codex CLI path |
+| `melink.codex.enabled` | `true` | Providers -> Codex -> Enabled |
 | `melink.codex.defaultModel` | *(empty)* | Defaults -> Default model (Codex) |
 | `melink.defaults.permissionLevel` | `default` | Defaults -> Default permission level |
 | `melink.defaults.mode` | `agent` | Defaults -> Default mode |

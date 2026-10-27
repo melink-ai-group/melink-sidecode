@@ -291,11 +291,14 @@ async function readEvents(
   const decoder = new TextDecoder();
   let buffer = '';
   const reasoningParts = new Map<string, Record<string, unknown>>();
+  // The bus also carries the user's prompt as a text part; the role lets the
+  // converter tell that part from the assistant's reply.
+  const messageRoles = new Map<string, string>();
   const drain = async (flushTail: boolean): Promise<void> => {
     const consumed = consumeSse(buffer, flushTail);
     buffer = consumed.rest;
     for (const message of consumed.messages) {
-      await handleBusMessage(message, baseUrl, options, env, sessionId, state, onEvent, reasoningParts);
+      await handleBusMessage(message, baseUrl, options, env, sessionId, state, onEvent, reasoningParts, messageRoles);
     }
   };
   try {
@@ -334,7 +337,8 @@ async function handleBusMessage(
   sessionId: string,
   state: { sawError?: { message: string; statusCode?: number }; terminal: boolean },
   onEvent: (event: OpencodeEvent) => void,
-  reasoningParts: Map<string, Record<string, unknown>>
+  reasoningParts: Map<string, Record<string, unknown>>,
+  messageRoles: Map<string, string>
 ): Promise<void> {
   let payload: Record<string, unknown>;
   try {
@@ -399,7 +403,7 @@ async function handleBusMessage(
     return;
   }
 
-  const line = busPayloadToOpencodeLine(payload, reasoningParts);
+  const line = busPayloadToOpencodeLine(payload, reasoningParts, messageRoles);
   if (!line) {
     return;
   }
