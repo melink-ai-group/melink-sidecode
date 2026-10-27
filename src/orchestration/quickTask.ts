@@ -10,6 +10,7 @@ export const QUICK_TASK_MAX_CHARS = 120;
 export const QUICK_TASK_MAX_WORDS = 20;
 
 export type QuickTaskReason =
+  | 'user-requested'
   | 'quick'
   | 'mode-not-agent'
   | 'origin-not-user'

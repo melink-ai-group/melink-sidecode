@@ -69,6 +69,21 @@ test('an Agent turn stores the choices and the potential roles', () => {
   assert.equal(plan.reasons.planning, 'on-agent-plan');
 });
 
+test('explicit quick send bypasses every role even with an active plan and attachments', () => {
+  const plan = planTurn(input({ quick: true, hasActivePlan: true, hasAttachments: true }));
+  assert.equal(plan.quickReason, 'user-requested');
+  assert.equal(plan.quickBypass, true);
+  for (const role of ['testing', 'reviewing', 'styling', 'doubleCheck', 'planning'] as const) {
+    assert.equal(plan[role], false);
+  }
+  const roles = resolvePostTurnRoles({ choices: ALL_ON, quick: plan.quick, entries: FRONTEND });
+  assert.equal(roles.testing, false);
+  assert.equal(roles.reviewing, false);
+  assert.equal(roles.styling, false);
+  assert.equal(roles.doubleCheck, false);
+  assert.equal(planTurn(input({ quick: true, origin: 'autopilot' })).quickBypass, false);
+});
+
 test('Off removes a role from the plan and On/Auto keep it potential', () => {
   const plan = planTurn(input({ settings: { ...ALL_ON, reviewing: 'off' } }));
   assert.equal(plan.reviewing, false);

@@ -761,6 +761,8 @@ export type WebviewToHostMessage =
   | {
       type: 'sendTurn';
       text: string;
+      /** Explicit per-request bypass of all orchestration roles. */
+      quick?: boolean;
       /** Backend the composer has selected. The host opens a thread there when the active one differs. */
       backendId?: string;
       model?: string;

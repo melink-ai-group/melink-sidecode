@@ -5,8 +5,8 @@
  *
  * Two decisions live here:
  *
- * - `planTurn` runs at dispatch. It records the six choices, always runs quick
- *   detection (the bypass is intrinsic), and marks which roles could still run
+ * - `planTurn` runs at dispatch. It records the six choices, honors explicit
+ *   quick send or detects quick tasks, and marks which roles could still run
  *   once the change set is known.
  * - `resolvePostTurnRoles` runs at turn end with the closed change set. It
  *   applies the tri-state policy: Off never, On whenever the hard mode applies,
@@ -28,6 +28,8 @@ export type PostTurnRole = 'testing' | 'reviewing' | 'styling' | 'doubleCheck';
 
 export interface TurnPlanInput {
   text: string;
+  /** Explicit quick-send overrides detection for this user request. */
+  quick?: boolean;
   mode: string;
   origin: string;
   hasAttachments: boolean;
@@ -56,13 +58,15 @@ export interface TurnPlan {
 
 export function planTurn(input: TurnPlanInput): TurnPlan {
   const choices = normalizedChoices(input.settings);
-  const decision = detectQuickTask({
-    text: input.text,
-    mode: input.mode,
-    origin: input.origin,
-    hasAttachments: input.hasAttachments,
-    hasActivePlan: input.hasActivePlan
-  });
+  const decision = input.quick && input.origin === 'user'
+    ? { quick: true, reason: 'user-requested' as const }
+    : detectQuickTask({
+      text: input.text,
+      mode: input.mode,
+      origin: input.origin,
+      hasAttachments: input.hasAttachments,
+      hasActivePlan: input.hasActivePlan
+    });
   const quickBypass = decision.quick;
   const reasons: Partial<Record<OrchestrationKey, string>> = {};
 
