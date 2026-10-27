@@ -483,6 +483,12 @@ export type HostToWebviewMessage =
    */
   | { type: 'composerDraft'; tabId: string; text: string; attachments: Attachment[] }
   /**
+   * One image the host captured from the browser tab and added to the open
+   * composer. `tabId` is the chat tab it belongs to; a different visible tab
+   * ignores it and restores the chip from its own draft instead.
+   */
+  | { type: 'attachmentsAdded'; tabId: string; attachments: Attachment[] }
+  /**
    * Queued user turns for the visible chat, oldest first. Posted on enqueue,
    * cancel, dispatch, clear, and tab switch so a chip never outlives its turn.
    */

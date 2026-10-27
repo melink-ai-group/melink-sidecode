@@ -50,6 +50,11 @@ export const MIME_BY_EXTENSION: Record<string, string> = {
   sql: 'text/x-sql'
 };
 
+/** Stable-enough id for a chip; the webview only needs it to key and remove. */
+export function createAttachmentId(): string {
+  return `att_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /** Provider-neutral mime for a filename; `application/octet-stream` when unknown. */
 export function mimeForName(name: string): string {
   const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '';

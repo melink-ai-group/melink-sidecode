@@ -57,7 +57,7 @@ class NavPage implements PlaywrightPage {
     return { status: () => 200 };
   }
 
-  async evaluate<T>(_probe: () => T): Promise<T> {
+  async evaluate<T, A = undefined>(_probe: (arg: A) => T, _arg?: A): Promise<T> {
     return { state: 'complete', hasBody: true, hasContent: true } as T;
   }
 
@@ -77,7 +77,10 @@ class NavPage implements PlaywrightPage {
     return this.size;
   }
 
-  async screenshot(): Promise<Buffer> {
+  async screenshot(_options?: {
+    type: 'png';
+    clip?: { x: number; y: number; width: number; height: number };
+  }): Promise<Buffer> {
     return Buffer.from('png');
   }
 
@@ -98,6 +101,9 @@ class NavPage implements PlaywrightPage {
 
   readonly mouse = {
     click: async (_x: number, _y: number) => undefined,
+    move: async (_x: number, _y: number) => undefined,
+    down: async (_options?: { button?: 'left' | 'middle' | 'right'; clickCount?: number }) => undefined,
+    up: async (_options?: { button?: 'left' | 'middle' | 'right'; clickCount?: number }) => undefined,
     wheel: async (dx: number, dy: number) => {
       this.wheelCalls.push([dx, dy]);
     }
@@ -106,6 +112,8 @@ class NavPage implements PlaywrightPage {
   readonly keyboard = {
     type: async (_text: string) => undefined,
     press: async (_key: string) => undefined,
+    down: async (_key: string) => undefined,
+    up: async (_key: string) => undefined,
     insertText: async (_text: string) => undefined
   };
 
