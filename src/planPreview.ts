@@ -1,6 +1,16 @@
 import * as vscode from 'vscode';
 import { renderPlanMarkdown } from './backends/plan';
 import type { PlanArtifact } from './backends/types';
+import { openFileInEditor, openUrlInInternalBrowser } from './editorNavigation';
+
+/** Messages the rendered plan sends back to the host. */
+interface PlanPreviewMessage {
+  type?: string;
+  path?: unknown;
+  line?: unknown;
+  column?: unknown;
+  url?: unknown;
+}
 
 /** Payload the rendered plan view shows. */
 export interface PlanPreviewState {
@@ -49,12 +59,20 @@ export class PlanPreview {
         }
       );
       this.panel.webview.html = this.html(this.panel.webview);
-      this.panel.webview.onDidReceiveMessage((message: { type?: string }) => {
+      this.panel.webview.onDidReceiveMessage((message: PlanPreviewMessage) => {
         if (message?.type === 'ready') {
           this.ready = true;
           this.flush();
         } else if (message?.type === 'build') {
           this.onBuild();
+        } else if (message?.type === 'openFile' && typeof message.path === 'string') {
+          void openFileInEditor({
+            path: message.path,
+            ...(typeof message.line === 'number' ? { line: message.line } : {}),
+            ...(typeof message.column === 'number' ? { column: message.column } : {})
+          });
+        } else if (message?.type === 'openLink' && typeof message.url === 'string') {
+          void openUrlInInternalBrowser(message.url);
         }
       });
       this.panel.onDidDispose(() => {

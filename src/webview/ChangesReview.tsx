@@ -244,19 +244,22 @@ function ChangesReviewView({
   const countLabel = fileCountLabel(review.files);
   const diffReview = diffReviewView(review.diffReview);
   const stylingReview = stylingReviewView(review.stylingReview);
-  const reviews = [diffReview, stylingReview].filter((view): view is DiffReviewView => Boolean(view));
+  // An advisory pass that could not run produced no assessment, so its notice
+  // is not shown and it contributes no attention count or Fix instruction.
+  const visibleDiffReview = diffReview?.kind === 'failed' ? undefined : diffReview;
+  const visibleStylingReview = stylingReview?.kind === 'failed' ? undefined : stylingReview;
+  const reviews = [visibleDiffReview, visibleStylingReview].filter(
+    (view): view is DiffReviewView => view !== undefined
+  );
   const attention = (['error', 'warning', 'info'] as const).map((severity) => ({
     severity,
-    count: reviews.reduce((count, view) => count + view.findings.filter((finding) => finding.severity === severity).length +
-      (view.kind === 'failed' && severity === 'warning' ? 1 : 0), 0) +
+    count: reviews.reduce((count, view) => count + view.findings.filter((finding) => finding.severity === severity).length, 0) +
       (severity === 'error' ? Math.max(rows.filter((row) => row.failed).length, gate === 'needs-override' ? 1 : 0) : 0)
   })).filter(({ count }) => count > 0);
   const fixMessage = [
     'Fix the following issues. Inspect the current files first and rerun the relevant checks after making changes.',
-    ...reviews.flatMap((view) => [
-      ...view.findings.map((finding) => `${finding.severityLabel}: ${finding.location} — ${finding.message}`),
-      ...(view.kind === 'failed' ? [`${view.heading} ${view.detail ?? ''}`] : [])
-    ]),
+    ...reviews.flatMap((view) =>
+      view.findings.map((finding) => `${finding.severityLabel}: ${finding.location} — ${finding.message}`)),
     ...rows.filter((row) => row.failed).map((row) =>
       `${row.statusLabel}: ${row.name}${row.command ? ` (${row.command})` : ''}\n${[row.reason, row.excerpt].filter(Boolean).join('\n')}`),
     ...(gate === 'needs-override' && !rows.some((row) => row.failed) ? [summary ?? 'Post-turn checks failed.'] : [])
@@ -419,8 +422,8 @@ function ChangesReviewView({
             </div>
           ) : null}
 
-          {diffReview && diffReview.kind !== 'empty' ? <DiffReviewSection view={diffReview} /> : null}
-          {stylingReview && stylingReview.kind !== 'empty' ? <DiffReviewSection view={stylingReview} label="Styling check" /> : null}
+          {visibleDiffReview && visibleDiffReview.kind !== 'empty' ? <DiffReviewSection view={visibleDiffReview} /> : null}
+          {visibleStylingReview && visibleStylingReview.kind !== 'empty' ? <DiffReviewSection view={visibleStylingReview} label="Styling check" /> : null}
           {rows.length > 0 ? <CheckRows rows={rows} /> : null}
 
           <ul className="changes-review__list" aria-label="Changed files">
@@ -451,23 +454,23 @@ function ChangesReviewView({
               Show {Math.min(24, review.files.length - visibleFileCount)} more files
             </button>
           ) : null}
-          {diffReview || stylingReview ? (
+          {visibleDiffReview || visibleStylingReview ? (
             <span className="changes-review__notices" role="group" aria-label="Review notices">
-              {diffReview ? (
-                <ReviewNotice label={diffReview.summary} message={[diffReview.heading, diffReview.detail].filter(Boolean).join('\n')} tone={diffReview.tone}>
+              {visibleDiffReview ? (
+                <ReviewNotice label={visibleDiffReview.summary} message={[visibleDiffReview.heading, visibleDiffReview.detail].filter(Boolean).join('\n')} tone={visibleDiffReview.tone}>
                   <ShieldIcon className="ico ico--xs" />
                 </ReviewNotice>
               ) : null}
-              {stylingReview ? (
-                <ReviewNotice label={stylingReview.summary} message={stylingReview.heading} tone={stylingReview.tone}>
+              {visibleStylingReview ? (
+                <ReviewNotice label={visibleStylingReview.summary} message={visibleStylingReview.heading} tone={visibleStylingReview.tone}>
                   <PencilIcon className="ico ico--xs" />
                 </ReviewNotice>
               ) : null}
               <ReviewNotice label="About advisory reviews" message="Advisory only; it never keeps or rejects changes.">
                 <InfoIcon className="ico ico--xs" />
               </ReviewNotice>
-              {stylingReview?.detail ? (
-                <ReviewNotice label="Styling check details" message={stylingReview.detail}>
+              {visibleStylingReview?.detail ? (
+                <ReviewNotice label="Styling check details" message={visibleStylingReview.detail}>
                   <FileIcon className="ico ico--xs" />
                 </ReviewNotice>
               ) : null}

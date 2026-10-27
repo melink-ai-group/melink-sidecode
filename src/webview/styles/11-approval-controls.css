@@ -651,6 +651,28 @@
   color: var(--vscode-foreground);
 }
 
+.file-name--link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 12px);
+  text-align: left;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+
+.file-name--link:hover {
+  text-decoration: underline;
+}
+
+.file-name--link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+  border-radius: var(--melink-radius-sm, 4px);
+}
+
 .diffstat {
   flex: 0 0 auto;
   display: inline-flex;

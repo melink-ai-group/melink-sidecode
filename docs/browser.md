@@ -47,11 +47,11 @@ image drag; selecting text in the tab does nothing.
   image has focus. Composed (IME) text and pasted text are inserted directly.
 - Escape leaves snippet mode. With snippet mode off, it blurs the image and
   returns focus to the address bar.
-- **Width** and **Height** set the viewport, from 200 to 3840 × 200 to 2160 CSS
-  px, and **Apply** resizes the page. The meta label shows the current size.
-- **Snippet** turns the image into a selection surface: drag over the area and
-  it is captured as a PNG and added to the open chat's composer. **Capture page**
-  attaches the whole viewport the same way.
+- The address row also holds the viewport size: width × height fields (200 to
+  3840 × 200 to 2160 CSS px) and the check icon that applies them.
+- The snippet icon turns the image into a selection surface: drag over the area
+  and it is captured as a PNG and added to the open chat's composer. The capture
+  icon attaches the whole viewport the same way.
 - Captures are saved under `.melink/reports/browser/` (gitignored) when a
   workspace is open. With no workspace the inline PNG is the attachment and the
   host keeps it beside the draft. A capture with no open chat tab reports that

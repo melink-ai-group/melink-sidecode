@@ -2,6 +2,7 @@ import { memo, type JSX, type ReactNode } from 'react';
 import { statusForMarker } from '../backends/plan';
 import type { TodoStepStatus } from '../backends/types';
 import { stepStatusKind, stepStatusLabel } from '../planStepIcon';
+import { parseFileReference, type FileReference } from './fileReferences';
 import { parseMarkdownBlocks } from './markdownBlocks';
 
 /**
@@ -23,21 +24,52 @@ function parseLeadingStep(text: string): { status: TodoStepStatus; text: string 
   return { status: statusForMarker(match[1]), text: text.slice(match[0].length) };
 }
 
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\[[^\]]+\]\([^)\s]+\))/g;
+const INLINE =
+  /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(\[[^\]]+\]\([^)\s]+\))|(https?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/g;
 
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
+interface InlineActions {
+  onOpenLink?: (url: string) => void;
+  onOpenFile?: (reference: FileReference) => void;
+}
+
+function isWebUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function fileButton(
+  reference: FileReference,
+  content: ReactNode,
+  className: string,
+  key: string,
+  actions: InlineActions
+): ReactNode {
+  return (
+    <button
+      type="button"
+      className={className}
+      key={key}
+      title={`Open ${reference.path}`}
+      aria-label={`Open ${reference.path}`}
+      onClick={() => actions.onOpenFile?.(reference)}
+    >
+      {content}
+    </button>
+  );
+}
+
+function renderInline(text: string, keyPrefix: string, actions: InlineActions): ReactNode[] {
   const lines = text.split('\n');
   const nodes: ReactNode[] = [];
   lines.forEach((line, lineIndex) => {
     if (lineIndex > 0) {
       nodes.push(<br key={`${keyPrefix}-br${lineIndex}`} />);
     }
-    nodes.push(...renderInlineLine(line, `${keyPrefix}-L${lineIndex}`));
+    nodes.push(...renderInlineLine(line, `${keyPrefix}-L${lineIndex}`, actions));
   });
   return nodes;
 }
 
-function renderInlineLine(text: string, keyPrefix: string): ReactNode[] {
+function renderInlineLine(text: string, keyPrefix: string, actions: InlineActions): ReactNode[] {
   const nodes: ReactNode[] = [];
   let last = 0;
   let match: RegExpExecArray | null;
@@ -51,26 +83,69 @@ function renderInlineLine(text: string, keyPrefix: string): ReactNode[] {
     const token = match[0];
     const tokenKey = `${keyPrefix}-i${key++}`;
     if (token.startsWith('`')) {
+      const code = token.slice(1, -1);
+      const reference = actions.onOpenFile ? parseFileReference(code) : undefined;
       nodes.push(
-        <code className="md__code" key={tokenKey}>
-          {token.slice(1, -1)}
-        </code>
+        reference
+          ? fileButton(reference, <code className="md__code">{code}</code>, 'md__file', tokenKey, actions)
+          : <code className="md__code" key={tokenKey}>{code}</code>
       );
     } else if (token.startsWith('**')) {
       nodes.push(<strong key={tokenKey}>{token.slice(2, -2)}</strong>);
     } else if (token.startsWith('*')) {
       nodes.push(<em key={tokenKey}>{token.slice(1, -1)}</em>);
-    } else {
+    } else if (token.startsWith('[')) {
       const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token);
-      if (link) {
-        nodes.push(
-          <a className="md__link" href={link[2]} key={tokenKey} rel="noreferrer noopener">
-            {link[1]}
-          </a>
-        );
-      } else {
+      if (!link) {
         nodes.push(token);
+      } else {
+        const href = link[2];
+        const reference = actions.onOpenFile ? parseFileReference(href) : undefined;
+        if (reference) {
+          nodes.push(fileButton(reference, link[1], 'md__file-link', tokenKey, actions));
+        } else if (actions.onOpenLink && isWebUrl(href)) {
+          nodes.push(
+            <a
+              className="md__link"
+              href={href}
+              key={tokenKey}
+              rel="noreferrer noopener"
+              onClick={(event) => {
+                event.preventDefault();
+                actions.onOpenLink?.(href);
+              }}
+            >
+              {link[1]}
+            </a>
+          );
+        } else {
+          nodes.push(
+            <a className="md__link" href={href} key={tokenKey} rel="noreferrer noopener">
+              {link[1]}
+            </a>
+          );
+        }
       }
+    } else if (isWebUrl(token)) {
+      nodes.push(
+        <a
+          className="md__link"
+          href={token}
+          key={tokenKey}
+          rel="noreferrer noopener"
+          onClick={(event) => {
+            if (!actions.onOpenLink) {
+              return;
+            }
+            event.preventDefault();
+            actions.onOpenLink(token);
+          }}
+        >
+          {token}
+        </a>
+      );
+    } else {
+      nodes.push(token);
     }
     last = match.index + token.length;
   }
@@ -84,9 +159,14 @@ export interface MarkdownProps {
   text: string;
   /** Rendered language label and copy affordance on fenced blocks. */
   renderCodeHeader?: (language: string, code: string) => ReactNode;
+  /** Open an http(s) link in the host's internal browser. */
+  onOpenLink?: (url: string) => void;
+  /** Open a file reference in the editor. */
+  onOpenFile?: (reference: FileReference) => void;
 }
 
-export const Markdown = memo(function Markdown({ text, renderCodeHeader }: MarkdownProps): JSX.Element {
+export const Markdown = memo(function Markdown({ text, renderCodeHeader, onOpenLink, onOpenFile }: MarkdownProps): JSX.Element {
+  const actions: InlineActions = { onOpenLink, onOpenFile };
   const blocks = parseMarkdownBlocks(text);
   return (
     <div className="md">
@@ -112,14 +192,14 @@ export const Markdown = memo(function Markdown({ text, renderCodeHeader }: Markd
             const Tag = `h${level}` as 'h3';
             return (
               <Tag className="md__heading" key={key}>
-                {renderInline(block.text, key)}
+                {renderInline(block.text, key, actions)}
               </Tag>
             );
           }
           case 'quote':
             return (
               <blockquote className="md__quote" key={key}>
-                {renderInline(block.lines.join('\n'), key)}
+                {renderInline(block.lines.join('\n'), key, actions)}
               </blockquote>
             );
           case 'table':
@@ -129,7 +209,7 @@ export const Markdown = memo(function Markdown({ text, renderCodeHeader }: Markd
                   <thead>
                     <tr>
                       {block.headers.map((header, cellIndex) => (
-                        <th key={`${key}-h${cellIndex}`}>{renderInline(header, `${key}-h${cellIndex}`)}</th>
+                        <th key={`${key}-h${cellIndex}`}>{renderInline(header, `${key}-h${cellIndex}`, actions)}</th>
                       ))}
                     </tr>
                   </thead>
@@ -138,7 +218,7 @@ export const Markdown = memo(function Markdown({ text, renderCodeHeader }: Markd
                       <tr key={`${key}-r${rowIndex}`}>
                         {row.map((cell, cellIndex) => (
                           <td key={`${key}-r${rowIndex}-c${cellIndex}`}>
-                            {renderInline(cell, `${key}-r${rowIndex}-c${cellIndex}`)}
+                            {renderInline(cell, `${key}-r${rowIndex}-c${cellIndex}`, actions)}
                           </td>
                         ))}
                       </tr>
@@ -151,7 +231,7 @@ export const Markdown = memo(function Markdown({ text, renderCodeHeader }: Markd
             const items = block.items.map((item, itemIndex) => {
               const step = parseLeadingStep(item);
               if (!step) {
-                return <li key={`${key}-l${itemIndex}`}>{renderInline(item, `${key}-l${itemIndex}`)}</li>;
+                return <li key={`${key}-l${itemIndex}`}>{renderInline(item, `${key}-l${itemIndex}`, actions)}</li>;
               }
               return (
                 <li className={`md__step md__step--${stepStatusKind(step.status)}`} key={`${key}-l${itemIndex}`}>
@@ -160,7 +240,7 @@ export const Markdown = memo(function Markdown({ text, renderCodeHeader }: Markd
                     role="img"
                     aria-label={stepStatusLabel(step.status)}
                   />
-                  <span className="md__step-text">{renderInline(step.text, `${key}-l${itemIndex}`)}</span>
+                  <span className="md__step-text">{renderInline(step.text, `${key}-l${itemIndex}`, actions)}</span>
                 </li>
               );
             });
@@ -177,7 +257,7 @@ export const Markdown = memo(function Markdown({ text, renderCodeHeader }: Markd
           default:
             return (
               <p className="md__p" key={key}>
-                {renderInline(block.text, key)}
+                {renderInline(block.text, key, actions)}
               </p>
             );
         }

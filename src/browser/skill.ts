@@ -197,6 +197,10 @@ export class BrowserSkill {
         isError: true
       };
     }
+    // Only a call from an agent shim carries a provider; panel input does not.
+    // The bar therefore says "sideCode is controlling the screen" only while the
+    // agent is driving, never while the user is clicking the page themselves.
+    const agentDriven = provider !== undefined;
     try {
       if (name === 'browser_close') {
         await this.closeBrowser();
@@ -224,6 +228,9 @@ export class BrowserSkill {
         }
       }
       const page = await this.ensurePage();
+      if (agentDriven) {
+        this.panel?.control(true);
+      }
       const actions = this.actions(page);
       const allow = async (origin: string): Promise<OriginApproval> => {
         if (approvedOrigin === origin && approval) {
@@ -246,6 +253,10 @@ export class BrowserSkill {
         this.panel?.showError(message);
       }
       return { content: [{ type: 'text', text: message }], isError: true };
+    } finally {
+      if (agentDriven) {
+        this.panel?.control(false);
+      }
     }
   }
 

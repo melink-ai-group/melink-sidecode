@@ -302,12 +302,27 @@
 }
 
 .diff-file__path {
+  display: block;
+  width: 100%;
   padding: 4px 8px;
-  color: var(--vscode-descriptionForeground);
+  border: 0;
+  font: inherit;
+  text-align: left;
+  color: var(--vscode-textLink-foreground);
   background: color-mix(in srgb, var(--vscode-textCodeBlock-background) 60%, transparent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.diff-file__path:hover {
+  text-decoration: underline;
+}
+
+.diff-file__path:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }
 
 .diff-line {

@@ -732,6 +732,13 @@ export type WebviewToHostMessage =
   | { type: 'setIncludeViewedFile'; included: boolean }
   /** Open a context file in the editor (the active file named in the strip). */
   | { type: 'openContextFile'; path: string }
+  /**
+   * Open a file a transcript row names. `path` is workspace-relative or absolute;
+   * `line`/`column` are 1-based and optional, from a `path:line:column` reference.
+   */
+  | { type: 'openFile'; path: string; line?: number; column?: number }
+  /** Open one http(s) link in the editor's internal browser. */
+  | { type: 'openLink'; url: string }
   | { type: 'openSettings' }
   /** Open the sidebar's own settings screen. `section` selects a provider page. */
   | { type: 'showAppSettings'; section?: SettingsSection }

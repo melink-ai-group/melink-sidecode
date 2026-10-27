@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { friendlyToolTitle, isRawToolName } from '../../backends/toolLabel.ts';
+import { openFileReference } from '../navigation';
 import { prettyPath } from '../prettyPath';
 import { FileIcon } from '../Icons';
 import type { TranscriptItemView } from '../state';
@@ -33,9 +34,15 @@ export function FileChangeCard({ item }: { item: TranscriptItemView }): JSX.Elem
           {diffs.map((file) => (
             <section className="diff-file" key={file.path}>
               {diffs.length > 1 ? (
-                <div className="diff-file__path" title={prettyPath(file.path)}>
+                <button
+                  className="diff-file__path"
+                  type="button"
+                  title={`Open ${prettyPath(file.path)}`}
+                  aria-label={`Open ${prettyPath(file.path)}`}
+                  onClick={() => openFileReference({ path: file.path })}
+                >
                   {prettyPath(file.path)}
-                </div>
+                </button>
               ) : null}
               {file.lines?.map((line, index) => (
                 <div className={`diff-line diff-line--${line.kind === 'add' ? 'add' : line.kind === 'del' ? 'del' : 'ctx'}`} key={`${index}-${line.kind}`}>

@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
 import { Markdown } from './Markdown';
+import { openFileReference, openWebLink } from './navigation';
 import { prettyPath } from './prettyPath.ts';
 import { isSubmitEnter } from './keys';
 import {
@@ -151,7 +152,11 @@ function PlanCard({
       <div className="plan-doc" tabIndex={0} aria-label="Plan contents">
         {plan.body || plan.summary ? (
           <div className="plan-doc__summary">
-            <Markdown text={plan.body || plan.summary || ''} />
+            <Markdown
+              text={plan.body || plan.summary || ''}
+              onOpenLink={openWebLink}
+              onOpenFile={openFileReference}
+            />
           </div>
         ) : null}
         {plan.steps.length > 0 ? (

@@ -6,6 +6,7 @@ import { visibleTranscriptText } from '../visibleTranscript';
 import { AlertIcon, CheckIcon, CopyIcon, PersonIcon, RestoreIcon, StopIcon } from '../Icons';
 import { AttachmentList, type ViewableImage } from '../composer/attachments';
 import { bridge } from '../hostBridge';
+import { openFileReference, openWebLink } from '../navigation';
 import { noticeActionLabel } from '../notices';
 import type { CheckpointView } from '../../protocol';
 import type { NoticeAction, TranscriptItemView } from '../state';
@@ -63,7 +64,7 @@ export const TranscriptRow = memo(function TranscriptRow({
             {item.attachments && item.attachments.length > 0 ? (
               <AttachmentList attachments={item.attachments} sent onView={onViewImage} />
             ) : null}
-            {text ? <Markdown text={text} /> : null}
+            {text ? <Markdown text={text} onOpenLink={openWebLink} onOpenFile={openFileReference} /> : null}
           </div>
           {checkpoint ? (
             <div className="turn-actions">
@@ -234,10 +235,17 @@ export function AssistantReply({ text, settled }: { text: string; settled: boole
   );
   return (
     <>
-      {parts.body ? <Markdown text={parts.body} renderCodeHeader={copyHeader} /> : null}
+      {parts.body ? (
+        <Markdown
+          text={parts.body}
+          renderCodeHeader={copyHeader}
+          onOpenLink={openWebLink}
+          onOpenFile={openFileReference}
+        />
+      ) : null}
       {parts.close ? (
         <div className="reply-close">
-          <Markdown text={parts.close} />
+          <Markdown text={parts.close} onOpenLink={openWebLink} onOpenFile={openFileReference} />
         </div>
       ) : null}
     </>

@@ -51,6 +51,13 @@ describe('subagent activity', () => {
     expect(screen.queryByText('The provider is unavailable.')).toBeNull();
   });
 
+  it('hides an unavailable advisory review instead of marking it failed', () => {
+    const { container } = render(<AgentActivityCard activity={{ ...running, status: 'unavailable' }} />);
+    expect(container.querySelector('.agent-activity')).toBeNull();
+    expect(screen.queryByLabelText('Styling agent: Failed')).toBeNull();
+    expect(screen.queryByLabelText('Styling agent: Unavailable')).toBeNull();
+  });
+
   it('replays activity and updates one row in place while keeping the main turn idle', async () => {
     render(<App />);
     act(() => {

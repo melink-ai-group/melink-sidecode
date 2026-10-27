@@ -8,11 +8,20 @@ const STATUS_LABELS: Record<AgentActivity['status'], string> = {
   running: 'Running',
   completed: 'Completed',
   failed: 'Failed',
-  cancelled: 'Cancelled'
+  cancelled: 'Cancelled',
+  unavailable: 'Unavailable'
 };
 
-/** A native disclosure keeps each worker compact and keyboard reachable. */
-export function AgentActivityCard({ activity }: { activity: AgentActivity }): JSX.Element {
+/**
+ * A native disclosure keeps each worker compact and keyboard reachable.
+ *
+ * An advisory pass that could not run carries no assessment, so its row is
+ * hidden rather than reported as a failure.
+ */
+export function AgentActivityCard({ activity }: { activity: AgentActivity }): JSX.Element | null {
+  if (activity.status === 'unavailable') {
+    return null;
+  }
   const label = STATUS_LABELS[activity.status];
   const tone = activity.status === 'running' ? 'running'
     : activity.status === 'completed' ? 'done'

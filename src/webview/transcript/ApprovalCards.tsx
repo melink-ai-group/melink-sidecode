@@ -1,5 +1,6 @@
 import { useEffect, useRef, type JSX } from 'react';
 import type { ApprovalDecision } from '../../backends/types';
+import { openFileReference } from '../navigation';
 import { prettyPath } from '../prettyPath';
 import { CheckIcon, InfoIcon, ShieldIcon } from '../Icons';
 import { decisionLabel, decisionMessage, decisionScope, requestMessage } from '../state';
@@ -64,9 +65,15 @@ export function ApprovalPrompt({
             <p className="affected-label">Changes it would touch</p>
             {files.map((file) => (
               <div className="file-row" key={file.path}>
-                <span className="file-name" title={prettyPath(file.path)}>
+                <button
+                  className="file-name file-name--link"
+                  type="button"
+                  title={`Open ${prettyPath(file.path)}`}
+                  aria-label={`Open ${prettyPath(file.path)}`}
+                  onClick={() => openFileReference({ path: file.path })}
+                >
                   {prettyPath(file.path)}
-                </span>
+                </button>
                 <span className="diffstat" aria-label={diffStatsLabel([file])}>
                   <span className="add">+{file.additions ?? 0}</span>
                   <span className="del">-{file.deletions ?? 0}</span>
@@ -79,9 +86,15 @@ export function ApprovalPrompt({
             <p className="affected-label">Files it would touch</p>
             {paths.map((path) => (
               <div className="file-row" key={path}>
-                <span className="file-name" title={prettyPath(path)}>
+                <button
+                  className="file-name file-name--link"
+                  type="button"
+                  title={`Open ${prettyPath(path)}`}
+                  aria-label={`Open ${prettyPath(path)}`}
+                  onClick={() => openFileReference({ path })}
+                >
                   {prettyPath(path)}
-                </span>
+                </button>
               </div>
             ))}
           </div>

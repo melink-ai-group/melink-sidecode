@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import type { FileReference } from './fileReferences';
 import { Markdown } from './Markdown';
 import './planPreview.css';
 
@@ -68,7 +69,22 @@ function PlanPreviewApp() {
         </button>
       </header>
       <article className="plan-preview__doc" tabIndex={0} aria-label="Plan document">
-        {markdown ? <Markdown text={markdown} /> : <p className="plan-preview__empty">This plan has no content yet.</p>}
+        {markdown ? (
+          <Markdown
+            text={markdown}
+            onOpenLink={(url) => vscode.postMessage({ type: 'openLink', url })}
+            onOpenFile={(reference: FileReference) =>
+              vscode.postMessage({
+                type: 'openFile',
+                path: reference.path,
+                ...(reference.line !== undefined ? { line: reference.line } : {}),
+                ...(reference.column !== undefined ? { column: reference.column } : {})
+              })
+            }
+          />
+        ) : (
+          <p className="plan-preview__empty">This plan has no content yet.</p>
+        )}
       </article>
     </div>
   );
