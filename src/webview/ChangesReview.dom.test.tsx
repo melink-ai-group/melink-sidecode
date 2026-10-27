@@ -82,14 +82,15 @@ it('disables Fix during a turn or decision and removes stale indicators when res
   expect(screen.queryByRole('status', { name: 'Issues need attention' })).toBeNull();
 });
 
-it('shows an unavailable review inline and includes its reason in Fix', () => {
+it('does not show an unavailable review as an issue or send its invalid line to Fix', () => {
   const options = props({ ...review(), checks: undefined, diffReview: undefined,
     stylingReview: { status: 'failed', findings: [], notice: 'Styling review timed out.' } });
   render(<ChangesReview {...options} />);
   fireEvent.click(screen.getByRole('button', { name: /Files changed/ }));
-  expect(screen.getByText('Styling review timed out.')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Fix' }));
-  expect(vi.mocked(options.onFix).mock.calls[0][0]).toContain('Styling review timed out.');
+  expect(screen.queryByText('Styling review timed out.')).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Styling check' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull();
+  expect(screen.queryByRole('status', { name: 'Issues need attention' })).toBeNull();
 });
 
 it('posts Fix as a user turn using the selected backend and preserves the composer draft', async () => {

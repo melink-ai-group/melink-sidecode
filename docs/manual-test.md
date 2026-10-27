@@ -56,10 +56,11 @@ readiness rules, assertion tool, and screenshot storage.
       start an image drag, the page's cursor appears over hover targets, the
       wheel scrolls under the pointer, and typing/paste reach the page. Escape
       while the image has focus returns to the address bar.
-- [ ] B6. Resolution and captures: Width/Height plus **Apply** resize the page;
-      **Snippet** drags a selection that becomes an attachment chip in the open
-      chat, and **Capture page** attaches the whole viewport. A capture with no
-      chat tab reports that instead of dropping the image.
+- [ ] B6. Resolution and captures: the width × height fields and the check icon
+      resize the page; the snippet icon drags a selection that becomes an
+      attachment chip in the open chat, and the capture icon attaches the whole
+      viewport. A capture with no chat tab reports that instead of dropping the
+      image.
 
 ---
 
@@ -756,7 +757,8 @@ unset.
 profile. Leave it on Auto (or set On) for this pass; both require a frontend file
 change, and Off never runs. Use Agent mode and an authenticated selected model.
 The check now uses a model worker; its activity should show a reason and status.
-Model failures should show Failed, not an empty clean assessment.
+Model failures must not be marked Failed or shown as an empty clean assessment;
+the unavailable pass stays hidden.
 
 - [ ] 47i. **Frontend work runs the check.** Ask for a small change to a
       component or stylesheet in the webview, for example add a rule with a
@@ -1280,10 +1282,10 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.2.1 (`package.json`)
-- **Node test files:** 194 (`src/**/*.test.ts`)
-- **Node tests:** 1841 declarations, 1860 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1850 pass, 10 skipped, 0 failures (Node suite within `npm test`).
+- **Node test files:** 195 (`src/**/*.test.ts`)
+- **Node tests:** 1845 declarations, 1864 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1854 pass, 10 skipped, 0 failures (Node suite within `npm test`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
-- **DOM suite:** 10 files / 80 tests, all passing (DOM suite within `npm test`). `npm test`
+- **DOM suite:** 11 files / 84 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`

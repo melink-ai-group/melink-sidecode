@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { ChevronDownIcon } from '../Icons';
 import { Markdown } from '../Markdown';
+import { openFileReference, openWebLink } from '../navigation';
 import { plainRowText } from '../plainRowText';
 import { shouldToggleReasoningBody } from '../reasoningClick';
 import type { TranscriptItemView } from '../state';
@@ -80,7 +81,7 @@ export function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Eleme
           }}
         >
           {text ? (
-            <Markdown text={item.text} />
+            <Markdown text={item.text} onOpenLink={openWebLink} onOpenFile={openFileReference} />
           ) : item.status === 'streaming' ? (
             <ReasoningWaitDots />
           ) : null}

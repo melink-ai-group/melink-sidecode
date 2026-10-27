@@ -504,7 +504,12 @@ export interface Attachment {
 export interface AgentActivity {
   role: string;
   reason: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  /**
+   * `unavailable` marks an advisory pass that could not run (provider failure,
+   * deadline, or an unusable reply). It is not a failed assessment: the review
+   * simply produced no evidence, so it must not read as a failure.
+   */
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unavailable';
   detail?: string;
   findings?: string[];
 }

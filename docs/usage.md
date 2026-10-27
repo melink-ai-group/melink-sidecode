@@ -557,17 +557,17 @@ wheel scrolling, typing, clipboard paste, and shortcuts are forwarded to the
 page the agent is driving, and the page's cursor appears over the image. Escape
 leaves snippet mode, or returns focus from the image to the address bar.
 
-The toolbar sets the page viewport: enter a width (200-3840) and height
-(200-2160), then choose **Apply**. The label beside the controls shows the
-current size.
+The address row sets the page viewport: the two number fields are width × height
+(200-3840 × 200-2160), and the check icon applies them. The other icon buttons
+are snippet selection and capture page.
 
-**Snippet** turns the page into a selection surface. Drag over one area and the
-selection becomes a PNG attachment in the open chat's composer, ready to send
-with your next message. **Capture page** attaches the whole visible viewport the
-same way. Captures are written under `.melink/reports/browser/` (local and
-gitignored) when a workspace is open; without a workspace the image stays inline
-with the draft. If no chat tab is open, the tab says so instead of dropping the
-capture.
+The snippet icon turns the page into a selection surface. Drag over one area and
+the selection becomes a PNG attachment in the open chat's composer, ready to
+send with your next message. The capture icon attaches the whole visible
+viewport the same way. Captures are written under `.melink/reports/browser/`
+(local and gitignored) when a workspace is open; without a workspace the image
+stays inline with the draft. If no chat tab is open, the tab says so instead of
+dropping the capture.
 
 ## Browser origin approvals
 
@@ -733,14 +733,16 @@ Completed Agent turns use a separate read-only subagent on the selected provider
 and model. It receives a bounded diff, the opening request, and available
 reference files. It assesses correctness and requested changes; a file mentioned
 only as a reference does not need to be edited. Invalid output, provider failures,
-and deadlines produce a visible failed assessment, never a false clean result.
+and deadlines leave that pass unavailable rather than presenting a failed
+assessment or a false clean result; the review's failed line is not shown and is
+never sent to **Fix**.
 
 A review is stored per turn and restored on reload; **no reviewer runs again on
 reload**. Turning **Reviewing** or **Styling check** Off later hides nothing that
 is already stored: the choice gates only whether a *new* turn runs a pass, so an
 earlier turn keeps showing the evidence it produced. If the pass throws or misses
-its 15-second deadline, the section shows
-a visible, non-blocking notice and the change decisions stay available. The new
+its 15-second deadline, the pass is treated as unavailable: it is not marked
+failed, its line is hidden, and the change decisions stay available. The new
 orchestration key is window-scoped; the legacy `melink.review.diffReview`
 fallback stays application-scoped, so a workspace cannot turn it on through the
 old key.

@@ -80,8 +80,35 @@
   text-decoration: none;
 }
 
-.md__link:hover {
+.md__link:hover,
+.md__file:hover,
+.md__file-link:hover {
   text-decoration: underline;
+}
+
+.md__link:focus-visible,
+.md__file:focus-visible,
+.md__file-link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+  border-radius: var(--melink-radius-sm, 4px);
+}
+
+/* Inline code that names a file opens in the editor, so it is a real button. */
+.md__file,
+.md__file-link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.md__file .md__code {
+  color: inherit;
 }
 
 .md__code {

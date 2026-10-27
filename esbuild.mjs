@@ -42,7 +42,10 @@ const extensionOptions = {
   format: 'cjs',
   platform: 'node',
   target: 'node20',
-  external: ['vscode', 'playwright-core']
+  external: ['vscode', 'playwright-core'],
+  // The browser panel cannot load extension-relative CSS, so its inline token
+  // block is the source stylesheet embedded at build time.
+  loader: { '.css': 'text' }
 };
 
 /** Webview bundle: React + TypeScript, browser IIFE, CSS emitted alongside. */

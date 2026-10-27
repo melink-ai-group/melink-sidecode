@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import tokensCss from '../../tokens.css';
 import {
   bindHelpers,
   clampedFraction,
@@ -10,6 +11,9 @@ import {
   wheelPixels
 } from './panelInput.ts';
 import { urlInputError } from './url.ts';
+
+/** How long the "controlling" bar stays up after the last agent action. */
+const CONTROL_LINGER_MS = 800;
 
 /** What the editor tab shows above the page. */
 export interface BrowserTabState {
@@ -75,6 +79,8 @@ export class BrowserPanel {
   private pendingError = '';
   private lastFrame?: string;
   private frameTimer?: ReturnType<typeof setTimeout>;
+  private controlTimer?: ReturnType<typeof setTimeout>;
+  private controlling = false;
   private readonly handlers: BrowserPanelHandlers;
 
   constructor(handlers: BrowserPanelHandlers) {
@@ -86,7 +92,7 @@ export class BrowserPanel {
     this.pendingError = '';
     if (!this.panel) {
       this.ready = false;
-      this.panel = vscode.window.createWebviewPanel('melink.browser', 'Browser', vscode.ViewColumn.Beside, {
+      this.panel = vscode.window.createWebviewPanel('melink.browser', 'Browser', vscode.ViewColumn.Active, {
         enableScripts: true,
         retainContextWhenHidden: true
       });
@@ -99,9 +105,14 @@ export class BrowserPanel {
         this.ready = false;
         this.pendingError = '';
         this.lastFrame = undefined;
+        this.controlling = false;
         if (this.frameTimer) {
           clearTimeout(this.frameTimer);
           this.frameTimer = undefined;
+        }
+        if (this.controlTimer) {
+          clearTimeout(this.controlTimer);
+          this.controlTimer = undefined;
         }
         this.handlers.blur();
       });
@@ -142,6 +153,31 @@ export class BrowserPanel {
     }
   }
 
+  /**
+   * Show or hide the fixed bar that says the agent is driving this page.
+   *
+   * The value is remembered while the tab is still starting, so the bar appears
+   * as soon as the panel reports ready even when the tool call began first.
+   */
+  control(value: boolean): void {
+    if (this.controlTimer) {
+      clearTimeout(this.controlTimer);
+      this.controlTimer = undefined;
+    }
+    if (value) {
+      this.controlling = true;
+      this.flushControl();
+      return;
+    }
+    // A click is often a single short tool call. Keep the bar up briefly so it
+    // is readable instead of flashing once between frames.
+    this.controlTimer = setTimeout(() => {
+      this.controlTimer = undefined;
+      this.controlling = false;
+      this.flushControl();
+    }, CONTROL_LINGER_MS);
+  }
+
   /** Mirror the page's cursor on the image. */
   cursor(value: string): void {
     if (this.ready && this.panel) {
@@ -169,9 +205,14 @@ export class BrowserPanel {
     this.ready = false;
     this.pendingError = '';
     this.lastFrame = undefined;
+    this.controlling = false;
     if (this.frameTimer) {
       clearTimeout(this.frameTimer);
       this.frameTimer = undefined;
+    }
+    if (this.controlTimer) {
+      clearTimeout(this.controlTimer);
+      this.controlTimer = undefined;
     }
   }
 
@@ -183,6 +224,7 @@ export class BrowserPanel {
     if (message.type === 'ready') {
       this.ready = true;
       this.flush();
+      this.flushControl();
       return;
     }
     if (message.type === 'blur') {
@@ -288,6 +330,12 @@ export class BrowserPanel {
     this.flushFrame();
   }
 
+  private flushControl(): void {
+    if (this.ready && this.panel) {
+      void this.panel.webview.postMessage({ type: 'control', value: this.controlling });
+    }
+  }
+
   private flushFrame(): void {
     if (!this.ready || !this.panel || !this.lastFrame) {
       return;
@@ -330,46 +378,77 @@ function html(webview: vscode.Webview): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Browser</title>
 <style>
+  ${tokensCss}
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; height: 100vh; display: flex; flex-direction: column; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font: 13px var(--vscode-font-family); }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); }
-  .toolbar { row-gap: 6px; }
-  input, button { font: inherit; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; }
-  input { padding: 4px 8px; }
-  #url { flex: 1 1 320px; min-width: 0; }
-  input[type="number"] { width: 76px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+  input, button { font: inherit; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--melink-radius-sm, 4px); }
+  input { height: 26px; padding: 4px 8px; }
+  #url { flex: 1 1 200px; min-width: 120px; }
+  input[type="number"] { width: 62px; padding: 4px 4px; text-align: center; }
+  input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   button { padding: 4px 10px; cursor: pointer; }
-  button[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: var(--vscode-button-background); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .field { display: flex; align-items: center; gap: 4px; white-space: nowrap; opacity: 0.9; }
-  .grow { flex: 1 1 auto; }
-  .meta { white-space: nowrap; opacity: 0.8; }
+  button.icon { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: var(--melink-radius-sm, 4px); background: transparent; color: var(--vscode-descriptionForeground); }
+  button.icon svg { display: block; }
+  button.icon:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); color: var(--vscode-foreground); }
+  button.icon[aria-pressed="true"] { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  button.icon[aria-pressed="true"]:hover:not(:disabled) { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  button.icon:disabled { opacity: 0.4; cursor: default; }
+  button.icon:disabled:hover { background: transparent; color: var(--vscode-descriptionForeground); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+  .size { display: flex; align-items: center; gap: 4px; }
+  .times { opacity: 0.7; }
+  .divider { width: 1px; height: 18px; background: var(--vscode-panel-border); }
   .error, .hint, .status { margin: 0; padding: 6px 8px; font-size: 12px; border-bottom: 1px solid var(--vscode-panel-border); }
   .error { color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground)); background: var(--vscode-inputValidation-errorBackground, transparent); border-bottom-color: var(--vscode-inputValidation-errorBorder, transparent); }
   .hint, .status { color: var(--vscode-descriptionForeground, inherit); }
-  .hint { position: absolute; z-index: 2; top: 8px; left: 8px; right: 8px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); pointer-events: none; }
+  .hint { position: absolute; z-index: 2; top: 8px; left: 8px; right: 8px; border: 1px solid var(--vscode-panel-border); border-radius: var(--melink-radius-sm, 4px); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); pointer-events: none; }
   main { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; overflow: hidden; background: var(--vscode-editor-background); }
   img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: default; user-select: none; -webkit-user-drag: none; touch-action: none; }
   img:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
   #selection { position: absolute; z-index: 1; border: 1px dashed var(--vscode-focusBorder); background: var(--vscode-editor-selectionBackground); pointer-events: none; }
   p { margin: 0; padding: 24px; opacity: 0.75; }
+  .control { position: fixed; z-index: 3; left: 0; right: 0; bottom: 0; padding: var(--melink-space-sm, 4px) var(--melink-space-lg, 12px); background: var(--vscode-statusBar-background, var(--melink-surface)); color: var(--vscode-statusBar-foreground, var(--melink-text-primary)); font-size: var(--melink-font-size-sm, 11px); font-weight: 600; letter-spacing: 0.01em; text-align: center; pointer-events: none; }
 </style>
 </head>
 <body>
 <header class="bar">
   <input id="url" type="url" spellcheck="false" aria-label="Address" placeholder="http://localhost:3000" />
-  <button id="go" type="button">Open</button>
+  <button id="go" type="button" class="icon" aria-label="Open address" title="Open address">
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M2.5 8h10.5" />
+      <path d="M9.5 3.5 14 8l-4.5 4.5" />
+    </svg>
+  </button>
+  <div class="actions">
+    <div class="size" role="group" aria-label="Viewport size">
+      <input id="width" type="number" min="200" max="3840" step="1" inputmode="numeric" aria-label="Viewport width" />
+      <span class="times" aria-hidden="true">×</span>
+      <input id="height" type="number" min="200" max="2160" step="1" inputmode="numeric" aria-label="Viewport height" />
+      <button id="apply" type="button" class="icon" aria-label="Apply viewport size" title="Apply viewport size">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M3 8.5l3.2 3L13 5" />
+        </svg>
+      </button>
+    </div>
+    <span class="divider" aria-hidden="true"></span>
+    <button id="snippet" type="button" class="icon" aria-pressed="false" aria-label="Snippet selection" title="Snippet selection: drag over the page">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M4.5 1.5v10h10" />
+        <path d="M1.5 4.5h10v10" />
+      </svg>
+    </button>
+    <button id="capture" type="button" class="icon" aria-label="Capture page" title="Capture page as a chat attachment">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M1.5 5.5h2.7l1-2h5.6l1 2h2.7v8h-13z" />
+        <circle cx="8" cy="9" r="2.3" />
+      </svg>
+    </button>
+  </div>
 </header>
-<div class="bar toolbar">
-  <label class="field" for="width">Width <input id="width" type="number" min="200" max="3840" step="1" inputmode="numeric" aria-label="Viewport width" /></label>
-  <label class="field" for="height">Height <input id="height" type="number" min="200" max="2160" step="1" inputmode="numeric" aria-label="Viewport height" /></label>
-  <button id="apply" type="button">Apply</button>
-  <span class="grow"></span>
-  <button id="snippet" type="button" aria-pressed="false" title="Drag over the page to attach that area to the chat">Snippet</button>
-  <button id="capture" type="button">Capture page</button>
-  <span class="meta" id="meta"></span>
-</div>
 <p class="error" id="error" role="alert" hidden></p>
 <p class="status" id="status" role="status" aria-live="polite" hidden></p>
 <main id="stage">
@@ -377,16 +456,17 @@ function html(webview: vscode.Webview): string {
   <div id="selection" hidden></div>
   <p class="hint" id="hint" hidden>Drag over the page to attach that area to the chat. Press Escape to cancel.</p>
 </main>
+<div class="control" id="control" role="status" aria-live="polite" hidden>sideCode is controlling the screen</div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   ${helpers}
   const url = document.getElementById('url');
   const widthInput = document.getElementById('width');
   const heightInput = document.getElementById('height');
-  const meta = document.getElementById('meta');
   const errorLine = document.getElementById('error');
   const hint = document.getElementById('hint');
   const statusLine = document.getElementById('status');
+  const controlBar = document.getElementById('control');
   const stage = document.getElementById('stage');
   const placeholder = document.getElementById('placeholder');
   const selectionBox = document.getElementById('selection');
@@ -432,6 +512,10 @@ function html(webview: vscode.Webview): string {
     statusLine.hidden = !text;
     if (statusTimer) { clearTimeout(statusTimer); statusTimer = undefined; }
     if (text) statusTimer = setTimeout(function () { statusLine.hidden = true; }, 5000);
+  }
+  function setControl(value) {
+    controlBar.hidden = !value;
+    document.body.classList.toggle('control-on', !!value);
   }
   function applyCursor() {
     if (!img) return;
@@ -730,13 +814,14 @@ function html(webview: vscode.Webview): string {
       if (document.activeElement !== url) url.value = message.url || '';
       if (document.activeElement !== widthInput && message.width) widthInput.value = String(message.width);
       if (document.activeElement !== heightInput && message.height) heightInput.value = String(message.height);
-      meta.textContent = message.width && message.height ? message.width + ' × ' + message.height : '';
       showError(message.error || '');
     } else if (message.type === 'error') {
       showError(message.message || '');
     } else if (message.type === 'cursor') {
       cursor = safeCursor(message.value);
       applyCursor();
+    } else if (message.type === 'control') {
+      setControl(message.value === true);
     } else if (message.type === 'attached') {
       setBusy(false);
       showStatus(message.message || 'Attached to the chat.');
