@@ -736,6 +736,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * The mode the chat on screen runs in, for the browser bridge.
+   *
+   * The bridge answers outside this webview's async store, so this reads the
+   * visible tab explicitly. An unknown or unsupported mode degrades to the
+   * backend's fallback rather than being treated as Ask.
+   */
+  browserMode(): DefaultMode {
+    const session = this.visible;
+    const backendId =
+      session?.activeThread?.backendId ?? session?.composerBackendId ?? this.defaultBackendId();
+    return this.resolveMode(backendId, session?.mode ?? readDefaultMode());
+  }
+
   private get pendingApproval(): ApprovalRequest | undefined {
     return this.session?.pendingApproval;
   }

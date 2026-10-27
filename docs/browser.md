@@ -12,12 +12,14 @@ server for this repository.
 - The browser tools therefore require an **external URL** (for example a docs
   site, a deployed app, or a throwaway local server you started yourself). Do
   not imply that `localhost` runs a sideCode app.
-- **Every http(s) origin asks the user, including localhost and loopback
-  addresses.** Nothing is auto-allowed. A granted origin stays allowed only for
-  the exact scheme, host and port until the browser is stopped. Redirects and
-  in-page link/form navigation are not re-prompted.
-- An invalid address, a missing url, or **Deny** returns an error **before**
-  Edge/Chrome launches: no page, tab or panel is created.
+- **Only Ask mode asks for an origin.** In Agent and Plan, `browser_navigate`
+  opens the address directly; the turn's permission level still governs the
+  agent's other actions. In Ask mode every http(s) origin asks the user,
+  including localhost and loopback addresses, and a granted origin stays
+  allowed only for the exact scheme, host and port until the browser is
+  stopped. Redirects and in-page link/form navigation are not re-prompted.
+- An invalid address, a missing url, or **Deny** (Ask mode only) returns an error
+  **before** Edge/Chrome launches: no page, tab or panel is created.
 
 ## Enabling it per provider
 
@@ -34,8 +36,8 @@ server for this repository.
 
 All tools act on the page in the editor tab the user is watching.
 
-- `browser_navigate` — open an absolute http(s) URL. Validation and origin
-  consent happen before the browser launches.
+- `browser_navigate` — open an absolute http(s) URL. Validation happens before
+  the browser launches; in Ask mode the origin consent comes first too.
 - `browser_resize` — set the viewport width/height (200–3840 × 200–2160 CSS px).
 - `browser_scroll` — scroll with wheel deltas in CSS pixels (`dx` right, `dy`
   down); at least one non-zero delta is required.

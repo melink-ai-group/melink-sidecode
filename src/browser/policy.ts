@@ -1,11 +1,28 @@
+import type { DefaultMode } from '../backends/types.ts';
+
 /**
  * Which addresses the editor browser may open without asking.
  *
- * Nothing is allowed by default, including localhost. An http(s) origin opens
- * only after the user allowed that exact scheme, host and port for the session.
+ * Only Ask mode prompts for an origin. In Agent and Plan, `browser_navigate`
+ * opens the address directly and the turn's own permission level still governs
+ * the agent's other actions. Within Ask mode, an http(s) origin opens only
+ * after the user allowed that exact scheme, host and port for the session;
+ * localhost has no special case.
  */
 
 export type NavigationDecision = 'allow' | 'ask' | 'invalid';
+
+/**
+ * Whether opening an origin needs the user's decision.
+ *
+ * Ask mode is the only place the browser asks: it is the mode that exists to
+ * confirm before the agent reads anything, and it always runs read-only. Agent
+ * and Plan open the address without a second prompt; the level still governs
+ * everything else the agent does.
+ */
+export function originApprovalRequired(mode: DefaultMode): boolean {
+  return mode === 'ask';
+}
 
 /**
  * The exact origins the user allowed for the current browser session.
@@ -81,6 +98,10 @@ export function configuredSettingValue<T>(
 /**
  * `allow` only for an exact granted origin, `ask` for any other `http(s)`
  * address, `invalid` otherwise. Localhost has no special case.
+ *
+ * This reports whether a grant is missing, not whether the user must be
+ * prompted: the caller pairs it with `originApprovalRequired` so Agent and Plan
+ * can navigate without a prompt.
  *
  * The comparison uses `URL.origin`, so scheme, host alias and port all count:
  * granting `http://localhost:3000` does not grant port 5173, `127.0.0.1`,

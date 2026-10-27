@@ -74,7 +74,7 @@ export const BROWSER_TOOLS: readonly BrowserTool[] = [
   {
     name: 'browser_navigate',
     description:
-      'Open a URL in the editor browser tab the user is watching, including localhost. Every http(s) origin asks the user unless it was already allowed for this session. Allowing an origin also permits browser_click, browser_type, browser_press and browser_snapshot in that tab; non-http(s) addresses are rejected.',
+      'Open a URL in the editor browser tab the user is watching, including localhost. In Ask mode every http(s) origin asks the user unless it was already allowed for this session; in Agent and Plan it opens directly. Allowing an origin also permits browser_click, browser_type, browser_press and browser_snapshot in that tab; non-http(s) addresses are rejected.',
     inputSchema: {
       type: 'object',
       properties: { url: { type: 'string', description: 'Absolute http or https URL.' } },
@@ -202,8 +202,9 @@ export function textResult(text: string, isError = false): ToolResult {
  * Run one browser tool.
  *
  * `allow` is called for every http(s) origin that is not already granted for
- * the session, including localhost. It only reports the user's choice;
- * `runBrowserTool` never mutates the grants. A denial does not navigate.
+ * the session, including localhost. It reports the decision (a prompt in Ask
+ * mode, an automatic `once` otherwise); `runBrowserTool` never mutates the
+ * grants. A denial does not navigate.
  */
 export async function runBrowserTool(
   actions: BrowserActions,

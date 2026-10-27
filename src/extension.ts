@@ -96,6 +96,9 @@ export function activate(context: vscode.ExtensionContext): { extendMarkdownIt(m
   const projectContext = new VscodeProjectContext();
   const provider = new SidebarViewProvider(context.extensionUri, context, activeRegistry, projectContext);
   sidebarProvider = provider;
+  // Origin approval is Ask-mode only. The bridge answers outside the webview's
+  // async store, so the view exposes the visible tab's mode for it.
+  skill.setModeProvider(() => provider.browserMode());
   skill.setLaunchErrorListener(() => {
     void provider.publishSettings();
   });

@@ -13,9 +13,11 @@ import {
   browserSkillEnabledFor,
   configuredSettingValue,
   originApprovalCopy,
+  originApprovalRequired,
   SessionOrigins,
   type BrowserSkillProvider
 } from './policy.ts';
+import type { DefaultMode } from '../backends/types.ts';
 import { BrowserPage } from './session.ts';
 import { preflightNavigation } from './preflight.ts';
 import { saveSnapshotPng } from './snapshot.ts';
@@ -39,9 +41,27 @@ export class BrowserSkill {
   private stopped = false;
   private readonly sessionOrigins = new SessionOrigins();
   private launchErrorListener?: () => void;
+  private modeProvider?: () => DefaultMode;
   launchError?: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  /**
+   * How the host reports the mode of the chat on screen. The bridge answers
+   * outside the webview's async context, so the host reads its visible tab
+   * rather than the request-local store.
+   *
+   * Absent means the strict prompt stays: an embedder that never wires this
+   * keeps Ask's behaviour instead of silently opening an origin.
+   */
+  setModeProvider(read: () => DefaultMode): void {
+    this.modeProvider = read;
+  }
+
+  /** Whether this call must surface the origin approval prompt. */
+  private originPromptRequired(): boolean {
+    return originApprovalRequired(this.modeProvider?.() ?? 'ask');
+  }
 
   /** Called after a browser launch fails, so the Skills tab can show the reason. */
   setLaunchErrorListener(listener: () => void): void {
@@ -181,7 +201,7 @@ export class BrowserSkill {
         }
         if (preflight.kind === 'ask') {
           approvedOrigin = preflight.origin;
-          approval = await this.askOrigin(preflight.origin);
+          approval = await this.approveOrigin(preflight.origin);
           if (approval === 'deny') {
             this.panel?.showError(`Navigation to ${preflight.origin} was denied.`);
             return textResult(`Navigation to ${preflight.origin} was denied.`, true);
@@ -194,7 +214,7 @@ export class BrowserSkill {
         if (approvedOrigin === origin && approval) {
           return approval;
         }
-        return this.askOrigin(origin);
+        return this.approveOrigin(origin);
       };
       const result = await runBrowserTool(actions, name, args, allow, this.sessionOrigins);
       if (result.isError && name === 'browser_navigate') {
@@ -318,6 +338,16 @@ export class BrowserSkill {
       title: location.title || 'Browser',
       ...page.viewport()
     });
+  }
+
+  /**
+   * The origin decision for one navigation.
+   *
+   * Ask mode shows the warning and honors Deny. Agent and Plan return `once`
+   * without recording a session grant, so switching to Ask later still asks.
+   */
+  private approveOrigin(origin: string): Promise<OriginApproval> {
+    return this.originPromptRequired() ? this.askOrigin(origin) : Promise.resolve('once');
   }
 
   private async askOrigin(origin: string): Promise<OriginApproval> {
