@@ -4,8 +4,9 @@
  * Color comes from two token sources only (DESIGN.md §6):
  *   - workbench theme variables (--vscode-*), which follow the editor theme;
  *   - brand tokens in ../../tokens.css, imported below.
- * No literal hex appears in this file. Brand hue (--melink-shell) is used for
- * exactly two jobs: provider identity and the streaming caret/spinner.
+ * No literal hex appears in this file. Brand hue is limited to provider
+ * identity, the streaming caret/spinner, and the plan and user-message
+ * highlights that the product makes interactive.
  */
 
 @import '../../tokens.css';

@@ -9,7 +9,7 @@
  *
  * One plan artifact, two treatments that never compete: the review card while a
  * plan is pending, and the todo list once it is built. Colors are tokens only;
- * brand hue is not used here (the provider dot and streaming caret own it). State
+ * the sideCode blue is reserved for the build action and the running step. State
  * is conveyed by label and glyph, never by hue alone.
  */
 
@@ -79,19 +79,13 @@
   text-overflow: ellipsis;
 }
 
+/* Keep the compact size, but inherit the shared primary button colour so the
+ * plan's build action matches every other primary action. */
 .plan-card__build {
   flex: 0 0 auto;
   min-height: 22px;
   padding: 2px 12px;
-  border-color: var(--melink-primary-blue);
-  background: var(--melink-primary-blue);
-  color: var(--melink-surface);
   font-size: 12px;
-}
-
-.plan-card__build:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
-  background: color-mix(in srgb, var(--melink-primary-blue) 85%, black);
 }
 
 .plan-revising {
