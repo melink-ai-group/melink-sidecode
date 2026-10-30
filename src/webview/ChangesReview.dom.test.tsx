@@ -141,7 +141,7 @@ it('keeps the final changes and findings when a turn finishes and its conversati
   });
   // Busy is urgent and flushes the queued lifecycle event before checking the panel.
   act(() => sendHostMessage({ type: 'busy', value: true, backendId: 'codex', threadId: 'thread-review' }));
-  expect((screen.getByRole('button', { name: 'Fix' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull();
   act(() => {
     sendHostMessage({ type: 'changes/review', review: { ...review(), turnId: 'next-turn' } });
     sendHostMessage({ type: 'agentEvent', event: { type: 'turn/completed', backendId: 'codex', threadId: 'thread-review', turnId: 'next-turn' } });
@@ -182,4 +182,11 @@ it('preserves checkpoint anchors for restored cards that have no message id', as
   expect(screen.getByRole('button', { name: /Files changed/ })).toBeTruthy();
   act(() => sendHostMessage({ type: 'conversation', backendId: 'opencode', threadId: 'thread-review', replay }));
   expect(screen.queryByRole('button', { name: /Files changed/ })).toBeNull();
+});
+
+
+it('removes manual Fix when orchestration owns the correction while keeping findings visible', () => {
+  render(<ChangesReview {...props()} hideFix />);
+  expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull();
+  expect(screen.getByRole('img', { name: '2 errors' })).toBeTruthy();
 });

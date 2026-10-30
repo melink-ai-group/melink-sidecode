@@ -887,6 +887,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       threadId,
       turnId,
       ...(messageId !== undefined ? { messageId } : {}),
+      requestMessageId: [...this.store.getTranscript(backendId, threadId)].reverse()
+        .find((item) => item.kind === 'message' && item.role === 'user' && !item.orchestration)?.id,
       candidates: this.turnCandidates(threadId)
     });
     this.changeWatcher.start();
@@ -1470,7 +1472,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
             pendingApproval: session.pendingApproval !== undefined,
             check: { status: 'failed' }
           });
-          if (notice) {
+          if (notice && (this.reviewFollowups.has(session.id) || !this.subagentRuns.has(session.id))) {
             void this.postAttentionNotice(
               {
                 backendId: set.backendId,
@@ -1561,6 +1563,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!review) {
       return;
     }
+    const recorded = this.changeJournal.getTurn(turnId);
+    if (recorded?.requestMessageId && this.changeJournal.listTurns(threadId).find((turn) =>
+      turn.requestMessageId === recorded.requestMessageId)?.turnId !== turnId) { return; }
     const diffReview = this.reviewStore.get(backendId, threadId, turnId);
     const stylingReview = this.stylingReviewStore.get(backendId, threadId, turnId);
     const checks = this.checkStore.get(backendId, threadId, turnId);

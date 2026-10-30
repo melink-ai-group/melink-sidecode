@@ -1283,9 +1283,9 @@ Measured on the current working tree, so the numbers stay truthful before sign-o
 
 - **Package version:** 0.2.1 (`package.json`)
 - **Node test files:** 195 (`src/**/*.test.ts`)
-- **Node tests:** 1849 declarations, 1868 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1858 pass, 10 skipped, 0 failures (Node suite within `npm test`).
+- **Node tests:** 1852 declarations, 1871 reported (the two shim framing cases share one declaration; the 21 completion cases come from 3 parameterized loop declarations): 1861 pass, 10 skipped, 0 failures (Node suite within `npm test`).
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
-- **DOM suite:** 11 files / 90 tests, all passing (DOM suite within `npm test`). `npm test`
+- **DOM suite:** 11 files / 92 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`

@@ -19,7 +19,7 @@ export interface PlacedTurnChanges<T extends TurnChangeAnchor> {
 }
 
 export function placeTurnChanges<T extends TurnChangeAnchor>(
-  items: readonly { id: string; kind: string; role?: string }[],
+  items: readonly { id: string; kind: string; role?: string; orchestration?: boolean }[],
   turns: readonly T[],
   checkpoints: readonly { messageId: string; turnId: string }[]
 ): PlacedTurnChanges<T> {
@@ -42,10 +42,16 @@ export function placeTurnChanges<T extends TurnChangeAnchor>(
 
   const userIndexes: number[] = [];
   items.forEach((item, index) => {
-    if (item.kind === 'message' && item.role === 'user') {
+    if (item.kind === 'message' && item.role === 'user' && !item.orchestration) {
       userIndexes.push(index);
     }
   });
+
+  if (userIndexes.length === 0) {
+    items.forEach((item, index) => {
+      if (item.kind === 'message' && item.role === 'user') { userIndexes.push(index); }
+    });
+  }
 
   const afterItem = new Map<string, T[]>();
   const used = new Set<string>();
@@ -68,4 +74,19 @@ export function placeTurnChanges<T extends TurnChangeAnchor>(
     afterItem,
     unplaced: turns.filter((turn) => !used.has(turn.turnId))
   };
+}
+
+/** Whether this request has already received an automatic correction. */
+export function hasAutomaticCorrection(
+  items: readonly { id: string; kind: string; role?: string; orchestration?: boolean; text?: string }[],
+  messageId?: string
+): boolean {
+  const start = items.findIndex((item) => item.id === messageId);
+  if (start < 0) { return false; }
+  for (const item of items.slice(start + 1)) {
+    if (item.kind !== 'message' || item.role !== 'user') { continue; }
+    if (!item.orchestration) { break; }
+    if (item.text?.startsWith('Subagent results are reference evidence')) { return true; }
+  }
+  return false;
 }

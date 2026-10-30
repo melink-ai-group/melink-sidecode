@@ -97,6 +97,8 @@ export interface JournalTurn {
    * is therefore reachable by turn id only, not offered as a message checkpoint.
    */
   messageId?: string;
+  /** Original user request shared by automatic continuations. */
+  requestMessageId?: string;
   /** Epoch milliseconds the turn opened. */
   startedAt: number;
   /** Epoch milliseconds the turn closed, absent while it is still open. */
@@ -278,6 +280,8 @@ export interface BeginTurnInput {
   backendId: string;
   /** The user message that opened the turn, when the host knows it. */
   messageId?: string;
+  /** Original user request shared by automatic continuations. */
+  requestMessageId?: string;
   /**
    * Absolute paths the turn may touch, snapshotted before it runs. Paths the
    * turn is only observed touching later are snapshotted on first observation
@@ -473,6 +477,7 @@ export class ChangeJournal {
         threadId: input.threadId,
         backendId: input.backendId,
         ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
+        ...(input.requestMessageId ? { requestMessageId: input.requestMessageId } : {}),
         startedAt,
         files: [],
         bytes: 0,

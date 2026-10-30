@@ -585,3 +585,39 @@ test('unknown turns and unchanged OpenCode reports without a baseline have no re
   }
   assert.equal(fs.writes, 0);
 });
+
+
+test('automatic continuations review and reject the complete user request after reload', async () => {
+  const fs = new FakeFs();
+  const disk = storage();
+  const journal = new ChangeJournal({ storage: disk, fs });
+  fs.files.set('/ws/a.ts', text('original\n'));
+  await journal.beginTurn({ turnId: 'initial', backendId: 'codex', threadId: 'thr',
+    messageId: 'user', requestMessageId: 'user', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('first edit\n'));
+  await journal.observe('initial', '/ws/a.ts', 'reported', 'modified');
+  await journal.endTurn('initial');
+  await journal.beginTurn({ turnId: 'correction', backendId: 'codex', threadId: 'thr',
+    messageId: 'automatic', requestMessageId: 'user', candidates: ['/ws/a.ts', '/ws/b.ts'] });
+  fs.files.set('/ws/a.ts', text('corrected\n'));
+  fs.files.set('/ws/b.ts', text('new file\n'));
+  await journal.observe('correction', '/ws/a.ts', 'reported', 'modified');
+  await journal.observe('correction', '/ws/b.ts', 'reported', 'created');
+  await journal.endTurn('correction');
+  const restored = new ChangeJournal({ storage: disk, fs });
+  const store = new ChangeStore({ storage: disk, fs, artifacts: restored });
+  const view = await store.view('codex', 'thr', 'correction');
+  assert.equal(view?.messageId, 'user');
+  assert.deepEqual(view?.files.map((file) => file.path), ['a.ts', 'b.ts']);
+  assert.equal(restored.getTurn('correction')?.messageId, 'automatic', 'checkpoint anchor remains independent');
+  const results = await store.decideAll({ backendId: 'codex', threadId: 'thr', turnId: 'correction', decision: 'rejected' });
+  assert.ok(results.every((result) => result.ok));
+  assert.equal(decode(fs.files.get('/ws/a.ts')), 'original\n');
+  assert.equal(fs.files.has('/ws/b.ts'), false);
+  await restored.beginTurn({ turnId: 'next', backendId: 'codex', threadId: 'thr', requestMessageId: 'next-user', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('next request\n'));
+  await restored.observe('next', '/ws/a.ts', 'reported', 'modified');
+  await restored.endTurn('next');
+  const next = await store.view('codex', 'thr', 'next');
+  assert.deepEqual(next?.files.map((file) => file.path), ['a.ts'], 'another user request does not inherit earlier files');
+});

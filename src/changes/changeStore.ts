@@ -1,3 +1,4 @@
+import { requestTurn } from './requestTurn.ts';
 import type { ChangeSource, ChangeStatus } from '../backends/types';
 import type { DiffReviewResult } from '../review/diffReview.ts';
 import type { CheckRunView } from '../review/checks.ts';
@@ -162,6 +163,7 @@ export interface ChangeWorkspaceFs {
 /** The recorded-artifact read seam, satisfied by `ChangeJournal`. */
 export interface ChangeArtifacts {
   getTurn(turnId: string): JournalTurn | undefined;
+  listTurns?(threadId: string): JournalTurn[];
   getBefore(turnId: string, relPath: string): Promise<Uint8Array | undefined>;
   getAfter(turnId: string, relPath: string): Promise<Uint8Array | undefined>;
   readBlob(key: string): Promise<Uint8Array | undefined>;
@@ -238,7 +240,7 @@ export class ChangeStore {
    * stale decision as actionable. Returns `undefined` for an unknown turn.
    */
   async view(backendId: string, threadId: string, turnId: string): Promise<ChangeView | undefined> {
-    const turn = this.artifacts.getTurn(turnId);
+    const turn = this.reviewedTurn(turnId);
     if (!turn) {
       return undefined;
     }
@@ -246,11 +248,11 @@ export class ChangeStore {
   }
 
   /**
-   * The turn a decision addresses. Keep and undo apply to that turn's own
-   * files and its own baseline, never to earlier steps in the same chat.
+   * The turn a decision addresses, including continuations of its user request.
    */
   private reviewedTurn(turnId: string): JournalTurn | undefined {
-    return this.artifacts.getTurn(turnId);
+    const turn = this.artifacts.getTurn(turnId);
+    return turn && requestTurn(turn, this.artifacts.listTurns?.(turn.threadId) ?? [turn]);
   }
 
   private async compose(backendId: string, threadId: string, turn: JournalTurn): Promise<ChangeView> {
