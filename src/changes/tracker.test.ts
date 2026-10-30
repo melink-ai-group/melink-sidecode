@@ -516,3 +516,31 @@ test('a closed turn id cannot be re-ended and a mismatched id is a no-op', async
   assert.equal(await change.endTurn('other'), undefined);
   assert.equal(change.isTracking, true, 'a mismatched id leaves the turn open');
 });
+
+
+test('continuations keep earlier files through a no-edit turn and replay one cumulative card', async () => {
+  const fs = new FakeFs();
+  const change = tracker(fs);
+  fs.files.set('/ws/a.ts', text('before'));
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 'first', messageId: 'user', requestMessageId: 'user', candidates: ['/ws/a.ts'] });
+  fs.files.set('/ws/a.ts', text('after'));
+  change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }], 'thr');
+  await change.endTurn('first');
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 'auto', messageId: 'auto-user', requestMessageId: 'user' });
+  fs.files.set('/ws/b.ts', text('new'));
+  change.reportChanges([{ absPath: '/ws/b.ts', status: 'created' }], 'thr');
+  assert.deepEqual((await change.endTurn('auto'))?.entries.map((entry) => entry.path), ['a.ts', 'b.ts']);
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 'noop', messageId: 'noop-user', requestMessageId: 'user' });
+  assert.deepEqual((await change.endTurn('noop'))?.entries.map((entry) => entry.path), ['a.ts', 'b.ts']);
+  const replay = await change.observedSets('thr');
+  assert.equal(replay.length, 1);
+  assert.equal(replay[0].turnId, 'noop');
+  assert.equal(replay[0].messageId, 'user');
+  assert.deepEqual(replay[0].entries.map((entry) => entry.path), ['a.ts', 'b.ts']);
+  await change.beginTurn({ backendId: 'codex', threadId: 'thr', turnId: 'revert', requestMessageId: 'user', candidates: ['/ws/a.ts', '/ws/b.ts'] });
+  fs.files.set('/ws/a.ts', text('before'));
+  fs.files.delete('/ws/b.ts');
+  change.reportChanges([{ absPath: '/ws/a.ts', status: 'modified' }, { absPath: '/ws/b.ts', status: 'deleted' }], 'thr');
+  assert.deepEqual((await change.endTurn('revert'))?.entries, []);
+  assert.deepEqual(await change.observedSets('thr'), [], 'replay must not resurrect a fully reverted request');
+});

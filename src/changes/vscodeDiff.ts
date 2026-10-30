@@ -1,7 +1,9 @@
+import { requestTurns } from './requestTurn';
+import { mergeSessionFiles } from './sessionFiles';
 import * as vscode from 'vscode';
 import type { ChangeStatus } from '../backends/types';
 import { filterListedFiles } from './ignore';
-import type { JournalFileEntry, JournalTurn } from './journal';
+import type { JournalTurn } from './journal';
 import type { SessionFile } from './sessionFiles';
 import {
   MELINK_CHANGES_SCHEME,
@@ -249,20 +251,13 @@ export class NativeDiffService implements vscode.Disposable {
     return this.turnFiles(turnId)?.find((file) => file.entry.relPath === target);
   }
 
-  /** Files this turn recorded. Review opens this turn, not earlier steps. */
+  /** Review and native diff share the original request baseline. */
   private turnFiles(turnId: string): SessionFile[] | undefined {
     const turn = this.artifacts.getTurn(turnId);
     if (!turn) {
       return undefined;
     }
-    return turn.files.map((entry) => this.singleTurnFile(turn.turnId, entry));
-  }
-
-  private singleTurnFile(turnId: string, entry: JournalFileEntry): SessionFile {
-    return {
-      entry,
-      ...(entry.hasBefore ? { beforeTurnId: turnId, beforeRelPath: entry.relPath } : {})
-    };
+    return mergeSessionFiles(requestTurns(turn, this.artifacts.listTurns(turn.threadId)));
   }
 
   /** A diff side URI. The baseline is read from the turn that stored it. */

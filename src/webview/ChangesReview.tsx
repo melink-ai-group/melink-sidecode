@@ -55,6 +55,7 @@ export interface ChangesReviewProps {
   /** Send the listed issues as a normal user message. */
   onFix: (text: string) => void;
   fixDisabled?: boolean;
+  hideFix?: boolean;
   /** The most recent decision outcomes, so a conflict or failure is surfaced. */
   decisionResults?: ChangeDecisionResult[];
   /** The destructive reject awaiting an explicit confirmation, if any. */
@@ -91,6 +92,7 @@ function ChangesReviewView({
   deciding,
   onFix,
   fixDisabled,
+  hideFix,
   decisionResults,
   rejectConfirm,
   onOpenFile,
@@ -365,7 +367,7 @@ function ChangesReviewView({
             })}
           </span>
         ) : null}
-        {attention.length > 0 ? (
+        {attention.length > 0 && !hideFix ? (
           <button className="btn changes-review__fix" type="button" disabled={busy || deciding || fixDisabled} onClick={() => onFix(fixMessage)} title="Send a message asking the agent to fix the reported issues">
             <PencilIcon className="ico ico--xs" />Fix
           </button>

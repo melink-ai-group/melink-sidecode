@@ -586,6 +586,7 @@ export function visibleModeSnapshot(state: AppState): ModeSnapshot | undefined {
 }
 
 function upsertTurnChange(turns: readonly TurnChange[], next: TurnChange): TurnChange[] {
+  turns = turns.filter((turn) => !next.messageId || turn.messageId !== next.messageId || turn.turnId === next.turnId);
   const index = turns.findIndex((turn) => turn.turnId === next.turnId);
   if (index === -1) {
     return [...turns, next];
@@ -1559,6 +1560,9 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
         ...state,
         busy: true,
         startingTurn: !opensFromOrchestration,
+        transcript: opensFromOrchestration ? state.transcript.map((item) =>
+          item.noticeAction === 'preparePlanFollowUp' || item.noticeAction === 'prepareCheckFollowUp'
+            ? { ...item, noticeAction: undefined } : item) : state.transcript,
         notice: withoutFailureNotice(state.notice),
         changeDecision: undefined,
         changeRejectConfirm: undefined,

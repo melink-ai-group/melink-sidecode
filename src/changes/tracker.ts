@@ -1,3 +1,4 @@
+import { requestTurn } from './requestTurn.ts';
 import type { ChangeEntry, ChangeStatus, ReportedChange } from '../backends/types';
 import { filterListedFiles } from './ignore.ts';
 import type { ChangeJournal, JournalFileEntry } from './journal';
@@ -47,6 +48,7 @@ export interface BeginTurnOptions {
    * checkpoint.
    */
   messageId?: string;
+  requestMessageId?: string;
   /**
    * Absolute paths known before the turn that are worth a real pre-turn
    * snapshot (open editors, files the agent is about to touch). Optional: a
@@ -108,6 +110,7 @@ export class ChangeTracker {
       threadId: options.threadId,
       backendId: options.backendId,
       ...(options.messageId !== undefined ? { messageId: options.messageId } : {}),
+      requestMessageId: options.requestMessageId,
       candidates: options.candidates ?? [],
       startedAt: this.now()
     });
@@ -186,13 +189,18 @@ export class ChangeTracker {
    * so a reload cannot invent a card for it.
    */
   async observedSets(threadId: string): Promise<TurnChangeSet[]> {
-    const turns = [...this.journal.listTurns(threadId)].reverse();
+    const recorded = this.journal.listTurns(threadId);
+    const turns = [...recorded].reverse().map((turn) => requestTurn(turn, recorded));
     const sets: TurnChangeSet[] = [];
     for (const turn of turns) {
       if (!turn.observed) {
         continue;
       }
       const entries = (await this.listed(turn.files)).map(toChangeEntry);
+      if (turn.messageId) {
+        const previous = sets.findIndex((set) => set.messageId === turn.messageId);
+        if (previous >= 0) { sets.splice(previous, 1); }
+      }
       if (entries.length === 0) {
         continue;
       }
@@ -248,7 +256,8 @@ export class ChangeTracker {
       this.active = [...this.openTurns.values()].at(-1);
     }
     await this.journal.endTurn(active.turnId, afterPaths);
-    const turn = this.journal.getTurn(active.turnId);
+    const recorded = this.journal.getTurn(active.turnId);
+    const turn = recorded && requestTurn(recorded, this.journal.listTurns(active.threadId));
     if (!turn || !turn.observed) {
       return undefined;
     }

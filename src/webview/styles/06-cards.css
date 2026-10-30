@@ -395,6 +395,10 @@
   margin-top: 0;
 }
 
+.banner--status .banner-actions .btn {
+  font-size: 11px;
+}
+
 .banner--error {
   border-left: 3px solid var(--vscode-errorForeground);
   background: color-mix(in srgb, var(--vscode-errorForeground) 8%, var(--vscode-sideBar-background));

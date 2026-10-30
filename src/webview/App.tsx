@@ -39,7 +39,7 @@ import {
 import { attentionFollowUpText, type AttentionKind } from '../orchestration/completion.ts';
 import { setPrettyPathRoots } from './prettyPath.ts';
 import { groupTranscript, speakerRows, turnElapsedNotes, type TranscriptEntry } from './activityGroups.ts';
-import { placeTurnChanges } from './turnChanges.ts';
+import { hasAutomaticCorrection, placeTurnChanges } from './turnChanges.ts';
 import { formatWorked } from '../backends/turnTiming.ts';
 import { resolveContextMax } from '../backends/contextUsage.ts';
 import { DEFAULT_TAB_TITLE, tabTitle } from '../chatTabs.ts';
@@ -2476,6 +2476,7 @@ export function App(): JSX.Element {
           review={review}
           busy={state.busy}
           deciding={state.changeDeciding}
+          hideFix={state.busy || hasAutomaticCorrection(state.transcript, turn.messageId)}
           fixDisabled={state.startingTurn || state.restoring || Boolean(pending) || asking || Boolean(state.modeSwitch) || active?.status !== 'available'}
           onFix={(text) => {
             if (state.busy || state.startingTurn || state.changeDeciding || state.restoring || pending || asking || state.modeSwitch || active?.status !== 'available') return;
