@@ -1024,6 +1024,7 @@ export class OllamaBackend implements AgentBackend {
     // A steer on a live session sends only the new text. Until a session id
     // exists, the text is still primed with the snapshot.
     let visibleText = request.text;
+    let turnAttachments = request.attachments;
     let barePrompt = false;
     // Set when a saved session is gone, so the replacement session receives the
     // sidebar chat instead of only the current turn.
@@ -1071,6 +1072,7 @@ export class OllamaBackend implements AgentBackend {
               // discovery reads the real `AGENTS.md`; `this.cwd` is only a fallback.
               cwd: opencodeCwd,
               config: built.config,
+              attachments: turnAttachments,
               modelRef: built.modelRef,
               agent: built.agent,
               prompt,
@@ -1140,6 +1142,7 @@ export class OllamaBackend implements AgentBackend {
           // the next child is fresh and must see both. A steer wins over a
           // quiet stop: the user already said what to do next.
           if (sessionId) {
+            turnAttachments = undefined;
             visibleText = next;
             barePrompt = true;
           } else {

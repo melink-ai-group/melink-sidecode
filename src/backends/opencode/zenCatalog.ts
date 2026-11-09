@@ -34,6 +34,7 @@ export interface ModelsDevModelMeta {
   limit?: { context?: number; output?: number };
   reasoning?: boolean;
   tool_call?: boolean;
+  modalities?: { input?: string[] };
 }
 
 export interface ZenCatalogOptions {
@@ -146,6 +147,7 @@ export function capabilitiesFromMeta(meta: ModelsDevModelMeta | undefined): Mode
       supported: thinkingSupported,
       default: thinkingSupported === 'unknown' ? 'unknown' : thinkingSupported[0] ?? 'unknown'
     },
+    ...(meta.modalities?.input ? { inputModalities: meta.modalities.input } : {}),
     tools: meta.tool_call === false ? false : true,
     modes: 'unknown'
   };
@@ -202,7 +204,9 @@ export function parseModelsDevOpencode(body: unknown): Record<string, ModelsDevM
       ...(cost ? { cost } : {}),
       ...(limit ? { limit } : {}),
       ...(typeof row.reasoning === 'boolean' ? { reasoning: row.reasoning } : {}),
-      ...(typeof row.tool_call === 'boolean' ? { tool_call: row.tool_call } : {})
+      ...(typeof row.tool_call === 'boolean' ? { tool_call: row.tool_call } : {}),
+      ...(row.modalities && typeof row.modalities === 'object' && Array.isArray((row.modalities as { input?: unknown }).input)
+        ? { modalities: { input: ((row.modalities as { input: unknown[] }).input).filter((value): value is string => typeof value === 'string') } } : {})
     };
   }
   return out;

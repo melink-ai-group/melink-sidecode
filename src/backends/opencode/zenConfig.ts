@@ -95,6 +95,9 @@ export function buildZenOpencodeConfig(input: ZenConfigInput): OpencodeConfigRes
     reasoningKnown && !reasoningSupported && requestedThinking !== undefined && requestedThinking !== 'off';
 
   const selected: Record<string, unknown> = { name: modelId, tool_call: true };
+  if (capabilities?.inputModalities && capabilities.inputModalities !== 'unknown') {
+    selected.modalities = { input: capabilities.inputModalities, output: ['text'] };
+  }
   if (contextApplied !== undefined) {
     selected.limit = { context: contextApplied, output: outputLimitFor(contextApplied) };
   }

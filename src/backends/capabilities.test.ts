@@ -296,6 +296,7 @@ test('Ollama capabilities build the descriptor from a live /api/show body', () =
   assert.deepEqual(parseOllamaCapabilities(show), ['completion', 'tools', 'thinking']);
   const descriptor = ollamaCapabilities(show, ['agent']);
   assert.deepEqual(descriptor, {
+    inputModalities: ['text'],
     contextWindow: { min: 'unknown', max: 131072, default: 131072 },
     thinking: { supported: [...THINKING_LEVELS], default: 'unknown' },
     tools: true,

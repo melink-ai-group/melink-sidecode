@@ -1282,10 +1282,10 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 Measured on the current working tree, so the numbers stay truthful before sign-off:
 
 - **Package version:** 0.3.0 (`package.json`)
-- **Node test files:** 198 (`src/**/*.test.ts`)
-- **Node tests:** 1880 declarations, 1900 reported (parameterized cases account for the difference): 1888 pass, 12 skipped, 0 failures (Node suite within `npm test`). The optional real-CLI compatibility suite also passed against OpenCode 1.19.4 and 2.2.6 with local mock providers.
+- **Node test files:** 199 (`src/**/*.test.ts`)
+- **Node tests:** 1887 declarations, 1907 reported (parameterized cases account for the difference): 1895 pass, 12 skipped, 0 failures (Node suite within `npm test`). The optional real-CLI compatibility suite also passed against OpenCode 1.19.4 and 2.2.6 with local mock providers.
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
-- **DOM suite:** 12 files / 95 tests, all passing (DOM suite within `npm test`). `npm test`
+- **DOM suite:** 12 files / 96 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`
