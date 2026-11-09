@@ -20,6 +20,16 @@ test('free cost requires both input and output to be zero', () => {
   assert.equal(isFreeCost(undefined), false);
 });
 
+test('Zen image and PDF input capabilities survive catalog parsing', () => {
+  const meta = parseModelsDevOpencode({ opencode: { models: {
+    vision: { name: 'Vision', modalities: { input: ['text', 'image', 'pdf', null] } },
+    text: { name: 'Text', modalities: { input: ['text'] } }
+  } } });
+  const models = mergeZenCatalog(['vision', 'text'], meta, { includePaid: true });
+  assert.deepEqual(models[0]?.capabilities?.inputModalities, ['text', 'image', 'pdf']);
+  assert.deepEqual(models[1]?.capabilities?.inputModalities, ['text']);
+});
+
 test('id fallback treats -free and known stealth ids as free', () => {
   assert.equal(isFreeByIdFallback('mimo-v2.5-free'), true);
   assert.equal(isFreeByIdFallback('big-pickle'), true);

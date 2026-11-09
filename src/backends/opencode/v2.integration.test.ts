@@ -1,12 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { deflateSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildOpencodeConfig } from './config.ts';
 import { runOpencodeTurn, type OpencodeRunOptions } from './runtime.ts';
 import type { OpencodeEvent } from './events.ts';
+import { UNKNOWN_CAPABILITIES } from '../capabilities.ts';
+
+function fixturePng(): Buffer {
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    let crc = 0xffffffff;
+    for (const byte of body) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+    const size = Buffer.alloc(4); size.writeUInt32BE(data.length);
+    const checksum = Buffer.alloc(4); checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+    return Buffer.concat([size, body, checksum]);
+  };
+  const header = Buffer.alloc(13); header.writeUInt32BE(1, 0); header.writeUInt32BE(1, 4); header[8] = 8; header[9] = 6;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.from([0, 255, 0, 0, 255]))), chunk('IEND', Buffer.alloc(0))]);
+}
+
+function fixturePdf(): Buffer {
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>', '<< /Length 0 >>\nstream\n\nendstream'];
+  let text = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => { offsets.push(Buffer.byteLength(text)); text += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+  const start = Buffer.byteLength(text);
+  text += `xref\n0 5\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
+  return Buffer.from(text);
+}
 
 // Explicit opt-in; never download a binary or call an external model from tests.
 for (const major of [1, 2] as const) {
@@ -27,6 +57,7 @@ test(`real v${major} server completes, resumes, and asks for shell approval`, { 
   let answered = 0;
   let questionPrompt = '';
   const offered = new Set<string>();
+  const modelRequests: Record<string, unknown>[] = [];
   const provider = createServer((request, response) => {
     let body = '';
     request.on('data', (chunk) => { body += chunk; });
@@ -35,6 +66,7 @@ test(`real v${major} server completes, resumes, and asks for shell approval`, { 
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       const base = { id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture' };
       const parsed = JSON.parse(body);
+      modelRequests.push(parsed);
       const tools = parsed.tools ?? [];
       for (const tool of tools) offered.add(tool.function?.name ?? tool.name);
       const toolName = todoReply ? 'todowrite' : questionReply ? 'question' : major === 2 ? 'shell' : 'bash';
@@ -61,6 +93,8 @@ test(`real v${major} server completes, resumes, and asks for shell approval`, { 
   });`;
   const run = async (sessionId?: string, overrides: Partial<OpencodeRunOptions> = {}, expected = 'completed') => {
     const built = buildOpencodeConfig({ baseUrl: `http://127.0.0.1:${address.port}`, modelIds: ['fixture'], modelId: 'fixture', permissionLevel: 'default', mode: 'agent',
+      settings: { contextWindow: 131072, thinking: 'high' },
+      capabilities: { ...UNKNOWN_CAPABILITIES, inputModalities: ['text', 'image', 'pdf'], thinking: { supported: ['high'], default: 'high' } },
       ...(major === 2 ? { skillMcp: { fixture: { type: 'local', command: [process.execPath, '-e', mcpScript], enabled: true } } } : {}) });
     const events: OpencodeEvent[] = [];
     const result = await runOpencodeTurn({ executable: executable!, cwd: work, ...built,
@@ -87,6 +121,43 @@ test(`real v${major} server completes, resumes, and asks for shell approval`, { 
   try {
     const id = await run();
     assert.equal(await run(id), id);
+    const png = fixturePng();
+    const pickedImage = join(root, 'picked # image.png');
+    const pickedText = join(root, 'notes # text.txt');
+    const pickedPdf = join(root, 'document # test.pdf');
+    const pickedSvg = join(root, 'diagram.svg');
+    await writeFile(pickedImage, png);
+    await writeFile(pickedText, 'attachment text sentinel');
+    await writeFile(pickedPdf, fixturePdf());
+    await writeFile(pickedSvg, '<svg xmlns="http://www.w3.org/2000/svg"><title>svg attachment sentinel</title></svg>');
+    const beforeFiles = modelRequests.length;
+    await run(id, { prompt: 'Read the attached images and text.', attachments: [
+      { id: 'clipboard', name: 'paste.png', kind: 'image', mimeType: 'image/png', dataUrl: `data:image/png;base64,${png.toString('base64')}` },
+      { id: 'picked', name: 'picked # image.png', kind: 'image', mimeType: 'image/png', path: pickedImage },
+      { id: 'text', name: 'notes # text.txt', kind: 'text', mimeType: 'text/plain', path: pickedText },
+      { id: 'pdf', name: 'document # test.pdf', kind: 'file', mimeType: 'application/pdf', path: pickedPdf },
+      { id: 'svg', name: 'diagram.svg', kind: 'image', mimeType: 'image/svg+xml', path: pickedSvg }
+    ] });
+    const delivered = JSON.stringify(modelRequests.slice(beforeFiles));
+    assert.match(delivered, /data:image\/png;base64,/, 'Image bytes must reach the model request');
+    assert.match(delivered, /attachment text sentinel/, 'Picked text content must reach the model request');
+    assert.match(delivered, /data:application\/pdf;base64,/, 'PDF bytes must reach the model request');
+    assert.match(delivered, /svg attachment sentinel/, 'SVG attachments must reach the model as text');
+    assert.ok(modelRequests.slice(beforeFiles).some((body) => {
+      const messages = body.messages as Array<{ content?: unknown }>;
+      return messages.flatMap((message) => Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'image_url').length >= 2;
+    }), 'Both clipboard and picked images must reach the same provider request');
+    // v1 applies its own 32,000-token ceiling; v2 honors this model's larger limit.
+    const outputBudget = major === 1 ? 32000 : 65536;
+    assert.ok(modelRequests.some((body) => body.max_tokens === outputBudget || body.max_completion_tokens === outputBudget),
+      'The selected model output budget must survive the runtime mapping');
+    assert.ok(modelRequests.some((body) => body.reasoning_effort === 'high'), 'Thinking effort must reach the provider');
+    const beforeImageOnly = modelRequests.length;
+    await run(undefined, { prompt: '', attachments: [
+      { id: 'image-only', name: 'only.png', kind: 'image', mimeType: 'image/png', dataUrl: `data:image/png;base64,${png.toString('base64')}` }
+    ] });
+    assert.match(JSON.stringify(modelRequests.slice(beforeImageOnly)), /data:image\/png;base64,/, 'An image-only message must carry image bytes without requiring prompt text');
     const beforeMigration = requests;
     await run(major === 2 ? 'ses_old_v1' : 'v2:ses_old_v2', {}, 'stale-session');
     assert.equal(requests, beforeMigration, 'switching majors must recover before sending another prompt');

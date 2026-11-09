@@ -544,6 +544,7 @@ export function ollamaCapabilities(show: unknown, modes: readonly DefaultMode[])
       supported: ollamaThinkingLevels(capabilities),
       default: 'unknown'
     },
+    ...(capabilities ? { inputModalities: capabilities.includes('vision') ? ['text', 'image'] : ['text'] } : {}),
     tools: ollamaToolSupport(capabilities),
     modes: [...modes]
   };

@@ -4,6 +4,7 @@ import { consumeSse } from './approval.ts';
 import { createOpencodePublisher, parseOpencodeEvent, type OpencodeEvent } from './events.ts';
 import { serverFetch, waitForListen } from './interactive.ts';
 import { buildEnv, killProcessTree, type OpencodeRunOptions, type OpencodeRunResult } from './runtime.ts';
+import { opencodeV2Prompt } from './attachments.ts';
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === 'object' ? value as RecordValue : {};
@@ -257,7 +258,7 @@ export async function runOpencodeV2Turn(options: OpencodeRunOptions, onEvent: (e
         await reader.cancel().catch(() => undefined);
       }
     })();
-    const prompt = await request(`${path}/prompt`, 'POST', { text: options.prompt });
+    const prompt = await request(`${path}/prompt`, 'POST', opencodeV2Prompt(options.prompt, options.attachmentFiles));
     if (!prompt.ok) {
       return { outcome: prompt.status === 401 || prompt.status === 403 ? 'unauthenticated' : 'provider', terminal: false, sessionId,
         detail: 'OpenCode 2 did not accept the turn.' };

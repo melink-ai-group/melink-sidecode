@@ -12,6 +12,15 @@ async function source(relative: string): Promise<string> {
   return readFile(join(process.cwd(), 'src', ...relative.split('/')), 'utf8');
 }
 
+test('both shared OpenCode callers forward attachments and consume them before a steered follow-up', async () => {
+  for (const file of ['backends/ollama.ts', 'backends/opencodeBackend.ts']) {
+    const text = await source(file);
+    assert.match(text, /let turnAttachments = request\.attachments/);
+    assert.match(text, /attachments: turnAttachments/);
+    assert.match(text, /if \(sessionId\) \{\s*turnAttachments = undefined/);
+  }
+});
+
 test('the config module never writes a file, logs, or touches the host', async () => {
   const text = await source('backends/opencode/config.ts');
   assert.equal(/\bfrom\s+['"]vscode['"]/.test(text), false);

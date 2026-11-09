@@ -555,6 +555,7 @@ export class OpencodeBackend implements AgentBackend {
       this.handoverSummary(handle.threadId) ??
       compactedSummary(this.store?.getTranscript(this.id, handle.threadId) ?? []);
     let visibleText = request.text;
+    let turnAttachments = request.attachments;
     let barePrompt = false;
     let recovery: string | undefined;
     const opencodeCwd = request.context?.workspaceRoot ?? this.cwd;
@@ -593,6 +594,7 @@ export class OpencodeBackend implements AgentBackend {
               executable: this.opencodePath,
               cwd: opencodeCwd,
               config: built.config,
+              attachments: turnAttachments,
               modelRef: built.modelRef,
               agent: built.agent,
               prompt,
@@ -657,6 +659,7 @@ export class OpencodeBackend implements AgentBackend {
         const quiet = this.quietStops.delete(handle.threadId);
         if (next) {
           if (sessionId) {
+            turnAttachments = undefined;
             visibleText = next;
             barePrompt = true;
           } else {

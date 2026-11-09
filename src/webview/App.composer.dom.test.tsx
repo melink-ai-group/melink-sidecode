@@ -2,6 +2,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { App } from './App';
 import { clearHostMessages, hostMessages, sendHostMessage } from './domSetup';
+import { readClipboardFile } from './composer/attachments';
+
+it('clipboard text and PDF files retain their bytes as well as their names', async () => {
+  for (const [name, type, content] of [['notes.txt', 'text/plain', 'Attached notes'], ['document.pdf', 'application/pdf', '%PDF-1.4']]) {
+    const attachment = await readClipboardFile(new File([content], name, { type }));
+    expect(attachment?.dataUrl).toBe(`data:${type};base64,${btoa(content)}`);
+    expect(attachment?.name).toBe(name);
+  }
+  const inferred = await readClipboardFile(new File(['Notes'], 'notes.txt'));
+  expect(inferred?.mimeType).toBe('text/plain');
+  expect(inferred?.dataUrl).toBe('data:text/plain;base64,Tm90ZXM=');
+  const failedRead = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => { throw new Error('unreadable'); });
+  try {
+    expect(await readClipboardFile(new File(['unreadable'], 'notes.txt', { type: 'text/plain' }))).toBeUndefined();
+  } finally { failedRead.mockRestore(); }
+});
 
 interface SendTurnMessage {
   type: 'sendTurn';

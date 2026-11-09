@@ -429,6 +429,9 @@ export function buildOpencodeConfig(input: OpencodeConfigInput): OpencodeConfigR
     reasoningKnown && !reasoningSupported && requestedThinking !== undefined && requestedThinking !== 'off';
 
   const selected: Record<string, unknown> = { name: modelId, tool_call: true };
+  if (capabilities?.inputModalities && capabilities.inputModalities !== 'unknown') {
+    selected.modalities = { input: capabilities.inputModalities, output: ['text'] };
+  }
   if (contextApplied !== undefined) {
     // opencode 1.18 rejects a limit that names context without output
     // (`ConfigInvalidError` / Missing key). Output stays inside the window.

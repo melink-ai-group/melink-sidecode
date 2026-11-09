@@ -5182,10 +5182,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!backend) {
       return false;
     }
-    // Clipboard images have no path. Copy them into workspace storage first so
+    // Clipboard files have no path. Copy them into workspace storage first so
     // a reload can show the same thumbnail. The transcript then keeps the path,
     // not the bytes, and workspace state stays free of file contents.
-    const persisted = persistableAttachments(await this.retainClipboardAttachments(attachments));
+    const retainedAttachments = await this.retainClipboardAttachments(attachments);
+    const persisted = persistableAttachments(retainedAttachments);
     const resolvedModel = model ?? this.activeThread.model;
     const level = this.resolvePermission(activeBackendId, permissionLevel ?? this.permissionLevel);
     await this.rememberPermission(level);
@@ -5303,7 +5304,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
           mode,
           modelSettings,
           context,
-          attachments
+          attachments: retainedAttachments
         }
       );
     } catch (error) {
@@ -7043,7 +7044,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  /** A clipboard image has no path until its bytes are copied into workspace storage. */
+  /** A clipboard file has no path until its bytes are copied into workspace storage. */
   private async retainClipboardAttachments(attachments: readonly Attachment[] | undefined): Promise<Attachment[] | undefined> {
     if (!attachments || attachments.length === 0) {
       return undefined;

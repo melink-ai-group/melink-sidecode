@@ -6,6 +6,8 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 /** Extension -> mime map for the formats the picker filter offers. */
 export const MIME_BY_EXTENSION: Record<string, string> = {
   png: 'image/png',
+  pdf: 'application/pdf',
+  svg: 'image/svg+xml',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   gif: 'image/gif',
@@ -81,6 +83,9 @@ export function extensionForAttachment(attachment: Attachment): string {
   if (fromName) {
     return fromName;
   }
+  if (attachment.mimeType === 'application/pdf') return '.pdf';
+  if (attachment.kind === 'text') return '.txt';
+  if (attachment.kind !== 'image') return '.bin';
   if (attachment.mimeType === 'image/jpeg') {
     return '.jpg';
   }

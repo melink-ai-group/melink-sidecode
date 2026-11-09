@@ -10,6 +10,8 @@ import { OPENCODE_CONFIG_ENV } from './config.ts';
 import type { OpencodePermissionAsk, OpencodePermissionReply } from './approval.ts';
 import type { ClarifyingQuestion } from '../../questions.ts';
 import { probeOpencode } from './status.ts';
+import type { Attachment } from '../types.ts';
+import { prepareOpencodeAttachments, opencodeAttachmentConfig, type OpencodeAttachmentFile } from './attachments.ts';
 
 /** One OpenCode question request, already reduced to the shared card shape. */
 export interface OpencodeQuestionAsk {
@@ -67,6 +69,9 @@ export interface OpencodeRunOptions {
   agent: string;
   /** The user turn text. */
   prompt: string;
+  attachments?: readonly Attachment[];
+  /** Validated native files filled by the dispatcher, never placed in argv. */
+  attachmentFiles?: readonly OpencodeAttachmentFile[];
   /** Existing runtime session to resume, when one is recorded for this thread. */
   sessionId?: string;
   /** API credential; read into the child environment only under {@link apiKeyEnv}. */
@@ -119,6 +124,12 @@ export async function runOpencodeTurn(
   onEvent: (event: OpencodeEvent) => void
 ): Promise<OpencodeRunResult> {
   if (options.signal?.aborted) return { outcome: 'canceled', terminal: false };
+  try {
+    const attachmentFiles = await prepareOpencodeAttachments(options.attachments);
+    options = { ...options, attachmentFiles, config: opencodeAttachmentConfig(options.config, options.modelRef, attachmentFiles) };
+  } catch (error) {
+    return { outcome: 'invalid-config', terminal: false, detail: error instanceof Error ? error.message : 'The attachments could not be prepared. Attach them again.' };
+  }
   const probe = await probeOpencode(options.executable);
   if (options.signal?.aborted) return { outcome: 'canceled', terminal: false };
   const major = probe.version?.split('.')[0];
@@ -153,7 +164,7 @@ export async function runOpencodeTurn(
     };
   }
 
-  if (options.streamActivity || options.decidePermission) {
+  if (options.streamActivity || options.decidePermission || options.attachmentFiles?.length) {
     const { runOpencodeServerTurn } = await import('./interactive.ts');
     return runOpencodeServerTurn(
       { ...options, decidePermission: options.decidePermission ?? (async () => 'reject' as const) },

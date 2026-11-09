@@ -13,6 +13,7 @@ import {
 } from './approval.ts';
 import { questionAskFromBus } from '../../questions.ts';
 import type { OpencodeRunOptions, OpencodeRunResult } from './runtime.ts';
+import { opencodeV1Parts } from './attachments.ts';
 
 /**
  * Drive one turn through `opencode serve` so an `ask` permission can wait for
@@ -147,7 +148,7 @@ export async function runOpencodeServerTurn(
       body: JSON.stringify({
         agent: options.agent,
         model: { providerID: model.providerID, modelID: model.modelID },
-        parts: [{ type: 'text', text: options.prompt }]
+        parts: opencodeV1Parts(options.prompt, options.attachmentFiles)
       }),
       signal: options.signal
     }, env);

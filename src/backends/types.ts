@@ -107,6 +107,8 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'low', 'medium'
  * own wire data into this shape, and the UI never sees the provider's types.
  */
 export interface ModelCapabilities {
+  /** Provider-reported input modalities; absent/unknown is not text-only. */
+  inputModalities?: CapabilityState<string[]>;
   contextWindow: ContextWindowCapability;
   /**
    * Supported thinking levels in the UI vocabulary, and the model's default
@@ -276,7 +278,7 @@ export interface SendTurnRequest {
   /** The user turn text. */
   text: string;
   /**
-   * Files the user attached to this turn. Metadata plus, for clipboard images,
+   * Files the user attached to this turn. Metadata plus, for clipboard files,
    * inline bytes; the adapter decides how to present them to its provider.
    */
   attachments?: Attachment[];
@@ -487,10 +489,10 @@ export type AttachmentKind = 'image' | 'audio' | 'text' | 'file';
  * A file carried on an outgoing user message.
  *
  * A picked file names its absolute `path`. An image also carries a `dataUrl`
- * so the webview can show a thumbnail and open a viewer. A clipboard image
- * carries its bytes the same way and has no path. Those bytes stay in the
- * webview and are stripped before the attachment is persisted, so no file
- * content is ever written to workspace state.
+ * so the webview can show a thumbnail and open a viewer. A clipboard file
+ * carries its bytes the same way until the host retains a private file copy.
+ * Inline bytes are stripped before metadata is persisted, so no file content
+ * is ever written to workspace state.
  */
 export interface Attachment {
   id: string;
@@ -501,7 +503,7 @@ export interface Attachment {
   mimeType: string;
   /** Byte size when the host could read it. */
   size?: number;
-  /** Inline image bytes (data URL) for clipboard content only. */
+  /** Inline bytes (data URL) for clipboard files and image previews. */
   dataUrl?: string;
   kind: AttachmentKind;
 }

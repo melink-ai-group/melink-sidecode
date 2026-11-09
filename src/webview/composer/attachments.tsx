@@ -1,18 +1,18 @@
 import { useEffect, useRef, type JSX } from 'react';
 import type { Attachment } from '../../backends/types';
-import { MAX_ATTACHMENT_BYTES, kindForMime } from '../../attachments';
+import { MAX_ATTACHMENT_BYTES, kindForMime, mimeForName } from '../../attachments';
 import { ChevronRightIcon, CrossIcon, PaperclipIcon } from '../Icons';
 import { trapTab } from '../focusTrap';
 
 /**
- * Turn one clipboard `File` into an attachment. Images are read to a data URL
- * so the chip can show a preview; anything else is carried by name and type.
+ * Turn one clipboard `File` into an attachment with its bytes. Images also
+ * use that data URL for the preview; other files keep the existing file icon.
  * Returns `undefined` for an oversized or unreadable file so the caller can
  * report it and add nothing.
  */
 export function readClipboardFile(file: File): Promise<Attachment | undefined> {
   const name = file.name && file.name.trim().length > 0 ? file.name : defaultPastedName(file.type);
-  const mimeType = file.type || 'application/octet-stream';
+  const mimeType = file.type || mimeForName(name);
   const base = {
     id: `paste_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     name,
@@ -23,17 +23,19 @@ export function readClipboardFile(file: File): Promise<Attachment | undefined> {
   if (file.size > MAX_ATTACHMENT_BYTES) {
     return Promise.resolve(undefined);
   }
-  if (base.kind !== 'image') {
-    return Promise.resolve(base);
-  }
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = typeof reader.result === 'string' ? reader.result : undefined;
-      resolve(result ? { ...base, dataUrl: result } : base);
+      const offset = result?.indexOf(';base64,') ?? -1;
+      resolve(result && offset >= 0 ? { ...base, dataUrl: `data:${mimeType};base64,${result.slice(offset + 8)}` } : undefined);
     };
-    reader.onerror = () => resolve(base);
-    reader.readAsDataURL(file);
+    reader.onerror = () => resolve(undefined);
+    try {
+      reader.readAsDataURL(file);
+    } catch {
+      resolve(undefined);
+    }
   });
 }
 
