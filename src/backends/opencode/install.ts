@@ -5,6 +5,7 @@ import { basename, join } from 'node:path';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import { randomBytes } from 'node:crypto';
 import { sha256Hex } from '../cliManifest.ts';
+import { probeOpencode } from './status.ts';
 
 /**
  * Download the official opencode CLI and install it for the settings screen.
@@ -36,6 +37,10 @@ export interface OpencodeInstallResult {
 }
 
 export interface InstallOpencodeOptions {
+  /** Updates stay within this major. Existing callers retain the v1 channel. */
+  major?: 1 | 2;
+  /** Test seam; production probes the staged binary before replacing anything. */
+  verifyBinary?: (path: string, version: string) => Promise<boolean>;
   platform?: OpencodeInstallPlatform;
   /** Defaults to `~/.opencode/bin`. */
   installDir?: string;
@@ -48,12 +53,12 @@ export interface InstallOpencodeOptions {
 }
 
 /** Hard cap so a bad response cannot fill memory. The release archives are smaller. */
-const MAX_ARCHIVE_BYTES = 120 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 180_000;
 const RELEASE_API = 'https://api.github.com/repos/anomalyco/opencode/releases/latest';
 
 /** Resolve once, then download the exact tag so a concurrent release cannot mix bytes and digest. */
-async function latestReleaseAsset(filename: string, fetchImpl: typeof fetch): Promise<{
+async function latestReleaseAsset(filename: string, fetchImpl: typeof fetch, major: 1 | 2): Promise<{
   version: string; url: string; sha256: string;
 }> {
   let response: Response;
@@ -78,6 +83,30 @@ async function latestReleaseAsset(filename: string, fetchImpl: typeof fetch): Pr
   if (!release || typeof release.tag_name !== 'string' || !/^v\d+\.\d+\.\d+$/.test(release.tag_name) ||
       release.draft !== false || release.prerelease !== false || !Array.isArray(release.assets)) {
     throw new Error('The latest opencode release metadata is invalid. Nothing was installed.');
+  }
+  if (!release.tag_name.startsWith(`v${major}.`)) {
+    // GitHub's "latest" designation may still point at v1. Search the official
+    // release list, ignoring unrelated daemon tags and prereleases.
+    release = undefined;
+    for (let page = 1; page <= 10; page++) {
+      const listed = await fetchImpl(`https://api.github.com/repos/anomalyco/opencode/releases?per_page=100&page=${page}`, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'melink-sidecode' },
+        signal: AbortSignal.timeout(20_000), cache: 'no-store'
+      });
+      if (!listed.ok) throw new Error(`Could not check opencode ${major}.x releases (HTTP ${listed.status}). Nothing was installed.`);
+      const entries = JSON.parse((await readLimited(listed, 20 * 1024 * 1024)).toString('utf8'));
+      if (!Array.isArray(entries)) throw new Error('Invalid opencode release list. Nothing was installed.');
+      const candidates = entries.filter((item) => item && new RegExp(`^v${major}\\.\\d+\\.\\d+$`).test(item.tag_name)
+        && item.draft === false && item.prerelease === false && Array.isArray(item.assets));
+      candidates.sort((a, b) => {
+        const av = a.tag_name.slice(1).split('.').map(Number);
+        const bv = b.tag_name.slice(1).split('.').map(Number);
+        return bv[1] - av[1] || bv[2] - av[2];
+      });
+      if (candidates.length) { release = candidates[0]; break; }
+      if (entries.length < 100) break;
+    }
+    if (!release) throw new Error(`No stable opencode ${major}.x release was found. Nothing was installed.`);
   }
   const version = release.tag_name.slice(1);
   const matches = release.assets.filter((asset: { name?: unknown } | null) => asset?.name === filename);
@@ -134,7 +163,7 @@ export async function installOpencodeRelease(
     const installDir = options.installDir ?? join(homedir(), '.opencode', 'bin');
     const filename = opencodeReleaseFilename(platform);
     const fetchImpl = options.fetchImpl ?? fetch;
-    const release = await latestReleaseAsset(filename, fetchImpl);
+    const release = await latestReleaseAsset(filename, fetchImpl, options.major ?? 1);
     const archive = await downloadRelease(release.url, fetchImpl);
     if (sha256Hex(archive) !== release.sha256) {
       throw new Error(`SHA-256 mismatch for opencode ${release.version} asset ${filename}, so it was not installed.`);
@@ -145,22 +174,33 @@ export async function installOpencodeRelease(
     await mkdir(installDir, { recursive: true });
     // Write beside the target then rename so an in-use Windows binary can be
     // replaced more reliably than an in-place overwrite.
-    const stagingPath = join(installDir, `.opencode-download-${randomBytes(6).toString('hex')}`);
+    const stagingPath = join(installDir, `.opencode-download-${randomBytes(6).toString('hex')}${process.platform === 'win32' ? '.exe' : ''}`);
     await writeFile(stagingPath, binary);
     if (process.platform !== 'win32') {
       await chmod(stagingPath, 0o755);
     }
     try {
-      await rename(stagingPath, executablePath);
-    } catch (error) {
-      // Windows often refuses rename-over-existing; delete then rename.
+      const verified = options.verifyBinary
+        ? await options.verifyBinary(stagingPath, release.version)
+        : (await probeOpencode(stagingPath, { timeoutMs: 15_000 })).version === release.version;
+      if (!verified) throw new Error(`The downloaded opencode did not report ${release.version}. The previous binary was preserved.`);
+      const backup = `${executablePath}.previous-${randomBytes(6).toString('hex')}`;
+      let backedUp = false;
       try {
-        await unlink(executablePath);
+        await rename(executablePath, backup);
+        backedUp = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      try {
         await rename(stagingPath, executablePath);
-      } catch {
-        await unlink(stagingPath).catch(() => undefined);
+      } catch (error) {
+        if (backedUp) await rename(backup, executablePath);
         throw error;
       }
+      if (backedUp) await unlink(backup).catch(() => undefined);
+    } finally {
+      await unlink(stagingPath).catch(() => undefined);
     }
     if (options.persistPath !== false) {
       await rememberInstallDir(installDir);

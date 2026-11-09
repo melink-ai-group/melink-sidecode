@@ -155,7 +155,7 @@ export function readTrustedAstGrepExecutable(fallback = 'ast-grep'): string {
  * Read from the user's own settings only, so a workspace cannot push the
  * runtime back onto a machine-local binary.
  */
-export function readTrustedOpencodeCliSource(): 'local' | 'bundled' {
+export function readTrustedOpencodeCliSource(): 'local' | 'bundled' | 'bundled-v2' {
   return readOpencodeCliSource(readTrustedOptional<string>(TRUSTED_KEYS.opencodeCliSource));
 }
 

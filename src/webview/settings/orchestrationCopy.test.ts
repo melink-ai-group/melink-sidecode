@@ -60,20 +60,20 @@ test('the six fields carry the exact labels, help, and defaults', () => {
 test('the default summary spells out every choice and the intrinsic bypass', () => {
   assert.equal(
     orchestrationSummary(values()),
-    'Effective policy: testing On, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Off.'
+    'Effective policy: testing On, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Off; dictation On.'
   );
 });
 
 test('the summary follows every choice, including quick notice Auto', () => {
   assert.equal(
     orchestrationSummary(values({ testing: 'auto', quickTask: 'auto' })),
-    'Effective policy: testing Auto, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Auto.'
+    'Effective policy: testing Auto, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Auto; dictation On.'
   );
   assert.equal(
     orchestrationSummary(
       values({ testing: 'off', reviewing: 'off', styling: 'off', doubleCheck: 'off', planning: 'off' })
     ),
-    'Effective policy: testing Off, reviewing Off, styling Off, double-check Off and plan autopilot Off. Quick bypass always applies; quick notice Off.'
+    'Effective policy: testing Off, reviewing Off, styling Off, double-check Off and plan autopilot Off. Quick bypass always applies; quick notice Off; dictation On.'
   );
 });
 

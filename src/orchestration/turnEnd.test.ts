@@ -20,6 +20,7 @@ function plan(overrides: Partial<TurnPlan> = {}): TurnPlan {
     quickReason: 'not-question',
     quickBypass: false,
     quickNotice: false,
+    dictation: true,
     testing: true,
     reviewing: false,
     styling: false,

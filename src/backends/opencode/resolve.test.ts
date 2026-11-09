@@ -12,6 +12,14 @@ import {
 
 const roots = { extensionPath: join('C:', 'ext'), globalStoragePath: join('C:', 'storage') };
 
+test('bundled v2 is isolated from v1 and never falls back to the v1 binary or PATH', () => {
+  assert.equal(readOpencodeCliSource('bundled-v2'), 'bundled-v2');
+  const options = { source: 'bundled-v2' as const, path: 'opencode', roots };
+  assert.equal(opencodeInstallDirFor(options), join(roots.globalStoragePath, 'opencode-v2', 'bin'));
+  assert.equal(resolveOpencodeExecutable(options), bundledOpencodePreferredExecutable(roots, 2));
+  assert.notEqual(resolveOpencodeExecutable(options), bundledOpencodeExecutable(roots));
+});
+
 test('cli source falls back to local for unknown values', () => {
   assert.equal(readOpencodeCliSource('bundled'), 'bundled');
   assert.equal(readOpencodeCliSource('local'), 'local');

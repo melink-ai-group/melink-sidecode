@@ -11,6 +11,25 @@ import {
 } from './events.ts';
 import { cleanOpencodeExit } from './runtime.ts';
 
+test('todo completion requires a successful tool result and prefers its accepted snapshot', () => {
+  const input = { todos: [{ content: 'Run build', status: 'pending' }] };
+  const metadata = { todos: [{ content: 'Run build', status: 'completed' }] };
+  for (const status of ['running', 'pending', 'error', 'completed']) {
+    const event = parseOpencodeEvent(JSON.stringify({ type: 'tool_use', part: { tool: 'todowrite', callID: 'todo', state: { status, input, metadata } } }));
+    assert.equal(event.kind, 'tool');
+    if (event.kind === 'tool') assert.deepEqual(event.todos, status === 'completed' ? [{ text: 'Run build', status: 'completed' }] : undefined);
+  }
+});
+
+test('cancelled todos stay terminal and an explicit empty snapshot does not replay stale arguments', () => {
+  const parse = (todos: unknown[]) => parseOpencodeEvent(JSON.stringify({ type: 'tool_use', part: { tool: 'todowrite', callID: 'todo',
+    state: { status: 'completed', input: { todos: [{ content: 'Stale task', status: 'completed' }] }, metadata: { todos } } } }));
+  const cancelled = parse([{ content: 'Deploy', status: 'cancelled' }]);
+  assert.deepEqual(cancelled.kind === 'tool' && cancelled.todos, [{ text: 'Deploy', status: 'denied' }]);
+  const cleared = parse([]);
+  assert.deepEqual(cleared.kind === 'tool' && cleared.todos, []);
+});
+
 // Real captured lines from `opencode run --format json` (opencode 1.1.65).
 const STEP_START =
   '{"type":"step_start","timestamp":1790347496436,"sessionID":"ses_f26f93a8fffeAnF7GxtfsLs01v","part":{"id":"prt_0d906cbf2001KFAaIHmDmfsWXE","sessionID":"ses_f26f93a8fffeAnF7GxtfsLs01v","messageID":"msg_0d906c5df001U4knPZrtgjHL0X","type":"step-start"}}';

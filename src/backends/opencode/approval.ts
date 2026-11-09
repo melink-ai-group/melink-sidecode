@@ -239,7 +239,7 @@ function isJsonPayload(data: string): boolean {
  * Only the listen line is the server we spawned.
  */
 export function opencodeListenUrl(text: string): string | undefined {
-  const match = text.match(/opencode server listening on\s+(https?:\/\/\S+)/i);
+  const match = text.match(/(?:opencode )?server listening on\s+(https?:\/\/\S+)/i);
   if (!match) {
     return undefined;
   }

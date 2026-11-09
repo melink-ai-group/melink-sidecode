@@ -168,6 +168,17 @@ test('the orchestration keys are tri-state, window-scoped, with the designed def
   }
 });
 
+test('the orchestration dictation switch is a boolean, window-scoped, and on by default', async () => {
+  const pkg = await manifest();
+  const property = pkg.contributes?.configuration?.properties?.['melink.orchestration.dictation'];
+  assert.ok(property, 'melink.orchestration.dictation is not contributed');
+  assert.equal(property.type, 'boolean');
+  assert.equal(property.default, true);
+  assert.match(property.markdownDescription ?? '', /Auto/i);
+  assert.match(property.markdownDescription ?? '', /Off/i);
+  assert.equal(property.scope === undefined || property.scope === 'window', true);
+});
+
 test('the capability description states that the application scope is enforced', async () => {
   const pkg = await manifest();
   const description = pkg.capabilities?.untrustedWorkspaces?.description ?? '';

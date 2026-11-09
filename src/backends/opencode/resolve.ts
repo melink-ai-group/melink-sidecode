@@ -11,9 +11,9 @@ import { isAbsoluteExecutable, resolveExecutableCommand } from '../executables.t
  * restarts and extension updates), never the machine's PATH entry.
  */
 
-export type OpencodeCliSource = 'local' | 'bundled';
+export type OpencodeCliSource = 'local' | 'bundled' | 'bundled-v2';
 
-export const OPENCODE_CLI_SOURCES: readonly OpencodeCliSource[] = ['local', 'bundled'];
+export const OPENCODE_CLI_SOURCES: readonly OpencodeCliSource[] = ['local', 'bundled', 'bundled-v2'];
 
 export interface OpencodeResolveRoots {
   /** Extension install directory; used only as a legacy fallback path. */
@@ -37,17 +37,17 @@ export function opencodeExecutableName(): string {
  * VS Code and extension updates. Fall back to the legacy
  * `extensionPath/vendor/opencode/bin` when global storage is not provided.
  */
-export function bundledOpencodeInstallDir(roots: OpencodeResolveRoots): string {
+export function bundledOpencodeInstallDir(roots: OpencodeResolveRoots, major: 1 | 2 = 1): string {
   const storage = roots.globalStoragePath?.trim();
   if (storage) {
-    return join(storage, 'opencode', 'bin');
+    return join(storage, major === 2 ? 'opencode-v2' : 'opencode', 'bin');
   }
-  return join(roots.extensionPath, 'vendor', 'opencode', 'bin');
+  return join(roots.extensionPath, 'vendor', major === 2 ? 'opencode-v2' : 'opencode', 'bin');
 }
 
 /** Absolute path of the preferred bundled CLI binary (may not exist yet). */
-export function bundledOpencodePreferredExecutable(roots: OpencodeResolveRoots): string {
-  return join(bundledOpencodeInstallDir(roots), opencodeExecutableName());
+export function bundledOpencodePreferredExecutable(roots: OpencodeResolveRoots, major: 1 | 2 = 1): string {
+  return join(bundledOpencodeInstallDir(roots, major), opencodeExecutableName());
 }
 
 /**
@@ -57,8 +57,9 @@ export function bundledOpencodePreferredExecutable(roots: OpencodeResolveRoots):
  * legacy binary under `extensionPath/vendor/opencode` so an earlier install is
  * still found until the user reinstalls into global storage.
  */
-export function bundledOpencodeExecutable(roots: OpencodeResolveRoots): string {
-  const preferred = bundledOpencodePreferredExecutable(roots);
+export function bundledOpencodeExecutable(roots: OpencodeResolveRoots, major: 1 | 2 = 1): string {
+  const preferred = bundledOpencodePreferredExecutable(roots, major);
+  if (major === 2) return preferred;
   if (existsSync(preferred)) {
     return preferred;
   }
@@ -80,7 +81,7 @@ export function managedOpencodeExecutable(): string {
 
 /** Coerce a stored setting to a known source; unknown values become `local`. */
 export function readOpencodeCliSource(value: unknown): OpencodeCliSource {
-  return value === 'bundled' ? 'bundled' : 'local';
+  return value === 'bundled-v2' ? 'bundled-v2' : value === 'bundled' ? 'bundled' : 'local';
 }
 
 /**
@@ -101,8 +102,8 @@ export function resolveOpencodeExecutable(options: {
   path: string;
   roots: OpencodeResolveRoots;
 }): string {
-  if (options.source === 'bundled') {
-    return bundledOpencodeExecutable(options.roots);
+  if (options.source !== 'local') {
+    return bundledOpencodeExecutable(options.roots, options.source === 'bundled-v2' ? 2 : 1);
   }
   const resolved = resolveExecutableCommand(options.path, 'opencode');
   return resolved.ok ? resolved.command : 'opencode';
@@ -120,8 +121,8 @@ export function opencodeInstallDirFor(options: {
   path: string;
   roots: OpencodeResolveRoots;
 }): string {
-  if (options.source === 'bundled') {
-    return bundledOpencodeInstallDir(options.roots);
+  if (options.source !== 'local') {
+    return bundledOpencodeInstallDir(options.roots, options.source === 'bundled-v2' ? 2 : 1);
   }
   const trimmed = options.path.trim();
   if (trimmed.length > 0 && isAbsoluteExecutable(trimmed)) {

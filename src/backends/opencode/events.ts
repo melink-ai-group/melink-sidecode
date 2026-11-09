@@ -81,7 +81,7 @@ export interface OpencodeToolEvent {
   /** Full post-edit file text paired with `beforeText`. */
   afterText?: string;
   /** Structured todo list reported by OpenCode's todowrite tool. */
-  todos?: Array<{ text: string; status: 'pending' | 'inProgress' | 'completed' }>;
+  todos?: Array<{ text: string; status: 'pending' | 'inProgress' | 'completed' | 'denied' }>;
 }
 
 export interface OpencodeStepFinishEvent {
@@ -248,7 +248,11 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
       const fileExists = typeof metadata?.exists === 'boolean' ? metadata.exists : undefined;
       const output = asString(state?.output);
       const title = asString(state?.title);
-      const todos = tool.toLowerCase() === 'todowrite' ? parseTodos(input?.todos) : undefined;
+      // Arguments describe an attempted update. A successful tool result
+      // confirms it; v2 also returns the accepted list in metadata.
+      const todos = tool.toLowerCase() === 'todowrite' && normalizedStatus === 'completed'
+        ? parseTodos(metadata?.todos) ?? parseTodos(input?.todos)
+        : undefined;
       const target = targetForTool(tool, input, metadata);
       const edit = isFileTool(tool) ? editFacts(input, metadata, output) : undefined;
       return {
@@ -287,7 +291,7 @@ export function parseOpencodeEvent(line: string): OpencodeEvent {
   }
 }
 
-function parseTodos(value: unknown): Array<{ text: string; status: 'pending' | 'inProgress' | 'completed' }> | undefined {
+function parseTodos(value: unknown): Array<{ text: string; status: 'pending' | 'inProgress' | 'completed' | 'denied' }> | undefined {
   if (!Array.isArray(value)) return undefined;
   const todos = value.flatMap((entry) => {
     const todo = asRecord(entry);
@@ -297,12 +301,14 @@ function parseTodos(value: unknown): Array<{ text: string; status: 'pending' | '
     const normalizedStatus =
       status === 'completed' || status === 'done'
         ? 'completed'
+        : status === 'cancelled' || status === 'canceled'
+          ? 'denied'
         : status === 'in_progress' || status === 'inprogress'
           ? 'inProgress'
           : 'pending';
-    return [{ text, status: normalizedStatus as 'pending' | 'inProgress' | 'completed' }];
+    return [{ text, status: normalizedStatus as 'pending' | 'inProgress' | 'completed' | 'denied' }];
   });
-  return todos.length > 0 ? todos : undefined;
+  return todos.length > 0 || value.length === 0 ? todos : undefined;
 }
 
 /**

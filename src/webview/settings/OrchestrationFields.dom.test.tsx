@@ -13,29 +13,33 @@ const DEFAULT_VALUES: OrchestrationFieldValues = {
 
 function renderFields(
   values: Partial<OrchestrationFieldValues> = {},
-  legacy: { legacyTesting?: boolean; legacyReviewing?: boolean } = {}
-): ReturnType<typeof vi.fn> {
+  legacy: { legacyTesting?: boolean; legacyReviewing?: boolean } = {},
+  dictation = true
+): { onChange: ReturnType<typeof vi.fn>; onDictationChange: ReturnType<typeof vi.fn> } {
   const onChange = vi.fn();
+  const onDictationChange = vi.fn();
   render(
     <OrchestrationFields
       values={{ ...DEFAULT_VALUES, ...values }}
+      dictation={dictation}
       legacyTesting={legacy.legacyTesting ?? false}
       legacyReviewing={legacy.legacyReviewing ?? false}
       onChange={onChange}
+      onDictationChange={onDictationChange}
     />
   );
-  return onChange;
+  return { onChange, onDictationChange };
 }
 
 describe('OrchestrationFields', () => {
-  it('renders the default tri-state summary', () => {
+  it('renders the default tri-state summary with dictation On', () => {
     renderFields();
     expect(screen.getByRole('status').textContent).toBe(
-      'Effective policy: testing On, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Off.'
+      'Effective policy: testing On, reviewing Auto, styling Auto, double-check Auto and plan autopilot Auto. Quick bypass always applies; quick notice Off; dictation On.'
     );
   });
 
-  it('renders the intro and the Auto explanation exactly once', () => {
+  it('renders the intro, the Auto explanation, and the dictation switch once', () => {
     renderFields();
     expect(screen.getAllByText('Changes apply from the next turn.')).toHaveLength(1);
     expect(
@@ -43,6 +47,18 @@ describe('OrchestrationFields', () => {
         'Auto runs a pass only when this turn is relevant; On runs it whenever its mode applies; Off never runs it.'
       )
     ).toBeTruthy();
+    const toggle = screen.getByRole('checkbox', { name: /Dictation for orchestration/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(screen.getByText(/Uses the dictation model when one is set/)).toBeTruthy();
+  });
+
+  it('reports the dictation switch through onDictationChange and explains Off', () => {
+    const { onDictationChange } = renderFields({}, {}, false);
+    const toggle = screen.getByRole('checkbox', { name: /Dictation for orchestration/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(screen.getByText('Off keeps the fixed Auto, On, and Off rules and makes no decision call.')).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(onDictationChange.mock.calls).toEqual([[true]]);
   });
 
   it('shows one select per role with the three choices and the stored value', () => {
@@ -62,7 +78,7 @@ describe('OrchestrationFields', () => {
   });
 
   it('reports every tri-state change through onChange', () => {
-    const onChange = renderFields();
+    const { onChange } = renderFields();
     fireEvent.change(screen.getByRole('combobox', { name: /Testing/ }), { target: { value: 'off' } });
     fireEvent.change(screen.getByRole('combobox', { name: /Reviewing/ }), { target: { value: 'on' } });
     fireEvent.change(screen.getByRole('combobox', { name: /Styling check/ }), { target: { value: 'off' } });
@@ -91,7 +107,7 @@ describe('OrchestrationFields', () => {
     expect(quick.disabled).toBe(false);
     expect(quick.value).toBe('off');
     expect(screen.getByRole('status').textContent).toBe(
-      'Effective policy: testing Off, reviewing Off, styling Off, double-check Off and plan autopilot Auto. Quick bypass always applies; quick notice Off.'
+      'Effective policy: testing Off, reviewing Off, styling Off, double-check Off and plan autopilot Auto. Quick bypass always applies; quick notice Off; dictation On.'
     );
   });
 

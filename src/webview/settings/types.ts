@@ -27,16 +27,16 @@ export interface SettingsScreenProps {
   onClearZenToken: () => void;
   onTestConnection: (
     backendId: string,
-    draft?: { cliSource: 'local' | 'bundled'; path: string }
+    draft?: { cliSource: 'local' | 'bundled' | 'bundled-v2'; path: string }
   ) => void;
   /** Set when a failure action opened settings, so that provider page is selected. */
   settingsProvider?: SettingsSection;
   codexVersionCheck?: { pending: boolean; ok?: boolean; message?: string };
   onValidateCodexVersion: () => void;
   opencodeUpgrade?: { pending: boolean; ok?: boolean; message?: string };
-  onUpgradeOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
+  onUpgradeOpencode: (draft: { cliSource: 'local' | 'bundled' | 'bundled-v2'; path: string }) => void;
   opencodeInstall?: { pending: boolean; ok?: boolean; message?: string; path?: string };
-  onInstallOpencode: (draft: { cliSource: 'local' | 'bundled'; path: string }) => void;
+  onInstallOpencode: (draft: { cliSource: 'local' | 'bundled' | 'bundled-v2'; path: string }) => void;
   zvecGrep?: {
     pending: boolean;
     requested?: boolean;

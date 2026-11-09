@@ -16,8 +16,10 @@
 
 import { detectQuickTask, type QuickTaskReason } from './quickTask.ts';
 import { isFrontendPath } from '../review/stylingReview.ts';
+import type { OrchestrationDictationDecision } from './dictation.ts';
 import {
   ORCHESTRATION_DEFAULTS,
+  ORCHESTRATION_DICTATION_DEFAULT,
   normalizeOrchestrationChoice,
   type OrchestrationChoice,
   type OrchestrationChoices,
@@ -34,12 +36,15 @@ export interface TurnPlanInput {
   origin: string;
   hasAttachments: boolean;
   hasActivePlan: boolean;
-  settings: OrchestrationChoices;
+  /** The six tri-state choices plus the optional dictation switch. */
+  settings: OrchestrationChoices & { dictation?: boolean };
 }
 
 export interface TurnPlan {
   /** The six effective choices this turn was planned with. */
   choices: OrchestrationChoices;
+  /** True when a model may decide the Auto post-turn passes for this turn. */
+  dictation: boolean;
   quick: boolean;
   quickReason: QuickTaskReason;
   /** True when quick detection forced every role off for this turn. */
@@ -53,11 +58,12 @@ export interface TurnPlan {
   doubleCheck: boolean;
   /** Planning is resolved at plan time: Agent mode, an active plan, not Off. */
   planning: boolean;
-  reasons: Partial<Record<OrchestrationKey, string>>;
+  reasons: Partial<Record<OrchestrationKey | 'dictation', string>>;
 }
 
 export function planTurn(input: TurnPlanInput): TurnPlan {
   const choices = normalizedChoices(input.settings);
+  const dictation = input.settings?.dictation ?? ORCHESTRATION_DICTATION_DEFAULT;
   const decision = input.quick && input.origin === 'user' && input.mode === 'agent'
     ? { quick: true, reason: 'user-requested' as const }
     : detectQuickTask({
@@ -68,7 +74,7 @@ export function planTurn(input: TurnPlanInput): TurnPlan {
       hasActivePlan: input.hasActivePlan
     });
   const quickBypass = decision.quick;
-  const reasons: Partial<Record<OrchestrationKey, string>> = {};
+  const reasons: Partial<Record<OrchestrationKey | 'dictation', string>> = {};
 
   const potential = (key: PostTurnRole): boolean => {
     if (quickBypass) {
@@ -85,6 +91,11 @@ export function planTurn(input: TurnPlanInput): TurnPlan {
 
   const planning = planningEnabled(choices.planning, input.mode, input.hasActivePlan, quickBypass);
   reasons.planning = planningReason(choices.planning, input.mode, input.hasActivePlan, quickBypass);
+  reasons.dictation = quickBypass
+    ? 'quick-bypass'
+    : dictation
+      ? 'enabled-pending-change-set'
+      : 'off';
   reasons.quickTask = quickBypass
     ? choices.quickTask === 'off'
       ? 'quick-bypass-silent'
@@ -93,6 +104,7 @@ export function planTurn(input: TurnPlanInput): TurnPlan {
 
   return {
     choices,
+    dictation,
     quick: decision.quick,
     quickReason: decision.reason,
     quickBypass,
@@ -146,12 +158,18 @@ export interface PostTurnInput {
   entries: readonly { path: string }[];
   mode?: string;
   terminus?: 'completed' | 'interrupted';
+  /**
+   * The optional model decision for this closed change set. It applies only to
+   * Auto roles; an explicit On or Off is never overridden, and every hard gate
+   * (no change set, no frontend change, quick bypass) still wins.
+   */
+  dictation?: OrchestrationDictationDecision;
 }
 
 /** The plan facts the diagnostic and the debug snapshot read. */
 export type OrchestrationPlanFacts = Pick<
   TurnPlan,
-  'choices' | 'quick' | 'quickBypass' | 'quickNotice' | 'planning' | 'reasons'
+  'choices' | 'dictation' | 'quick' | 'quickBypass' | 'quickNotice' | 'planning' | 'reasons'
 > & {
   /**
    * Absent only for the fallback used when a turn has no stored plan (for
@@ -161,7 +179,9 @@ export type OrchestrationPlanFacts = Pick<
 };
 
 /** Reason text for one choice or post-turn role. Never includes file names. */
-export type OrchestrationReasons = Partial<Record<OrchestrationKey | PostTurnRole, string>>;
+export type OrchestrationReasons = Partial<
+  Record<OrchestrationKey | PostTurnRole | 'dictation', string>
+>;
 
 /**
  * The bounded, per-turn debug record of what the resolver decided.
@@ -215,6 +235,7 @@ export function resolvePostTurnRoles(input: PostTurnInput): PostTurnRoles {
       return false;
     }
     const choice = choices[key];
+    const decided = input.dictation?.[key];
     if (choice === 'off') {
       reasons[key] = 'off';
       return false;
@@ -228,7 +249,15 @@ export function resolvePostTurnRoles(input: PostTurnInput): PostTurnRoles {
         reasons[key] = 'no-frontend-change';
         return false;
       }
-      reasons[key] = choice === 'on' ? 'on-frontend-change' : 'auto-frontend-change';
+      if (choice === 'on') {
+        reasons[key] = 'on-frontend-change';
+        return true;
+      }
+      if (decided === false) {
+        reasons[key] = 'dictation-skip';
+        return false;
+      }
+      reasons[key] = decided === true ? 'dictation-frontend-change' : 'auto-frontend-change';
       return true;
     }
     if (choice === 'on') {
@@ -239,7 +268,11 @@ export function resolvePostTurnRoles(input: PostTurnInput): PostTurnRoles {
       reasons[key] = 'docs-only';
       return false;
     }
-    reasons[key] = 'auto-code-change';
+    if (decided === false) {
+      reasons[key] = 'dictation-skip';
+      return false;
+    }
+    reasons[key] = decided === true ? 'dictation-code-change' : 'auto-code-change';
     return true;
   };
 
@@ -264,7 +297,8 @@ export function orchestrationDiagnostic(
     .map((key) => `${key}=${roles[key] ? 'run' : 'skip'}(${roles.reasons[key] ?? 'unknown'})`)
     .join(' ');
   const planning = `planning=${plan.planning ? 'run' : 'skip'}(${plan.reasons.planning ?? 'unknown'})`;
-  return `orchestration turn=${plan.quick ? 'quick' : 'normal'} quickBypass=${plan.quickBypass} quickNotice=${plan.quickNotice} quickReason=${plan.quickReason ?? 'unknown'} choices=${choiceText} ${planning} ${roleText}`;
+  const dictation = `dictation=${plan.dictation ? 'on' : 'off'}(${plan.reasons.dictation ?? 'unknown'})`;
+  return `orchestration turn=${plan.quick ? 'quick' : 'normal'} quickBypass=${plan.quickBypass} quickNotice=${plan.quickNotice} quickReason=${plan.quickReason ?? 'unknown'} choices=${choiceText} ${dictation} ${planning} ${roleText}`;
 }
 
 /**

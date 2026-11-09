@@ -9,6 +9,7 @@ import {
 import { OPENCODE_CONFIG_ENV } from './config.ts';
 import type { OpencodePermissionAsk, OpencodePermissionReply } from './approval.ts';
 import type { ClarifyingQuestion } from '../../questions.ts';
+import { probeOpencode } from './status.ts';
 
 /** One OpenCode question request, already reduced to the shared card shape. */
 export interface OpencodeQuestionAsk {
@@ -117,6 +118,26 @@ export async function runOpencodeTurn(
   options: OpencodeRunOptions,
   onEvent: (event: OpencodeEvent) => void
 ): Promise<OpencodeRunResult> {
+  if (options.signal?.aborted) return { outcome: 'canceled', terminal: false };
+  const probe = await probeOpencode(options.executable);
+  if (options.signal?.aborted) return { outcome: 'canceled', terminal: false };
+  const major = probe.version?.split('.')[0];
+  if (major !== '1' && major !== '2') {
+    return { outcome: 'cli-missing', terminal: false, detail: 'OpenCode 1.x or 2.x is required. Check the CLI selection in Settings.' };
+  }
+  if (major === '2') {
+    if (options.sessionId && !options.sessionId.startsWith('v2:')) {
+      return { outcome: 'stale-session', terminal: false, sessionId: options.sessionId };
+    }
+    if (configContainsSecret(options.config, options.token)) {
+      return { outcome: 'invalid-config', terminal: false, detail: 'The generated opencode config would contain the credential, so it was not started.' };
+    }
+    const { runOpencodeV2Turn } = await import('./v2.ts');
+    return runOpencodeV2Turn(options, onEvent);
+  }
+  if (options.sessionId?.startsWith('v2:')) {
+    return { outcome: 'stale-session', terminal: false, sessionId: options.sessionId };
+  }
   const args = buildArgs(options);
   const env = buildEnv(options);
 

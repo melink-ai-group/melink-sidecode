@@ -11,6 +11,14 @@ const localDetected = {
 };
 const bundledMissing = { path: '/storage/opencode/bin/opencode', status: 'missing' as const };
 
+test('bundled v2 status uses its own probe and cannot inherit a detected v1', () => {
+  const snapshot = { cliSource: 'bundled' as const, path: 'opencode', status: 'detected' as const,
+    local: localDetected, bundled: localDetected, zvecGrep: zvecOff };
+  assert.equal(opencodeRuntimeView(snapshot, { source: 'bundled-v2' }).tone, 'missing');
+  assert.equal(opencodeRuntimeView({ ...snapshot, bundledV2: { ...localDetected, version: '2.2.6' } },
+    { source: 'bundled-v2' }).version, '2.2.6');
+});
+
 test('a detected runtime carries the version and no disabled state', () => {
   const view = opencodeRuntimeView({
     cliSource: 'local',

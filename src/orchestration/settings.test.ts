@@ -15,6 +15,7 @@ test('defaults are the documented tri-state policy', () => {
     doubleCheck: 'auto',
     quickTask: 'off',
     planning: 'auto',
+    dictation: true,
     legacyTesting: false,
     legacyReviewing: false
   });
@@ -167,6 +168,27 @@ test('malformed values are ignored rather than coerced', () => {
   assert.equal(settings.doubleCheck, 'auto');
   assert.equal(settings.quickTask, 'off');
   assert.equal(settings.planning, 'auto');
+});
+
+test('the dictation switch is a nearest-scope boolean that defaults to On', () => {
+  assert.equal(resolveOrchestrationSettings({}).dictation, true);
+  assert.equal(resolveOrchestrationSettings({ dictation: { globalValue: false } }).dictation, false);
+  assert.equal(
+    resolveOrchestrationSettings({
+      dictation: { globalValue: false, workspaceValue: true, workspaceFolderValue: false }
+    }).dictation,
+    false
+  );
+  assert.equal(
+    resolveOrchestrationSettings({
+      dictation: { globalValue: true, workspaceValue: false }
+    }).dictation,
+    false
+  );
+  // A schema default is not an explicit user value, and a malformed value is
+  // ignored rather than coerced into Off.
+  assert.equal(resolveOrchestrationSettings({ dictation: { defaultValue: false } }).dictation, true);
+  assert.equal(resolveOrchestrationSettings({ dictation: { globalValue: 'false' } }).dictation, true);
 });
 
 test('the exported key list is the six policy choices', () => {

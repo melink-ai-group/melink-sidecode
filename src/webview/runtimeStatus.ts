@@ -19,7 +19,7 @@ export interface RuntimeView {
 
 export interface OpencodeRuntimeViewOptions {
   /** Draft CLI source; defaults to the saved `cliSource`. */
-  source?: 'local' | 'bundled';
+  source?: 'local' | 'bundled' | 'bundled-v2';
 }
 
 export function opencodeRuntimeView(
@@ -27,11 +27,11 @@ export function opencodeRuntimeView(
   options: OpencodeRuntimeViewOptions = {}
 ): RuntimeView {
   const source = options.source ?? opencode.cliSource;
-  const probe = source === 'bundled' ? opencode.bundled : opencode.local;
+  const probe = source === 'bundled-v2' ? opencode.bundledV2 ?? { status: 'missing' as const } : source === 'bundled' ? opencode.bundled : opencode.local;
   if (probe.status === 'detected') {
     return {
       tone: 'detected',
-      label: source === 'bundled' ? 'Bundled opencode detected' : 'opencode detected',
+      label: source !== 'local' ? 'Bundled opencode detected' : 'opencode detected',
       ...(probe.version ? { version: probe.version } : {})
     };
   }
@@ -39,7 +39,7 @@ export function opencodeRuntimeView(
     return {
       tone: 'missing',
       label:
-        source === 'bundled'
+        source !== 'local'
           ? 'Bundled CLI not found. Install opencode to download it.'
           : 'Not found. Install opencode, or set the CLI path.'
     };
