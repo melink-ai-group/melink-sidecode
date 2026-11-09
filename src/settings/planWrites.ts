@@ -222,7 +222,7 @@ export function planSettingsWrites(
   }
 
   if (patch.opencodeCliSource !== undefined) {
-    if (patch.opencodeCliSource !== 'local' && patch.opencodeCliSource !== 'bundled') {
+    if (patch.opencodeCliSource !== 'local' && patch.opencodeCliSource !== 'bundled' && patch.opencodeCliSource !== 'bundled-v2') {
       errors.opencodeCliSource = 'Pick local machine or bundled. This value was not saved.';
     } else {
       write(
@@ -263,6 +263,10 @@ export function planSettingsWrites(
     } else {
       write(field, key, normalized);
     }
+  }
+
+  if (patch.orchestrationDictation !== undefined) {
+    write('orchestrationDictation', `${ORCHESTRATION_SECTION}.dictation`, patch.orchestrationDictation);
   }
 
   if (patch.contextIncludeInstructions !== undefined) {

@@ -1,13 +1,15 @@
 /**
- * Host-free resolution of the six orchestration choices.
+ * Host-free resolution of the six orchestration choices plus the dictation
+ * switch.
  *
  * Values come from an injected `inspect()`-shaped object: the nearest explicit
  * scope wins (folder > workspace > global) and a schema default is not explicit.
- * Every key is tri-state: `auto` (run only when the turn is relevant), `on`
- * (run whenever the role's hard mode applies), or `off` (never run). Saved
+ * Every role key is tri-state: `auto` (run only when the turn is relevant),
+ * `on` (run whenever the role's hard mode applies), or `off` (never run). Saved
  * booleans are migrated on read: `true` becomes `on` and `false` becomes `off`.
  * The two post-turn settings that existed before T106 remain fallbacks, and the
- * returned legacy flags say when a fallback supplied the value.
+ * returned legacy flags say when a fallback supplied the value. The dictation
+ * switch is a plain boolean: on lets a model pick the Auto roles at turn end.
  */
 
 export const ORCHESTRATION_SECTION = 'melink.orchestration';
@@ -28,6 +30,10 @@ export const ORCHESTRATION_DEFAULTS = {
   quickTask: 'off',
   planning: 'auto'
 } as const;
+
+/** The top-level switch: let a model decide the Auto post-turn passes. */
+export const ORCHESTRATION_DICTATION_KEY = 'melink.orchestration.dictation';
+export const ORCHESTRATION_DICTATION_DEFAULT = true;
 
 export type OrchestrationKey = keyof typeof ORCHESTRATION_DEFAULTS;
 export type OrchestrationChoices = Record<OrchestrationKey, OrchestrationChoice>;
@@ -59,11 +65,15 @@ export interface OrchestrationInspect {
   doubleCheck?: SettingScope<unknown>;
   quickTask?: SettingScope<unknown>;
   planning?: SettingScope<unknown>;
+  /** Boolean, unlike the six tri-state choices. */
+  dictation?: SettingScope<unknown>;
   legacyTesting?: SettingScope<unknown>;
   legacyReviewing?: SettingScope<unknown>;
 }
 
 export interface ResolvedOrchestrationSettings extends OrchestrationChoices {
+  /** True when a model may decide the Auto post-turn passes for this turn. */
+  dictation: boolean;
   legacyTesting: boolean;
   legacyReviewing: boolean;
 }
@@ -83,6 +93,7 @@ export function resolveOrchestrationSettings(
     doubleCheck: explicitChoice(inspect.doubleCheck) ?? ORCHESTRATION_DEFAULTS.doubleCheck,
     quickTask: explicitChoice(inspect.quickTask) ?? ORCHESTRATION_DEFAULTS.quickTask,
     planning: explicitChoice(inspect.planning) ?? ORCHESTRATION_DEFAULTS.planning,
+    dictation: resolveDictation(inspect.dictation),
     legacyTesting: testing === undefined && legacyTesting !== undefined,
     legacyReviewing: reviewing === undefined && legacyReviewing !== undefined
   };
@@ -119,6 +130,15 @@ function explicitChoice(scope: SettingScope<unknown> | undefined): Orchestration
   return normalizeOrchestrationChoice(
     firstDefined(scope.workspaceFolderValue, scope.workspaceValue, scope.globalValue)
   );
+}
+
+/** The nearest explicit boolean, or the documented default when none is set. */
+function resolveDictation(scope: SettingScope<unknown> | undefined): boolean {
+  if (!scope) {
+    return ORCHESTRATION_DICTATION_DEFAULT;
+  }
+  const value = firstDefined(scope.workspaceFolderValue, scope.workspaceValue, scope.globalValue);
+  return typeof value === 'boolean' ? value : ORCHESTRATION_DICTATION_DEFAULT;
 }
 
 function firstDefined(...values: unknown[]): unknown {

@@ -68,6 +68,52 @@ function releaseMetadata(archive: Buffer, version = '1.19.4') {
   };
 }
 
+test('major channels use the release list when latest belongs to the other major', async () => {
+  for (const major of [1, 2] as const) {
+    const dir = await mkdtemp(join(tmpdir(), 'opencode-channel-'));
+    const archive = gzipSync(tarArchive('opencode', Buffer.from('fixture')));
+    const latest = releaseMetadata(archive, major === 1 ? '2.2.6' : '1.19.5');
+    const selected = releaseMetadata(archive, `${major}.20.0`);
+    const seen: string[] = [];
+    try {
+      const result = await installOpencodeRelease({ platform, installDir: dir, persistPath: false, major,
+        verifyBinary: async (_path, version) => version === `${major}.20.0`,
+        fetchImpl: async (input) => {
+          const url = String(input); seen.push(url);
+          if (url === releaseApi) return Response.json(latest);
+          if (url.includes('?per_page=')) return Response.json([
+            { ...selected, tag_name: 'process-daemon-v0.5.0' },
+            { ...selected, tag_name: `v${major}.21.0`, prerelease: true },
+            releaseMetadata(archive, `${major}.9.0`), selected
+          ]);
+          assert.equal(url, selected.assets[0].browser_download_url);
+          return new Response(archive);
+        }
+      });
+      assert.equal(result.ok, true, result.message);
+      assert.equal(result.version, `${major}.20.0`);
+      assert.equal(seen.length, 3);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  }
+});
+
+test('a staged executable that fails its version probe cannot replace an existing install', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencode-stage-'));
+  const path = join(dir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+  const archive = gzipSync(tarArchive('opencode', Buffer.from('bad-cli')));
+  try {
+    await writeFile(path, 'previous');
+    const result = await installOpencodeRelease({ platform, installDir: dir, persistPath: false,
+      verifyBinary: async () => false,
+      fetchImpl: async (url) => String(url) === releaseApi ? Response.json(releaseMetadata(archive)) : new Response(archive)
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /previous binary was preserved/);
+    assert.equal(await readFile(path, 'utf8'), 'previous');
+    assert.deepEqual(await readdir(dir), [process.platform === 'win32' ? 'opencode.exe' : 'opencode']);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('install follows latest stable metadata for current and future versions using exact tagged downloads', async () => {
   for (const version of ['1.19.4', '1.20.0', '2.0.0']) {
     const dir = await mkdtemp(join(tmpdir(), 'opencode-install-'));
@@ -77,7 +123,8 @@ test('install follows latest stable metadata for current and future versions usi
     const requests: string[] = [];
     try {
       const result = await installOpencodeRelease({
-        platform, installDir: dir, persistPath: false,
+        verifyBinary: async () => true,
+        platform, installDir: dir, persistPath: false, major: version.startsWith('2.') ? 2 : 1,
         fetchImpl: async (input) => {
           requests.push(String(input));
           return String(input) === releaseApi ? Response.json(metadata) : new Response(archive);
@@ -103,6 +150,7 @@ test('Update replaces an existing executable using a newly resolved release on e
     for (const version of ['1.19.4', '1.20.0']) {
       const archive = gzipSync(tarArchive('./opencode', Buffer.from(version)));
       const result = await installOpencodeRelease({
+        verifyBinary: async () => true,
         platform, installDir: dir, persistPath: false,
         fetchImpl: async (input, options) => {
           if (String(input) === releaseApi) {
@@ -131,6 +179,7 @@ test('a checksum mismatch leaves an existing executable untouched', async () => 
   try {
     await writeFile(executablePath, original);
     const result = await installOpencodeRelease({
+        verifyBinary: async () => true,
       platform, installDir: dir, persistPath: false,
       fetchImpl: async (input) => String(input) === releaseApi ? Response.json(metadata) : new Response(archive)
     });
@@ -161,6 +210,7 @@ test('invalid release metadata fails before archive download and leaves existing
     for (const metadata of invalid) {
       let fetched = 0;
       const result = await installOpencodeRelease({
+        verifyBinary: async () => true,
         platform, installDir: dir, persistPath: false,
         fetchImpl: async () => { fetched++; return Response.json(metadata); }
       });
@@ -181,6 +231,7 @@ test('a missing platform asset fails before archive download and creates nothing
   let fetched = 0;
   try {
     const result = await installOpencodeRelease({
+        verifyBinary: async () => true,
       platform: { os: 'windows', arch: 'arm64', baseline: false, musl: false },
       installDir, persistPath: false,
       fetchImpl: async () => { fetched++; return Response.json(releaseMetadata(Buffer.from('archive'))); }
@@ -202,7 +253,8 @@ test('metadata HTTP, network, malformed JSON and size failures return actionable
     async () => new Response('{broken'),
     async () => new Response('x'.repeat(2 * 1024 * 1024 + 1))
   ]) {
-    const result = await installOpencodeRelease({ platform, persistPath: false, fetchImpl });
+    const result = await installOpencodeRelease({
+        verifyBinary: async () => true, platform, persistPath: false, fetchImpl });
     assert.equal(result.ok, false);
     assert.match(result.message, /Could not check|could not be read/);
     assert.equal(result.executablePath, undefined);
@@ -214,6 +266,7 @@ test('a failed archive download returns an error and creates no install director
   const installDir = join(parent, 'not-created');
   try {
     const result = await installOpencodeRelease({
+        verifyBinary: async () => true,
       platform, installDir, persistPath: false,
       fetchImpl: async (input) => String(input) === releaseApi
         ? Response.json(releaseMetadata(Buffer.from('archive')))

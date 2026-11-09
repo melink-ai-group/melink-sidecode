@@ -104,6 +104,7 @@ import { readDefaultMode, readDefaultPermissionLevel, readDefaultThinking } from
 import { ContextDelivery } from './context/delivery';
 import { inferRequestedMode, modeIsMoreRestrictive } from './backends/modeIntent';
 import {
+  isDocumentationPath,
   orchestrationDiagnostic,
   orchestrationTurnSnapshot,
   planTurn,
@@ -112,6 +113,14 @@ import {
   type TurnPlan
 } from './orchestration/plan.ts';
 import { runTurnEnd } from './orchestration/turnEnd.ts';
+import {
+  buildOrchestrationDictationPrompt,
+  parseOrchestrationDictationDecision,
+  ORCHESTRATION_DICTATION_ROLES,
+  ORCHESTRATION_DICTATION_TIMEOUT_MS,
+  type OrchestrationDictationDecision
+} from './orchestration/dictation.ts';
+import type { OrchestrationChoices } from './orchestration/settings.ts';
 import { runReadOnlySubagent } from './orchestration/subagentRunner.ts';
 import { parseSubagentRequests } from './orchestration/delegation.ts';
 import { modelReviewFindings, reviewReferences, selectReviewReferences } from './orchestration/modelReview.ts';
@@ -139,7 +148,7 @@ import {
   runTurnDiffReview,
   turnRequestText
 } from './review/turnReview.ts';
-import type { StylingBrandKitFile } from './review/stylingReview.ts';
+import { isFrontendPath, type StylingBrandKitFile } from './review/stylingReview.ts';
 import {
   STYLING_REVIEW_TIMEOUT_MS,
   runTurnStylingReview
@@ -1112,29 +1121,55 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const storedPlan = this.turnPlans.get(turnId);
-    const choices = storedPlan?.choices ?? readOrchestrationSettings();
-    const plan = storedPlan ?? {
+    const currentSettings = readOrchestrationSettings();
+    const choices: OrchestrationChoices = storedPlan?.choices ?? {
+      testing: currentSettings.testing,
+      reviewing: currentSettings.reviewing,
+      styling: currentSettings.styling,
+      doubleCheck: currentSettings.doubleCheck,
+      quickTask: currentSettings.quickTask,
+      planning: currentSettings.planning
+    };
+    const dictationEnabled = storedPlan?.dictation ?? currentSettings.dictation;
+    const plan: TurnPlan = storedPlan ?? {
       choices,
+      dictation: dictationEnabled,
       quick: false,
+      quickReason: 'not-question',
       quickBypass: false,
       quickNotice: false,
+      testing: false,
+      reviewing: false,
+      styling: false,
+      doubleCheck: false,
       planning: false,
       reasons: {}
     };
+    // One bounded model call decides the Auto roles. Off, On, quick tasks and
+    // the change-set gates still win, and any failure falls back to the fixed
+    // rules, so a turn never depends on this pass.
+    const dictation = await this.decideOrchestration(set, plan, choices, dictationEnabled, terminus, signal);
     const roles = resolvePostTurnRoles({
       choices,
       quick: plan.quick,
       entries: set.entries,
       mode: this.mode,
-      terminus
+      terminus,
+      ...(dictation.decision ? { dictation: dictation.decision } : {})
     });
-    const snapshot = orchestrationTurnSnapshot(plan, roles, {
+    // The dictation trace rides in the same reasons record the snapshot exposes,
+    // so the settings read model shows whether the model decided this turn.
+    const facts: TurnPlan = {
+      ...plan,
+      reasons: { ...plan.reasons, dictation: dictation.reason }
+    };
+    const snapshot = orchestrationTurnSnapshot(facts, roles, {
       backendId: set.backendId,
       threadId: set.threadId,
       turnId
     });
     this.lastOrchestrationTurn = snapshot;
-    logDiagnostic(orchestrationDiagnostic(plan, roles));
+    logDiagnostic(orchestrationDiagnostic(facts, roles));
     const shouldReview = roles.reviewing && terminus === 'completed' && this.mode === 'agent';
     // The styling pass is a frontend-only pass: a backend-only turn is skipped
     // before a brand kit is read or a prompt is built.
@@ -1175,6 +1210,113 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // A turn that just touched files makes its opening message a checkpoint, so
     // the per-message entry point offers it without waiting for a reload.
     await this.postCheckpoints(set.backendId, set.threadId);
+  }
+
+  /**
+   * Ask the decision model which Auto post-turn passes are worth running.
+   *
+   * The dictation model is preferred when one is chosen, because that is the
+   * model the user configured for lightweight text decisions. With none set,
+   * the chat's own model is tried. A provider without read-only enforcement is
+   * skipped rather than widened. Every failure returns no decision, so
+   * `resolvePostTurnRoles` keeps the fixed rules and the turn still finishes.
+   */
+  private async decideOrchestration(
+    set: TurnChangeSet,
+    plan: TurnPlan,
+    choices: OrchestrationChoices,
+    enabled: boolean,
+    terminus: 'completed' | 'interrupted',
+    signal?: AbortSignal
+  ): Promise<{ decision?: OrchestrationDictationDecision; reason: string }> {
+    if (!enabled) {
+      return { reason: 'off' };
+    }
+    if (terminus !== 'completed') {
+      return { reason: 'turn-interrupted' };
+    }
+    if (plan.quick) {
+      return { reason: 'quick-bypass' };
+    }
+    const session = this.sessionForThread(set.backendId, set.threadId);
+    const mode = session?.mode ?? this.mode;
+    if (mode !== 'agent') {
+      return { reason: 'mode-not-agent' };
+    }
+    if (signal?.aborted) {
+      return { reason: 'cancelled' };
+    }
+    if (set.entries.length === 0) {
+      return { reason: 'no-change-set' };
+    }
+    // Nothing to decide when no role is Auto: On is forced and Off never runs.
+    if (!ORCHESTRATION_DICTATION_ROLES.some((role) => choices[role] === 'auto')) {
+      return { reason: 'no-auto-role' };
+    }
+    const request = turnRequestText(
+      this.store.getTranscript(set.backendId, set.threadId),
+      set.messageId
+    );
+    if (!request) {
+      return { reason: 'no-request' };
+    }
+    const prompt = buildOrchestrationDictationPrompt({
+      request,
+      mode,
+      quick: plan.quick,
+      choices,
+      files: set.entries.map((entry) => ({
+        // A workspace-relative path keeps the prompt small and avoids sending a
+        // home directory or drive layout to a model that does not need it.
+        path: vscode.workspace.asRelativePath(entry.path, false),
+        documentation: isDocumentationPath(entry.path),
+        frontend: isFrontendPath(entry.path)
+      }))
+    });
+    const dictation = parseDictationTarget(
+      vscode.workspace.getConfiguration('melink.defaults').get<string>('dictationModel', '')
+    );
+    const thread = this.store
+      .listThreads(set.backendId)
+      .find((entry) => entry.threadId === set.threadId);
+    const threadModel = thread?.modelId ?? session?.activeThread?.model;
+    const candidates: Array<{
+      backendId: string;
+      model?: string;
+      source: 'dictation-model' | 'thread-model';
+    }> = [];
+    if (dictation) {
+      candidates.push({ backendId: dictation.backendId, model: dictation.modelId, source: 'dictation-model' });
+    }
+    candidates.push({
+      backendId: set.backendId,
+      ...(threadModel ? { model: threadModel } : {}),
+      source: 'thread-model'
+    });
+    for (const candidate of candidates) {
+      const backend = this.registry.get(candidate.backendId);
+      if (!backend || !backend.permissionLevels.includes('read-only')) {
+        continue;
+      }
+      try {
+        const modelSettings = await this.resolveTurnSettings(candidate.backendId, candidate.model);
+        const text = await runReadOnlySubagent({
+          backend,
+          prompt,
+          ...(candidate.model ? { model: candidate.model } : {}),
+          modelSettings,
+          signal,
+          timeoutMs: ORCHESTRATION_DICTATION_TIMEOUT_MS
+        });
+        const decision = parseOrchestrationDictationDecision(text);
+        return decision
+          ? { decision, reason: `used:${candidate.source}` }
+          : { reason: `invalid:${candidate.source}` };
+      } catch {
+        // Try the next candidate; a provider failure is not a turn failure.
+      }
+    }
+    return { reason: 'unavailable' };
   }
 
   private async postAttentionNotice(

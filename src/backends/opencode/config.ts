@@ -231,7 +231,7 @@ function agentPrompt(mode: DefaultMode): string {
     case 'plan':
       return 'Investigate and write a plan. Do not implement it. Never bypass the permission rules or delegate to another agent.';
     default:
-      return 'Act on the workspace using only the actions the permission rules allow. Never bypass them or delegate to another agent.';
+      return 'Act on the workspace using only the actions the permission rules allow. Never bypass them or delegate to another agent. Keep approved plan steps and native todos in sync as work progresses. Before the final reply, update completed todos with todowrite when available and report each completed approved step as "- [x] " followed by its exact original text. Leave unfinished, failed, cancelled, or denied work explicitly open; finishing a reply does not complete a step.';
   }
 }
 

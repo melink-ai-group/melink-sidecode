@@ -367,6 +367,7 @@ settings (**sideCode: Open settings**).
 | `melink.review.checks.enabled` | `false` | Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit value still wins; an untrusted workspace is always skipped. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands to run. Empty means auto-detect `typecheck` (falling back to `lint`) and `test` from `package.json`; an explicitly saved empty list turns checks off. |
 | `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout in seconds, clamped to 5â€“600. A timed-out check is killed and reported as timed out. |
+| `melink.orchestration.dictation` | `true` | Top-level switch: let a model decide which Auto post-turn passes run, based on your request and the files that changed. It can only narrow an Auto role; On and Off keep their meaning. Uses the configured dictation model when one is set, otherwise the chat's model. Off keeps the fixed rules and makes no decision call. |
 | `melink.orchestration.testing` | `on` | Post-turn typecheck/lint and tests. `auto` runs only when code (non-documentation) files changed; `on` on any change set; `off` never. Falls back to `melink.review.checks.enabled` when unset. |
 | `melink.orchestration.reviewing` | `auto` | Advisory read-only diff review. `auto` runs only for code changes; `on` for any change set; `off` never. Falls back to `melink.review.diffReview` when unset. |
 | `melink.orchestration.styling` | `auto` | Advisory styling check for frontend work. `auto` and `on` both require a frontend file change; `off` never. Uses the project brand kit and tokens when present. |
@@ -405,6 +406,7 @@ with its status word, duration, and any bounded failure detail or skipped reason
 | `melink.review.checks.commands` | *(empty)* | Not yet on the screen - explicit commands; empty means auto-detect |
 | `melink.review.checks.timeoutSeconds` | `120` | Not yet on the screen - per-check timeout, clamped 5-600 |
 | `melink.review.diffReview` | `false` | Settings JSON only (application scope): opt-in advisory diff review |
+| `melink.orchestration.dictation` | `true` | Orchestration -> Dictation for orchestration (On/Off) |
 | `melink.orchestration.testing` | `on` | Orchestration -> Testing (Auto/On/Off) |
 | `melink.orchestration.reviewing` | `auto` | Orchestration -> Reviewing (Auto/On/Off) |
 | `melink.orchestration.styling` | `auto` | Orchestration -> Styling check (Auto/On/Off) |
@@ -827,6 +829,15 @@ at restricted permission levels. Compact expandable rows show worker reasons,
 progress and results. Stop cancels workers and checks; closing a chat cancels its
 workers. An extension-host restart marks unfinished worker rows Cancelled.
 
+- **Dictation for orchestration** (`melink.orchestration.dictation`, default On)
+  makes one bounded read-only model call after an Agent turn closes its change
+  set. The model sees the request and the changed paths (never file contents)
+  and decides which **Auto** passes are worth running; **On** and **Off** keep
+  their meaning, and quick tasks, an empty change set, docs-only work, and a
+  missing frontend change still win. It prefers the configured dictation model
+  and falls back to the chat's model. A failed, slow, or malformed answer uses
+  the fixed Auto rules, so the turn never depends on it. Off makes no decision
+  call and behaves exactly like the fixed policy.
 - **Testing** (`melink.orchestration.testing`, default On) runs the project's
   typecheck/lint and tests through the post-turn check runner described above.
   Auto runs only when code (non-documentation) files changed.

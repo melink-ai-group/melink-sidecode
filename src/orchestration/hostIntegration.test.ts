@@ -39,6 +39,7 @@ async function fixture() {
     checkStore: { get: () => undefined },
     checkHost: { cancelThread: async () => {} },
     post: () => {}, postAgentActivity: () => {}, postTurnChanged: () => calls.push('changes'),
+    decideOrchestration: async () => ({ reason: 'off' }),
     startChangeChecks: () => calls.push('checks'), runDoubleCheck: () => calls.push('diagnostics'),
     reviewFinishedTurn: async () => { calls.push('review'); },
     stylingReviewFinishedTurn: async () => { calls.push('styling'); },
@@ -88,7 +89,7 @@ test('an approval denial prevents automatic reviewer correction from starting an
 
 test('Off and Auto use the closed change set, and a completed review queues one correction', async () => {
   const { host, calls } = await fixture();
-  host.turnPlans.set('turn', { choices: { ...ORCHESTRATION_DEFAULTS, testing: 'off', reviewing: 'off', styling: 'auto', doubleCheck: 'off' }, quick: false, reasons: {} });
+  host.turnPlans.set('turn', { choices: { ...ORCHESTRATION_DEFAULTS, testing: 'off', reviewing: 'off', styling: 'auto', doubleCheck: 'off' }, quick: false, dictation: true, reasons: {} });
   host.startChangeChecks = (_set: unknown, enabled: boolean) => { if (enabled) calls.push('checks'); };
   host.stylingReviewStore.get = () => ({ findings: [{ path: 'src/Card.tsx', line: 1, message: 'Compare the existing input.' }] });
   await host.finishOrchestration('fake', 'parent', 'turn', 'completed');
@@ -97,6 +98,39 @@ test('Off and Auto use the closed change set, and a completed review queues one 
   assert.ok(!calls.includes('checks'));
   assert.match(host.planAutopilotQueue.get('chat').text, /Compare the existing input/);
   assert.equal(host.reviewFollowups.size, 1);
+});
+
+test('the dictation decision narrows the Auto passes before the fixed rules run', async () => {
+  const { host, calls } = await fixture();
+  host.turnPlans.set('turn', {
+    choices: { ...ORCHESTRATION_DEFAULTS, testing: 'auto', reviewing: 'auto', styling: 'auto', doubleCheck: 'auto' },
+    quick: false,
+    dictation: true,
+    reasons: {}
+  });
+  let decided = 0;
+  host.decideOrchestration = async () => {
+    decided += 1;
+    return {
+      decision: {
+        testing: false,
+        reviewing: false,
+        styling: true,
+        doubleCheck: false,
+        reason: 'Only the visible control changed.'
+      },
+      reason: 'used:thread-model'
+    };
+  };
+  host.startChangeChecks = (_set: unknown, enabled: boolean) => { if (enabled) calls.push('checks'); };
+  host.stylingReviewStore.get = () => ({ findings: [] });
+  await host.finishOrchestration('fake', 'parent', 'turn', 'completed');
+  assert.equal(decided, 1);
+  assert.ok(calls.includes('styling'));
+  assert.ok(!calls.includes('review'));
+  assert.ok(!calls.includes('checks'));
+  assert.ok(!calls.includes('diagnostics'));
+  assert.equal(host.lastOrchestrationTurn?.reasons.dictation, 'used:thread-model');
 });
 
 test('explicit delegation without file changes returns all worker results to the owning main agent', async () => {

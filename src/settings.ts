@@ -74,7 +74,10 @@ import {
   readTrustedZvecGrepCliSource,
   readTrustedZvecGrepPath
 } from './config/settings.ts';
-import { resolveOrchestrationSettings } from './orchestration/settings';
+import {
+  ORCHESTRATION_DICTATION_KEY,
+  resolveOrchestrationSettings
+} from './orchestration/settings';
 import {
   executeSettingsWrites,
   planSettingsWrites,
@@ -147,6 +150,7 @@ const SETTINGS_KEYS: readonly string[] = [
   `${ORCHESTRATION_SECTION}.doubleCheck`,
   `${ORCHESTRATION_SECTION}.quickTask`,
   `${ORCHESTRATION_SECTION}.planning`,
+  ORCHESTRATION_DICTATION_KEY,
   `${CONTEXT_SECTION}.includeInstructions`,
   `${CONTEXT_SECTION}.includeShape`,
   `${CONTEXT_SECTION}.includeEditorState`,
@@ -394,6 +398,7 @@ export class SettingsService {
       doubleCheck: inspect(`${ORCHESTRATION_SECTION}.doubleCheck`),
       quickTask: inspect(`${ORCHESTRATION_SECTION}.quickTask`),
       planning: inspect(`${ORCHESTRATION_SECTION}.planning`),
+      dictation: inspect(ORCHESTRATION_DICTATION_KEY),
       legacyTesting: inspect(LEGACY_TESTING_KEY),
       legacyReviewing: inspect(LEGACY_REVIEWING_KEY)
     });
@@ -424,11 +429,12 @@ export class SettingsService {
     const cliSource = this.opencodeCliSource();
     const localPath = this.opencodePathSetting();
     const bundledPath = bundledOpencodeExecutable(this.opencodeRoots());
-    const [local, bundled] = await Promise.all([
+    const [local, bundled, bundledV2] = await Promise.all([
       this.probeCli(localPath, 'opencode'),
-      this.probeCli(bundledPath, 'opencode')
+      this.probeCli(bundledPath, 'opencode'),
+      this.probeCli(bundledOpencodeExecutable(this.opencodeRoots(), 2), 'opencode')
     ]);
-    const active = cliSource === 'bundled' ? bundled : local;
+    const active = cliSource === 'bundled-v2' ? bundledV2 : cliSource === 'bundled' ? bundled : local;
     const zvecGrep = await this.zvecGrepStatus();
     return {
       cliSource,
@@ -437,6 +443,7 @@ export class SettingsService {
       ...(active.version ? { version: active.version } : {}),
       local,
       bundled,
+      bundledV2,
       zvecGrep
     };
   }
@@ -932,7 +939,11 @@ export class SettingsService {
     if (before.status !== 'detected') {
       return { ok: false, message: 'opencode is not connected. Check the path, then try again.' };
     }
-    const installed = await this.downloadOpencodeRelease(config, target, 'updated');
+    if (target.source === 'local' && !/^[12]\./.test(before.version ?? '')) {
+      return { ok: false, message: 'Only OpenCode 1.x and 2.x can be updated here. The local installation was left unchanged.' };
+    }
+    const major = target.source === 'bundled-v2' ? 2 : target.source === 'bundled' ? 1 : before.version?.startsWith('2.') ? 2 : 1;
+    const installed = await this.downloadOpencodeRelease(config, target, 'updated', major);
     if (!installed.ok) {
       return { ok: false, message: installed.message };
     }
@@ -977,7 +988,8 @@ export class SettingsService {
   private async downloadOpencodeRelease(
     config: vscode.WorkspaceConfiguration,
     target: { source: OpencodeCliSource; path: string },
-    verb: 'installed' | 'updated'
+    verb: 'installed' | 'updated',
+    major: 1 | 2 = target.source === 'bundled-v2' ? 2 : 1
   ): Promise<OpencodeInstallResult> {
     const installDir = opencodeInstallDirFor({
       source: target.source,
@@ -985,6 +997,7 @@ export class SettingsService {
       roots: this.opencodeRoots()
     });
     const installed = await installOpencodeRelease({
+      major,
       installDir,
       // Bundled stays in extension global storage; do not rewrite the user PATH.
       persistPath: target.source === 'local'
@@ -1061,7 +1074,7 @@ export class SettingsService {
     // uses the CLI tab choice (local vs bundled) even before Save settings.
     if (backendId === 'opencode' && draft) {
       const config = vscode.workspace.getConfiguration();
-      if (draft.cliSource === 'local' || draft.cliSource === 'bundled') {
+      if (draft.cliSource === 'local' || draft.cliSource === 'bundled' || draft.cliSource === 'bundled-v2') {
         await config.update(
           `${OLLAMA_OPENCODE_SECTION}.cliSource`,
           draft.cliSource,

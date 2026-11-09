@@ -2,7 +2,7 @@
   "name": "melink-sidecode",
   "displayName": "sideCode",
   "description": "sideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "melink",
   "icon": "media/melink-logo.png",
   "license": "MIT",
@@ -182,14 +182,16 @@
           "scope": "application",
           "enum": [
             "local",
-            "bundled"
+            "bundled",
+            "bundled-v2"
           ],
           "enumDescriptions": [
             "Use the opencode CLI on this machine (path setting or PATH).",
-            "Use the sideCode-downloaded CLI in extension global storage. Install and Update fetch the official GitHub release into that folder; it survives closing VS Code."
+            "Use sideCode-managed OpenCode 1.x in extension global storage. Updates stay on 1.x.",
+            "Use sideCode-managed OpenCode 2.x in separate extension global storage. Updates stay on 2.x; the 1.x download is preserved."
           ],
           "default": "local",
-          "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path`. **bundled** downloads into extension global storage and every turn uses that binary instead of the machine PATH. Read from your user settings only."
+          "markdownDescription": "Where the opencode CLI comes from. **local** uses `melink.ollama.opencode.path` and detects OpenCode 1.x or 2.x automatically. **bundled** selects managed 1.x; **bundled-v2** selects managed 2.x in a separate folder. Install and Update verify official releases and stay on the chosen major. Read from your user settings only."
         },
         "melink.ollama.opencode.zvecGrep": {
           "type": "boolean",
@@ -372,6 +374,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit user value still wins. Checks never run in an untrusted workspace."
+        },
+        "melink.orchestration.dictation": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Let a model decide which **Auto** post-turn passes run, using your request and the files that changed. It can only narrow an **Auto** role: **On** runs whenever its mode applies and **Off** never runs. Uses the configured dictation model when one is set, otherwise the chat's model. **Off** keeps the fixed rules and makes no extra model call. Default: On."
         },
         "melink.orchestration.testing": {
           "type": ["boolean", "string"],

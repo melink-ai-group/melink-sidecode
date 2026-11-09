@@ -15,6 +15,8 @@ export interface OrchestrationFieldCopy {
 }
 
 export interface OrchestrationCopyValues extends OrchestrationChoices {
+  /** Undefined reads as the documented default, On. */
+  dictation?: boolean;
   legacyTesting?: boolean;
   legacyReviewing?: boolean;
 }
@@ -23,6 +25,17 @@ export const ORCHESTRATION_TITLE = 'Orchestration';
 export const ORCHESTRATION_INTRO = 'Changes apply from the next turn.';
 export const AUTO_EXPLANATION =
   'Auto runs a pass only when this turn is relevant; On runs it whenever its mode applies; Off never runs it.';
+
+export const DICTATION_LABEL = 'Dictation for orchestration';
+export const DICTATION_HELP =
+  'Let a model decide which Auto passes run, using your request and the files that changed. It can only narrow Auto choices: On and Off keep their meaning. Uses the dictation model when one is set, otherwise this chat\u2019s model. (Default: On.)';
+export const DICTATION_OFF_HELP =
+  'Off keeps the fixed Auto, On, and Off rules and makes no decision call.';
+
+/** The switch's one-line help, honest about the off state. */
+export function orchestrationDictationHelp(enabled: boolean): string {
+  return enabled ? DICTATION_HELP : DICTATION_OFF_HELP;
+}
 
 export const ORCHESTRATION_FIELDS: readonly OrchestrationFieldCopy[] = [
   {
@@ -100,7 +113,8 @@ export function orchestrationSummary(values: OrchestrationCopyValues): string {
     values.quickTask === 'off'
       ? 'quick notice Off'
       : `quick notice ${choiceLabel(values.quickTask)}`;
-  return `Effective policy: ${joinNatural(roles)}. Quick bypass always applies; ${quick}.`;
+  const dictation = values.dictation === false ? 'Off' : 'On';
+  return `Effective policy: ${joinNatural(roles)}. Quick bypass always applies; ${quick}; dictation ${dictation}.`;
 }
 
 export function orchestrationFieldHelp(

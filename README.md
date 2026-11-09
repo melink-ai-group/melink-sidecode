@@ -114,12 +114,12 @@ settings below.
 
 ### Option A â€” from a packaged `.vsix`
 
-1. Build the package (or obtain a released `melink-sidecode-0.2.1.vsix`) â€”
+1. Build the package (or obtain a released `melink-sidecode-0.3.0.vsix`) â€”
    see [Build from source](#build-from-source) if you need to make one.
 2. Install it:
    - **VS Code CLI:**
      ```sh
-     code --install-extension ./melink-sidecode-0.2.1.vsix
+     code --install-extension ./melink-sidecode-0.3.0.vsix
      ```
    - **Any host (including Open VSX consumers):** open the Extensions view, click
      the `...` menu in its title bar, choose **Install from VSIXâ€¦**, and pick the
@@ -161,7 +161,7 @@ npm run build
 with:
 
 ```sh
-npm run package   # produces melink-sidecode-0.2.1.vsix
+npm run package   # produces melink-sidecode-0.3.0.vsix
 ```
 
 `npm run package` still packages for the current host under the default name. For
@@ -266,6 +266,7 @@ Optional settings (`Settings â†’ search "melink"`, or **sideCode: Open sett
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
 | `melink.review.diffReview` | `false` | Legacy opt-in for the read-only advisory diff review, used only while `melink.orchestration.reviewing` is unset. Application scope, so only a user setting can enable it. |
+| `melink.orchestration.dictation` | `true` | One read-only model call after an Agent turn decides which Auto passes run, from your request and the changed paths. On/Off keep their meaning; Off makes no call. Uses the dictation model when set, otherwise the chat's model. |
 | `melink.orchestration.testing` | `on` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. `auto` runs only for code (non-documentation) changes, `off` never. |
 | `melink.orchestration.reviewing` | `auto` | Advisory diff review; falls back to `melink.review.diffReview` until saved. `auto` runs only for code changes, `on` for any change set, `off` never. |
 | `melink.orchestration.styling` | `auto` | Advisory styling check for frontend work, compared with the brand kit and existing components. `auto` and `on` both require a frontend file change; `off` never. |
@@ -312,11 +313,16 @@ dictation cleanup. Ollama Cloud, Ollama Local and OpenCode Zen share the same
 OpenCode binary, and each keeps its own provider identity and dot in the picker.
 
 - **CLI source.** Configure under **Settings â†’ CLI**. `melink.ollama.opencode.cliSource`
-  is `local` (path / PATH) or `bundled` (sideCode download in extension global
-  storage). Bundled turns always use that binary; it survives closing VS Code.
-  Install and Update fetch the official GitHub release into the active install
-  directory (they do not rely on `opencode upgrade`, which can report success
-  without replacing the binary).
+  is `local` (path / PATH), `bundled` (managed OpenCode 1.x), or `bundled-v2`
+  (managed OpenCode 2.x). The two bundled downloads use separate folders in
+  extension global storage and survive closing VS Code. Existing selections
+  stay unchanged. Local installations detect either major automatically.
+  Install and Update verify the official GitHub archive checksum and the staged
+  executable's version before replacing an install. Updates stay within the
+  selected major, including when GitHub's latest release points to another major.
+  To try v2, select **Bundled OpenCode 2.x** under **Settings > CLI**, then click
+  **Install bundled opencode**. Installation also saves that source selection.
+  Switch back to **Bundled OpenCode 1.x** to reuse the preserved v1 download.
 - **Path.** When `cliSource` is `local`, `melink.ollama.opencode.path` defaults
   to `opencode`, resolved from `PATH` when it is a bare name, exactly like
   `melink.codex.path`.
@@ -816,7 +822,8 @@ capability flag.
 
 The Ollama (Cloud and Local) and OpenCode Zen runtime is a per-turn, short-lived
 child process. Sidebar turns use `opencode serve` with the installed CLI
-(Install and Update resolve the latest stable release; the T69 regression used 1.19.x).
+(OpenCode 1.x and 2.x are detected automatically; real-binary compatibility checks
+cover 1.19.4 and 2.2.6 using a local mock provider).
 Notes:
 
 - Reasoning snapshots and text deltas from the live bus update one reasoning
@@ -830,7 +837,17 @@ Notes:
   card. That is why `default` never silently runs a command or fetches the web;
   workspace edits are ordinary work and still go through Keep/Reject.
 - A stream that ends without a terminal `step_finish` (`reason: "stop"`) is a
-  stream error, not a successful turn.
+  stream error in v1. V2 uses its native API and waits for execution completion;
+  accepting a prompt alone is not a completed turn. Text, reasoning, tools,
+  approvals, and standard question forms map into the same sidebar events.
+- Sessions are separated by major version. Switching major versions starts a
+  fresh runtime session with the sidebar's existing transcript recovery handover.
+  V2 reads supported v1 configuration without rewriting it. OpenCode's v1
+  plugins need their own v2 migration; see the
+  [upstream migration guide](https://opencode.ai/docs/migrate-v1/).
+- V2 Code Mode is disabled because its direct `fetch` primitive bypasses the
+  sidebar's network approval channel. SideCode's MCP tools are exposed directly
+  and keep their existing permission checks.
 - The credential is supplied through the provider's `env` declaration and the
   child's environment; `OPENCODE_CONFIG_CONTENT` is the only config transport,
   so nothing is written into the workspace or the repository. Ollama Local has

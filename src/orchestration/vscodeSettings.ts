@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import {
   LEGACY_REVIEWING_KEY,
   LEGACY_TESTING_KEY,
+  ORCHESTRATION_DICTATION_KEY,
   ORCHESTRATION_SECTION,
   resolveOrchestrationSettings,
   type ResolvedOrchestrationSettings
@@ -19,6 +20,7 @@ export function readOrchestrationSettings(): ResolvedOrchestrationSettings {
     doubleCheck: inspect(`${ORCHESTRATION_SECTION}.doubleCheck`),
     quickTask: inspect(`${ORCHESTRATION_SECTION}.quickTask`),
     planning: inspect(`${ORCHESTRATION_SECTION}.planning`),
+    dictation: inspect(ORCHESTRATION_DICTATION_KEY),
     legacyTesting: inspect(LEGACY_TESTING_KEY),
     legacyReviewing: inspect(LEGACY_REVIEWING_KEY)
   });

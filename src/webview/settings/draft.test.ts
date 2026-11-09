@@ -50,6 +50,7 @@ function snapshot(): SettingsSnapshot {
       doubleCheck: 'auto',
       quickTask: 'off',
       planning: 'auto',
+      dictation: true,
       legacyTesting: false,
       legacyReviewing: false
     },
@@ -131,7 +132,8 @@ function applied(settings: SettingsSnapshot, patch: SettingsPatch): SettingsSnap
       styling: patch.orchestrationStyling ?? settings.orchestration.styling,
       doubleCheck: patch.orchestrationDoubleCheck ?? settings.orchestration.doubleCheck,
       quickTask: patch.orchestrationQuickTask ?? settings.orchestration.quickTask,
-      planning: patch.orchestrationPlanning ?? settings.orchestration.planning
+      planning: patch.orchestrationPlanning ?? settings.orchestration.planning,
+      dictation: patch.orchestrationDictation ?? settings.orchestration.dictation
     },
     skills: {
       ...settings.skills,
@@ -183,6 +185,7 @@ function changedDraft(): Draft {
   draft.orchestrationDoubleCheck = 'off';
   draft.orchestrationQuickTask = 'on';
   draft.orchestrationPlanning = 'off';
+  draft.orchestrationDictation = false;
   draft.browserCodex = false;
   draft.browserOpencode = false;
   draft.contextIncludeInstructions = false;
@@ -215,6 +218,7 @@ test('every changed toggle, select and input is in the patch and in dirty keys',
     'orchestrationDoubleCheck',
     'orchestrationQuickTask',
     'orchestrationPlanning',
+    'orchestrationDictation',
     'browserCodex',
     'browserOpencode',
     'contextIncludeInstructions',
@@ -240,6 +244,7 @@ test('every changed toggle, select and input is in the patch and in dirty keys',
     'orchestrationDoubleCheck',
     'orchestrationQuickTask',
     'orchestrationPlanning',
+    'orchestrationDictation',
     'browserCodex',
     'browserOpencode',
     'contextIncludeShape',

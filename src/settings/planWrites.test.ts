@@ -37,6 +37,7 @@ const ALL_FIELDS: Array<keyof SettingsPatch> = [
   'orchestrationDoubleCheck',
   'orchestrationQuickTask',
   'orchestrationPlanning',
+  'orchestrationDictation',
   'opencodeCliSource',
   'opencodePath',
   'browserCodex',
@@ -53,6 +54,13 @@ const ALL_FIELDS: Array<keyof SettingsPatch> = [
   'contextMaxBytes',
   'contextExclude'
 ];
+
+test('bundled v2 saves as an application setting even from a workspace settings page', () => {
+  const plan = planSettingsWrites({ opencodeCliSource: 'bundled-v2' }, 'workspace');
+  assert.deepEqual(plan.errors, {});
+  assert.equal(plan.writes[0]?.value, 'bundled-v2');
+  assert.equal(plan.writes[0]?.scope, 'global');
+});
 
 const PATCH: Required<SettingsPatch> = {
   ollamaEnabled: false,
@@ -76,6 +84,7 @@ const PATCH: Required<SettingsPatch> = {
   orchestrationDoubleCheck: 'off',
   orchestrationQuickTask: 'on',
   orchestrationPlanning: 'off',
+  orchestrationDictation: true,
   opencodeCliSource: 'local',
   opencodePath: 'C:\\Tools\\opencode.exe',
   browserCodex: false,
@@ -112,6 +121,7 @@ test('every patch field becomes exactly one write, including booleans and select
 
   assert.equal(writes.get('orchestrationReviewing')?.value, 'on');
   assert.equal(writes.get('orchestrationStyling')?.value, 'auto');
+  assert.equal(writes.get('orchestrationDictation')?.value, true);
   assert.equal(writes.get('mode')?.value, 'plan');
   assert.equal(writes.get('thinking')?.value, 'high');
   assert.equal(writes.get('contextMaxBytes')?.value, 32768);

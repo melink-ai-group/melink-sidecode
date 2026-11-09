@@ -428,7 +428,7 @@ function splitModel(modelRef: string): { providerID: string; modelID: string } {
   return { providerID: modelRef.slice(0, slash), modelID: modelRef.slice(slash + 1) };
 }
 
-async function waitForListen(child: ChildProcess, signal?: AbortSignal): Promise<string> {
+export async function waitForListen(child: ChildProcess, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     let buffer = '';
     let settled = false;
@@ -573,7 +573,7 @@ export function serverFetch(
           return;
         }
         readBody(incoming).then(
-          (bytes) => resolve(new Response(bytes, { status, headers: responseHeaders })),
+          (bytes) => resolve(new Response(status === 204 || status === 205 || status === 304 ? null : bytes, { status, headers: responseHeaders })),
           reject
         );
       }

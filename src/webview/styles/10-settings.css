@@ -416,6 +416,11 @@
   margin-top: -2px;
 }
 
+/* The top-level dictation switch sits above the per-role rows. */
+.orchestration-switch {
+  margin: 2px 0 4px;
+}
+
 /* One tri-state row: the label/help share the row with a compact select. The
    help wraps, so the row survives the 390px viewport without horizontal
    overflow. */

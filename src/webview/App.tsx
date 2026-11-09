@@ -1115,12 +1115,12 @@ export function App(): JSX.Element {
     bridge.post({ type: 'clearOpencodeZenToken' });
   };
 
-  const upgradeOpencode = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
+  const upgradeOpencode = (draft: { cliSource: 'local' | 'bundled' | 'bundled-v2'; path: string }): void => {
     dispatch({ type: 'opencodeUpgrade', pending: true });
     bridge.post({ type: 'upgradeOpencode', cliSource: draft.cliSource, path: draft.path });
   };
 
-  const installOpencode = (draft: { cliSource: 'local' | 'bundled'; path: string }): void => {
+  const installOpencode = (draft: { cliSource: 'local' | 'bundled' | 'bundled-v2'; path: string }): void => {
     dispatch({ type: 'opencodeInstall', pending: true });
     bridge.post({ type: 'installOpencode', cliSource: draft.cliSource, path: draft.path });
   };
@@ -1180,7 +1180,7 @@ export function App(): JSX.Element {
 
   const testConnection = (
     backendId: string,
-    draft?: { cliSource: 'local' | 'bundled'; path: string }
+    draft?: { cliSource: 'local' | 'bundled' | 'bundled-v2'; path: string }
   ): void => {
     dispatch({ type: 'connectionTestPending', backendId });
     bridge.post({

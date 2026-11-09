@@ -11,6 +11,7 @@ test('the decision modules stay host-free', async () => {
   for (const file of [
     'src/orchestration/settings.ts',
     'src/orchestration/quickTask.ts',
+    'src/orchestration/dictation.ts',
     'src/orchestration/plan.ts',
     'src/orchestration/turnEnd.ts',
     'src/orchestration/doubleCheck.ts',
@@ -29,6 +30,9 @@ test('the turn pipeline decides once and consumes the stored plan at every seam'
   assert.match(source, /from '\.\/orchestration\/plan\.ts'/);
   assert.match(source, /session\.turnPlan = planTurn\(\{/);
   assert.match(source, /this\.turnPlans\.set\(turnId, plan\)/);
+  assert.match(source, /this\.decideOrchestration\(set, plan, choices, dictationEnabled, terminus, signal\)/);
+  assert.match(source, /runReadOnlySubagent\(\{/);
+  assert.match(source, /timeoutMs: ORCHESTRATION_DICTATION_TIMEOUT_MS/);
   assert.match(source, /resolvePostTurnRoles\(\{/);
   assert.match(source, /this\.startChangeChecks\(set, roles\.testing, \{/);
   assert.match(source, /runner: async \(input, prompt\) => modelReviewFindings\(await this\.runVisibleSubagent\(set,/);
@@ -60,10 +64,10 @@ test('the double-check pass reads diagnostics and never sends a model turn', asy
 
 test('the resolved orchestration plan is exposed in the settings read model', async () => {
   const source = await read('src/sidebarView.ts');
-  assert.match(source, /orchestrationTurnSnapshot\(plan, roles, \{/);
+  assert.match(source, /orchestrationTurnSnapshot\(facts, roles, \{/);
   assert.match(source, /this\.lastOrchestrationTurn = snapshot/);
   assert.match(source, /lastTurn: this\.lastOrchestrationTurn/);
-  assert.match(source, /orchestrationDiagnostic\(plan, roles\)/);
+  assert.match(source, /orchestrationDiagnostic\(facts, roles\)/);
   // The old write-only map must not come back: a snapshot that is stored and
   // never read is not observability.
   assert.doesNotMatch(source, /rememberResolvedRoles|resolvedTurnPlans/);

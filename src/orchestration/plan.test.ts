@@ -101,6 +101,15 @@ test('Off removes a role from the plan and On/Auto keep it potential', () => {
   assert.equal(auto.reasons.testing, 'auto-pending-change-set');
 });
 
+test('the dictation switch is stored on the turn plan and defaults On', () => {
+  assert.equal(planTurn(input({ settings: ALL_AUTO })).dictation, true);
+  const off = planTurn(input({ settings: { ...ALL_AUTO, dictation: false } }));
+  assert.equal(off.dictation, false);
+  assert.equal(off.reasons.dictation, 'off');
+  const quick = planTurn(input({ text: 'What is this?', settings: ALL_AUTO }));
+  assert.equal(quick.reasons.dictation, 'quick-bypass');
+});
+
 test('quick detection always runs and bypasses every role even with quickTask Off', () => {
   const plan = planTurn(
     input({
@@ -200,6 +209,84 @@ test('Auto styling needs a frontend file, not just any file', () => {
   assert.equal(frontend.reasons.styling, 'auto-frontend-change');
 });
 
+test('a dictation decision can only narrow the Auto roles', () => {
+  const roles = resolvePostTurnRoles({
+    choices: ALL_AUTO,
+    quick: false,
+    entries: FRONTEND,
+    dictation: {
+      testing: false,
+      reviewing: false,
+      styling: true,
+      doubleCheck: true,
+      reason: 'A small guarded UI change.'
+    }
+  });
+  assert.deepEqual(
+    [roles.testing, roles.reviewing, roles.styling, roles.doubleCheck],
+    [false, false, true, true]
+  );
+  assert.equal(roles.reasons.testing, 'dictation-skip');
+  assert.equal(roles.reasons.reviewing, 'dictation-skip');
+  assert.equal(roles.reasons.styling, 'dictation-frontend-change');
+  assert.equal(roles.reasons.doubleCheck, 'dictation-code-change');
+});
+
+test('an explicit On or Off is never overridden by the decision model', () => {
+  const roles = resolvePostTurnRoles({
+    choices: { ...ALL_AUTO, testing: 'on', reviewing: 'off' },
+    quick: false,
+    entries: CODE,
+    dictation: {
+      testing: false,
+      reviewing: true,
+      styling: true,
+      doubleCheck: false,
+      reason: 'The model disagrees with the fixed policy.'
+    }
+  });
+  assert.equal(roles.testing, true);
+  assert.equal(roles.reasons.testing, 'on-change');
+  assert.equal(roles.reviewing, false);
+  assert.equal(roles.reasons.reviewing, 'off');
+});
+
+test('a dictation decision cannot cross the hard change-set gates', () => {
+  const allRun = {
+    testing: true,
+    reviewing: true,
+    styling: true,
+    doubleCheck: true,
+    reason: 'Run everything.'
+  };
+  const docs = resolvePostTurnRoles({
+    choices: ALL_AUTO,
+    quick: false,
+    entries: DOCS,
+    dictation: allRun
+  });
+  assert.deepEqual(
+    [docs.testing, docs.reviewing, docs.styling, docs.doubleCheck],
+    [false, false, false, false]
+  );
+  assert.equal(docs.reasons.testing, 'docs-only');
+  assert.equal(docs.reasons.styling, 'no-frontend-change');
+
+  const empty = resolvePostTurnRoles({ choices: ALL_AUTO, quick: false, entries: [], dictation: allRun });
+  assert.equal(empty.reasons.testing, 'no-change-set');
+
+  const quick = resolvePostTurnRoles({ choices: ALL_AUTO, quick: true, entries: CODE, dictation: allRun });
+  assert.equal(quick.reasons.testing, 'quick-bypass');
+
+  const forced = resolvePostTurnRoles({
+    choices: { ...ALL_AUTO, styling: 'on' },
+    quick: false,
+    entries: FRONTEND,
+    dictation: { ...allRun, styling: false }
+  });
+  assert.equal(forced.styling, true);
+});
+
 test('an empty change set runs no post-turn role', () => {
   for (const choices of [ALL_ON, ALL_AUTO]) {
     const roles = resolvePostTurnRoles({ choices, quick: false, entries: [] });
@@ -264,6 +351,7 @@ test('the diagnostic names the resolved roles without file text', () => {
   assert.match(line, /quickBypass=false/);
   assert.match(line, /quickNotice=false/);
   assert.match(line, /quickReason=action-verb/);
+  assert.match(line, /dictation=on\(enabled-pending-change-set\)/);
   assert.match(line, /choices=testing:auto,reviewing:auto,styling:auto,doubleCheck:auto,quickTask:auto,planning:auto/);
   assert.match(line, /planning=skip\(no-active-plan\)/);
   assert.match(line, /testing=skip\(docs-only\)/);

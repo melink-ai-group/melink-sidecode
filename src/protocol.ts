@@ -151,10 +151,10 @@ export interface SettingsSnapshot {
    */
   opencode: {
     /**
-     * Where the CLI comes from. `bundled` uses the sideCode download under
-     * extension global storage; `local` uses `path` / PATH.
+     * `bundled` uses managed v1; `bundled-v2` uses a separate v2 download.
+     * `local` uses `path` / PATH and detects either major automatically.
      */
-    cliSource: 'local' | 'bundled';
+    cliSource: 'local' | 'bundled' | 'bundled-v2';
     /**
      * Effective path for the saved `cliSource` (what turns spawn today).
      */
@@ -166,6 +166,8 @@ export interface SettingsSnapshot {
     local: OpencodeCliProbe;
     /** Probe for the bundled binary under extension global storage. */
     bundled: OpencodeCliProbe;
+    /** Optional so older cached snapshots remain readable. Never falls back to v1. */
+    bundledV2?: OpencodeCliProbe;
     /**
      * @deprecated Prefer `skills.zvecGrep`. Kept so older webview builds keep a status line.
      */
@@ -197,6 +199,8 @@ export interface SettingsSnapshot {
     doubleCheck: OrchestrationChoice;
     quickTask: OrchestrationChoice;
     planning: OrchestrationChoice;
+    /** Top-level switch: a model may decide the Auto passes for each turn. */
+    dictation: boolean;
     legacyTesting: boolean;
     legacyReviewing: boolean;
     /**
@@ -297,7 +301,7 @@ export interface SettingsPatch {
   /** Ollama model id for dictation cleanup. Empty clears the choice. */
   dictationModel?: string;
   /** `local` uses the path field; `bundled` uses the sideCode-managed download. */
-  opencodeCliSource?: 'local' | 'bundled';
+  opencodeCliSource?: 'local' | 'bundled' | 'bundled-v2';
   opencodePath?: string;
   orchestrationTesting?: OrchestrationChoice;
   orchestrationReviewing?: OrchestrationChoice;
@@ -305,6 +309,8 @@ export interface SettingsPatch {
   orchestrationDoubleCheck?: OrchestrationChoice;
   orchestrationQuickTask?: OrchestrationChoice;
   orchestrationPlanning?: OrchestrationChoice;
+  /** Top-level switch for the model-decided Auto roles. */
+  orchestrationDictation?: boolean;
   contextIncludeInstructions?: boolean;
   contextIncludeShape?: boolean;
   contextIncludeEditorState?: boolean;
@@ -870,7 +876,7 @@ export type WebviewToHostMessage =
       type: 'testConnection';
       backendId: string;
       /** Draft CLI overrides so OpenCode Zen checks the CLI selected on the CLI tab. */
-      cliSource?: 'local' | 'bundled';
+      cliSource?: 'local' | 'bundled' | 'bundled-v2';
       path?: string;
     }
   /**
@@ -882,9 +888,9 @@ export type WebviewToHostMessage =
    * Re-download the opencode CLI for the draft source (no save required).
    * `cliSource` / `path` come from the settings draft when the user has not saved yet.
    */
-  | { type: 'upgradeOpencode'; cliSource?: 'local' | 'bundled'; path?: string }
+  | { type: 'upgradeOpencode'; cliSource?: 'local' | 'bundled' | 'bundled-v2'; path?: string }
   /** Download the opencode CLI for the draft source when that probe is not detected. */
-  | { type: 'installOpencode'; cliSource?: 'local' | 'bundled'; path?: string }
+  | { type: 'installOpencode'; cliSource?: 'local' | 'bundled' | 'bundled-v2'; path?: string }
   /** Install or remove zvec-grep's OpenCode integration. Applies immediately. */
   | { type: 'setZvecGrep'; enabled: boolean; cliSource?: 'local' | 'bundled'; path?: string }
   /** Install or remove ast-grep's OpenCode integration. Applies immediately. */

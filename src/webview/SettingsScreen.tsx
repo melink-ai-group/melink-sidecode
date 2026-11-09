@@ -85,6 +85,7 @@ export function SettingsScreen({
   const [tokenSaved, setTokenSaved] = useState(false);
   const [zenToken, setZenToken] = useState('');
   const [zenTokenSaved, setZenTokenSaved] = useState(false);
+  const [opencodeActionSource, setOpencodeActionSource] = useState<string>();
   // The pattern being typed; it only joins the draft list on Add or Enter, so a
   // half-typed pattern is never validated or saved mid-keystroke.
   const [patternDraft, setPatternDraft] = useState('');
@@ -336,8 +337,9 @@ export function SettingsScreen({
     cliSource: draft.opencodeCliSource,
     path: draft.opencodePath
   };
-  const draftProbe =
-    draft.opencodeCliSource === 'bundled' ? settings.opencode.bundled : settings.opencode.local;
+  const draftProbe = draft.opencodeCliSource === 'bundled-v2'
+    ? settings.opencode.bundledV2 ?? { status: 'missing', path: '' }
+    : draft.opencodeCliSource === 'bundled' ? settings.opencode.bundled : settings.opencode.local;
   const zvecSnapshot = settings.skills.zvecGrep;
   const astSnapshot = settings.skills.astGrep;
   const zvecChecked = skillChecked({
@@ -492,18 +494,20 @@ export function SettingsScreen({
                 className="select"
                 id="opencode-cli-source"
                 value={draft.opencodeCliSource}
+                disabled={opencodeInstall?.pending || opencodeUpgrade?.pending}
                 aria-describedby="opencode-cli-source-help"
                 onChange={(event) =>
-                  update('opencodeCliSource', event.target.value === 'bundled' ? 'bundled' : 'local')
+                  update('opencodeCliSource', event.target.value === 'bundled-v2' ? 'bundled-v2' : event.target.value === 'bundled' ? 'bundled' : 'local')
                 }
               >
                 <option value="local">Local machine</option>
-                <option value="bundled">Bundled (extension storage)</option>
+                <option value="bundled">Bundled OpenCode 1.x (extension storage)</option>
+                <option value="bundled-v2">Bundled OpenCode 2.x (extension storage)</option>
               </select>
               <p className="field-help" id="opencode-cli-source-help">
-                {draft.opencodeCliSource === 'bundled'
-                  ? 'Install downloads into extension global storage so the binary survives closing VS Code. Every turn uses that binary, not PATH.'
-                  : 'Use the path below or PATH. Install and Update use this selection immediately.'}
+                {draft.opencodeCliSource !== 'local'
+                  ? 'Install downloads the selected major into its own extension storage folder. Update stays on that major. Both downloads are kept when you switch.'
+                  : 'Use OpenCode 1.x or 2.x from the path below or PATH. The version is detected automatically; Update stays on its current major.'}
               </p>
               <ScopeNotice id="opencode-cli-source-notice" notice={noticeFor('opencodeCliSource')} />
 
@@ -543,7 +547,7 @@ export function SettingsScreen({
                 </>
               ) : (
                 <p className="field-help" id="opencode-bundled-path">
-                  Bundled path: <code>{settings.opencode.bundled.path}</code>
+                  Bundled path: <code>{draftProbe.path || 'Available after the host refreshes settings.'}</code>
                 </p>
               )}
 
@@ -563,16 +567,16 @@ export function SettingsScreen({
                     <button
                       className="btn btn--secondary"
                       type="button"
-                      disabled={opencodeUpgrade?.pending}
-                      onClick={() => onUpgradeOpencode(draftCliAction)}
+                      disabled={opencodeUpgrade?.pending || opencodeInstall?.pending}
+                      onClick={() => { setOpencodeActionSource(draft.opencodeCliSource); onUpgradeOpencode(draftCliAction); }}
                     >
                       {opencodeUpgrade?.pending
                         ? 'Updating...'
-                        : draft.opencodeCliSource === 'bundled'
+                        : draft.opencodeCliSource !== 'local'
                           ? 'Update bundled opencode'
                           : 'Update opencode'}
                     </button>
-                    {opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
+                    {opencodeActionSource === draft.opencodeCliSource && opencodeUpgrade && !opencodeUpgrade.pending && opencodeUpgrade.message ? (
                       <CliResult ok={opencodeUpgrade.ok} message={opencodeUpgrade.message} />
                     ) : null}
                   </>
@@ -581,16 +585,16 @@ export function SettingsScreen({
                     <button
                       className="btn btn--secondary"
                       type="button"
-                      disabled={opencodeInstall?.pending}
-                      onClick={() => onInstallOpencode(draftCliAction)}
+                      disabled={opencodeInstall?.pending || opencodeUpgrade?.pending}
+                      onClick={() => { setOpencodeActionSource(draft.opencodeCliSource); onInstallOpencode(draftCliAction); }}
                     >
                       {opencodeInstall?.pending
                         ? 'Installing...'
-                        : draft.opencodeCliSource === 'bundled'
+                        : draft.opencodeCliSource !== 'local'
                           ? 'Install bundled opencode'
                           : 'Install opencode'}
                     </button>
-                    {opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
+                    {opencodeActionSource === draft.opencodeCliSource && opencodeInstall && !opencodeInstall.pending && opencodeInstall.message ? (
                       <CliResult ok={opencodeInstall.ok} message={opencodeInstall.message} />
                     ) : null}
                   </>
@@ -1006,7 +1010,7 @@ export function SettingsScreen({
               </div>
               <p className="field-help">
                 Check models probes the CLI selected under Settings → CLI (
-                {draft.opencodeCliSource === 'bundled' ? 'bundled' : 'local'}) and refreshes the Zen catalog.
+                {draft.opencodeCliSource !== 'local' ? 'bundled' : 'local'}) and refreshes the Zen catalog.
               </p>
               {opencodeStatus?.result ? (
                 <p
@@ -1326,7 +1330,9 @@ export function SettingsScreen({
               }}
               legacyTesting={settings.orchestration.legacyTesting}
               legacyReviewing={settings.orchestration.legacyReviewing}
+              dictation={draft.orchestrationDictation}
               onChange={changeOrchestration}
+              onDictationChange={(value) => update('orchestrationDictation', value)}
             />
           </div>
         </section>

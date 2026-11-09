@@ -25,7 +25,8 @@ export interface Draft {
   orchestrationDoubleCheck: OrchestrationChoice;
   orchestrationQuickTask: OrchestrationChoice;
   orchestrationPlanning: OrchestrationChoice;
-  opencodeCliSource: 'local' | 'bundled';
+  orchestrationDictation: boolean;
+  opencodeCliSource: 'local' | 'bundled' | 'bundled-v2';
   opencodePath: string;
   browserCodex: boolean;
   browserOpencode: boolean;
@@ -67,6 +68,7 @@ export function draftFrom(settings: SettingsSnapshot): Draft {
     orchestrationDoubleCheck: settings.orchestration.doubleCheck,
     orchestrationQuickTask: settings.orchestration.quickTask,
     orchestrationPlanning: settings.orchestration.planning,
+    orchestrationDictation: settings.orchestration.dictation,
     opencodeCliSource: settings.opencode.cliSource,
     opencodePath: settings.opencode.local.path,
     browserCodex: settings.skills.browserCodex,
@@ -111,6 +113,7 @@ export function patchFrom(draft: Draft): Required<SettingsPatch> {
     orchestrationDoubleCheck: draft.orchestrationDoubleCheck,
     orchestrationQuickTask: draft.orchestrationQuickTask,
     orchestrationPlanning: draft.orchestrationPlanning,
+    orchestrationDictation: draft.orchestrationDictation,
     opencodeCliSource: draft.opencodeCliSource,
     // Always included: the saved path is what this screen shows and compares,
     // so bundling must not leave a typed path silently unwritten.
@@ -161,6 +164,7 @@ function storedPatch(settings: SettingsSnapshot): Required<SettingsPatch> {
     orchestrationDoubleCheck: settings.orchestration.doubleCheck,
     orchestrationQuickTask: settings.orchestration.quickTask,
     orchestrationPlanning: settings.orchestration.planning,
+    orchestrationDictation: settings.orchestration.dictation,
     opencodeCliSource: settings.opencode.cliSource,
     opencodePath: settings.opencode.local.path,
     browserCodex: settings.skills.browserCodex,
