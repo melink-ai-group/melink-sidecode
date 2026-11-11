@@ -1,4 +1,126 @@
-/* ---- Item cards ---- */
+/* ---- Activity rows: one readable line per step ---- */
+
+/* A step reads as a line of text, the way a reply does. The row is clickable
+ * and expandable but carries no card chrome; only content that is really a
+ * panel (command output, a diff, an approval) keeps a bordered surface. */
+.activity-row {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.activity-row__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+/* Only a row with something behind it is clickable; a plain step is text. */
+button.activity-row__head,
+summary.activity-row__head {
+  cursor: pointer;
+}
+
+button.activity-row__head:hover,
+summary.activity-row__head:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+button.activity-row__head:focus-visible,
+summary.activity-row__head:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.activity-row > summary.activity-row__head {
+  list-style: none;
+}
+
+.activity-row > summary.activity-row__head::-webkit-details-marker {
+  display: none;
+}
+
+.activity-row__head .item-main {
+  overflow: hidden;
+}
+
+.activity-row__head .item-kind {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--vscode-foreground);
+}
+
+/* Counts under an investigation read as prose; a file path or command keeps
+ * the editor font from CardLines. */
+.activity-group .item-path {
+  font-family: inherit;
+}
+
+/* The check or spinner belongs to the row text, not to a pill. */
+.activity-row__head .status-chip--icon {
+  border-color: transparent;
+  background: transparent;
+}
+
+.activity-row__chevron {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+  color: var(--vscode-descriptionForeground);
+  transform: rotate(-90deg);
+}
+
+.activity-row__chevron .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.activity-row__chevron--open {
+  transform: none;
+}
+
+/* Expanded steps indent under their row with a hairline, so nesting stays
+ * readable without drawing another box. */
+.activity-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px 18px;
+  padding-left: 10px;
+  border-left: 1px solid var(--vscode-panel-border);
+}
+
+.activity-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.activity-group__items .turn--reasoning {
+  margin: 0;
+}
+
+/* ---- Item cards: the surface for expanded output, diffs, and approvals ---- */
 
 .item-card {
   /* Same reason as .panel: overflow:hidden makes the flex minimum size 0, so
@@ -11,72 +133,19 @@
   overflow: hidden;
 }
 
-.item-card--command > summary,
-.item-card--change > summary { list-style: none; cursor: pointer; }
-.item-card--command > summary::-webkit-details-marker,
-.item-card--change > summary::-webkit-details-marker { display: none; }
-.item-card--command:not([open]),
-.item-card--command:not([open]) > .item-head,
-.item-card--change:not([open]),
-.item-card--change:not([open]) > .item-head {
-  min-height: 32px;
-}
-.item-card--command[open] .item-head,
-.item-card--change[open] .item-head { border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
-.item-card--command .item-body code,
-.item-card--change .item-body code { white-space: pre-wrap; overflow-wrap: anywhere; }
-
-.activity-group__toggle {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+/* The row above the panel already separates the two with spacing. */
+.activity-row > .item-card {
+  margin: 2px 0 4px 22px;
 }
 
-.activity-group__toggle .item-main {
-  overflow: hidden;
+.item-card > .item-body,
+.item-card > .diff-body {
+  border-top: 0;
 }
 
-.activity-group__toggle .item-kind {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.activity-group__chevron {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  margin-top: 2px;
-  color: var(--vscode-descriptionForeground);
-  transform: rotate(-90deg);
-}
-
-.activity-group__chevron--open {
-  transform: none;
-}
-
-.activity-group__items {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 8px 8px 16px;
-  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-}
-
-.activity-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.activity-group__items .turn--reasoning {
-  margin: 0;
+.item-card .item-body code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .narration {
@@ -92,13 +161,23 @@
   gap: 8px;
   width: 100%;
   margin: 0;
-  padding: 0;
+  padding: 4px 6px;
   border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.narration__toggle:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.narration__toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }
 
 .narration__text {
@@ -111,23 +190,11 @@
 .narration__details {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   margin-left: 18px;
+  padding-left: 10px;
+  border-left: 1px solid var(--vscode-panel-border);
   min-width: 0;
-}
-
-.item-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.item-card > summary.item-head {
-  list-style: none;
 }
 
 .item-icon {
@@ -167,10 +234,6 @@
   white-space: nowrap;
   font-family: var(--vscode-editor-font-family, monospace);
   color: var(--vscode-descriptionForeground);
-}
-
-.item-head .spacer {
-  flex: 1 1 auto;
 }
 
 .diff-stats {
