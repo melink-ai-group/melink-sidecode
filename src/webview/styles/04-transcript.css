@@ -421,18 +421,29 @@
 
 .reasoning-toggle {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  gap: 8px;
   width: 100%;
   min-width: 0;
   margin: 0;
-  padding: 0;
+  padding: 4px 6px;
   border: 0;
+  border-radius: var(--melink-radius-sm, 4px);
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.reasoning-toggle:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.reasoning-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }
 
 .reasoning-lead {
@@ -444,8 +455,8 @@
 
 .reasoning-lead .meta-strong {
   color: var(--vscode-foreground);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .reasoning-snippet__sep,
@@ -533,24 +544,6 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.reasoning-toggle__chevron {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  margin-left: auto;
-  color: var(--vscode-descriptionForeground);
-  transform: rotate(-90deg);
-}
-
-.reasoning-toggle__chevron .ico {
-  width: 12px;
-  height: 12px;
-}
-
-.reasoning-toggle__chevron--open {
-  transform: none;
 }
 
 .turn--reasoning .stream-status {

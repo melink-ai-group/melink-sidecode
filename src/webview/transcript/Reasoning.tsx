@@ -47,6 +47,9 @@ export function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Eleme
         aria-label={`${expanded ? 'Hide' : 'Show'} ${label}`}
         onClick={toggle}
       >
+        <span className={`activity-row__chevron${expanded ? ' activity-row__chevron--open' : ''}`} aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
         <span className="reasoning-lead">
           <span className="meta-strong">{label}</span>
           {waiting && !expanded ? <ReasoningWaitDots /> : null}
@@ -63,12 +66,6 @@ export function ReasoningCard({ item }: { item: TranscriptItemView }): JSX.Eleme
         ) : null}
         <span className="status-slot" aria-hidden="true">
           {item.status === 'streaming' ? <StatusMark tone="running" label="Thinking" /> : null}
-        </span>
-        <span
-          className={`reasoning-toggle__chevron${expanded ? ' reasoning-toggle__chevron--open' : ''}`}
-          aria-hidden="true"
-        >
-          <ChevronDownIcon />
         </span>
       </button>
       {expanded && (text || item.status === 'streaming' || incomplete) ? (

@@ -37,7 +37,7 @@ export const NarrationRow = memo(function NarrationRow({
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className={`activity-group__chevron${expanded ? ' activity-group__chevron--open' : ''}`} aria-hidden="true">
+        <span className={`activity-row__chevron${expanded ? ' activity-row__chevron--open' : ''}`} aria-hidden="true">
           <ChevronDownIcon />
         </span>
         <span className="narration__text">
@@ -79,15 +79,15 @@ export const ActivityGroup = memo(function ActivityGroup({ family, items }: { fa
   const nested = family === 'work' || items.some((item) => item.kind === 'reasoning');
   const label = summary.detail ? `${summary.label} ${summary.detail}` : summary.label;
   return (
-    <div className={`item-card activity-group${expanded ? ' activity-group--open' : ''}`}>
+    <div className={`activity-row activity-group${expanded ? ' activity-group--open' : ''}`}>
       <button
         type="button"
-        className="activity-group__toggle item-head"
+        className="activity-row__head"
         aria-expanded={expanded}
         aria-label={label}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className={`activity-group__chevron${expanded ? ' activity-group__chevron--open' : ''}`} aria-hidden="true">
+        <span className={`activity-row__chevron${expanded ? ' activity-row__chevron--open' : ''}`} aria-hidden="true">
           <ChevronDownIcon />
         </span>
         <span className="item-icon" aria-hidden="true">
@@ -125,15 +125,15 @@ export function NestedBurst({ family, items }: { family: ActivityFamily; items: 
   const summary = activitySummary(items);
   const Icon = family === 'command' ? TerminalIcon : family === 'change' ? FileIcon : SearchIcon;
   return (
-    <div className={`item-card activity-group activity-group--nested${expanded ? ' activity-group--open' : ''}`}>
+    <div className={`activity-row activity-row--nested activity-group${expanded ? ' activity-group--open' : ''}`}>
       <button
         type="button"
-        className="activity-group__toggle item-head"
+        className="activity-row__head"
         aria-expanded={expanded}
         aria-label={summary.label}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className={`activity-group__chevron${expanded ? ' activity-group__chevron--open' : ''}`} aria-hidden="true">
+        <span className={`activity-row__chevron${expanded ? ' activity-row__chevron--open' : ''}`} aria-hidden="true">
           <ChevronDownIcon />
         </span>
         <span className="item-icon" aria-hidden="true">
@@ -161,8 +161,8 @@ export function GroupChild({ item }: { item: TranscriptItemView }): JSX.Element 
     return <ToolCard item={item} />;
   }
   return (
-    <div className="item-card" aria-label="Web search item">
-      <div className="item-head">
+    <div className="activity-row">
+      <div className="activity-row__head">
         <span className="item-icon" aria-hidden="true">
           <SearchIcon />
         </span>
@@ -176,20 +176,30 @@ export function GroupChild({ item }: { item: TranscriptItemView }): JSX.Element 
 export function ToolCard({ item }: { item: TranscriptItemView }): JSX.Element {
   const presentation = toolCardPresentation(item);
   const output = toolOutput(item, presentation.detail);
+  const head = (
+    <>
+      <span className="item-icon" aria-hidden="true">
+        <TerminalIcon />
+      </span>
+      <CardLines title={presentation.title} detail={presentation.detail} />
+      <StatusChip status={item.status} doneLabel="Passed" />
+    </>
+  );
+  if (!output) {
+    return (
+      <div className="activity-row activity-row--tool">
+        <div className="activity-row__head">{head}</div>
+      </div>
+    );
+  }
   return (
-    <details className="item-card item-card--command">
-      <summary className="item-head" aria-label="Command item">
-        <span className="item-icon" aria-hidden="true">
-          <TerminalIcon />
-        </span>
-        <CardLines title={presentation.title} detail={presentation.detail} />
-        <StatusChip status={item.status} doneLabel="Passed" />
-      </summary>
-      {output ? (
+    <details className="activity-row activity-row--tool">
+      <summary className="activity-row__head">{head}</summary>
+      <div className="item-card">
         <div className="item-body">
           <code>{output}</code>
         </div>
-      ) : null}
+      </div>
     </details>
   );
 }
