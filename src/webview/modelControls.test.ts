@@ -72,6 +72,17 @@ test('only supported thinking levels are offered, in the fixed vocabulary order'
   assert.equal(control.defaultValue, 'low');
 });
 
+test('a model that does not report off never offers it, and higher tiers stay distinct', () => {
+  const capabilities: ModelCapabilities = {
+    ...REASONING,
+    thinking: { supported: ['low', 'medium', 'high', 'extra high', 'max', 'ultra'], default: 'medium' }
+  };
+  const control = thinkingControl(capabilities, resolved({ thinking: 'medium' }));
+  assert.deepEqual(control.offered, ['low', 'medium', 'high', 'extra high', 'max', 'ultra']);
+  assert.equal(control.offered.includes('off'), false);
+  assert.equal(control.value, 'medium');
+});
+
 test('a non-reasoning model explains the unavailability instead of a dead selector', () => {
   const capabilities: ModelCapabilities = {
     ...REASONING,

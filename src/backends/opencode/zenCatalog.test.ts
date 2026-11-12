@@ -30,6 +30,68 @@ test('Zen image and PDF input capabilities survive catalog parsing', () => {
   assert.deepEqual(models[1]?.capabilities?.inputModalities, ['text']);
 });
 
+test('Zen reasoning options become the model’s own thinking levels', () => {
+  const meta = parseModelsDevOpencode({ opencode: { models: {
+    'gpt-5.5': {
+      name: 'GPT 5.5',
+      reasoning: true,
+      reasoning_options: [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'xhigh'] }]
+    },
+    'gpt-5.6-sol': {
+      name: 'GPT 5.6 Sol',
+      reasoning: true,
+      reasoning_options: [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] }]
+    },
+    'glm-5.1': {
+      name: 'GLM 5.1',
+      reasoning: true,
+      reasoning_options: [{ type: 'toggle' }]
+    },
+    'grok-code': {
+      name: 'Grok Code',
+      reasoning: true,
+      reasoning_options: []
+    },
+    'claude-opus-4-5': {
+      name: 'Claude Opus 4.5',
+      reasoning: true,
+      reasoning_options: [{ type: 'budget_tokens', min: 1024 }]
+    }
+  } } });
+  const models = mergeZenCatalog(
+    ['gpt-5.5', 'gpt-5.6-sol', 'glm-5.1', 'grok-code', 'claude-opus-4-5'],
+    meta,
+    { includePaid: true }
+  );
+  const byId = new Map(models.map((model) => [model.id, model.capabilities]));
+  assert.deepEqual(byId.get('gpt-5.5')?.thinking, {
+    supported: ['off', 'low', 'medium', 'high', 'extra high'],
+    default: 'unknown'
+  });
+  assert.deepEqual(byId.get('gpt-5.6-sol')?.thinking, {
+    supported: ['off', 'low', 'medium', 'high', 'extra high', 'max'],
+    default: 'unknown'
+  });
+  // A boolean toggle is off/on, not the effort ladder.
+  assert.deepEqual(byId.get('glm-5.1')?.thinking, {
+    supported: ['off', 'on'],
+    default: 'unknown'
+  });
+  // No named control, or a token budget we cannot express, stays unknown.
+  assert.deepEqual(byId.get('grok-code')?.thinking, { supported: 'unknown', default: 'unknown' });
+  assert.deepEqual(byId.get('claude-opus-4-5')?.thinking, { supported: 'unknown', default: 'unknown' });
+});
+
+test('a model with no reasoning_options keeps reasoning support unknown', () => {
+  const meta = parseModelsDevOpencode({ opencode: { models: {
+    'gpt-5.5': { name: 'GPT 5.5', reasoning: true },
+    'claude-3-5-haiku': { name: 'Haiku', reasoning: false }
+  } } });
+  const models = mergeZenCatalog(['gpt-5.5', 'claude-3-5-haiku'], meta, { includePaid: true });
+  assert.deepEqual(models[0]?.capabilities?.thinking, { supported: 'unknown', default: 'unknown' });
+  assert.deepEqual(models[1]?.capabilities?.thinking, { supported: [], default: 'unknown' });
+});
+
 test('id fallback treats -free and known stealth ids as free', () => {
   assert.equal(isFreeByIdFallback('mimo-v2.5-free'), true);
   assert.equal(isFreeByIdFallback('big-pickle'), true);

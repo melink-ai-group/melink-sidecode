@@ -36,12 +36,15 @@ test('the OpenAI-compatible base URL is derived from the configured base URL', (
 });
 
 test('the UI thinking ladder maps onto OpenAI-compatible reasoning efforts', () => {
-  assert.equal(opencodeReasoningEffort('off'), undefined);
+  assert.equal(opencodeReasoningEffort('off'), 'none');
+  assert.equal(opencodeReasoningEffort('on'), undefined);
+  assert.equal(opencodeReasoningEffort('minimal'), 'minimal');
   assert.equal(opencodeReasoningEffort('low'), 'low');
   assert.equal(opencodeReasoningEffort('medium'), 'medium');
   assert.equal(opencodeReasoningEffort('high'), 'high');
-  // The top UI level aliases onto the adapter's highest tier, not a new value.
-  assert.equal(opencodeReasoningEffort('extra high'), 'high');
+  assert.equal(opencodeReasoningEffort('extra high'), 'xhigh');
+  assert.equal(opencodeReasoningEffort('max'), 'max');
+  assert.equal(opencodeReasoningEffort('ultra'), 'ultra');
 });
 
 const FULL_DENY = {

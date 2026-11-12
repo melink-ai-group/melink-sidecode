@@ -94,11 +94,36 @@ export interface ContextWindowCapability {
 /**
  * The fixed UI vocabulary for a reasoning/thinking control. These are the only
  * levels any surface may name; each adapter maps them to its native values.
+ *
+ * The ladder spans every tier the supported providers report: a boolean
+ * reasoning toggle (`on`), OpenAI's `minimal` tier, and the `max`/`ultra` tiers
+ * newer Codex models expose above `xhigh` (the UI's `extra high`). No surface
+ * shows a level a particular model did not report; the ladder only defines the
+ * shared names and their order.
  */
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'extra high';
+export type ThinkingLevel =
+  | 'off'
+  | 'on'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'extra high'
+  | 'max'
+  | 'ultra';
 
 /** Every thinking level, in presentation order. The single source of truth. */
-export const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'extra high'];
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  'off',
+  'on',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'extra high',
+  'max',
+  'ultra'
+];
 
 /**
  * What a model can do, in the provider-neutral vocabulary the UI renders.

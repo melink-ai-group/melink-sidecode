@@ -282,6 +282,7 @@ export function ThinkingField({
             type="button"
             role="radio"
             aria-checked={level === control.value}
+            title={level}
             key={level}
             onClick={() => onChange(level)}
           >

@@ -33,16 +33,19 @@ function caps(overrides: Partial<ModelCapabilities> = {}): ModelCapabilities {
   return { ...UNKNOWN_CAPABILITIES, ...overrides };
 }
 
-test('the UI thinking vocabulary is exactly the documented five levels, in order', () => {
-  assert.deepEqual([...THINKING_LEVELS], ['off', 'low', 'medium', 'high', 'extra high']);
+test('the UI thinking vocabulary names every provider tier in presentation order', () => {
+  assert.deepEqual(
+    [...THINKING_LEVELS],
+    ['off', 'on', 'minimal', 'low', 'medium', 'high', 'extra high', 'max', 'ultra']
+  );
   for (const level of THINKING_LEVELS) {
     assert.equal(isThinkingLevel(level), true);
   }
-  assert.equal(isThinkingLevel('max'), false);
-  assert.equal(isThinkingLevel('minimal'), false);
+  assert.equal(isThinkingLevel('xhigh'), false);
   assert.equal(isThinkingLevel(undefined), false);
   assert.equal(thinkingLevelRank('off'), 0);
-  assert.equal(thinkingLevelRank('extra high'), 4);
+  assert.equal(thinkingLevelRank('extra high'), 6);
+  assert.equal(thinkingLevelRank('ultra'), 8);
   assert.equal(thinkingLevelRank('bogus'), -1);
 });
 
@@ -106,8 +109,10 @@ test('thinking levels clamp to what the model supports, nearest at or below', ()
   assert.equal(clampThinkingLevel('bogus', supported), undefined);
 });
 
-test('off is meaningful for any reasoning model even if not enumerated', () => {
-  assert.equal(supportsThinkingLevel('off', ['low', 'high']), true);
+test('a level is supported only when the provider reports it', () => {
+  assert.equal(supportsThinkingLevel('off', ['off', 'low', 'high']), true);
+  assert.equal(supportsThinkingLevel('off', ['low', 'high']), false);
+  assert.equal(supportsThinkingLevel('on', ['off', 'on']), true);
   assert.equal(supportsThinkingLevel('high', ['low', 'high']), true);
   assert.equal(supportsThinkingLevel('medium', ['low', 'high']), false);
   // An unknown support set means nothing can be asserted about it.
@@ -115,13 +120,13 @@ test('off is meaningful for any reasoning model even if not enumerated', () => {
 });
 
 test('unknown is not the same as unsupported', () => {
-  // A model known not to reason reports an empty list, not `unknown`.
+  // A model known not to reason reports an empty list and has no level to set.
   const nonReasoning = resolveModelSettings({
     providerId: 'ollama',
     modelId: 'm',
     capabilities: caps({ thinking: { supported: [], default: 'unknown' } })
   });
-  assert.equal(nonReasoning.thinking, 'off');
+  assert.equal(nonReasoning.thinking, 'unknown');
   assert.equal(nonReasoning.isOverridden, false);
 
   // A model whose reasoning support was never reported stays unknown.
@@ -185,9 +190,10 @@ test('the app default applies only when the provider reports no default', () => 
   });
   assert.equal(resolved.thinking, 'low');
   assert.equal(resolved.isOverridden, false);
-  // No provider default and no app default: the lowest supported effort.
+  // No provider default and no app default: the lowest active effort, never a
+  // silent switch to off.
   const fallback = resolveModelSettings({ providerId: 'ollama', modelId: 'm', capabilities });
-  assert.equal(fallback.thinking, 'off');
+  assert.equal(fallback.thinking, 'low');
 });
 
 test('an override the model cannot support is clamped rather than surfaced raw', () => {
@@ -220,28 +226,40 @@ test('sanitizeOverrides drops what cannot be sent and keeps what can', () => {
   assert.deepEqual(sanitizeOverrides({ thinking: 'extra high', contextWindow: 1000 }), {});
 });
 
-test('the UI vocabulary maps to Ollama native values, with extra high aliasing max', () => {
+test('the UI vocabulary maps to Ollama native values, with the top tiers aliasing max', () => {
   assert.equal(ollamaThinkValue('off'), false);
+  assert.equal(ollamaThinkValue('on'), true);
+  assert.equal(ollamaThinkValue('minimal'), 'minimal');
   assert.equal(ollamaThinkValue('low'), 'low');
   assert.equal(ollamaThinkValue('medium'), 'medium');
   assert.equal(ollamaThinkValue('high'), 'high');
-  // The UI's top level aliases onto Ollama's top tier, which is `max`.
+  // Ollama's own levels end at `max`; the higher Codex tiers alias onto it.
   assert.equal(ollamaThinkValue('extra high'), 'max');
+  assert.equal(ollamaThinkValue('max'), 'max');
+  assert.equal(ollamaThinkValue('ultra'), 'max');
   // The mapping round-trips, including the boolean and `max` specials.
   assert.equal(thinkingLevelFromOllama(false), 'off');
-  assert.equal(thinkingLevelFromOllama('max'), 'extra high');
+  assert.equal(thinkingLevelFromOllama(true), 'on');
+  assert.equal(thinkingLevelFromOllama('max'), 'max');
   assert.equal(thinkingLevelFromOllama('high'), 'high');
   assert.equal(thinkingLevelFromOllama('bogus'), undefined);
 });
 
-test('the UI vocabulary maps to Codex native tiers, with extra high aliasing the top tier', () => {
-  assert.equal(codexReasoningEffort('off'), undefined);
+test('the UI vocabulary maps every Codex native tier without collapsing it', () => {
+  assert.equal(codexReasoningEffort('off'), 'none');
+  assert.equal(codexReasoningEffort('on'), undefined);
+  assert.equal(codexReasoningEffort('minimal'), 'minimal');
   assert.equal(codexReasoningEffort('low'), 'low');
   assert.equal(codexReasoningEffort('medium'), 'medium');
   assert.equal(codexReasoningEffort('high'), 'high');
   assert.equal(codexReasoningEffort('extra high'), 'xhigh');
+  assert.equal(codexReasoningEffort('max'), 'max');
+  assert.equal(codexReasoningEffort('ultra'), 'ultra');
   assert.equal(thinkingLevelFromCodex('xhigh'), 'extra high');
-  assert.equal(thinkingLevelFromCodex('high'), 'high');
+  assert.equal(thinkingLevelFromCodex('max'), 'max');
+  assert.equal(thinkingLevelFromCodex('ultra'), 'ultra');
+  assert.equal(thinkingLevelFromCodex('minimal'), 'minimal');
+  assert.equal(thinkingLevelFromCodex('none'), 'off');
   assert.equal(thinkingLevelFromCodex('bogus'), undefined);
 });
 
@@ -255,12 +273,14 @@ test('the Ollama request carries only fields the host resolved', () => {
   });
 });
 
-test('the Codex request omits the effort for off and maps the rest to native tiers', () => {
+test('the Codex request sends none for off and passes every higher tier through', () => {
   assert.deepEqual(codexNativeRequest(undefined), { summary: 'auto' });
-  // `off` is the absence of a tier: nothing is sent, so the model default holds.
-  assert.deepEqual(codexNativeRequest({ thinking: 'off' }), { summary: 'auto' });
+  // `off` is only resolved when the model listed `none`, so it is sent as such.
+  assert.deepEqual(codexNativeRequest({ thinking: 'off' }), { effort: 'none', summary: 'auto' });
   assert.deepEqual(codexNativeRequest({ thinking: 'high' }), { effort: 'high', summary: 'auto' });
   assert.deepEqual(codexNativeRequest({ thinking: 'extra high' }), { effort: 'xhigh', summary: 'auto' });
+  assert.deepEqual(codexNativeRequest({ thinking: 'max' }), { effort: 'max', summary: 'auto' });
+  assert.deepEqual(codexNativeRequest({ thinking: 'ultra' }), { effort: 'ultra', summary: 'auto' });
 });
 
 test('overridesFromResolved drops unknown values so the adapter leaves the field alone', () => {
@@ -298,10 +318,44 @@ test('Ollama capabilities build the descriptor from a live /api/show body', () =
   assert.deepEqual(descriptor, {
     inputModalities: ['text'],
     contextWindow: { min: 'unknown', max: 131072, default: 131072 },
-    thinking: { supported: [...THINKING_LEVELS], default: 'unknown' },
+    // A thinking-capable model with no reported controls is a boolean toggle.
+    thinking: { supported: ['off', 'on'], default: 'unknown' },
     tools: true,
     modes: ['agent']
   });
+});
+
+test('Ollama reports exactly the thinking controls its /api/show body names', () => {
+  const gptOss = ollamaCapabilities(
+    {
+      capabilities: ['completion', 'tools', 'thinking'],
+      thinking: { values: ['low', 'medium', 'high'], default: 'medium' }
+    },
+    ['agent']
+  );
+  assert.deepEqual(gptOss.thinking, {
+    supported: ['off', 'low', 'medium', 'high'],
+    default: 'medium'
+  });
+
+  const toggle = ollamaCapabilities(
+    {
+      capabilities: ['completion', 'thinking'],
+      thinking: { values: [false, true], default: false }
+    },
+    ['agent']
+  );
+  assert.deepEqual(toggle.thinking, { supported: ['off', 'on'], default: 'off' });
+
+  // An unknown native value is dropped, never forced onto the ladder.
+  const partly = ollamaCapabilities(
+    {
+      capabilities: ['thinking'],
+      thinking: { values: ['low', 'ultra', 'unheard-of'], default: 'ultra' }
+    },
+    ['agent']
+  );
+  assert.deepEqual(partly.thinking, { supported: ['off', 'low', 'ultra'], default: 'ultra' });
 });
 
 test('an Ollama model with no reported capability data yields unknown, not defaults', () => {
@@ -321,8 +375,13 @@ test('Ollama capability helpers distinguish a reported list from no list at all'
   // No list: the provider said nothing, so every capability stays unknown.
   assert.equal(ollamaThinkingLevels(undefined), 'unknown');
   assert.equal(ollamaToolSupport(undefined), 'unknown');
-  // A reported list with `thinking`/`tools` means the model supports them.
-  assert.deepEqual(ollamaThinkingLevels(['thinking']), [...THINKING_LEVELS]);
+  // A thinking cap with no controls is a boolean toggle, not the full ladder.
+  assert.deepEqual(ollamaThinkingLevels(['thinking']), ['off', 'on']);
+  // Reported tier values narrow the offered set to exactly those levels.
+  assert.deepEqual(ollamaThinkingLevels(['thinking'], { values: ['low', 'high'] }), ['off', 'low', 'high']);
+  assert.deepEqual(ollamaThinkingLevels(['thinking'], { values: [false, true] }), ['off', 'on']);
+  // A list of only unrecognized spellings is a provider change, not a toggle.
+  assert.equal(ollamaThinkingLevels(['thinking'], { values: ['unheard-of'] }), 'unknown');
   assert.equal(ollamaToolSupport(['tools']), true);
   // A reported list without them means the model is known not to support them.
   assert.deepEqual(ollamaThinkingLevels(['completion']), []);
@@ -336,22 +395,29 @@ test('Codex reasoning tiers come from the generated model fields, not a hardcode
     { supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'high' },
     ['agent', 'plan', 'ask']
   );
-  assert.deepEqual(reasoning.thinking.supported, ['off', 'low', 'high']);
+  assert.deepEqual(reasoning.thinking.supported, ['low', 'high']);
   assert.equal(reasoning.thinking.default, 'high');
   assert.equal(reasoning.tools, true);
   assert.deepEqual(reasoning.modes, ['agent', 'plan', 'ask']);
 
-  // A model that reports the full tier list offers the full UI vocabulary.
+  // A model that reports the full tier list offers the full effort vocabulary,
+  // including the higher max/ultra tiers and `none` as off. `on` is a boolean
+  // toggle and is not part of Codex's effort ladder.
   assert.deepEqual(
     codexThinkingLevels([
+      { reasoningEffort: 'none' },
       { reasoningEffort: 'minimal' },
       { reasoningEffort: 'low' },
       { reasoningEffort: 'medium' },
       { reasoningEffort: 'high' },
-      { reasoningEffort: 'xhigh' }
+      { reasoningEffort: 'xhigh' },
+      { reasoningEffort: 'max' },
+      { reasoningEffort: 'ultra' }
     ]),
-    [...THINKING_LEVELS]
+    ['off', 'minimal', 'low', 'medium', 'high', 'extra high', 'max', 'ultra']
   );
+  // Without `none`, the model cannot be switched off and off is not offered.
+  assert.deepEqual(codexThinkingLevels([{ reasoningEffort: 'low' }]), ['low']);
 
   // An empty reported list means the model does not reason; absent stays unknown.
   assert.deepEqual(codexThinkingLevels([]), []);
@@ -360,5 +426,6 @@ test('Codex reasoning tiers come from the generated model fields, not a hardcode
   assert.equal(codexThinkingLevels([{ reasoningEffort: 'unheard-of' }]), 'unknown');
   assert.equal(codexDefaultThinkingLevel(undefined), 'unknown');
   assert.equal(codexDefaultThinkingLevel('xhigh'), 'extra high');
-  assert.equal(codexDefaultThinkingLevel('minimal'), 'low');
+  assert.equal(codexDefaultThinkingLevel('max'), 'max');
+  assert.equal(codexDefaultThinkingLevel('minimal'), 'minimal');
 });

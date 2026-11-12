@@ -215,6 +215,15 @@ export class CodexBackend implements AgentBackend {
   /** One waiter per chat. A second tab does not replace the first chat's turn. */
   private readonly pendingTurns = new Map<string, PendingTurn>();
   /**
+   * Turn ids the app-server started only to compact a thread.
+   *
+   * Codex models compaction as a turn, but it is a transcript rewrite, not
+   * agent work. These ids are kept out of `turn/started` and the terminal
+   * events, so the host never opens a change boundary or runs post-turn
+   * orchestration (checks, reviews, delegation, autopilot) for a compaction.
+   */
+  private readonly compactTurns = new Set<string>();
+  /**
    * Turn ids already shown as a failure. Codex reports the same limit or
    * provider error on the `error` notification and again on `turn/completed`,
    * and both would otherwise become a banner.
@@ -960,6 +969,9 @@ export class CodexBackend implements AgentBackend {
       const pending = this.pendingTurns.get(handle.threadId);
       if (pending?.compact) {
         this.pendingTurns.delete(handle.threadId);
+        if (pending.turnId) {
+          this.compactTurns.delete(pending.turnId);
+        }
         pending.reject(new BackendError('provider', 'Compaction did not finish.'));
       }
     }, 120_000);
@@ -970,6 +982,9 @@ export class CodexBackend implements AgentBackend {
       const pending = this.pendingTurns.get(handle.threadId);
       if (pending?.compact) {
         this.pendingTurns.delete(handle.threadId);
+        if (pending.turnId) {
+          this.compactTurns.delete(pending.turnId);
+        }
       }
       throw error;
     } finally {
@@ -1013,6 +1028,7 @@ export class CodexBackend implements AgentBackend {
       pending.resolve();
     }
     this.pendingTurns.clear();
+    this.compactTurns.clear();
     this.threads.clear();
     this.announcedThreads.clear();
     this.openedItems.clear();
@@ -1124,6 +1140,7 @@ export class CodexBackend implements AgentBackend {
       pending.reject(failure);
     }
     this.pendingTurns.clear();
+    this.compactTurns.clear();
   }
 
   /**
@@ -1259,6 +1276,12 @@ export class CodexBackend implements AgentBackend {
         if (pending) {
           pending.turnId = turn.id;
         }
+        if (pending?.compact) {
+          // Compaction starts a turn inside the app-server. Record it so the
+          // terminal event is swallowed too, and never report it as a user turn.
+          this.compactTurns.add(turn.id);
+          break;
+        }
         this.events.fire({ type: 'turn/started', backendId: this.id, threadId, turnId: turn.id });
         break;
       }
@@ -1380,6 +1403,9 @@ export class CodexBackend implements AgentBackend {
         const pending = this.pendingTurns.get(notification.threadId);
         if (pending?.compact) {
           this.pendingTurns.delete(notification.threadId);
+          if (pending.turnId) {
+            this.compactTurns.delete(pending.turnId);
+          }
           pending.resolve();
         }
         break;
@@ -1463,19 +1489,28 @@ export class CodexBackend implements AgentBackend {
    * a clean `completed`.
    */
   private finishTurn(threadId: string, turn: Turn): void {
+    // A compact turn is a transcript rewrite, not agent work. Its terminal
+    // lifecycle is swallowed so the host never opens a change boundary or runs
+    // post-turn orchestration for a compaction; a failure still surfaces as an
+    // `error`, because that is the user's only signal that compaction failed.
+    const compaction = this.compactTurns.delete(turn.id);
     switch (turn.status) {
       case 'completed':
-        this.events.fire({ type: 'turn/completed', backendId: this.id, threadId, turnId: turn.id });
+        if (!compaction) {
+          this.events.fire({ type: 'turn/completed', backendId: this.id, threadId, turnId: turn.id });
+        }
         break;
       case 'interrupted':
-        this.events.fire({
-          type: 'turn/interrupted',
-          backendId: this.id,
-          threadId,
-          turnId: turn.id,
-          reason: 'Response stopped.',
-          canceled: true
-        });
+        if (!compaction) {
+          this.events.fire({
+            type: 'turn/interrupted',
+            backendId: this.id,
+            threadId,
+            turnId: turn.id,
+            reason: 'Response stopped.',
+            canceled: true
+          });
+        }
         break;
       case 'failed':
         // A transient host failure (the model host is full, an upstream rate
@@ -1487,7 +1522,9 @@ export class CodexBackend implements AgentBackend {
         // card and a plan that looks stopped. A genuinely terminal failure
         // (usage limit, context window, auth, policy) keeps the banner.
         if (isRetryableCodexFailure(turn.error) && this.pendingTurns.has(threadId)) {
-          this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId, turnId: turn.id });
+          if (!compaction) {
+            this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId, turnId: turn.id });
+          }
           const pending = this.pendingTurns.get(threadId);
           if (pending) {
             this.pendingTurns.delete(threadId);
@@ -1518,7 +1555,9 @@ export class CodexBackend implements AgentBackend {
             code: errorCodeFor(turn.error?.message)
           });
         }
-        this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId, turnId: turn.id });
+        if (!compaction) {
+          this.events.fire({ type: 'turn/interrupted', backendId: this.id, threadId, turnId: turn.id });
+        }
         break;
       case 'inProgress':
       default:

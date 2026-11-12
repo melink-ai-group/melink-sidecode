@@ -8,7 +8,17 @@ import type {
 
 const MODES = new Set<DefaultMode>(['agent', 'plan', 'ask']);
 const PERMISSIONS = new Set<PermissionLevel>(['read-only', 'default', 'unrestricted']);
-const THINKING = new Set<ModelSettingOverrides['thinking']>(['off', 'low', 'medium', 'high', 'extra high']);
+const THINKING = new Set<ModelSettingOverrides['thinking']>([
+  'off',
+  'on',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'extra high',
+  'max',
+  'ultra'
+]);
 
 /** Composer choices saved with one open chat tab. */
 export interface StoredComposer {
