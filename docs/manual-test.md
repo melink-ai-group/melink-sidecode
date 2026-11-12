@@ -1,12 +1,12 @@
-# Manual test script — sideCode v0.3.1
+# Manual test script — sideCode v0.3.2
 
-Runnable checklist for signing off v0.3.1. Work top to bottom; tick `[x]` for pass,
+Runnable checklist for signing off v0.3.2. Work top to bottom; tick `[x]` for pass,
 leave `[ ]` and record the failure (or promote it to a known limitation) for a miss.
 
 Run every step in both hosts (see [Per-host pass](#5-per-host-pass)) unless a step
 names a single host.
 
-- Extension under test: `melink-sidecode` 0.3.1 (`melink` publisher)
+- Extension under test: `melink-sidecode` 0.3.2 (`melink` publisher)
 - Build under test: `npm run build` output in `dist/`
 - Tester: ............................  Date: ............
 - Host A (plain VS Code): version ............
@@ -16,7 +16,7 @@ names a single host.
 
 ## Release acceptance criteria → step map
 
-v0.3.1 ships only when all six criteria pass in both hosts.
+v0.3.2 ships only when all six criteria pass in both hosts.
 | # | Release acceptance criterion | Proven by |
 |---|---|---|
 | RC-1 | **Provider isolation.** A provider that cannot be used (CLI missing, no credential, rejected credential) degrades only itself: it produces no error noise in, and never blocks, the other provider. | Steps 1–14 |
@@ -67,11 +67,11 @@ readiness rules, assertion tool, and screenshot storage.
 ## 0. Setup
 
 - [ ] 0.1 Install the build: `npm run build`, then install the produced `.vsix` in
-      each host (`code -n --install-extension ./melink-sidecode-0.3.1.vsix` for
+      each host (`code -n --install-extension ./melink-sidecode-0.3.2.vsix` for
       VS Code; for Cursor use the Extensions view → `...` → *Install from VSIX*).
 - [ ] 0.1b. Release runs use the asset matching this machine's OS/architecture,
-      e.g. `melink-sidecode-0.3.1-win32-x64.vsix` on Windows x64 or
-      `melink-sidecode-0.3.1-linux-x64.vsix` on Linux x64 (see section 4d).
+      e.g. `melink-sidecode-0.3.2-win32-x64.vsix` on Windows x64 or
+      `melink-sidecode-0.3.2-linux-x64.vsix` on Linux x64 (see section 4d).
 - [ ] 0.2 Restart the host so `deactivate`/`activate` run against a clean state.
 - [ ] 0.3 Record the Codex CLI version: `codex --version`
       (expected baseline: `codex-cli 0.156.1`; the supported protocol window is
@@ -1166,8 +1166,8 @@ one and dictation fails without affecting the rest of the sidebar.
 ### Shared preparation
 
 - [ ] D1. Install the matching release asset:
-      - Windows x64: `code --install-extension .\melink-sidecode-0.3.1-win32-x64.vsix`
-      - Linux x64: `code --install-extension ./melink-sidecode-0.3.1-linux-x64.vsix`
+      - Windows x64: `code --install-extension .\melink-sidecode-0.3.2-win32-x64.vsix`
+      - Linux x64: `code --install-extension ./melink-sidecode-0.3.2-linux-x64.vsix`
       (or Extensions view -> `...` -> *Install from VSIX...*), then reload the window.
 - [ ] D2. Confirm the packaged binaries are present in the installed extension:
       `dist/bin/ffmpeg.exe` on Windows, `dist/bin/ffmpeg` on Linux, and
@@ -1281,11 +1281,11 @@ fails is either fixed (recorded in the headless section) or listed under Â§7.
 
 Measured on the current working tree, so the numbers stay truthful before sign-off:
 
-- **Package version:** 0.3.1 (`package.json`)
+- **Package version:** 0.3.2 (`package.json`)
 - **Node test files:** 199 (`src/**/*.test.ts`)
-- **Node tests:** 1887 declarations, 1907 reported (parameterized cases account for the difference): 1895 pass, 12 skipped, 0 failures (Node suite within `npm test`). The optional real-CLI compatibility suite also passed against OpenCode 1.19.4 and 2.2.6 with local mock providers.
+- **Node tests:** 1891 declarations, 1911 reported (parameterized cases account for the difference): 1899 pass, 12 skipped, 0 failures (Node suite within `npm test`). The optional real-CLI compatibility suite also passed against OpenCode 1.19.4 and 2.2.6 with local mock providers.
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
-- **DOM suite:** 12 files / 96 tests, all passing (DOM suite within `npm test`). `npm test`
+- **DOM suite:** 13 files / 100 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.
 - **Typecheck:** 0 known errors; `npm run typecheck` and `npm run lint` are green.
 - **Hex colour literals:** 0 occurrences across 0 lines in `src/webview/styles.css`

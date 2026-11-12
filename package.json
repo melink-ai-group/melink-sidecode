@@ -2,7 +2,7 @@
   "name": "melink-sidecode",
   "displayName": "sideCode",
   "description": "sideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "melink",
   "icon": "media/melink-logo.png",
   "license": "MIT",
@@ -275,21 +275,29 @@
           "enum": [
             "",
             "off",
+            "on",
+            "minimal",
             "low",
             "medium",
             "high",
-            "extra high"
+            "extra high",
+            "max",
+            "ultra"
           ],
           "enumDescriptions": [
             "No app default: each model uses its own reported default level.",
             "Off: do not reason.",
-            "Low: minimal reasoning.",
+            "On: enable reasoning where the model only offers a toggle.",
+            "Minimal: the lowest reasoning effort.",
+            "Low: light reasoning.",
             "Medium: balanced reasoning.",
             "High: more reasoning.",
-            "Extra high: the model's maximum reasoning effort."
+            "Extra high: the xhigh tier.",
+            "Max: the highest standard reasoning effort.",
+            "Ultra: maximum reasoning with automatic task delegation."
           ],
           "default": "",
-          "description": "App-level default thinking level. A per-model choice overrides it, and a model's own reported default overrides this when neither is set."
+          "description": "App-level default thinking level. A per-model choice overrides it, and a model's own reported default overrides this when neither is set. Only levels the selected model reports are offered in the chat."
         },
         "melink.defaults.dictationModel": {
           "type": "string",

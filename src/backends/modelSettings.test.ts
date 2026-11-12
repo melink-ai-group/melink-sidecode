@@ -87,7 +87,7 @@ test('an override for a capability the model does not report is dropped', async 
   };
   const store = new ModelSettingsStore(storage);
   const resolved = store.resolve('codex', 'no-reasoning', noReasoning);
-  assert.equal(resolved.thinking, 'off');
+  assert.equal(resolved.thinking, 'unknown');
   assert.equal(resolved.contextWindow, 'unknown');
 });
 

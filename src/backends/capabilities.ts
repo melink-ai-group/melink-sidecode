@@ -178,9 +178,9 @@ export function clampThinkingLevel(
 }
 
 /**
- * Whether a thinking level is meaningful for a model: the model is known to
- * reason and lists the level. `off` is supported by every reasoning model even
- * when the provider does not enumerate it, because it is the absence of effort.
+ * Whether a thinking level is meaningful for a model: the model lists it.
+ * There is no implicit level: a provider that offers a boolean toggle reports
+ * `on`/`off` explicitly, and a provider that omits `off` cannot be switched off.
  */
 export function supportsThinkingLevel(
   level: ThinkingLevel,
@@ -188,9 +188,6 @@ export function supportsThinkingLevel(
 ): boolean {
   if (!isKnown(supported)) {
     return false;
-  }
-  if (level === 'off') {
-    return true;
   }
   return supported.includes(level);
 }
@@ -207,8 +204,9 @@ function resolveThinking(
     return { value: 'unknown', overridden: false };
   }
   if (supported.length === 0) {
-    // Reported as not reasoning: the only honest value is `off`.
-    return { value: 'off', overridden: false };
+    // Reported as not reasoning: no level applies, so nothing may be shown or
+    // sent. `off` is not implied because the model never advertised a control.
+    return { value: 'unknown', overridden: false };
   }
   if (isThinkingLevel(override.thinking)) {
     // A stored override is honored, but clamped to the model's supported levels:
@@ -226,8 +224,10 @@ function resolveThinking(
   if (isThinkingLevel(appDefault) && supportsThinkingLevel(appDefault, supported)) {
     return { value: appDefault, overridden: false };
   }
-  // A reasoning model with no reported default: the lowest supported effort.
-  return { value: supported[0], overridden: false };
+  // A reasoning model with no reported default: the lowest active effort, so a
+  // missing provider default never silently turns reasoning off.
+  const firstActive = supported.find((level) => level !== 'off') ?? supported[0];
+  return { value: firstActive, overridden: false };
 }
 
 /**
@@ -318,11 +318,11 @@ export function sanitizeOverrides(
  * Native vocabulary mapping
  * ---------------------------------------------------------------------------
  *
- * The UI names only the five `ThinkingLevel` values. Each adapter needs its own
- * provider's values, so the mapping lives here as pure functions rather than in
- * the UI or inline in an adapter. `extra high` is the deliberate top-of-scale
- * alias: it maps to Ollama's `max` and to Codex's top tier, so a provider that
- * tops out below the UI's scale still receives its own highest value.
+ * The UI ladder names every tier the supported providers report. Each adapter
+ * needs its own provider's spelling, so the mapping lives here as pure
+ * functions rather than in the UI or inline in an adapter. `extra high` is
+ * OpenAI's `xhigh`; `max` and `ultra` are higher tiers some Codex models report;
+ * `minimal` is OpenAI's lowest effort; `on` is a provider's boolean toggle.
  */
 
 /**
@@ -344,13 +344,58 @@ export function overridesFromResolved(resolved: ResolvedModelSettings): ModelSet
   return overrides;
 }
 
-/** The value Ollama's `think` field accepts for a UI level. */
-export function ollamaThinkValue(level: ThinkingLevel): false | string {
-  if (level === 'off') {
-    return false;
+/**
+ * The UI level for a native reasoning tier, shared by every provider that spells
+ * efforts in OpenAI's vocabulary. `true`/`false` are a provider's boolean
+ * toggle. An unknown spelling returns `undefined` so a provider update is hidden
+ * rather than guessed.
+ */
+export function thinkingLevelFromEffort(value: unknown): ThinkingLevel | undefined {
+  switch (value) {
+    case false:
+    case 'off':
+    case 'none':
+      return 'off';
+    case true:
+    case 'on':
+      return 'on';
+    case 'minimal':
+      return 'minimal';
+    case 'low':
+      return 'low';
+    case 'medium':
+      return 'medium';
+    case 'high':
+      return 'high';
+    case 'xhigh':
+    case 'extra_high':
+    case 'extraHigh':
+      return 'extra high';
+    case 'max':
+      return 'max';
+    case 'ultra':
+      return 'ultra';
+    default:
+      return isThinkingLevel(value) ? value : undefined;
   }
-  // Ollama's own levels end at `max`; the UI's top level aliases onto it.
-  return level === 'extra high' ? 'max' : level;
+}
+
+/** The value Ollama's `think` field accepts for a UI level. */
+export function ollamaThinkValue(level: ThinkingLevel): false | true | string {
+  switch (level) {
+    case 'off':
+      return false;
+    case 'on':
+      return true;
+    // Ollama's own levels end at `max`; the two higher Codex tiers alias onto it
+    // so a value from a previous model still degrades to a valid Ollama tier.
+    case 'extra high':
+    case 'max':
+    case 'ultra':
+      return 'max';
+    default:
+      return level;
+  }
 }
 
 /**
@@ -374,21 +419,15 @@ export function ollamaNativeRequest(settings?: ModelSettingOverrides): Record<st
 
 /**
  * The UI level for an Ollama native `think` value, or `undefined` when it is not
- * one. `false` is Ollama's "do not reason" spelling.
+ * one. `false` is Ollama's "do not reason" spelling and `true` its toggle-on.
  */
 export function thinkingLevelFromOllama(value: unknown): ThinkingLevel | undefined {
-  if (value === false || value === 'off' || value === 'none') {
-    return 'off';
-  }
-  if (value === 'max') {
-    return 'extra high';
-  }
-  return isThinkingLevel(value) ? value : undefined;
+  return thinkingLevelFromEffort(value);
 }
 
 /**
- * The top Codex reasoning tier the UI's `extra high` maps onto. Named once so
- * the top-of-scale alias is a single edit rather than a scattered literal.
+ * The Codex reasoning tier the UI's `extra high` maps onto. Named once so the
+ * `xhigh` alias is a single edit rather than a scattered literal.
  */
 export const TOP_CODEX_REASONING_TIER = 'xhigh';
 
@@ -396,14 +435,21 @@ export const TOP_CODEX_REASONING_TIER = 'xhigh';
  * The Codex reasoning tier for a UI level.
  *
  * Codex's generated `ReasoningEffort` is an open string using its own tiers.
- * `off` is the absence of a tier and is therefore `undefined`: Codex is not told
- * to reason less, the effort field is simply omitted. `extra high` maps to the
- * top tier so the UI's highest level is always expressible.
+ * `off` maps to `none` because it is only offered when the model's own
+ * `supportedReasoningEfforts` lists `none`; a model that does not list it never
+ * renders the control. `extra high` maps to `xhigh`, and the newer `max`/`ultra`
+ * tiers pass through unchanged.
  */
 export function codexReasoningEffort(level: ThinkingLevel): string | undefined {
   switch (level) {
     case 'off':
+      return 'none';
+    case 'on':
+      // A boolean toggle has no effort spelling; omitting the tier leaves the
+      // model's own default in place.
       return undefined;
+    case 'minimal':
+      return 'minimal';
     case 'low':
       return 'low';
     case 'medium':
@@ -412,6 +458,10 @@ export function codexReasoningEffort(level: ThinkingLevel): string | undefined {
       return 'high';
     case 'extra high':
       return TOP_CODEX_REASONING_TIER;
+    case 'max':
+      return 'max';
+    case 'ultra':
+      return 'ultra';
     default:
       return undefined;
   }
@@ -419,25 +469,14 @@ export function codexReasoningEffort(level: ThinkingLevel): string | undefined {
 
 /** The UI level for a Codex native tier, or `undefined` when it is not one. */
 export function thinkingLevelFromCodex(value: unknown): ThinkingLevel | undefined {
-  if (value === TOP_CODEX_REASONING_TIER || value === 'max' || value === 'extra_high' || value === 'extraHigh') {
-    return 'extra high';
-  }
-  // Codex's lowest tier is spelled `minimal`; it maps onto the UI's `low`.
-  if (value === 'minimal') {
-    return 'low';
-  }
-  if (value === 'none') {
-    return 'off';
-  }
-  return isThinkingLevel(value) ? value : undefined;
+  return thinkingLevelFromEffort(value);
 }
 
 /**
  * The native Codex turn fields for resolved per-model settings.
  *
- * `effort` is only emitted when a tier applies: `off` (and an unresolved
- * setting) means the field is omitted, so Codex uses the model's own default
- * rather than being told to reason less than it can.
+ * `effort` is omitted only when no tier applies (`on`, an unresolved setting).
+ * `off` sends `none`, which the host only resolves when the model advertised it.
  */
 export function codexNativeRequest(settings?: ModelSettingOverrides): { effort?: string; summary: 'auto' } {
   const effort = settings?.thinking === undefined ? undefined : codexReasoningEffort(settings.thinking);
@@ -498,14 +537,56 @@ export function parseOllamaCapabilities(show: unknown): readonly string[] | unde
  * `thinking` present means the model reasons. A reported list without it means
  * the model is known not to reason (an empty list), which is distinct from a
  * missing list (`'unknown'`), where the provider said nothing at all.
+ *
+ * When Ollama reports the model's own controls (`thinking.values`), exactly
+ * those levels are offered. `off` is always expressible with `think: false`,
+ * and a model that reports no controls at all is a boolean toggle, so the
+ * honest baseline is `off`/`on` rather than the full effort ladder.
  */
 export function ollamaThinkingLevels(
-  capabilities: readonly string[] | undefined
+  capabilities: readonly string[] | undefined,
+  controls?: unknown
 ): CapabilityState<ThinkingLevel[]> {
   if (capabilities === undefined) {
     return 'unknown';
   }
-  return capabilities.includes('thinking') ? [...THINKING_LEVELS] : [];
+  if (!capabilities.includes('thinking')) {
+    return [];
+  }
+  const values =
+    typeof controls === 'object' && controls !== null
+      ? (controls as { values?: unknown }).values
+      : undefined;
+  const mapped = new Set<ThinkingLevel>(['off']);
+  let recognised = 0;
+  if (Array.isArray(values)) {
+    for (const value of values) {
+      const level = thinkingLevelFromOllama(value);
+      if (level) {
+        mapped.add(level);
+        recognised += 1;
+      }
+    }
+    // A non-empty list we cannot place at all is a provider change, not a
+    // boolean toggle: stay unknown so the UI explains instead of guessing.
+    if (values.length > 0 && recognised === 0) {
+      return 'unknown';
+    }
+  } else {
+    // No control list: `think: true` is still a valid toggle for a reasoning
+    // model, so off/on is the honest baseline.
+    mapped.add('on');
+  }
+  return THINKING_LEVELS.filter((level) => mapped.has(level));
+}
+
+/** The model's own reported thinking default, when Ollama named one. */
+export function ollamaDefaultThinkingLevel(controls?: unknown): CapabilityState<ThinkingLevel> {
+  const raw =
+    typeof controls === 'object' && controls !== null
+      ? (controls as { default?: unknown }).default
+      : undefined;
+  return thinkingLevelFromOllama(raw) ?? 'unknown';
 }
 
 /** Tool support from an Ollama capabilities list, or `'unknown'` when absent. */
@@ -525,6 +606,8 @@ export function ollamaToolSupport(
  */
 export function ollamaCapabilities(show: unknown, modes: readonly DefaultMode[]): ModelCapabilities {
   const capabilities = parseOllamaCapabilities(show);
+  const controls =
+    typeof show === 'object' && show !== null ? (show as { thinking?: unknown }).thinking : undefined;
   const modelInfo =
     typeof show === 'object' && show !== null ? (show as { model_info?: unknown }).model_info : undefined;
   const contextLength = parseOllamaContextLength(modelInfo);
@@ -541,8 +624,8 @@ export function ollamaCapabilities(show: unknown, modes: readonly DefaultMode[])
   return {
     contextWindow,
     thinking: {
-      supported: ollamaThinkingLevels(capabilities),
-      default: 'unknown'
+      supported: ollamaThinkingLevels(capabilities, controls),
+      default: ollamaDefaultThinkingLevel(controls)
     },
     ...(capabilities ? { inputModalities: capabilities.includes('vision') ? ['text', 'image'] : ['text'] } : {}),
     tools: ollamaToolSupport(capabilities),
@@ -559,8 +642,8 @@ export function ollamaCapabilities(show: unknown, modes: readonly DefaultMode[])
  * The tiers come from the provider: each reported native effort is mapped onto
  * the UI ladder, so a model that reports only some tiers offers only those. An
  * unrecognized native tier is not forced onto the ladder; it is dropped rather
- * than guessed. `off` is always available once the model is known to reason,
- * because it is the absence of effort.
+ * than guessed. `off` is offered only when the provider lists `none`; a model
+ * that never reports it cannot be switched off through this control.
  */
 export function codexThinkingLevels(
   supportedReasoningEfforts: readonly { reasoningEffort: string }[] | undefined
@@ -583,8 +666,6 @@ export function codexThinkingLevels(
     // fabricating a supported set, so the UI hides the control.
     return 'unknown';
   }
-  // Present in the shared order, with `off` always first for a reasoning model.
-  mapped.add('off');
   return THINKING_LEVELS.filter((level) => mapped.has(level));
 }
 
@@ -599,8 +680,14 @@ export function codexDefaultThinkingLevel(native: string | undefined): Capabilit
 /**
  * Build the provider-neutral descriptor for one Codex model from the generated
  * `Model` fields. Codex models drive tool execution, so `tools` is a reported
- * `true`; `modes` is supplied by the adapter. Codex reports no per-model context
- * window in the model list, so no maximum is invented.
+ * `true`; `modes` is supplied by the adapter.
+ *
+ * Codex reports no per-model context window in `model/list`, and `turn/start`
+ * has no context-window field, so no maximum is invented here. The CLI's global
+ * `model_context_window` setting is not per-model, and
+ * `thread/tokenUsage/updated.modelContextWindow` is a live usage denominator,
+ * not a setting the sidebar can send. The context control therefore stays
+ * unavailable instead of offering a value the provider would ignore.
  */
 export function codexCapabilities(
   model: {

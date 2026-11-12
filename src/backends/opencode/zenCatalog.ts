@@ -5,7 +5,12 @@
  */
 
 import type { BackendModel, ModelCapabilities, ThinkingLevel } from '../types.ts';
-import { UNKNOWN_CAPABILITIES, normalizeContextWindow } from '../capabilities.ts';
+import { THINKING_LEVELS } from '../types.ts';
+import {
+  UNKNOWN_CAPABILITIES,
+  normalizeContextWindow,
+  thinkingLevelFromEffort
+} from '../capabilities.ts';
 import {
   PROVIDER_PROBE_TIMEOUT_MS,
   ProviderTimeoutError,
@@ -28,11 +33,23 @@ export interface ModelsDevCost {
   output?: number;
 }
 
+/**
+ * One reasoning control models.dev reports for a model. `effort` carries the
+ * provider's own values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+ * `max`); `toggle` is a plain on/off control; `budget_tokens` is a numeric
+ * budget the UI does not express.
+ */
+export interface ModelsDevReasoningOption {
+  type?: string;
+  values?: unknown[];
+}
+
 export interface ModelsDevModelMeta {
   name?: string;
   cost?: ModelsDevCost;
   limit?: { context?: number; output?: number };
   reasoning?: boolean;
+  reasoning_options?: ModelsDevReasoningOption[];
   tool_call?: boolean;
   modalities?: { input?: string[] };
 }
@@ -135,21 +152,55 @@ export function capabilitiesFromMeta(meta: ModelsDevModelMeta | undefined): Mode
     max: meta.limit?.context,
     default: meta.limit?.context
   });
-  const thinkingSupported: ThinkingLevel[] | 'unknown' =
-    meta.reasoning === true
-      ? (['low', 'medium', 'high', 'extra high'] as ThinkingLevel[])
-      : meta.reasoning === false
-        ? []
-        : 'unknown';
   return {
     contextWindow,
-    thinking: {
-      supported: thinkingSupported,
-      default: thinkingSupported === 'unknown' ? 'unknown' : thinkingSupported[0] ?? 'unknown'
-    },
+    thinking: thinkingFromReasoningOptions(meta),
     ...(meta.modalities?.input ? { inputModalities: meta.modalities.input } : {}),
     tools: meta.tool_call === false ? false : true,
     modes: 'unknown'
+  };
+}
+
+/**
+ * The model's own reasoning levels from models.dev `reasoning_options`.
+ *
+ * `effort` values are mapped onto the shared ladder, so a model that reports
+ * only `low`/`high` offers only those. A `toggle` control is a boolean, and
+ * therefore offers `off`/`on`, not the effort ladder. A model that reports
+ * reasoning but no control we can name stays `unknown` rather than inheriting
+ * a plausible-but-wrong set; `budget_tokens` alone is not a level control.
+ * models.dev reports no per-model default, so the default stays unknown.
+ */
+export function thinkingFromReasoningOptions(meta: ModelsDevModelMeta): {
+  supported: ThinkingLevel[] | 'unknown';
+  default: ThinkingLevel | 'unknown';
+} {
+  if (meta.reasoning === false) {
+    return { supported: [], default: 'unknown' };
+  }
+  if (meta.reasoning !== true || !Array.isArray(meta.reasoning_options)) {
+    return { supported: 'unknown', default: 'unknown' };
+  }
+  const mapped = new Set<ThinkingLevel>();
+  for (const option of meta.reasoning_options) {
+    if (option.type === 'effort' && Array.isArray(option.values)) {
+      for (const value of option.values) {
+        const level = thinkingLevelFromEffort(value);
+        if (level) {
+          mapped.add(level);
+        }
+      }
+    } else if (option.type === 'toggle') {
+      mapped.add('off');
+      mapped.add('on');
+    }
+  }
+  if (mapped.size === 0) {
+    return { supported: 'unknown', default: 'unknown' };
+  }
+  return {
+    supported: THINKING_LEVELS.filter((level) => mapped.has(level)),
+    default: 'unknown'
   };
 }
 
@@ -199,11 +250,20 @@ export function parseModelsDevOpencode(body: unknown): Record<string, ModelsDevM
     const row = value as Record<string, unknown>;
     const cost = row.cost && typeof row.cost === 'object' ? (row.cost as ModelsDevCost) : undefined;
     const limit = row.limit && typeof row.limit === 'object' ? (row.limit as { context?: number; output?: number }) : undefined;
+    const reasoningOptions = Array.isArray(row.reasoning_options)
+      ? row.reasoning_options
+          .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+          .map((entry) => ({
+            ...(typeof entry.type === 'string' ? { type: entry.type } : {}),
+            ...(Array.isArray(entry.values) ? { values: entry.values } : {})
+          }))
+      : undefined;
     out[id] = {
       ...(typeof row.name === 'string' ? { name: row.name } : {}),
       ...(cost ? { cost } : {}),
       ...(limit ? { limit } : {}),
       ...(typeof row.reasoning === 'boolean' ? { reasoning: row.reasoning } : {}),
+      ...(reasoningOptions ? { reasoning_options: reasoningOptions } : {}),
       ...(typeof row.tool_call === 'boolean' ? { tool_call: row.tool_call } : {}),
       ...(row.modalities && typeof row.modalities === 'object' && Array.isArray((row.modalities as { input?: unknown }).input)
         ? { modalities: { input: ((row.modalities as { input: unknown[] }).input).filter((value): value is string => typeof value === 'string') } } : {})

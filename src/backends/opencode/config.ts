@@ -195,22 +195,34 @@ export function outputLimitFor(context: number): number {
   return Math.max(1, Math.floor(context / 2));
 }
 
-/** The UI thinking level as an opencode/OpenAI-compatible reasoning effort. */
+/**
+ * The UI thinking level as an opencode/OpenAI-compatible reasoning effort.
+ *
+ * Every distinct tier is passed through; a model never receives one its
+ * capability descriptor did not list, because the host clamps before this map
+ * runs. `off` sends `none` (the OpenAI spelling) and `on` omits the field for a
+ * boolean-toggle model.
+ */
 export function opencodeReasoningEffort(level: ThinkingLevel): string | undefined {
   switch (level) {
     case 'off':
-      // `off` is the absence of an effort: nothing is sent, so the model default
-      // holds rather than being told to reason less than it can.
+      return 'none';
+    case 'on':
       return undefined;
+    case 'minimal':
+      return 'minimal';
     case 'low':
       return 'low';
     case 'medium':
       return 'medium';
     case 'high':
-    case 'extra high':
-      // The generic OpenAI-compatible adapter accepts low/medium/high; the top
-      // UI level aliases onto its highest tier rather than inventing a value.
       return 'high';
+    case 'extra high':
+      return 'xhigh';
+    case 'max':
+      return 'max';
+    case 'ultra':
+      return 'ultra';
     default:
       return undefined;
   }

@@ -215,7 +215,10 @@ export function thinkingControl(
   const defaultValue =
     isKnown(providerDefault) && offered.includes(providerDefault) ? providerDefault : undefined;
   const resolved = settings.thinking;
-  const value = isKnown(resolved) && offered.includes(resolved) ? resolved : defaultValue ?? offered[0];
+  // When no reported value applies, mirror the host's fallback: the lowest
+  // active effort, never a silent switch to off.
+  const fallback = offered.find((level) => level !== 'off') ?? offered[0];
+  const value = isKnown(resolved) && offered.includes(resolved) ? resolved : defaultValue ?? fallback;
 
   return {
     available: true,
