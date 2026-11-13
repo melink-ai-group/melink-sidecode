@@ -115,6 +115,7 @@ import {
 import { runTurnEnd } from './orchestration/turnEnd.ts';
 import {
   buildOrchestrationDictationPrompt,
+  collectOrchestrationTurnWork,
   parseOrchestrationDictationDecision,
   ORCHESTRATION_DICTATION_ROLES,
   ORCHESTRATION_DICTATION_TIMEOUT_MS,
@@ -161,6 +162,7 @@ import { NativeDiffService, type NativeDiffResult } from './changes/vscodeDiff';
 import { OPEN_CHANGE_DIFF_COMMAND, OPEN_TURN_CHANGES_COMMAND } from './changes/nativeDiff';
 import { ChangeTracker, type TurnChangeSet } from './changes/tracker';
 import { CheckHost } from './review/checkHost.ts';
+import { resolveCheckPlan } from './review/checks.ts';
 import { decisionBlockReason } from './review/checkGate.ts';
 import {
   VscodeCheckStore,
@@ -1253,15 +1255,35 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!ORCHESTRATION_DICTATION_ROLES.some((role) => choices[role] === 'auto')) {
       return { reason: 'no-auto-role' };
     }
-    const request = turnRequestText(
-      this.store.getTranscript(set.backendId, set.threadId),
-      set.messageId
-    );
+    const transcript = this.store.getTranscript(set.backendId, set.threadId);
+    const request = turnRequestText(transcript, set.messageId);
     if (!request) {
       return { reason: 'no-request' };
     }
+    let testingCommands: string[] | undefined;
+    if (choices.testing === 'auto') {
+      try {
+        const settings = readWorkspaceCheckSettings();
+        const workspace = vscodeCheckWorkspace();
+        const root = workspace.workspaceRoot();
+        const manifest = settings.trusted && root && settings.commands === undefined
+          ? await workspace.readManifest(root) : undefined;
+        if (settings.commands !== undefined || manifest) {
+          const checks = resolveCheckPlan({ ...settings, enabled: true }, {
+            trusted: settings.trusted,
+            scripts: manifest?.scripts ?? {},
+            packageManager: manifest?.packageManager
+          });
+          if (checks.status === 'run') testingCommands = checks.commands.map((check) => check.command);
+        }
+      } catch {
+        // Unknown coverage keeps the fixed Auto testing policy.
+      }
+    }
     const prompt = buildOrchestrationDictationPrompt({
       request,
+      work: collectOrchestrationTurnWork(transcript, set.messageId),
+      testingCommands,
       mode,
       quick: plan.quick,
       choices,
