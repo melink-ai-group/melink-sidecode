@@ -114,12 +114,12 @@ settings below.
 
 ### Option A â€” from a packaged `.vsix`
 
-1. Build the package (or obtain a released `melink-sidecode-0.3.2.vsix`) â€”
+1. Build the package (or obtain a released `melink-sidecode-0.3.3.vsix`) â€”
    see [Build from source](#build-from-source) if you need to make one.
 2. Install it:
    - **VS Code CLI:**
      ```sh
-     code --install-extension ./melink-sidecode-0.3.2.vsix
+     code --install-extension ./melink-sidecode-0.3.3.vsix
      ```
    - **Any host (including Open VSX consumers):** open the Extensions view, click
      the `...` menu in its title bar, choose **Install from VSIXâ€¦**, and pick the
@@ -161,7 +161,7 @@ npm run build
 with:
 
 ```sh
-npm run package   # produces melink-sidecode-0.3.2.vsix
+npm run package   # produces melink-sidecode-0.3.3.vsix
 ```
 
 `npm run package` still packages for the current host under the default name. For
@@ -266,7 +266,7 @@ Optional settings (`Settings â†’ search "melink"`, or **sideCode: Open sett
 | `melink.ollama.opencode.path` | `opencode` | Path to the `opencode` CLI when `cliSource` is `local`. Ignored when bundled. |
 | `melink.ollama.opencode.zvecGrep` | `false` | Legacy. Prefer `melink.skills.zvecGrep`. |
 | `melink.review.diffReview` | `false` | Legacy opt-in for the read-only advisory diff review, used only while `melink.orchestration.reviewing` is unset. Application scope, so only a user setting can enable it. |
-| `melink.orchestration.dictation` | `true` | One read-only model call after an Agent turn decides which Auto passes run, from your request and the changed paths. On/Off keep their meaning; Off makes no call. Uses the dictation model when set, otherwise the chat's model. |
+| `melink.orchestration.dictation` | `true` | A read-only model decision after an Agent turn uses your request, changed paths, and bounded turn activity to avoid repeating completed work in Auto passes. Testing coverage is compared with the configured or detected host commands; a build alone does not replace tests. Set Testing to Auto to allow this decision (Testing defaults to On). On/Off keep their meaning; Off makes no call. Uses the dictation model when set, otherwise the chat's model. |
 | `melink.orchestration.testing` | `on` | Run post-turn checks after a turn that changed files; falls back to `melink.review.checks.enabled` until saved. `auto` runs only for code (non-documentation) changes, `off` never. |
 | `melink.orchestration.reviewing` | `auto` | Advisory diff review; falls back to `melink.review.diffReview` until saved. `auto` runs only for code changes, `on` for any change set, `off` never. |
 | `melink.orchestration.styling` | `auto` | Advisory styling check for frontend work, compared with the brand kit and existing components. `auto` and `on` both require a frontend file change; `off` never. |

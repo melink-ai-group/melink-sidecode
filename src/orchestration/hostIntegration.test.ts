@@ -7,6 +7,12 @@ import { resolvePostTurnRoles, orchestrationTurnSnapshot, orchestrationDiagnosti
 import { ORCHESTRATION_DEFAULTS } from './settings.ts';
 import { turnRequestText } from '../review/turnReview.ts';
 import { collectDoubleCheck, doubleCheckNotice } from './doubleCheck.ts';
+import {
+  buildOrchestrationDictationPrompt, collectOrchestrationTurnWork,
+  parseOrchestrationDictationDecision, ORCHESTRATION_DICTATION_ROLES,
+  ORCHESTRATION_DICTATION_TIMEOUT_MS
+} from './dictation.ts';
+import { resolveCheckPlan } from '../review/checks.ts';
 
 /** Execute the actual host methods with injected host seams, without VS Code. */
 async function fixture() {
@@ -131,6 +137,66 @@ test('the dictation decision narrows the Auto passes before the fixed rules run'
   assert.ok(!calls.includes('checks'));
   assert.ok(!calls.includes('diagnostics'));
   assert.equal(host.lastOrchestrationTurn?.reasons.dictation, 'used:thread-model');
+});
+
+test('the real decision call receives the owning turn work and detected or configured checks', async () => {
+  const source = await readFile(`${process.cwd()}/src/sidebarView.ts`, 'utf8');
+  const start = source.indexOf('private async decideOrchestration(');
+  const end = source.indexOf('  private ', start + 1);
+  const code = transformSync(`class Harness { ${source.slice(start, end).replace(/^private /, '')} }`,
+    { loader: 'ts', target: 'es2022' }).code;
+  let prompt = '';
+  let configured: string[] | undefined;
+  let manifestUnavailable = false;
+  const dependencies = {
+    turnRequestText, buildOrchestrationDictationPrompt, collectOrchestrationTurnWork,
+    parseOrchestrationDictationDecision, ORCHESTRATION_DICTATION_ROLES, ORCHESTRATION_DICTATION_TIMEOUT_MS,
+    resolveCheckPlan,
+    readWorkspaceCheckSettings: () => ({ trusted: true, timeoutMs: 1000, commands: configured }),
+    vscodeCheckWorkspace: () => ({ workspaceRoot: () => '/project', readManifest: async () => {
+      if (manifestUnavailable) throw new Error('Unavailable');
+      return { scripts: { typecheck: 'tsc', test: 'test runner' }, packageManager: 'pnpm@9' };
+    } }),
+    vscode: { workspace: { asRelativePath: (path: string) => path,
+      getConfiguration: () => ({ get: () => '' }) } },
+    isDocumentationPath: () => false, isFrontendPath: () => false,
+    parseDictationTarget: () => undefined,
+    runReadOnlySubagent: async (input: { prompt: string }) => {
+      prompt = input.prompt;
+      return JSON.stringify({ testing: false, reviewing: true, styling: false, doubleCheck: true });
+    }
+  };
+  const Harness = new Function(...Object.keys(dependencies), `${code}; return Harness;`)(...Object.values(dependencies));
+  const host = Object.assign(new Harness(), {
+    mode: 'agent', sessionForThread: () => ({ mode: 'agent' }),
+    store: {
+      getTranscript: () => [
+        { id: 'user', kind: 'message', role: 'user', text: 'Fix the handler' },
+        { id: 'test', kind: 'tool', command: 'pnpm run test', status: 'completed' },
+        { id: 'report', kind: 'message', role: 'assistant', text: 'Typecheck and tests passed.' },
+        { id: 'new', kind: 'message', role: 'user', text: 'Another task' },
+        { id: 'other', kind: 'tool', command: 'unrelated command', status: 'completed' }
+      ],
+      listThreads: () => [{ threadId: 'parent', modelId: 'model' }]
+    },
+    registry: { get: () => ({ permissionLevels: ['read-only'] }) },
+    resolveTurnSettings: async () => ({})
+  });
+  const choices = { ...ORCHESTRATION_DEFAULTS, testing: 'auto' };
+  const set = { backendId: 'fake', threadId: 'parent', turnId: 'turn', messageId: 'user', entries: [{ path: 'src/handler.ts' }] };
+  const decide = () => host.decideOrchestration(set, { quick: false }, choices, true, 'completed');
+  const result = await decide();
+  assert.equal(result.decision.testing, false);
+  assert.match(prompt, /\["pnpm run typecheck","pnpm run test"\]/);
+  assert.match(prompt, /Typecheck and tests passed/);
+  assert.doesNotMatch(prompt, /unrelated command/);
+  configured = ['custom compile', 'custom tests'];
+  await decide();
+  assert.match(prompt, /\["custom compile","custom tests"\]/);
+  configured = undefined;
+  manifestUnavailable = true;
+  await decide();
+  assert.match(prompt, /Host testing commands[^\n]*\n\(unknown\)/);
 });
 
 test('explicit delegation without file changes returns all worker results to the owning main agent', async () => {
