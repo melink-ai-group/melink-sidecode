@@ -72,6 +72,7 @@ import { RulesScreen } from './screens/RulesScreen';
 import { entryContains } from './transcript/shared';
 import { TranscriptRow } from './transcript/TranscriptRow';
 import { ActivityGroup, NarrationRow } from './transcript/ActivityCards';
+import { PostTurnChecks } from './transcript/AgentActivityCard';
 import { AttachmentList, ImageViewer, readClipboardFile, type ViewableImage } from './composer/attachments';
 import { QueuedTurns } from './composer/QueuedTurns';
 import { ModeMenu, ModeTrigger, PermissionPanel, PermissionTrigger } from './composer/Controls';
@@ -792,6 +793,7 @@ export function App(): JSX.Element {
     return () => cancelAnimationFrame(frame);
   }, [
     state.transcript,
+    state.turnChanges,
     state.restoring,
     state.activeThreadId,
     state.notice,
@@ -2579,6 +2581,8 @@ export function App(): JSX.Element {
                 <Fragment key={entryId}>
                   {entry.kind === 'group' ? (
                     <ActivityGroup family={entry.family} items={entry.items} />
+                  ) : entry.kind === 'post-turn-checks' ? (
+                    <PostTurnChecks items={entry.items} />
                   ) : entry.kind === 'narration' ? (
                     <NarrationRow
                       message={entry.message}

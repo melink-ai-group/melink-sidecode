@@ -17,6 +17,7 @@ export type ActivityFamily = 'lookup' | 'change' | 'command' | 'work';
 export type TranscriptEntry =
   | { kind: 'item'; item: TranscriptItemView }
   | { kind: 'group'; id: string; family: ActivityFamily; items: TranscriptItemView[] }
+  | { kind: 'post-turn-checks'; id: string; items: TranscriptItemView[] }
   | { kind: 'narration'; id: string; message: TranscriptItemView; items: TranscriptItemView[] };
 
 /** One reasoning highlight and the tool calls that followed it. */
@@ -65,9 +66,31 @@ const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'strreplace', 'apply_patch
 const DELETE_TOOLS = new Set(['delete', 'remove']);
 const COMMAND_TOOLS = new Set(['bash', 'shell', 'command', 'exec', 'powershell']);
 
-/** Walk the transcript once. Investigation stays together; an edit starts a new line. */
+/** Use the host's persisted item IDs so late results and restored chats group by the owning turn. */
+function postTurnCheckId(item: TranscriptItemView): string | undefined {
+  if (item.kind !== 'notice' || !item.agentActivity) {
+    return undefined;
+  }
+  return /^subagent_(.+)_(?:tests|review|styling|orchestration)$/.exec(item.id)?.[1]
+    ?? /^double-check_(.+)$/.exec(item.id)?.[1];
+}
+
+/** Fold investigations, edits and post-turn checks into transcript rows. */
 export function groupTranscript(items: TranscriptItemView[]): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
+  const checksByTurn = new Map<string, TranscriptItemView[]>();
+  for (const item of items) {
+    const turnId = postTurnCheckId(item);
+    if (!turnId || item.agentActivity?.status === 'unavailable') {
+      continue;
+    }
+    const checks = checksByTurn.get(turnId);
+    if (checks) {
+      checks.push(item);
+    } else {
+      checksByTurn.set(turnId, [item]);
+    }
+  }
   let run: 'work' | 'change' | undefined;
   let buffer: TranscriptItemView[] = [];
 
@@ -87,6 +110,15 @@ export function groupTranscript(items: TranscriptItemView[]): TranscriptEntry[] 
   };
 
   for (const item of items) {
+    const turnId = postTurnCheckId(item);
+    const checks = turnId ? checksByTurn.get(turnId) : undefined;
+    if (item.agentActivity?.status !== 'unavailable' && checks && checks.length > 1) {
+      if (checks[0] === item) {
+        flush();
+        entries.push({ kind: 'post-turn-checks', id: `post-turn-checks:${turnId}`, items: checks });
+      }
+      continue;
+    }
     const next = runOf(item);
     if (!next) {
       flush();
@@ -163,7 +195,7 @@ export function turnElapsedNotes(entries: TranscriptEntry[]): Map<string, number
       }
       continue;
     }
-    if (workedMs == null || (entry.kind === 'item' && entry.item.kind === 'notice')) {
+    if (workedMs == null || entry.kind === 'post-turn-checks' || (entry.kind === 'item' && entry.item.kind === 'notice')) {
       continue;
     }
     lastId = entry.kind === 'item' ? entry.item.id : entry.id;
@@ -226,10 +258,7 @@ function isDetailEntry(entry: TranscriptEntry): boolean {
   if (entry.kind === 'group') {
     return entry.family !== 'change';
   }
-  if (entry.kind === 'narration') {
-    return false;
-  }
-  return isDetailItem(entry.item);
+  return entry.kind === 'item' && isDetailItem(entry.item);
 }
 
 function isDetailItem(item: TranscriptItemView): boolean {
@@ -246,7 +275,7 @@ function isDetailItem(item: TranscriptItemView): boolean {
 }
 
 function itemsOf(entry: TranscriptEntry): TranscriptItemView[] {
-  if (entry.kind === 'group') {
+  if (entry.kind === 'group' || entry.kind === 'post-turn-checks') {
     return entry.items;
   }
   if (entry.kind === 'narration') {

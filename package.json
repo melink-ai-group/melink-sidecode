@@ -2,7 +2,7 @@
   "name": "melink-sidecode",
   "displayName": "sideCode",
   "description": "sideCode is one agent chat sidebar for VS Code and Open VSX hosts, driving Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "publisher": "melink",
   "icon": "media/melink-logo.png",
   "license": "MIT",

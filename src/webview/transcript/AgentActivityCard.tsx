@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import type { AgentActivity } from '../../backends/types';
 import { AlertIcon, CheckIcon, StopIcon } from '../Icons';
+import type { TranscriptItemView } from '../state';
 import { StatusMark } from './shared';
 
 const STATUS_LABELS: Record<AgentActivity['status'], string> = {
@@ -11,6 +12,26 @@ const STATUS_LABELS: Record<AgentActivity['status'], string> = {
   cancelled: 'Cancelled',
   unavailable: 'Unavailable'
 };
+
+export function PostTurnChecks({ items }: { items: TranscriptItemView[] }): JSX.Element {
+  const failed = items.filter((item) => item.agentActivity?.status === 'failed').length;
+  const running = items.filter((item) => item.agentActivity?.status === 'running' || item.agentActivity?.status === 'queued').length;
+  const cancelled = items.filter((item) => item.agentActivity?.status === 'cancelled').length;
+  const status = [failed && `${failed} failed`, running && `${running} running`, cancelled && `${cancelled} cancelled`]
+    .filter(Boolean).join(' · ');
+
+  return (
+    <details className="agent-activity post-turn-checks">
+      <summary>
+        <span className="agent-activity__role">Post-turn checks ({items.length})</span>
+        {status ? <span className="agent-activity__status" aria-live="polite">{status}</span> : null}
+      </summary>
+      <div className="activity-group__items">
+        {items.map(({ id, agentActivity }) => agentActivity ? <AgentActivityCard key={id} activity={agentActivity} /> : null)}
+      </div>
+    </details>
+  );
+}
 
 /**
  * A native disclosure keeps each worker compact and keyboard reachable.
