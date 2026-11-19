@@ -45,7 +45,7 @@ import { effectivePermissionLevel, isDefaultMode, modeInstructionsForTurn } from
 // the runtime module nor any child-process code; the runtime is dynamically
 // imported inside the enabled branch only. `isFileTool` is a pure predicate
 // with no child-process dependency, so it is safe to import directly.
-import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
+import { isFileTool, isTerminalStepReason, isTextPartComplete, reportedChangeOfTool } from './opencode/events';
 import { resolveOpencodeExecutable } from './opencode/resolve';
 import { readTrustedOpencodeCliSource, readTrustedOpencodePath } from '../config/settings.ts';
 import {
@@ -1398,7 +1398,8 @@ export class OllamaBackend implements AgentBackend {
     switch (event.kind) {
       case 'text':
         // opencode 1.1.65 delivers whole text parts rather than token deltas;
-        // each part is its own streamed item keyed by its part id.
+        // each part is its own streamed item keyed by its part id. OpenCode 2
+        // streams deltas and ends the part explicitly.
         this.events.fire({
           type: 'item/started',
           backendId: this.id,
@@ -1406,7 +1407,9 @@ export class OllamaBackend implements AgentBackend {
           item: { id: event.partId, kind: 'message', role: 'assistant' }
         });
         this.events.fire({ type: 'item/delta', backendId: this.id, threadId, itemId: event.partId, delta: event.text });
-        this.events.fire({ type: 'item/completed', backendId: this.id, threadId, itemId: event.partId, status: 'completed' });
+        if (isTextPartComplete(event)) {
+          this.events.fire({ type: 'item/completed', backendId: this.id, threadId, itemId: event.partId, status: 'completed' });
+        }
         break;
       case 'reasoning':
         this.events.fire({

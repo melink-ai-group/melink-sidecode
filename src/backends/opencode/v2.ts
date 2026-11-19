@@ -49,8 +49,9 @@ export function createV2EventTranslator(sessionID: string, publish: (event: Open
       const text = type.endsWith('.delta')
         ? (texts.get(partId) ?? '') + String(data.delta ?? '') : String(data.text ?? '');
       texts.set(partId, text);
-      emit(kind === 'text' ? { kind, sessionId, partId, text }
-        : { kind, sessionId, partId, text, streaming: !type.endsWith('.ended') });
+      // Both kinds stream in v2; only `*.ended` closes the part, and the host
+      // uses that to finalize the transcript item and capture a question block.
+      emit({ kind, sessionId, partId, text, streaming: !type.endsWith('.ended') });
     } else if (type === 'session.tool.input.started') {
       tools.set(String(data.id), { name: String(data.name), input: {} });
     } else if (/^session\.tool\.(called|success|failed)$/.test(type)) {
