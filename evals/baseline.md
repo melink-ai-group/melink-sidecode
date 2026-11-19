@@ -1,8 +1,8 @@
 # Golden-scenario eval report
 
-- Date: 2026-10-20T21:48:44.307Z
-- Base commit: `8622c6b`
-- Worktree: generated from the T83 eval-harness working tree at base `8622c6b` (uncommitted changes present)
+- Date: 2026-11-19T09:15:03.141Z
+- Base commit: `0e75d40`
+- Worktree: clean
 - Command: `npm run eval -- --report evals/baseline.md`
 - Mode: offline fixture scoring, no model or provider call
 - Method: each prompt is built from the mode instructions, fixture context, and request and recorded for reproducibility; scores come only from the committed golden trajectories, not a live model

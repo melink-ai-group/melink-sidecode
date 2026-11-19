@@ -840,8 +840,8 @@ never calls a provider or reads model output, and there is no live mode; adding
 one would be opt-in and would require explicit configuration. Results are
 reproducible because scoring uses no clock or randomness.
 
-The committed baseline is `evals/baseline.md` (2026-10-20, base `8622c6b`,
-4/4 passing), generated from the eval-harness working tree at that base with
+The committed baseline is `evals/baseline.md` (2026-11-19, base `0e75d40`,
+4/4 passing), generated from the clean worktree at that base with
 `npm run eval -- --report evals/baseline.md`.
 
 To add a scenario, append an `EvalScenario` to `scenarios.ts` with a fixture
