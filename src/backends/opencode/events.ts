@@ -11,8 +11,11 @@
  * - Each line is `{ type, timestamp, sessionID, part?, error? }`. The `sessionID`
  *   is how the adapter learns the runtime's own session id to persist and resume.
  * - `type: "text"` carries `part.text`; `type: "reasoning"` carries reasoning
- *   text. In this pinned version a whole text/reasoning part arrives at once
- *   rather than as token deltas, so the adapter forwards each part as it lands.
+ *   text. OpenCode 1.x in this pinned shape sends a whole text/reasoning part at
+ *   once, while OpenCode 2 streams cumulative snapshots and ends each part
+ *   explicitly. `createOpencodePublisher` turns both into deltas and keeps a
+ *   streaming part open until its end frame, so the host never captures a
+ *   half-written reply.
  * - `type: "tool_use"` carries `part.tool` and a `part.state` with a `status`
  *   (`pending` | `running` | `completed` | `error`). A `write`/`edit`/`patch`
  *   tool's `state.metadata.filepath` is the changed file; a `bash` tool's
@@ -35,6 +38,11 @@ export interface OpencodeTextEvent {
   /** Part id, used to correlate deltas of one message part. */
   partId: string;
   text: string;
+  /**
+   * True while a v2 text part is still receiving deltas. OpenCode 1 sends one
+   * whole text part with no flag, so absent means complete.
+   */
+  streaming?: boolean;
 }
 
 export interface OpencodeReasoningEvent {
@@ -126,7 +134,19 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 }
 
-/** Convert cumulative parts into deltas, retaining the final reasoning status. */
+/** A text part closes its item unless the runtime says more deltas are coming. */
+export function isTextPartComplete(event: OpencodeTextEvent): boolean {
+  return event.streaming !== true;
+}
+
+/**
+ * Convert cumulative parts into deltas, retaining the final reasoning status.
+ *
+ * OpenCode 2 streams text and reasoning as cumulative snapshots and ends each
+ * part explicitly. A part that is still streaming must not emit its completion:
+ * the host captures a question payload when the item completes, and a
+ * half-written reply would be stripped as unreadable.
+ */
 export function createOpencodePublisher(onEvent: (event: OpencodeEvent) => void): (event: OpencodeEvent) => void {
   const seen = new Map<string, string>();
   const completed = new Set<string>();
@@ -137,7 +157,9 @@ export function createOpencodePublisher(onEvent: (event: OpencodeEvent) => void)
     }
     if (completed.has(event.partId)) return;
     const previous = seen.get(event.partId);
-    const finishing = event.kind === 'reasoning' && !event.streaming;
+    // v1 reasoning snapshots end without `streaming`; v1 text is one whole part.
+    // v2 ends both kinds with `streaming: false`.
+    const finishing = event.kind === 'reasoning' ? event.streaming !== true : event.streaming === false;
     if (previous === undefined || (event.text.startsWith(previous) && event.text.length > previous.length)) {
       seen.set(event.partId, event.text);
       onEvent({ ...event, text: previous === undefined ? event.text : event.text.slice(previous.length) });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createOpencodePublisher, parseOpencodeEvent, type OpencodeEvent } from './events.ts';
+import { createOpencodePublisher, isTextPartComplete, parseOpencodeEvent, type OpencodeEvent } from './events.ts';
 import {
   approvalFromOpencode,
   busPayloadToOpencodeLine,
@@ -220,6 +220,26 @@ test('completed-only reasoning and a growing final snapshot retain their text', 
   assert.deepEqual(received.map((event) => event.kind === 'reasoning' ? [event.text, event.streaming] : []), [
     ['Look', true], [' at tests', undefined], ['Whole thought', undefined]
   ]);
+});
+
+test('streaming text stays open until the ended frame, which closes it once', () => {
+  const received: OpencodeEvent[] = [];
+  const publish = createOpencodePublisher((event) => received.push(event));
+  const full = 'Done.\n```sidecode-question\n{"questions":[{"prompt":"Which?"}]}\n```';
+  publish({ kind: 'text', partId: 'reply', text: full.slice(0, 24), streaming: true });
+  publish({ kind: 'text', partId: 'reply', text: full, streaming: true });
+  publish({ kind: 'text', partId: 'reply', text: full, streaming: false });
+  publish({ kind: 'text', partId: 'reply', text: full, streaming: false });
+  assert.equal(received.map((event) => event.kind === 'text' ? event.text : '').join(''), full);
+  assert.deepEqual(received.map((event) => event.kind === 'text' ? [event.streaming, isTextPartComplete(event)] : []), [
+    [true, false],
+    [true, false],
+    [false, true]
+  ]);
+  // OpenCode 1 sends one whole text part with no streaming flag.
+  publish({ kind: 'text', partId: 'v1', text: 'Whole reply.' });
+  const v1 = received[received.length - 1];
+  assert.equal(v1?.kind === 'text' && isTextPartComplete(v1), true);
 });
 
 test('a closed SSE stream keeps a trailing frame that has no blank line', () => {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createV2EventTranslator, v2RuntimeConfig, v2TodoSnapshot } from './v2.ts';
+import { isTextPartComplete } from './events.ts';
 import { mergeReportedStepStatuses, renderPlanMarkdown } from '../plan.ts';
 import { settleInProgressSteps } from '../types.ts';
 import { opencodeListenUrl } from './approval.ts';
@@ -66,7 +67,41 @@ test('v2 native text and reasoning deltas do not duplicate their final snapshots
   translate({ type: 'session.text.delta', data: { sessionID: 'other', delta: 'hidden' } });
   assert.equal(events.filter((event) => event.kind === 'text').map((event) => event.text).join(''), 'hello world');
   assert.equal(events.filter((event) => event.kind === 'reasoning').map((event) => event.text).join(''), 'hello world');
+  assert.deepEqual(events.filter((event) => event.kind === 'text').map((event) => event.streaming), [true, true, false]);
   assert.ok(events.every((event) => 'sessionId' in event && event.sessionId === 'v2:s'));
+});
+
+test('v2 text stays streaming until the ended frame, which closes the item exactly once', () => {
+  const events: OpencodeEvent[] = [];
+  const translate = createV2EventTranslator('s', (event) => events.push(event));
+  const part = { sessionID: 's', assistantMessageID: 'm', ordinal: 2 };
+  const payload = '{"questions":[{"prompt":"Which?"}]}';
+  translate({ type: 'session.text.delta', data: { ...part, delta: payload.slice(0, 16) } });
+  translate({ type: 'session.text.delta', data: { ...part, delta: payload.slice(16) } });
+  // The ended frame repeats the full text, as the v2 stream does when the last
+  // delta already carried it. It must still emit a close signal.
+  translate({ type: 'session.text.ended', data: { ...part, text: payload } });
+  translate({ type: 'session.text.delta', data: { ...part, delta: 'late' } });
+  const text = events.filter((event) => event.kind === 'text');
+  assert.equal(text.map((event) => event.text).join(''), payload);
+  assert.deepEqual(
+    text.map((event) => [event.streaming, isTextPartComplete(event)]),
+    [[true, false], [true, false], [false, true]]
+  );
+});
+
+test('a v2 ended frame without text still closes a text part', () => {
+  const events: OpencodeEvent[] = [];
+  const translate = createV2EventTranslator('s', (event) => events.push(event));
+  const part = { sessionID: 's', assistantMessageID: 'm', ordinal: 3 };
+  translate({ type: 'session.text.delta', data: { ...part, delta: 'No question here.' } });
+  translate({ type: 'session.text.ended', data: part });
+  const text = events.filter((event) => event.kind === 'text');
+  assert.equal(text.length, 2);
+  const ended = text[1];
+  assert.ok(ended?.kind === 'text');
+  assert.equal(ended.text, '');
+  assert.equal(isTextPartComplete(ended), true);
 });
 
 test('v2 tool events retain command and file metadata through completion', () => {

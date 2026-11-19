@@ -35,7 +35,7 @@ import {
   ThreadSummary
 } from './types';
 import { effectivePermissionLevel, isDefaultMode, modeInstructionsForTurn } from './modes';
-import { isFileTool, isTerminalStepReason, reportedChangeOfTool } from './opencode/events';
+import { isFileTool, isTerminalStepReason, isTextPartComplete, reportedChangeOfTool } from './opencode/events';
 import { resolveOpencodeExecutable } from './opencode/resolve';
 import { probeOpencode } from './opencode/status';
 import {
@@ -896,13 +896,18 @@ export class OpencodeBackend implements AgentBackend {
           item: { id: event.partId, kind: 'message', role: 'assistant' }
         });
         this.events.fire({ type: 'item/delta', backendId: this.id, threadId, itemId: event.partId, delta: event.text });
-        this.events.fire({
-          type: 'item/completed',
-          backendId: this.id,
-          threadId,
-          itemId: event.partId,
-          status: 'completed'
-        });
+        // OpenCode 2 streams a text part in pieces. Completing it on the first
+        // delta would let the host capture a half-written question payload as
+        // unreadable and strip the rest of the reply.
+        if (isTextPartComplete(event)) {
+          this.events.fire({
+            type: 'item/completed',
+            backendId: this.id,
+            threadId,
+            itemId: event.partId,
+            status: 'completed'
+          });
+        }
         break;
       case 'reasoning':
         this.events.fire({
