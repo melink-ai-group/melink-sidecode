@@ -1092,7 +1092,7 @@ export class OllamaBackend implements AgentBackend {
             },
             (event) => {
               this.noteOpencodeActivity(event, openTools, pace, quietWatch);
-              this.handleOpencodeEvent(event, handle.threadId, opencodeCwd);
+              this.handleOpencodeEvent(event, handle.threadId, turnId, opencodeCwd);
             }
           );
 
@@ -1394,7 +1394,7 @@ export class OllamaBackend implements AgentBackend {
   }
 
   /** Translate one opencode event into the normalized union. */
-  private handleOpencodeEvent(event: OpencodeEvent, threadId: string, cwd: string): void {
+  private handleOpencodeEvent(event: OpencodeEvent, threadId: string, turnId: string, cwd: string): void {
     switch (event.kind) {
       case 'text':
         // opencode 1.1.65 delivers whole text parts rather than token deltas;
@@ -1426,7 +1426,7 @@ export class OllamaBackend implements AgentBackend {
             type: 'plan/updated',
             backendId: this.id,
             threadId,
-            turnId: event.callId,
+            turnId,
             steps: event.todos
           });
         }

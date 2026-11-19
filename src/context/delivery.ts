@@ -33,7 +33,8 @@ import {
 import type {
   GetSnapshotInput,
   ProjectContextReads,
-  ProjectSnapshot
+  ProjectSnapshot,
+  ViewedFileAttachment
 } from './projectContext.ts';
 import { applyContextExclusions, buildContextView, snapshotForDelivery, type ContextView } from './contextView.ts';
 import { detectFrontendStack } from './frontendStack.ts';
@@ -254,7 +255,8 @@ export class ContextDelivery {
   async forTurn(
     threadKey: string,
     input: GetSnapshotInput = {},
-    requestText = ''
+    requestText = '',
+    linkedPlan?: ViewedFileAttachment
   ): Promise<ContextPayload> {
     const state = this.states.get(threadKey) ?? { needPrime: true };
     const delta = await this.buildDelta(threadKey, state, input);
@@ -273,7 +275,7 @@ export class ContextDelivery {
       ...(state.last ? { workspaceRoot: state.last.workspace.roots[0] } : {}),
       ...(frontendStack ? { frontendStack } : {}),
       repoMap: await this.repoMapForTurn(state, requestText),
-      attachedFile: await this.viewedFileTurnBlock(),
+      attachedFile: await this.viewedFileTurnBlock(linkedPlan),
       priming
     };
   }
@@ -325,15 +327,19 @@ export class ContextDelivery {
    * names the file open now rather than the file that was open when the
    * session started.
    */
-  private async viewedFileTurnBlock(): Promise<string> {
+  private async viewedFileTurnBlock(linkedPlan?: ViewedFileAttachment): Promise<string> {
+    const planBlock = linkedPlan && renderAttachedFile(linkedPlan);
     if (!this.includeViewedFile) {
-      return renderViewedFileNotice(VIEWED_FILE_NOT_ATTACHED);
+      return planBlock ?? renderViewedFileNotice(VIEWED_FILE_NOT_ATTACHED);
     }
     const file = await this.reads.viewedFileAttachment?.();
     if (!file) {
-      return renderViewedFileNotice(VIEWED_FILE_NONE_OPEN);
+      return planBlock ?? renderViewedFileNotice(VIEWED_FILE_NONE_OPEN);
     }
-    return renderAttachedFile(file);
+    if (linkedPlan && file.path.replace(/\\/g, '/') === linkedPlan.path) {
+      return renderAttachedFile({ ...linkedPlan, selection: file.selection });
+    }
+    return [renderAttachedFile(file), planBlock].filter(Boolean).join('\n\n');
   }
 
   /**

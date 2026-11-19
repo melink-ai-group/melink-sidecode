@@ -11,6 +11,7 @@ import {
   HistoryIcon,
   MicSolidIcon,
   PaperclipIcon,
+  PlanIcon,
   PlusIcon,
   SlidersIcon,
   SendSolidIcon,
@@ -21,7 +22,7 @@ import { SendButton } from './composer/SendButton';
 import { ContextMeter, ContextStrip } from './ContextStrip';
 import { ChangesReview } from './ChangesReview';
 import { ChangedFilesStrip } from './ChangedFilesStrip';
-import { showBuiltPlanDock } from '../backends/plan';
+import { planHasRemainingSteps, showBuiltPlanDock } from '../backends/plan';
 import { continueAfterStopInstruction } from '../backends/threadRecovery';
 import { PlanSurface } from './PlanSurface';
 import { estimateConversationTokens, modelSettingsView } from './modelControls';
@@ -625,7 +626,8 @@ export function App(): JSX.Element {
   // selected model. The host owns resolution and clamping, so the webview never
   // guesses a valid value; it marks the read loading until the answer arrives,
   // and the floating panel renders whatever the host resolved.
-  const activeChatTabId = state.chatTabs.find((tab) => tab.active)?.id;
+  const activeChatTab = state.chatTabs.find((tab) => tab.active);
+  const activeChatTabId = activeChatTab?.id;
   activeChatTabIdRef.current = activeChatTabId;
 
   useEffect(() => {
@@ -1931,6 +1933,25 @@ export function App(): JSX.Element {
     bridge.post({ type: 'openPlanFile' });
   };
 
+  const planThreadId = state.activeThreadId;
+  const planContext = state.mode === 'plan' && planThreadId &&
+    activeChatTab?.threadId === planThreadId && state.plan?.steps.length
+    ? {
+        path: state.plan.path,
+        included: !activeChatTab.planContextExcluded,
+        onOpen: openPlan,
+        onSetIncluded: (included: boolean) => bridge.post({
+          type: 'setPlanContext', tabId: activeChatTab.id, threadId: planThreadId, included
+        })
+      }
+    : undefined;
+  const buildTarget = planContext?.included && activeChatTabId && planThreadId && !hasComposerContent &&
+    !state.busy && !listening && !cleaning
+    ? { tabId: activeChatTabId, threadId: planThreadId }
+    : undefined;
+  const buildDisabled = backgroundBusy || Boolean(pending) || asking || Boolean(state.modeSwitch) ||
+    state.queuedTurns.length > 0 || active?.status !== 'available' || !planHasRemainingSteps(state.plan?.steps ?? []);
+
   const buildPlan = (): void => {
     bridge.post({ type: 'buildPlan' });
   };
@@ -2694,6 +2715,7 @@ export function App(): JSX.Element {
           onOpenFile={openContextFile}
           includeViewedFile={state.includeViewedFile}
           onSetIncludeViewedFile={setIncludeViewedFile}
+          plan={planContext}
         />
         {state.pendingQuestion ? (
           <QuestionCard
@@ -2947,7 +2969,7 @@ export function App(): JSX.Element {
               >
                 <PaperclipIcon />
               </button>
-              {showMic ? (
+              {showMic && !buildTarget ? (
                 <button
                   className={
                     micPhase === 'idle'
@@ -3004,6 +3026,17 @@ export function App(): JSX.Element {
                     <SendSolidIcon />
                   </button>
                 )
+              ) : buildTarget ? (
+                <button
+                  className={'icon-btn icon-btn--primary composer-action ' + composerModeClass}
+                  type="button"
+                  aria-label="Build Plan"
+                  title="Build Plan in Agent mode"
+                  disabled={buildDisabled}
+                  onClick={() => bridge.post({ type: 'buildPlan', composer: buildTarget })}
+                >
+                  <PlanIcon />
+                </button>
               ) : showMic ? null : (
                 <SendButton
                   className={`icon-btn icon-btn--primary composer-action ${composerModeClass}`}

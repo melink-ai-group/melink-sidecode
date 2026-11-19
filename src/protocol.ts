@@ -416,6 +416,7 @@ export interface ChatTabView {
   active: boolean;
   backendId?: string;
   threadId?: string;
+  planContextExcluded?: boolean;
 }
 
 /** One queued user turn as rendered above the composer. No paths or bytes. */
@@ -748,6 +749,7 @@ export type WebviewToHostMessage =
    * echoes the choice on the next context view.
    */
   | { type: 'setIncludeViewedFile'; included: boolean }
+  | { type: 'setPlanContext'; tabId: string; threadId: string; included: boolean }
   /** Open a context file in the editor (the active file named in the strip). */
   | { type: 'openContextFile'; path: string }
   /**
@@ -949,7 +951,7 @@ export type WebviewToHostMessage =
    * and seeds the todo list from the plan's bullet list. This is the only route
    * from Plan mode to a write path.
    */
-  | { type: 'buildPlan' }
+  | { type: 'buildPlan'; composer?: { tabId: string; threadId: string } }
   /** Reject the plan; leaves the workspace unchanged apart from the plan file. */
   | { type: 'rejectPlan' }
   /**

@@ -614,7 +614,7 @@ export class OpencodeBackend implements AgentBackend {
             },
             (event) => {
               this.noteOpencodeActivity(event, openTools, pace, quietWatch);
-              this.handleOpencodeEvent(event, handle.threadId, opencodeCwd);
+              this.handleOpencodeEvent(event, handle.threadId, turnId, opencodeCwd);
             }
           );
 
@@ -886,7 +886,7 @@ export class OpencodeBackend implements AgentBackend {
     watch.activity();
   }
 
-  private handleOpencodeEvent(event: OpencodeEvent, threadId: string, cwd: string): void {
+  private handleOpencodeEvent(event: OpencodeEvent, threadId: string, turnId: string, cwd: string): void {
     switch (event.kind) {
       case 'text':
         this.events.fire({
@@ -928,7 +928,7 @@ export class OpencodeBackend implements AgentBackend {
             type: 'plan/updated',
             backendId: this.id,
             threadId,
-            turnId: event.callId,
+            turnId,
             steps: event.todos
           });
         }

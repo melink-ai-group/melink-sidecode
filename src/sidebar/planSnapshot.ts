@@ -14,6 +14,7 @@ export function planSnapshot(state: PersistedPlanState): CheckpointPlanState {
     steps: state.steps.map((step) => ({ text: step.text, status: step.status })),
     built: state.built,
     completedDismissed: state.completedDismissed,
+    ...(state.nativeOnly === undefined ? {} : { nativeOnly: state.nativeOnly }),
     updatedAt: state.updatedAt
   };
 }

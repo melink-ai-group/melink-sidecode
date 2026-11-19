@@ -127,6 +127,7 @@ export interface CheckpointPlanState {
   steps: { text: string; status: string }[];
   built?: boolean;
   completedDismissed?: boolean;
+  nativeOnly?: boolean;
   updatedAt: number;
 }
 

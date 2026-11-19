@@ -32,10 +32,10 @@ export function isCancellation(error: unknown): boolean {
  * the todo list; this tells the agent to execute it, so building the plan moves
  * the thread into execution rather than being a no-op.
  */
-export function buildTurnInstruction(steps: readonly TodoStep[]): string {
+export function buildTurnInstruction(steps: readonly TodoStep[], path: string): string {
   const list = steps.map((step) => `- [ ] ${step.text}`).join('\n');
   return [
-    'Build the approved plan. Execute each step in order. As soon as you start a step, write a checkbox line on its own line that repeats the step text exactly: "- [~] ...". As soon as you finish it, write "- [x] ...". The plan document and the todo list update from those lines while you work. Leave the plan document prose unchanged.',
+    'Build the approved plan at ' + path + '. Read it for the approach and decisions, then execute the remaining steps listed below in order. As soon as you start a step, write a checkbox line on its own line that repeats the step text exactly: "- [~] ...". As soon as you finish it, write "- [x] ...". The plan document and the todo list update from those lines while you work. Leave the plan document prose unchanged.',
     '',
     list,
     '',

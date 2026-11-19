@@ -60,6 +60,7 @@ export function canonicalPlanPath(input: {
   threadId: string;
   title: string;
   existingPath?: string;
+  migratePlaceholder?: boolean;
 }): { path: string; retire?: string } {
   const friendly = planRelativePathForTitle(input.title);
   const existing = input.existingPath?.replace(/\\/g, '/');
@@ -68,13 +69,28 @@ export function canonicalPlanPath(input: {
   // A thread-id file, or the placeholder written before the title is known,
   // is replaced by the friendly name. Any other path stays, so a later retitle
   // does not create a second file.
-  if (!existing || existing === threadPath || (existing === placeholder && friendly !== placeholder)) {
+  const placeholderPath = existing === placeholder ||
+    /^\.melink\/plans\/plan-(?:[2-9]|[1-9]\d+)\.md$/.test(existing ?? '');
+  if (!existing || existing === threadPath ||
+      (input.migratePlaceholder !== false && placeholderPath && friendly !== placeholder)) {
     return {
       path: friendly,
       retire: existing && existing !== friendly ? existing : undefined
     };
   }
   return { path: existing };
+}
+
+/** Try to create each candidate exclusively. A collision leaves the existing file alone. */
+export async function createPlanAtAvailablePath(
+  preferredPath: string,
+  tryCreate: (path: string) => Promise<boolean>
+): Promise<string> {
+  let candidate = preferredPath;
+  for (let index = 2; !await tryCreate(candidate); index += 1) {
+    candidate = preferredPath.slice(0, -3) + '-' + index + '.md';
+  }
+  return candidate;
 }
 
 /**
@@ -167,6 +183,8 @@ export function statusForMarker(marker: string): TodoStepStatus {
   }
 }
 
+const PLAN_STEP_LINE = /^(\s*[-*]\s+)(?:\[(.)\](\s*))?(.*\S)(\s*)$/;
+
 /**
  * Parse the bullet list of a plan markdown file into tracked steps. Only the
  * steps under the `## Steps` heading count, so a plan that quotes a bullet list
@@ -188,12 +206,12 @@ export function parsePlanSteps(markdown: string): TodoStep[] {
     if (!inSteps) {
       continue;
     }
-    const match = /^\s*[-*]\s+(?:\[(.)\]\s*)?(.*\S)\s*$/.exec(line);
+    const match = PLAN_STEP_LINE.exec(line);
     if (!match) {
       continue;
     }
-    const rawMarker = match[1];
-    const text = match[2].trim();
+    const rawMarker = match[2];
+    const text = match[4].trim();
     if (text.length === 0) {
       continue;
     }
@@ -203,6 +221,37 @@ export function parsePlanSteps(markdown: string): TodoStep[] {
     });
   }
   return steps;
+}
+
+/** Update checkboxes in place when the saved list still matches the host's snapshot. */
+export function replacePlanStepStatuses(
+  markdown: string,
+  previous: readonly TodoStep[],
+  next: readonly TodoStep[]
+): string | undefined {
+  const saved = parsePlanSteps(markdown);
+  if (saved.length !== previous.length || saved.length !== next.length ||
+      !saved.every((step, index) => step.text === previous[index].text && step.status === previous[index].status &&
+        step.text === next[index].text)) {
+    return undefined;
+  }
+  let inSteps = false;
+  let index = 0;
+  const lineBreak = markdown.includes('\r\n') ? '\r\n' : '\n';
+  return markdown.split(/\r?\n/).map((line) => {
+    if (line.trim().startsWith('#')) {
+      inSteps = line.trim().toLowerCase() === PLAN_STEPS_HEADING.toLowerCase();
+    } else if (inSteps) {
+      const bullet = PLAN_STEP_LINE.exec(line);
+      if (bullet) {
+        const status = next[index++].status;
+        if (status !== statusForMarker(bullet[2] ?? ' ')) {
+          return bullet[1] + '[' + stepMarker(status) + ']' + (bullet[3] ?? ' ') + bullet[4] + bullet[5];
+        }
+      }
+    }
+    return line;
+  }).join(lineBreak);
 }
 
 /** Parse the title (`# ...`) of a plan file, for display. */

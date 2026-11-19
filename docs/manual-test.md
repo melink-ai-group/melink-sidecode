@@ -1283,7 +1283,7 @@ Measured on the current working tree, so the numbers stay truthful before sign-o
 
 - **Package version:** 0.3.4 (`package.json`)
 - **Node test files:** 199 (`src/**/*.test.ts`)
-- **Node tests:** 1896 declarations, 1916 reported (parameterized cases account for the difference): 1904 pass, 12 skipped, 0 failures (Node suite within `npm test`). The optional real-CLI compatibility suite also passed against OpenCode 1.19.4 and 2.2.6 with local mock providers.
+- **Node tests:** 1900 declarations, 1920 reported (parameterized cases account for the difference): 1908 pass, 12 skipped, 0 failures (Node suite within `npm test`). The optional real-CLI compatibility suite also passed against OpenCode 1.19.4 and 2.2.6 with local mock providers.
 - **Tools suite:** 10 tests, all passing (`node --test tools/**/*.test.mjs`).
 - **DOM suite:** 13 files / 100 tests, all passing (DOM suite within `npm test`). `npm test`
   runs the node, tools and DOM suites together.

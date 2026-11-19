@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import type { PlanArtifact, TodoStep, TodoStepStatus } from '../backends/types';
+import { planHasRemainingSteps } from '../backends/plan';
 import { Markdown } from './Markdown';
 import { openFileReference, openWebLink } from './navigation';
 import { prettyPath } from './prettyPath.ts';
@@ -66,6 +67,7 @@ export function PlanSurface({
   return (
     <PlanCard
       plan={plan}
+      busy={busy}
       revising={revising}
       rejectConfirmationOpen={rejectConfirmationOpen}
       onOpenPlan={onOpenPlan}
@@ -80,6 +82,7 @@ export function PlanSurface({
 
 function PlanCard({
   plan,
+  busy,
   revising,
   rejectConfirmationOpen,
   onOpenPlan,
@@ -90,6 +93,7 @@ function PlanCard({
   onRevise
 }: {
   plan: PlanArtifact;
+  busy: boolean;
   revising: boolean;
   rejectConfirmationOpen: boolean;
   onOpenPlan: () => void;
@@ -134,8 +138,8 @@ function PlanCard({
         <button
           className="btn btn--primary plan-card__build"
           type="button"
-          disabled={revising || stepCount === 0}
-          title={stepCount === 0 ? 'Build is disabled until the plan has at least one step.' : 'Build this plan in Agent mode'}
+          disabled={busy || revising || !planHasRemainingSteps(plan.steps)}
+          title={planHasRemainingSteps(plan.steps) ? 'Build this plan in Agent mode' : 'Build requires an unfinished step.'}
           onClick={onBuild}
         >
           Build

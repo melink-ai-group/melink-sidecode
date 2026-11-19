@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   PLAN_DIRECTORY,
   adoptedPlanSteps,
+  createPlanAtAvailablePath,
   assistantProgressText,
   completeStepsBeforeFrontier,
   mergeCheckboxStatuses,
@@ -24,6 +25,7 @@ import {
   planStepsFromReply,
   planSummaryFromReply,
   renderPlanMarkdown,
+  replacePlanStepStatuses,
   sanitizeThreadId,
   applyPlanDecisions,
   extractPlanDecisionLines,
@@ -104,6 +106,50 @@ test('a new unbuilt plan opens once; a built plan or a repeat does not', () => {
   assert.equal(shouldAutoOpenPlanDocument({ built: true, stepCount: 2, alreadyOpened: false }), false);
   assert.equal(shouldAutoOpenPlanDocument({ stepCount: 0, alreadyOpened: false }), false);
   assert.equal(shouldAutoOpenPlanDocument({ stepCount: 2, alreadyOpened: true }), false);
+});
+
+test('title collisions get separate paths while an established plan keeps its filename', async () => {
+  const preferred = '.melink/plans/plan.md';
+  const files = new Map([[preferred, 'Existing plan']]);
+  const paths = await Promise.all(['First chat', 'Second chat'].map((contents) =>
+    createPlanAtAvailablePath(preferred, async (candidate) => {
+      await Promise.resolve();
+      if (files.has(candidate)) {
+        return false;
+      }
+      files.set(candidate, contents);
+      return true;
+    })
+  ));
+  assert.deepEqual(paths, ['.melink/plans/plan-2.md', '.melink/plans/plan-3.md']);
+  assert.equal(files.get(preferred), 'Existing plan');
+  assert.equal(files.get(paths[0]), 'First chat');
+  assert.equal(files.get(paths[1]), 'Second chat');
+  assert.deepEqual(canonicalPlanPath({
+    threadId: 'chat',
+    title: 'Revised title',
+    existingPath: '.melink/plans/plan-2.md',
+    migratePlaceholder: false
+  }), { path: '.melink/plans/plan-2.md' });
+});
+
+test('progress updates preserve manual formatting and skip a newer list or checkbox edit', () => {
+  const markdown = '# Plan\r\n\r\nKeep this prose.\r\n\r\n## Steps\r\n* [ ]   First  \r\n* Second\r\n\r\n## Notes\r\nKeep these too.\r\n';
+  const previous = parsePlanSteps(markdown);
+  const steps = updateStepStatus(previous, 0, 'completed');
+  assert.equal(replacePlanStepStatuses(markdown, previous, steps), markdown.replace('[ ]', '[x]'));
+  assert.equal(replacePlanStepStatuses(markdown.replace('Second', 'New scope'), previous, steps), undefined);
+  assert.equal(replacePlanStepStatuses(markdown.replace('[ ]', '[-]'), previous, steps), undefined);
+});
+
+test('a revised list retains progress by step text and uses the new order and scope', () => {
+  const previous = parsePlanSteps('## Steps\n- [x] Investigate\n- [ ] Remove this\n- [-] Needs approval');
+  const revised = parsePlanSteps('## Steps\n- [ ] Needs approval\n- [ ] Investigate\n- [ ] Verify');
+  assert.deepEqual(mergeReportedStepStatuses(revised, previous).steps, [
+    { text: 'Needs approval', status: 'denied' },
+    { text: 'Investigate', status: 'completed' },
+    { text: 'Verify', status: 'pending' }
+  ]);
 });
 
 test('a thread id with path characters is sanitized into a safe, stable file name', () => {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { renderPlanMarkdown } from './backends/plan';
+import { planHasRemainingSteps, renderPlanMarkdown } from './backends/plan';
 import type { PlanArtifact } from './backends/types';
 import { openFileInEditor, openUrlInInternalBrowser } from './editorNavigation';
 
@@ -127,16 +127,16 @@ export class PlanPreview {
 }
 
 /** The rendered document and whether Build is available for this artifact. */
-export function planPreviewState(plan: PlanArtifact): PlanPreviewState {
+export function planPreviewState(plan: PlanArtifact, markdown?: string): PlanPreviewState {
   return {
     title: plan.title || 'Plan',
-    markdown: renderPlanMarkdown({
+    markdown: markdown ?? renderPlanMarkdown({
       title: plan.title || 'Plan',
       summary: plan.summary,
       body: plan.body,
       steps: plan.steps
     }),
-    canBuild: plan.built !== true && plan.steps.length > 0
+    canBuild: plan.built !== true && planHasRemainingSteps(plan.steps)
   };
 }
 
