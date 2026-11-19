@@ -175,7 +175,7 @@ The harness fixes:
 - the browser executable used for the run.
 
 With the same OS, fonts, browser build, and harness revision, two consecutive
-runs produced byte-identical PNGs in the ticket verification (all 24 files).
+runs produced byte-identical PNGs in the release verification (all 24 files).
 
 Known sources of variation:
 
@@ -195,7 +195,7 @@ Known sources of variation:
 
 No screenshots are promised to match a real VS Code window pixel-for-pixel.
 
-## Referencing artifacts in a ticket or review
+## Referencing artifacts in a report or review
 
 - Attach or link the specific PNG(s), and name the screen and viewport:
   `change-review-390x844.png`.

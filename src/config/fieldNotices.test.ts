@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -18,7 +18,7 @@ import { planSettingsWrites } from '../settings/planWrites.ts';
  * spawned, or what the permission default is. They are read from the user's
  * own settings only, so a "Save to workspace" writes them to the user settings
  * instead. The value *is* persisted, so the screen shows a notice rather than an
- * error â€” but the notice has to appear on every one of the ten. A field
+ * error — but the notice has to appear on every one of the ten. A field
  * that silently saved somewhere else than the button said is a lie.
  */
 

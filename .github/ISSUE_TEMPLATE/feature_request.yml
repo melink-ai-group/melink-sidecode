@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest a capability or a change to sideCode
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the solution. Do not include credentials or private project content.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should sideCode do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Providers and models
+        - Agent, Plan, or Ask modes
+        - Review, checkpoints, or approvals
+        - Context and project awareness
+        - Skills and browser tools
+        - Settings and safety
+        - Documentation or packaging
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host and version
+      placeholder: VS Code 1.95, Cursor 2.0, VSCodium 1.95
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, screenshots, or prior art. Redact anything private.

@@ -1,8 +1,0 @@
-﻿The review is controlled by **Orchestration -> Reviewing**
-(`melink.orchestration.reviewing`), which defaults to **Auto**: it runs only
-when the turn changed code (non-documentation) files. **On** runs on any change
-set and **Off** never runs. Until you save that key, it falls back to the older
-`melink.review.diffReview` value. A live turn that resolves the role gets one
-additional advisory pass before the review panel is repainted. It is read-only:
-it never edits files, runs shell commands, asks for approvals, or keeps/rejects
-changes. **Keep** and **Reject** remain the only actions, and they are unchanged.

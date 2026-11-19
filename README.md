@@ -1,13 +1,149 @@
 # sideCode
 
-One agent chat sidebar for VS Code and Open VSX hosts, driving four providers:
-Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen.
+**One agent chat sidebar for VS Code and Open VSX hosts. Bring your own model: Ollama Cloud, Ollama Local, the OpenAI Codex CLI, or OpenCode Zen.**
 
-- **Install and set up:** see below.
-- **How to use it and what it can do:** [docs/usage.md](docs/usage.md).
-- **Reviewing changes, checkpoints, and how they differ from approvals:**
-  [docs/usage.md](docs/usage.md#reviewing-changes).
-- **Manual test script / release checks:** [docs/manual-test.md](docs/manual-test.md).
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Release workflow](https://github.com/melink-ai-group/melink-sidecode/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/melink-ai-group/melink-sidecode/actions/workflows/release.yml)
+[![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.93.0-007ACC)](https://code.visualstudio.com/)
+[![Node](https://img.shields.io/badge/node-22.12-339933)](https://nodejs.org/)
+
+![sideCode sidebar with an empty chat](docs/images/hero-chat.png)
+
+sideCode keeps the agent, model picker, review surface, and safety rules in one Activity Bar view. It is MIT-licensed, works in VS Code and Open VSX hosts, and sends no network telemetry.
+
+## Contents
+
+- [Why sideCode](#why-sidecode)
+- [Features](#features)
+- [How it compares](#how-it-compares)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Privacy](#privacy)
+- [Documentation](#documentation)
+- [Development](#development)
+- [License](#license)
+
+## Why sideCode
+
+- **One sidebar, four provider families.** Ollama Cloud, Ollama Local, the official Codex CLI app-server, and OpenCode Zen share one model picker and one transcript. Switch providers per conversation instead of living inside one vendor.
+- **Local when you want local.** Ollama Local needs no key, and dictation runs through a local Whisper ONNX model. Only the resulting text goes to the cleanup model you choose.
+- **Review before you keep.** A turn that edits files becomes a **Changes this turn** panel with per-file **Keep** / **Reject**, conflict detection, native VS Code diffs, and a **Restore checkpoint** action that reverts files only.
+- **A workspace cannot widen its own trust.** Base URLs, CLI paths, skill switches, and the permission default are application-scoped and read from user settings only. A destructive-command check runs before any stored approval rule, and Ask mode refuses every action.
+- **Plans live in the repository.** Plan mode writes `.melink/plans/<kebab-case-title>.md`; building the plan turns its steps into a persisted todo list instead of hiding the plan in a proprietary service.
+- **Quality gates after the turn.** Typecheck/tests, an advisory diff review, a styling check, and a diagnostics sweep run against the changed files. Keep is disabled while checks run, and every failure is visible rather than silently retried.
+- **No telemetry.** sideCode has no analytics or crash-upload endpoint. The only optional log is a local, opt-in missed-issue JSONL file whose fields are fixed and whose values are redacted.
+- **MIT and Open VSX.** The extension is auditable, installable in VS Code and Open VSX hosts, and does not require a subscription.
+
+## Features
+
+| Area | What you get |
+|---|---|
+| Providers | Ollama Cloud, Ollama Local, OpenAI Codex CLI, and OpenCode Zen, with live model lists and per-provider enable switches. |
+| Modes | Agent, Plan, and Ask. Plan writes a plan file and waits; Ask cannot act; Agent honors the selected permission level. |
+| Review and rollback | Per-file Keep/Reject, Keep all/Reject all, conflict detection, native diff views, and restore checkpoints stored separately from Git. |
+| Safety | Application-scoped trust keys, approval cards, a destructive-command classifier with Ask/Block modes, and explicit confirmation before unrestricted mode. |
+| Context | A bounded project snapshot with languages, tree, manifests, entry points, and derived conventions; a compact per-turn delta and an optional repo map. |
+| Skills | Browser tab control, zvec-grep semantic search, and ast-grep structural search, each opt-in from Settings. |
+| Dictation | Local Whisper transcription plus a model cleanup pass, with a masked microphone gesture and no audio upload. |
+| Quality checks | Post-turn typecheck/tests, advisory diff review, styling consistency, and a no-model diagnostics sweep. |
+| Settings | An inline settings screen for providers, CLI source, skills, defaults, orchestration, and trusted paths. |
+| Hosts | VS Code 1.93+ and Open VSX hosts, including Cursor and VSCodium, with a limited-untrusted-workspace contract. |
+
+| Plan in the repository | Settings in the sidebar |
+|---|---|
+| ![Plan artifact with four steps and a Build action](docs/images/plan-todos.png) | ![Inline settings screen with Defaults, permission level, mode, and thinking level](docs/images/settings.png) |
+
+## How it compares
+
+sideCode is not a drop-in replacement for every agent. It is the better fit when you want a small, auditable sidebar that treats local models and CLI providers as first-class and puts review and safety gates in the same surface.
+
+| Dimension | sideCode | Cline | Cursor |
+|---|---|---|---|
+| Form factor | VS Code / Open VSX sidebar | VS Code extension, CLI, desktop, JetBrains | Full IDE (VS Code fork) |
+| License | MIT | Apache-2.0 | Proprietary |
+| Model access | Ollama Cloud, Ollama Local, Codex CLI, OpenCode Zen | 30+ providers, including local Ollama and LM Studio | Built-in frontier models and plan tiers |
+| Review and rollback | Per-file Keep/Reject, checkpoint restore, native diff | Plan/Act, per-action approval, checkpoints | Plan mode, review, checkpoints |
+| Safety model | App-scoped trust keys, destructive-command gate, Ask refuses actions | Per-action approval, auto-approve, YOLO | Agent permissions and review |
+| Telemetry | None; opt-in local missed-issue log | Telemetry is documented and configurable; check the current docs | See Cursor's privacy docs |
+| Post-turn checks | Typecheck/tests, diff review, styling check, diagnostics | In-loop lint/compiler feedback; see Cline docs for current gates | Review and test workflows |
+| Plan artifact | `.melink/plans/<title>.md` in the repo | Plan/Act modes | Plan mode |
+| Price | Free/MIT; bring a key or CLI | Free/Apache-2.0; bring a key or ClinePass | Free tier plus paid subscription |
+
+Sources: [Cline docs](https://docs.cline.bot/), [Cline repository](https://github.com/cline/cline), [Cline Marketplace](https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev), [Cursor docs](https://cursor.com/docs), [Cursor models and pricing](https://cursor.com/docs/models-and-pricing). Compared on 2026-11-19; competitor features and prices change. Cline and Cursor are trademarks of their owners; this comparison is informational, not an endorsement.
+
+Where each fits:
+
+- **Choose Cline** if you want a large provider catalogue, a CLI/desktop/JetBrains surface, and a mature community.
+- **Choose Cursor** if you want an all-in-one IDE with Tab completion, built-in frontier models, cloud agents, and code review in one product.
+- **Choose sideCode** if you want a lean, MIT-licensed sidebar across VS Code and Open VSX hosts, local Ollama and CLI providers, review-before-keep, and workspace-safe settings.
+
+## Install
+
+sideCode is distributed as a VSIX from [GitHub Releases](https://github.com/melink-ai-group/melink-sidecode/releases). There is no Marketplace listing yet.
+
+1. Download the asset for your OS and architecture.
+2. Install it with the VS Code CLI or the Extensions view:
+   ```sh
+   code --install-extension ./melink-sidecode-<version>-<target>.vsix
+   ```
+3. Reload the window and open **sideCode** in the Activity Bar.
+
+The [install details](#install-details) cover each platform asset, the **Install from VSIX** flow, and building from source.
+
+## Quick start
+
+1. Open the sidebar once to activate the extension.
+2. Set up one provider from the table below.
+3. Type a message and press **Enter**. The reply streams into the transcript.
+4. When a turn edits files, review **Changes this turn** and choose **Keep** or **Reject**.
+
+| Provider | What it needs | First step |
+|---|---|---|
+| **Ollama Cloud** | An `ollama.com` bearer token | Command Palette -> **sideCode: Set Ollama Cloud token** |
+| **Ollama Local** | `ollama serve` and at least one pulled model | Settings -> Providers -> Ollama Local -> **Test connection** |
+| **OpenAI Codex CLI** | The `codex` CLI installed and signed in | `codex login`, then set `melink.codex.path` if it is not on `PATH` |
+| **OpenCode Zen** | The shared `opencode` CLI; free models need no key | Pick an OpenCode Zen model; add a Zen key only for paid models |
+
+See [Set up a provider](#set-up-a-provider) for the full details.
+
+## Privacy
+
+- **No network telemetry.** sideCode has no analytics, crash upload, or remote logging endpoint.
+- **Secrets stay in secret storage.** Provider tokens are read from VS Code secret storage and are never written to `settings.json`, output channels, or logs.
+- **Workspace settings cannot redirect trust.** Base URLs, CLI paths, skill switches, and the permission default are application-scoped.
+- **Project context goes to one provider.** The bounded snapshot is sent only to the provider you selected; excluded paths are never read.
+- **The only optional log is local.** The missed-issue log is off by default, application-scoped, and writes a fixed set of redacted fields to a local JSONL file.
+- **Network access is narrow.** Provider base URLs, GitHub for CLI installs/updates, and the Whisper model download are the only outbound paths sideCode initiates.
+
+See [Privacy and the optional local missed-issue log](#privacy-and-the-optional-local-missed-issue-log) for the full statement.
+
+## Documentation
+
+- [Usage guide](docs/usage.md): chat, providers, modes, review, checkpoints, browser tools, and settings.
+- [Manual test script](docs/manual-test.md): the release acceptance checklist.
+- [Browser tools](docs/browser.md): page checks, console capture, and origin approvals.
+- [CLI pins and release verification](docs/cli-pins.md): opencode and ast-grep download checks.
+- [Visual harness](docs/visual-harness.md): seeded screenshots and their limitations.
+- [Settings and security model](docs/settings-audit.md): every setting, its scope, and its consumer.
+- [Contributing](CONTRIBUTING.md), [security policy](SECURITY.md), [changelog](CHANGELOG.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Development
+
+Node **22.6+** is required for tests and typecheck; CI uses **22.12**. Building and packaging need Node **20+**.
+
+```sh
+npm ci
+npm run build
+npm run typecheck   # alias: npm run lint
+npm test
+npm run verify
+npm run check:hex
+npm run eval
+```
+
+`npm test` runs the Node unit suite, the `tools/**/*.test.mjs` suite, and the jsdom/Testing Library webview suite. `npm run visual` renders the built webview in installed Chrome or Edge and writes screenshots under `.melink/reports/visual/`.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [Build from source](#build-from-source) for the full workflow.
 
 ## What it is
 
@@ -30,13 +166,13 @@ account for, in one place.
 A turn that edits files is recorded and shown as a **Changes this turn** panel.
 You decide per file: **Keep** and **Keep all** write nothing to disk (the edit is
 already there), while **Reject** and **Reject all** write the pre-turn content
-back, deleting a file the turn created â€” behind a confirmation that names the
+back, deleting a file the turn created — behind a confirmation that names the
 paths. A file edited outside the agent is a **conflict** and is never clobbered
 silently, and a **binary** or oversized file is listed but not reviewable inline.
 Every message whose turn touched files also carries a **Restore checkpoint**
 action that reverts those files (across later turns) to their state before that
 message; it reverts **files only**, keeps the conversation, is itself undoable,
-and is stored **locally, separately from Git** â€” it is not a version-control
+and is stored **locally, separately from Git** — it is not a version-control
 substitute.
 
 This post-hoc review is deliberately separate from the pre-execution **approval
@@ -48,7 +184,7 @@ effects, and the storage/pruning behaviour are documented in
 
 ### Opt-in diff review
 
-**Orchestration â†’ Reviewing** (`melink.orchestration.reviewing`, default **Auto**; Auto runs only when
+**Orchestration → Reviewing** (`melink.orchestration.reviewing`, default **Auto**; Auto runs only when
 code (non-documentation) files changed, On on any change set, Off never)
 adds an advisory second pass to the **Changes this turn** panel. Until that key
 is saved it falls back to the older application-scoped
@@ -64,7 +200,7 @@ visible, non-blocking notice.
 
 ### Styling check
 
-**Orchestration â†’ Styling check** (`melink.orchestration.styling`, default **Auto**; Auto and On both require a
+**Orchestration → Styling check** (`melink.orchestration.styling`, default **Auto**; Auto and On both require a
 frontend file change, Off never runs) adds an advisory pass for frontend work.
 It runs only when the turn
 changed at least one UI file, so a backend-only turn pays nothing. The pass
@@ -98,7 +234,7 @@ settings below.
 
 ## Requirements
 
-- VS Code **1.93.0** or newer, or an Open VSX host (Cursor, VSCodium, â€¦).
+- VS Code **1.93.0** or newer, or an Open VSX host (Cursor, VSCodium, …).
 - **Node.js 20+** to build from source. Tests and typecheck need **Node.js 22.6+
   (22.x)** because `npm test` runs with `--experimental-strip-types`; CI uses
   Node **22.12**.
@@ -110,11 +246,11 @@ settings below.
     sideCode-managed download. Free Zen models need no key; paid models need a
     Zen API key.
 
-## Install
+## Install details
 
-### Option A â€” from a packaged `.vsix`
+### Option A — from a packaged `.vsix`
 
-1. Build the package (or obtain a released `melink-sidecode-0.3.4.vsix`) â€”
+1. Build the package (or obtain a released `melink-sidecode-0.3.4.vsix`) —
    see [Build from source](#build-from-source) if you need to make one.
 2. Install it:
    - **VS Code CLI:**
@@ -122,7 +258,7 @@ settings below.
      code --install-extension ./melink-sidecode-0.3.4.vsix
      ```
    - **Any host (including Open VSX consumers):** open the Extensions view, click
-     the `...` menu in its title bar, choose **Install from VSIXâ€¦**, and pick the
+     the `...` menu in its title bar, choose **Install from VSIX…**, and pick the
      file.
 3. Reload the window when prompted.
 
@@ -175,7 +311,7 @@ Then install the `.vsix` as in Option A.
 #### Build with a script
 
 If you do not know the npm scripts by heart, run the wrapper for your platform
-from anywhere in the checkout â€” each script resolves the repo root itself and
+from anywhere in the checkout — each script resolves the repo root itself and
 runs the same flow (install if needed, then build, then package):
 
 ```sh
@@ -243,20 +379,20 @@ prerequisites, screens, determinism, and limitations.
 
 ## Set up a provider
 
-Open the sidebar (Activity Bar â†’ **sideCode**) once to activate the extension, then
+Open the sidebar (Activity Bar → **sideCode**) once to activate the extension, then
 set up whichever provider you have.
 
 ### Ollama Cloud
 
 1. Create an API token at <https://ollama.com>.
-2. Command Palette â†’ **sideCode: Set Ollama Cloud token**.
+2. Command Palette → **sideCode: Set Ollama Cloud token**.
 3. Paste the token and press Enter.
 
 The token is stored in VS Code **secret storage** and sent only as a bearer
 credential to the configured base URL. It never appears in `settings.json`,
 output channels, or logs. To remove it, run **sideCode: Clear Ollama Cloud token**.
 
-Optional settings (`Settings â†’ search "melink"`, or **sideCode: Open settings**):
+Optional settings (`Settings → search "melink"`, or **sideCode: Open settings**):
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -283,13 +419,13 @@ Optional settings (`Settings â†’ search "melink"`, or **sideCode: Open sett
 | `melink.skills.astGrep.path` | `ast-grep` | Path to `ast-grep` when `cliSource` is local. |
 
 `Ollama Cloud` lists exactly the models the live server returns from
-`GET /api/tags` â€” there is no hardcoded fallback list.
+`GET /api/tags` — there is no hardcoded fallback list.
 
 ### Ollama Local
 
 1. Install Ollama and start it with `ollama serve`.
 2. Pull at least one model (`ollama pull qwen2.5-coder:7b`).
-3. In **Settings â†’ Providers â†’ Ollama Local**, keep the default
+3. In **Settings → Providers → Ollama Local**, keep the default
    `http://localhost:11434` (or enter another address) and press **Test
    connection**.
 
@@ -312,7 +448,7 @@ project, edit files, and run commands. This is always on; there is no direct
 dictation cleanup. Ollama Cloud, Ollama Local and OpenCode Zen share the same
 OpenCode binary, and each keeps its own provider identity and dot in the picker.
 
-- **CLI source.** Configure under **Settings â†’ CLI**. `melink.ollama.opencode.cliSource`
+- **CLI source.** Configure under **Settings → CLI**. `melink.ollama.opencode.cliSource`
   is `local` (path / PATH), `bundled` (managed OpenCode 1.x), or `bundled-v2`
   (managed OpenCode 2.x). The two bundled downloads use separate folders in
   extension global storage and survive closing VS Code. Existing selections
@@ -326,14 +462,14 @@ OpenCode binary, and each keeps its own provider identity and dot in the picker.
 - **Path.** When `cliSource` is `local`, `melink.ollama.opencode.path` defaults
   to `opencode`, resolved from `PATH` when it is a bare name, exactly like
   `melink.codex.path`.
-- **zvec-grep.** Under **Settings â†’ Skills**, enable semantic search to connect
+- **zvec-grep.** Under **Settings → Skills**, enable semantic search to connect
   [zvec-grep](https://github.com/zvec-ai/zvec-grep) to OpenCode. Choose **local**
   or **bundled** (sideCode-managed install under extension global storage).
   Enable writes an absolute-path `zvec_grep` MCP entry into the user OpenCode
   config and injects the same server into each sideCode turn. Off removes that
   entry and leaves the CLI installed. Stored as `melink.skills.zvecGrep`
   (legacy key `melink.ollama.opencode.zvecGrep` is still read when unset).
-- **ast-grep.** Under **Settings â†’ Skills**, enable structural search to connect
+- **ast-grep.** Under **Settings → Skills**, enable structural search to connect
   [ast-grep](https://github.com/ast-grep/ast-grep). Bundled downloads the
   official GitHub release into extension global storage. sideCode ships a thin
   MCP shim (`dist/ast-grep-mcp.js`) that shells out to the resolved binary.
@@ -433,14 +569,14 @@ The OpenCode and Codex paths were verified against the versions below.
 
 ### Versions the priming path was verified against
 
-- **Codex CLI: `codex-cli 0.156.1`** â€” the generated bindings in `schemas/`
+- **Codex CLI: `codex-cli 0.156.1`** — the generated bindings in `schemas/`
   expose `baseInstructions`/`developerInstructions` on `thread/start` and
   `thread/resume`, and no per-turn instructions field on `turn/start`. That is
   why Codex priming is native at start/resume and left to Codex's own file access
-  mid-thread. The supported protocol window is `0.154.0â€“0.164.x`; a server
+  mid-thread. The supported protocol window is `0.154.0–0.164.x`; a server
   outside it is reported as `incompatible` with its version rather than used.
-- **opencode: `1.19.x`** â€” Install and Update resolve the latest stable GitHub release, and the T69
-  regression ran against the bundled 1.19.x CLI. `opencode run --help` exposes
+- **opencode: `1.19.x`** — Install and Update resolve the latest stable GitHub release, and the
+  1.19.x regression ran against the bundled 1.19.x CLI. `opencode run --help` exposes
   no system/instructions flag, so the snapshot is delivered by priming the turn
   text. This is a deliberate fallback, not an oversight.
 
@@ -476,12 +612,12 @@ Optional settings:
 
 OpenCode Zen is its own provider: free models work without a key, and paid models
 use a Zen API key. It runs on the same shared `opencode` CLI as the optional
-Ollama runtime; choose **local** or **bundled** under **Settings â†’ CLI**
+Ollama runtime; choose **local** or **bundled** under **Settings → CLI**
 (`melink.ollama.opencode.cliSource` / `.path`), or install it from that screen.
 
 1. Free models: install the CLI and pick an OpenCode Zen model in the model
    picker. No credential is needed.
-2. Paid models: Command Palette â†’ **sideCode: Set OpenCode Zen API key**
+2. Paid models: Command Palette → **sideCode: Set OpenCode Zen API key**
    (`melink.setOpencodeZenToken`), then paste the key. Remove it with
    **sideCode: Clear OpenCode Zen API key** (`melink.clearOpencodeZenToken`).
 
@@ -514,7 +650,7 @@ picker in the title bar override them for the conversation you are in.
 |---|---|---|
 | `melink.review.checks.enabled` | `false` | Legacy fallback for post-turn checks, read only while `melink.orchestration.testing` is unset. An explicit value still wins; untrusted workspaces always skip. |
 | `melink.review.checks.commands` | *(empty)* | Explicit commands; empty auto-detects `typecheck` (or `lint`) and `test` from `package.json`. An explicitly saved empty list runs nothing. |
-| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout, clamped to 5â€“600 seconds. |
+| `melink.review.checks.timeoutSeconds` | `120` | Per-check timeout, clamped to 5–600 seconds. |
 
 The command list and timeout are read directly from `settings.json`. The
 **Orchestration** tab controls whether the pass runs, plus the review,
@@ -705,7 +841,7 @@ one would be opt-in and would require explicit configuration. Results are
 reproducible because scoring uses no clock or randomness.
 
 The committed baseline is `evals/baseline.md` (2026-10-20, base `8622c6b`,
-4/4 passing), generated from the T83 working tree at that base with
+4/4 passing), generated from the eval-harness working tree at that base with
 `npm run eval -- --report evals/baseline.md`.
 
 To add a scenario, append an `EvalScenario` to `scenarios.ts` with a fixture
@@ -751,9 +887,9 @@ the user never chose. Two things prevent that:
   key. An unrecognised key is ignored by the CLI rather than fatal, so the
   override is safe across the supported version window.
 
-The `getAuthStatus` reply's auth mode is surfaced in **Settings â†’ Providers â†’
-Codex** (*Reported auth method*). When the CLI reports an API-key login â€” or a
-failed turn body is `Incorrect API key provided` â€” the state is named as the
+The `getAuthStatus` reply's auth mode is surfaced in **Settings → Providers →
+Codex** (*Reported auth method*). When the CLI reports an API-key login — or a
+failed turn body is `Incorrect API key provided` — the state is named as the
 API-key-vs-ChatGPT mismatch rather than a healthy sign-in or a plain sign-out,
 and it is only surfaced while Codex is the selected provider. No credential value
 is ever logged, shown, or interpolated into a message.
@@ -764,7 +900,7 @@ Generated protocol bindings are checked in under `schemas/` and the extension
 compiles against them, so a protocol drift surfaces as a build/type error rather
 than a runtime mystery. At runtime, the server's own version (from the
 `initialize` user agent, or `codex --version` when the handshake times out) is
-checked against the pinned protocol window: a version outside `0.154.0â€“0.164.x`
+checked against the pinned protocol window: a version outside `0.154.0–0.164.x`
 is reported as the specific `incompatible` status carrying that version, never the
 generic `unavailable` state and never a silent no-op.
 
@@ -879,4 +1015,10 @@ src/
 schemas/                generated Codex app-server protocol bindings
 docs/                   usage and manual-test documentation
 ```
+
+## License
+
+sideCode is released under the [MIT License](LICENSE).
+
+Bundled `ffmpeg` binaries are GPL-3.0-or-later and are covered by their own license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The sideCode name and the meLink logo are project marks. Cline, Cursor, VS Code, Open VSX, Ollama, OpenAI Codex, and OpenCode are trademarks of their respective owners.
 

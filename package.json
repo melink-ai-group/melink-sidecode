@@ -6,9 +6,14 @@
   "publisher": "melink",
   "icon": "media/melink-logo.png",
   "license": "MIT",
+  "author": "sideCode Contributors",
   "repository": {
     "type": "git",
-    "url": "https://github.com/melink/melink-agent-sidebar.git"
+    "url": "https://github.com/melink-ai-group/melink-sidecode.git"
+  },
+  "homepage": "https://github.com/melink-ai-group/melink-sidecode#readme",
+  "bugs": {
+    "url": "https://github.com/melink-ai-group/melink-sidecode/issues"
   },
   "engines": {
     "vscode": "^1.93.0"

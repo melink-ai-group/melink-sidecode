@@ -27,6 +27,15 @@ const SETTINGS_FILES = [
   'src/webview/composer/ModelSettingsPanel.tsx'
 ] as const;
 
+const COPY_FILES = [
+  'src/webview/App.tsx',
+  'src/webview/state.ts',
+  'README.md',
+  'docs/usage.md',
+  'docs/manual-test.md',
+  'docs/settings-audit.md'
+] as const;
+
 const FORBIDDEN: ReadonlyArray<readonly [string, RegExp]> = [
   ['U+FFFD replacement character', /\uFFFD/],
   ['double-encoded `â€` sequence (intended …, •, —, ’, “ or ”)', /\u00E2\u20AC/],
@@ -75,4 +84,18 @@ test('the repaired settings glyphs are still in place', () => {
     2,
     'both model default hints must use a real apostrophe (U+2019)'
   );
+});
+
+test('user-facing copy and docs carry no double-encoded UTF-8', () => {
+  const failures: string[] = [];
+  for (const file of COPY_FILES) {
+    const source = read(file);
+    for (const [label, pattern] of FORBIDDEN) {
+      const match = pattern.exec(source);
+      if (match) {
+        failures.push(`${file}:${lineNumber(source, match.index)} ${label}`);
+      }
+    }
+  }
+  assert.deepEqual(failures, [], `copy is corrupted:\n${failures.join('\n')}`);
 });

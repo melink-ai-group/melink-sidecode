@@ -1,11 +1,11 @@
 # Settings audit: contributed configuration, credentials, and persisted values
 
 This is the audit behind the settings screen. Every value the extension honours is
-listed with where it lives, whether the screen reaches it, and â€” for a default â€”
+listed with where it lives, whether the screen reaches it, and — for a default —
 what actually consumes it (so no control is inert). The configuration list is
-enumerated from `package.json` â†’ `contributes.configuration`, not from memory.
+enumerated from `package.json` → `contributes.configuration`, not from memory.
 
-## Contributed configuration (`package.json` â†’ `contributes.configuration`)
+## Contributed configuration (`package.json` → `contributes.configuration`)
 
 ### Trust-sensitive keys (read from user settings only)
 
@@ -19,7 +19,7 @@ Every spawned path is additionally checked by `src/backends/executables.ts`:
 a value that is *relative* is refused, because the child runs with the
 workspace as its working directory. That covers a relative path with a
 separator (`./evil`, `..\evil`) **and** the Windows drive-relative form
-(`C:evil.exe`, `C:`, `C:..\evil`) â€” the latter carries no separator, so a
+(`C:evil.exe`, `C:`, `C:..\evil`) — the latter carries no separator, so a
 separator-only rule would let it through, and Windows would resolve it against
 the current directory of that drive, i.e. the workspace. A bare command name
 (resolved from PATH) and a true absolute path (`C:\Tools\codex.exe`,
@@ -27,19 +27,19 @@ the current directory of that drive, i.e. the workspace. A bare command name
 
 | Key | Type / default | On the screen | Consumer |
 |---|---|---|---|
-| `melink.ollama.baseUrl` | string, `https://ollama.com` | **Present** â€” Providers â†’ Ollama Cloud â†’ Base URL | `OllamaClient.baseUrl` â†’ the request URL; the token is sent only to this host |
-| `melink.ollamaLocal.baseUrl` | string, `http://localhost:11434` | **Present** â€” Providers â†’ Ollama Local â†’ Base URL | `OllamaClient.baseUrl` (Local profile) â†’ the request and `/v1` URL; no credential is sent |
-| `melink.ollama.opencode.path` | string, `opencode` | **Present** â€” CLI â†’ opencode CLI path | `resolveOpencodeExecutable` â†’ the spawned command |
-| `melink.ollama.opencode.cliSource` | enum, `local` | **Present** â€” CLI â†’ Source | `resolveOpencodeExecutable` â†’ the spawned command |
-| `melink.codex.path` | string, `codex` | **Present** â€” Providers â†’ Codex â†’ Codex CLI path | `readTrustedCodexExecutable` â†’ the spawned app-server command |
-| `melink.skills.zvecGrep.path` | string, `zg` | **Present** â€” Skills â†’ zvec-grep | `resolveZvecGrepExecutable` â†’ the MCP command |
-| `melink.skills.zvecGrep.cliSource` | enum, `local` | **Present** â€” Skills â†’ zvec-grep | `resolveZvecGrepExecutable` â†’ the MCP command |
-| `melink.skills.astGrep.path` | string, `ast-grep` | **Present** â€” Skills â†’ ast-grep | `resolveAstGrepExecutable` â†’ the MCP command |
+| `melink.ollama.baseUrl` | string, `https://ollama.com` | **Present** — Providers → Ollama Cloud → Base URL | `OllamaClient.baseUrl` → the request URL; the token is sent only to this host |
+| `melink.ollamaLocal.baseUrl` | string, `http://localhost:11434` | **Present** — Providers → Ollama Local → Base URL | `OllamaClient.baseUrl` (Local profile) → the request and `/v1` URL; no credential is sent |
+| `melink.ollama.opencode.path` | string, `opencode` | **Present** — CLI → opencode CLI path | `resolveOpencodeExecutable` → the spawned command |
+| `melink.ollama.opencode.cliSource` | enum, `local` | **Present** — CLI → Source | `resolveOpencodeExecutable` → the spawned command |
+| `melink.codex.path` | string, `codex` | **Present** — Providers → Codex → Codex CLI path | `readTrustedCodexExecutable` → the spawned app-server command |
+| `melink.skills.zvecGrep.path` | string, `zg` | **Present** — Skills → zvec-grep | `resolveZvecGrepExecutable` → the MCP command |
+| `melink.skills.zvecGrep.cliSource` | enum, `local` | **Present** — Skills → zvec-grep | `resolveZvecGrepExecutable` → the MCP command |
+| `melink.skills.astGrep.path` | string, `ast-grep` | **Present** — Skills → ast-grep | `resolveAstGrepExecutable` → the MCP command |
 | `melink.skills.astGrep` | boolean, `false` | **Present** - Skills -> ast-grep -> Use structural search | MCP shim registration for OpenCode |
-| `melink.skills.astGrep.cliSource` | enum, `local` | **Present** â€” Skills â†’ ast-grep | `resolveAstGrepExecutable` â†’ the MCP command |
-| `melink.defaults.permissionLevel` | enum, `default` | **Present** â€” Defaults â†’ Default permission level | `readDefaultPermissionLevel()` â†’ `SidebarViewProvider` seeds a new thread; `CodexBackend.startThread` maps it to `approvalPolicy` + `sandbox` |
+| `melink.skills.astGrep.cliSource` | enum, `local` | **Present** — Skills → ast-grep | `resolveAstGrepExecutable` → the MCP command |
+| `melink.defaults.permissionLevel` | enum, `default` | **Present** — Defaults → Default permission level | `readDefaultPermissionLevel()` → `SidebarViewProvider` seeds a new thread; `CodexBackend.startThread` maps it to `approvalPolicy` + `sandbox` |
 
-### Skills keys (T113)
+### Skills keys
 
 The skill enable flags joined the path/source keys in application scope, so a
 workspace value can never flip a skill back after a reload. A toggle writes
@@ -64,22 +64,22 @@ server and reads `zg status`.
 | Key | Type / default | On the screen | Consumer |
 |---|---|---|---|
 | `melink.ollama.enabled` | boolean, `true` | **Present** - Providers -> Ollama Cloud -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides Ollama Cloud from the model picker and new-chat selection |
-| `melink.ollama.defaultModel` | string, *(empty)* | **Present** â€” Providers â†’ Ollama Cloud â†’ Default model | `OllamaBackend.defaultModel`, used when no model is selected |
+| `melink.ollama.defaultModel` | string, *(empty)* | **Present** — Providers → Ollama Cloud → Default model | `OllamaBackend.defaultModel`, used when no model is selected |
 | `melink.ollamaLocal.enabled` | boolean, `true` | **Present** - Providers -> Ollama Local -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides Ollama Local from the model picker and new-chat selection |
-| `melink.ollamaLocal.defaultModel` | string, *(empty)* | **Present** â€” Providers â†’ Ollama Local â†’ Default model | `OllamaBackend.defaultModel` (Local); empty resolves to the first `/api/tags` model |
+| `melink.ollamaLocal.defaultModel` | string, *(empty)* | **Present** — Providers → Ollama Local → Default model | `OllamaBackend.defaultModel` (Local); empty resolves to the first `/api/tags` model |
 | `melink.codex.enabled` | boolean, `true` | **Present** - Providers -> Codex -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides Codex from the model picker and new-chat selection |
-| `melink.codex.defaultModel` | string, *(empty)* | **Present** â€” Providers â†’ Codex â†’ Default model | `CodexBackend.defaultModel`, used when no model is selected |
-| `melink.defaults.mode` | enum, `agent` | **Present** â€” Defaults â†’ Default mode | `readDefaultMode()` â†’ `CodexBackend.startThread` applies `developerInstructions`; `agent` adds none |
-| `melink.safety.destructiveCommands` | enum, `ask` (`off` / `ask` / `block`), application scope | **Not on the screen** â€” user `settings.json` only, so a workspace cannot turn the check off | `readSafeModeSettings()` â†’ `safeModeDecision()` in `CodexBackend.handleServerRequest`, `OllamaBackend.decideOpencodePermission`, `OpencodeBackend.decideOpencodePermission`, before any stored-rule match |
-| `melink.safety.destructivePatterns` | array, *(empty)*, application scope | **Not on the screen** â€” user `settings.json` only, so a workspace cannot weaken the check | `readSafeModeSettings()` â†’ `classifyDestructiveCommand(..., patterns)`; invalid/blank patterns are ignored |
-| `melink.defaults.thinking` | string, *(empty)* | **Present** â€” Defaults â†’ Default thinking level | `readDefaultThinking()` â†’ `SidebarViewProvider.appDefaults()` â†’ model setting resolution; model-reported defaults and saved per-model choices take precedence |
-| `melink.context.includeInstructions` | boolean, `true` | **Present** â€” Context â†’ Included by default | `VscodeProjectContextHost.contextSettings()` â†’ `ProjectContext.getSnapshot`; off sends no instruction documents |
-| `melink.context.includeShape` | boolean, `true` | **Present** â€” Context â†’ Included by default | `contextSettings()` â†’ `ProjectContext.getSnapshot`; off sends no shape |
-| `melink.context.includeEditorState` | boolean, `true` | **Present** â€” Context â†’ Editor state | `contextSettings()` â†’ `ProjectContext.buildEditor` is not called; no active-file or open-editor read |
-| `melink.context.includeSelection` | boolean, `true` | **Present** â€” Context â†’ Selection | `contextSettings()` â†’ `ProjectContext.buildEditor`; off never reads the selected text |
-| `melink.context.includeChangedFiles` | boolean, `true` | **Present** â€” Context â†’ Included by default | `contextSettings()` â†’ `ProjectContext.getDelta`; off omits the changed-files notice |
-| `melink.context.maxBytes` | number, `20480` | **Present** â€” Context â†’ Maximum context size | `contextSettings()` â†’ `ProjectContext` overall cap and `ContextDelivery` render budget |
-| `melink.context.exclude` | array, *(empty)* | **Present** â€” Context â†’ Ignore patterns | `VscodeProjectContextHost.userExclude()` â†’ `ProjectContext` glob options, additive to the built-in set |
+| `melink.codex.defaultModel` | string, *(empty)* | **Present** — Providers → Codex → Default model | `CodexBackend.defaultModel`, used when no model is selected |
+| `melink.defaults.mode` | enum, `agent` | **Present** — Defaults → Default mode | `readDefaultMode()` → `CodexBackend.startThread` applies `developerInstructions`; `agent` adds none |
+| `melink.safety.destructiveCommands` | enum, `ask` (`off` / `ask` / `block`), application scope | **Not on the screen** — user `settings.json` only, so a workspace cannot turn the check off | `readSafeModeSettings()` → `safeModeDecision()` in `CodexBackend.handleServerRequest`, `OllamaBackend.decideOpencodePermission`, `OpencodeBackend.decideOpencodePermission`, before any stored-rule match |
+| `melink.safety.destructivePatterns` | array, *(empty)*, application scope | **Not on the screen** — user `settings.json` only, so a workspace cannot weaken the check | `readSafeModeSettings()` → `classifyDestructiveCommand(..., patterns)`; invalid/blank patterns are ignored |
+| `melink.defaults.thinking` | string, *(empty)* | **Present** — Defaults → Default thinking level | `readDefaultThinking()` → `SidebarViewProvider.appDefaults()` → model setting resolution; model-reported defaults and saved per-model choices take precedence |
+| `melink.context.includeInstructions` | boolean, `true` | **Present** — Context → Included by default | `VscodeProjectContextHost.contextSettings()` → `ProjectContext.getSnapshot`; off sends no instruction documents |
+| `melink.context.includeShape` | boolean, `true` | **Present** — Context → Included by default | `contextSettings()` → `ProjectContext.getSnapshot`; off sends no shape |
+| `melink.context.includeEditorState` | boolean, `true` | **Present** — Context → Editor state | `contextSettings()` → `ProjectContext.buildEditor` is not called; no active-file or open-editor read |
+| `melink.context.includeSelection` | boolean, `true` | **Present** — Context → Selection | `contextSettings()` → `ProjectContext.buildEditor`; off never reads the selected text |
+| `melink.context.includeChangedFiles` | boolean, `true` | **Present** — Context → Included by default | `contextSettings()` → `ProjectContext.getDelta`; off omits the changed-files notice |
+| `melink.context.maxBytes` | number, `20480` | **Present** — Context → Maximum context size | `contextSettings()` → `ProjectContext` overall cap and `ContextDelivery` render budget |
+| `melink.context.exclude` | array, *(empty)* | **Present** — Context → Ignore patterns | `VscodeProjectContextHost.userExclude()` → `ProjectContext` glob options, additive to the built-in set |
 | `melink.review.diffReview` | boolean, `false`, application scope | **Legacy fallback** - surfaced in Orchestration -> Reviewing; read only while `melink.orchestration.reviewing` is unset | `SidebarViewProvider.diffReviewEnabled()` -> `reviewFinishedTurn()` on live turn finish; off means no input is built, no runner is called, and nothing is stored |
 | `melink.opencode.enabled` | boolean, `true` | **Present** - Providers -> OpenCode Zen -> Enabled | `BackendRegistry.probe` -> `BackendAvailability.enabled`; off hides OpenCode Zen from the model picker and new-chat selection |
 | `melink.opencode.defaultModel` | string, *(empty)* | **Present** - Providers -> OpenCode Zen -> Default model | `buildZenOpencodeConfig` model default; empty uses the first catalog model |
@@ -88,11 +88,11 @@ server and reads `zg status`.
 | `melink.skills.browserCodex` | boolean, `true` | **Present** - Skills -> Browser -> Codex | Codex browser skill |
 | `melink.skills.browserOpencode` | boolean, `true` | **Present** - Skills -> Browser -> OpenCode | OpenCode browser skill |
 | `melink.skills.browser` | boolean, `true` | **Not on the screen** - legacy fallback | read only when the per-provider browser keys are unset |
-| `melink.context.repoMap` | boolean, `false` | **Added by T84** â€” off by default; no map is built until enabled | `contextSettings()` â†’ `ContextDelivery.repoMapForTurn`; on builds a bounded map over `shape.files`, off sends the explicit disabled marker |
-| `melink.context.repoMapMaxFiles` | number, `200` | **Added by T84** | `contextSettings()` â†’ `RepoMapCaps.maxFiles`; stops the build deterministically |
-| `melink.context.repoMapMaxBytes` | number, `131072` | **Added by T84** | `contextSettings()` â†’ `RepoMapCaps.maxBytes`; stops the build deterministically |
-| `melink.context.repoMapBuildMs` | number, `750` | **Added by T84** | `contextSettings()` â†’ `RepoMapCaps.maxBuildMs`; per-read timeout also bounds a never-resolving read |
-| `melink.context.repoMapMaxChars` | number, `1200` | **Added by T84** | `contextSettings()` â†’ `RepoMapCaps.maxChars`; bounds the rendered per-turn block |
+| `melink.context.repoMap` | boolean, `false` | **Added for the repo map** — off by default; no map is built until enabled | `contextSettings()` → `ContextDelivery.repoMapForTurn`; on builds a bounded map over `shape.files`, off sends the explicit disabled marker |
+| `melink.context.repoMapMaxFiles` | number, `200` | **Added for the repo map** | `contextSettings()` → `RepoMapCaps.maxFiles`; stops the build deterministically |
+| `melink.context.repoMapMaxBytes` | number, `131072` | **Added for the repo map** | `contextSettings()` → `RepoMapCaps.maxBytes`; stops the build deterministically |
+| `melink.context.repoMapBuildMs` | number, `750` | **Added for the repo map** | `contextSettings()` → `RepoMapCaps.maxBuildMs`; per-read timeout also bounds a never-resolving read |
+| `melink.context.repoMapMaxChars` | number, `1200` | **Added for the repo map** | `contextSettings()` → `RepoMapCaps.maxChars`; bounds the rendered per-turn block |
 | `melink.review.checks.enabled` | boolean, `false` | **Legacy fallback** - surfaced in Orchestration -> Testing; read only while `melink.orchestration.testing` is unset, and its schema default is not treated as explicit | `readWorkspaceCheckSettings()` -> `resolveCheckPlan`; off stores an off summary and spawns nothing |
 | `melink.orchestration.dictation` | boolean, `true` | **Present** - Orchestration -> Dictation for orchestration; lets a model narrow the Auto passes, On/Off stay authoritative | `resolveOrchestrationSettings()` -> `decideOrchestration()` read-only call -> `resolvePostTurnRoles(dictation)` |
 | `melink.orchestration.testing` | tri-state (`boolean` accepted), `on` | **Present** - Orchestration -> Testing; `auto` needs a code change, `off` never. Falls back to `melink.review.checks.enabled` | `resolveOrchestrationSettings()` -> per-turn plan gate / `resolvePostTurnRoles()` |
@@ -109,14 +109,14 @@ server and reads `zg status`.
 | Key | Scope | Purpose |
 |---|---|---|
 | `melink.review.checks` | workspace | Newest 50 check runs, keyed `backendId:threadId:turnId`; a stored `running` run is read back as `skipped` after a reload. This is state, not a setting, and it shares the name with the configuration section only by design. |
-| `melink.telemetry.failureLog` | boolean, `false`, **application scope** | **Not on the screen** â€” VS Code Settings or the **sideCode: Record a missed issue locally** command | `createFailureLogHost()` / `recordFailureEntry()`; false keeps the command informational and touches no directory or file. Application scope means a workspace cannot opt in |
+| `melink.telemetry.failureLog` | boolean, `false`, **application scope** | **Not on the screen** — VS Code Settings or the **sideCode: Record a missed issue locally** command | `createFailureLogHost()` / `recordFailureEntry()`; false keeps the command informational and touches no directory or file. Application scope means a workspace cannot opt in |
 
 ## Credentials
 
 | Secret | Store | On the screen | Consumer / write path |
 |---|---|---|---|
-| `melink.ollama.token` (`OLLAMA_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** â€” Providers â†’ Ollama Cloud â†’ API key (masked, empty; only `hasToken` is sent to the webview) | Bearer credential for `melink.ollama.baseUrl` requests, including the opencode runtime child env. Written by the screen and `sideCode: Set Ollama Cloud token` via `context.secrets.store`; removed with `context.secrets.delete` |
-| `melink.opencode.zenToken` (`OPENCODE_ZEN_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** â€” Providers â†’ OpenCode Zen â†’ Zen API key (optional, masked, empty; only `hasToken` is sent to the webview) | Paid-model Zen catalog and model requests (`OpencodeBackend`). Written by the screen and `sideCode: Set OpenCode Zen API key` via `context.secrets.store`; removed with `context.secrets.delete` |
+| `melink.ollama.token` (`OLLAMA_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → Ollama Cloud → API key (masked, empty; only `hasToken` is sent to the webview) | Bearer credential for `melink.ollama.baseUrl` requests, including the opencode runtime child env. Written by the screen and `sideCode: Set Ollama Cloud token` via `context.secrets.store`; removed with `context.secrets.delete` |
+| `melink.opencode.zenToken` (`OPENCODE_ZEN_TOKEN_SECRET_KEY`, `src/backends/secrets.ts`) | VS Code `SecretStorage` only | **Present** — Providers → OpenCode Zen → Zen API key (optional, masked, empty; only `hasToken` is sent to the webview) | Paid-model Zen catalog and model requests (`OpencodeBackend`). Written by the screen and `sideCode: Set OpenCode Zen API key` via `context.secrets.store`; removed with `context.secrets.delete` |
 
 There is no second credential store and no `settings.json` write path for either
 secret. The webview read model exposes only `hasToken`, so a stored value can
@@ -140,13 +140,13 @@ list, and so must the `restrictedConfigurations` array.
 The `restrictedConfigurations` list is a host-level layer on top of the
 application scope: while a workspace is untrusted, VS Code does not hand the
 extension a workspace-defined value for those keys at all. The code's own rule
-is stronger â€” a workspace value for those keys is ignored whether the
-workspace is trusted or not â€” so the application scope is what the description
+is stronger — a workspace value for those keys is ignored whether the
+workspace is trusted or not — so the application scope is what the description
 promises.
 
 A **Save to workspace** action writes a trust-sensitive key to the user's own
 settings instead, and the field carries a short notice saying so. The value is
-persisted â€” it is not silently dropped â€” but it lands in the scope that is
+persisted — it is not silently dropped — but it lands in the scope that is
 actually read. All ten trust-sensitive fields show that notice; the list
 lives in `src/config/fieldNotices.ts` and is asserted against the screen's
 source by `src/config/fieldNotices.test.ts`.
