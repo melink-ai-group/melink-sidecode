@@ -32,6 +32,42 @@ const MODELS = {
       label: 'kimi-k2:instruct',
       description: 'General assistant with tool use.',
       capabilities: CAPABILITIES
+    },
+    {
+      id: 'deepseek-v4.1-flash',
+      label: 'deepseek-v4.1-flash',
+      description: 'Fast coding assistant.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'deepseek-v4-pro:0813',
+      label: 'deepseek-v4-pro:0813',
+      description: 'Reasoning-heavy coding model.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'gemma4:31b',
+      label: 'gemma4:31b',
+      description: 'Open model with a large context window.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'glm-5.2',
+      label: 'glm-5.2',
+      description: 'Agentic coding model.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'glm-5.3-flash',
+      label: 'glm-5.3-flash',
+      description: 'Fast agentic coding model.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'clef:27b',
+      label: 'clef:27b',
+      description: 'Compact coding model.',
+      capabilities: CAPABILITIES
     }
   ],
   'ollama-local': [
@@ -46,6 +82,18 @@ const MODELS = {
       label: 'llama3.2:3b',
       description: 'Small local assistant.',
       capabilities: CAPABILITIES
+    },
+    {
+      id: 'deepseek-coder-v2:16b',
+      label: 'deepseek-coder-v2:16b',
+      description: 'Local coding model with a larger context window.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'mistral-nemo:12b',
+      label: 'mistral-nemo:12b',
+      description: 'Local general assistant.',
+      capabilities: CAPABILITIES
     }
   ],
   codex: [
@@ -53,6 +101,24 @@ const MODELS = {
       id: 'gpt-5-codex',
       label: 'gpt-5-codex',
       description: 'Codex model for agentic edits.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'gpt-5.1-codex',
+      label: 'gpt-5.1-codex',
+      description: 'Codex model for larger agentic changes.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'gpt-5.1-codex-mini',
+      label: 'gpt-5.1-codex-mini',
+      description: 'Faster Codex model for smaller edits.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'gpt-5.2',
+      label: 'gpt-5.2',
+      description: 'General Codex model.',
       capabilities: CAPABILITIES
     }
   ],
@@ -62,6 +128,24 @@ const MODELS = {
       label: 'big-pickle',
       description: 'Free OpenCode Zen model.',
       free: true,
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'grok-code-fast-1',
+      label: 'grok-code-fast-1',
+      description: 'Fast coding model.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'kimi-k2-thinking',
+      label: 'kimi-k2-thinking',
+      description: 'Reasoning model for agentic work.',
+      capabilities: CAPABILITIES
+    },
+    {
+      id: 'minimax-m2',
+      label: 'minimax-m2',
+      description: 'Agentic coding model.',
       capabilities: CAPABILITIES
     }
   ]
@@ -396,6 +480,8 @@ export function screenMessages(slug) {
         ]
       });
     case 'chat-idle':
+      return baseMessages({ title: 'New chat' });
+    case 'chat-model-picker':
       return baseMessages({ title: 'New chat' });
     case 'stream-reasoning': {
       const messages = baseMessages({

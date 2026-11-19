@@ -2,14 +2,14 @@
 
 **One agent chat sidebar for VS Code and Open VSX hosts. Bring your own model: Ollama Cloud, Ollama Local, the OpenAI Codex CLI, or OpenCode Zen.**
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: source-available](https://img.shields.io/badge/license-source--available-orange.svg)](LICENSE.md)
 [![Release workflow](https://github.com/melink-ai-group/melink-sidecode/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/melink-ai-group/melink-sidecode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.93.0-007ACC)](https://code.visualstudio.com/)
 [![Node](https://img.shields.io/badge/node-22.12-339933)](https://nodejs.org/)
 
 ![sideCode sidebar with an empty chat](docs/images/hero-chat.png)
 
-sideCode keeps the agent, model picker, review surface, and safety rules in one Activity Bar view. It is MIT-licensed, works in VS Code and Open VSX hosts, and sends no network telemetry.
+sideCode keeps the agent, model picker, review surface, and safety rules in one Activity Bar view. It is source-available, works in VS Code and Open VSX hosts, and sends no network telemetry.
 
 ## Contents
 
@@ -21,6 +21,7 @@ sideCode keeps the agent, model picker, review surface, and safety rules in one 
 - [Privacy](#privacy)
 - [Documentation](#documentation)
 - [Development](#development)
+- [Support the project](#support-the-project)
 - [License](#license)
 
 ## Why sideCode
@@ -32,7 +33,11 @@ sideCode keeps the agent, model picker, review surface, and safety rules in one 
 - **Plans live in the repository.** Plan mode writes `.melink/plans/<kebab-case-title>.md`; building the plan turns its steps into a persisted todo list instead of hiding the plan in a proprietary service.
 - **Quality gates after the turn.** Typecheck/tests, an advisory diff review, a styling check, and a diagnostics sweep run against the changed files. Keep is disabled while checks run, and every failure is visible rather than silently retried.
 - **No telemetry.** sideCode has no analytics or crash-upload endpoint. The only optional log is a local, opt-in missed-issue JSONL file whose fields are fixed and whose values are redacted.
-- **MIT and Open VSX.** The extension is auditable, installable in VS Code and Open VSX hosts, and does not require a subscription.
+- **Source-available and Open VSX.** The full source is public and auditable, it installs in VS Code and Open VSX hosts, and it does not require a subscription. Resale and redistribution need written permission.
+
+![Model picker with provider tabs for Ollama Cloud, Ollama Local, the OpenAI Codex CLI, and OpenCode Zen, plus a searchable model list](docs/images/model-picker.png)
+
+**Every provider, one picker.** Provider tabs, live model counts, and a filter, without leaving the transcript.
 
 ## Features
 
@@ -60,14 +65,14 @@ sideCode is not a drop-in replacement for every agent. It is the better fit when
 | Dimension | sideCode | Cline | Cursor |
 |---|---|---|---|
 | Form factor | VS Code / Open VSX sidebar | VS Code extension, CLI, desktop, JetBrains | Full IDE (VS Code fork) |
-| License | MIT | Apache-2.0 | Proprietary |
+| License | Source-available (no resale) | Apache-2.0 | Proprietary |
 | Model access | Ollama Cloud, Ollama Local, Codex CLI, OpenCode Zen | 30+ providers, including local Ollama and LM Studio | Built-in frontier models and plan tiers |
 | Review and rollback | Per-file Keep/Reject, checkpoint restore, native diff | Plan/Act, per-action approval, checkpoints | Plan mode, review, checkpoints |
 | Safety model | App-scoped trust keys, destructive-command gate, Ask refuses actions | Per-action approval, auto-approve, YOLO | Agent permissions and review |
 | Telemetry | None; opt-in local missed-issue log | Telemetry is documented and configurable; check the current docs | See Cursor's privacy docs |
 | Post-turn checks | Typecheck/tests, diff review, styling check, diagnostics | In-loop lint/compiler feedback; see Cline docs for current gates | Review and test workflows |
 | Plan artifact | `.melink/plans/<title>.md` in the repo | Plan/Act modes | Plan mode |
-| Price | Free/MIT; bring a key or CLI | Free/Apache-2.0; bring a key or ClinePass | Free tier plus paid subscription |
+| Price | Free to use; source-available; bring a key or CLI | Free/Apache-2.0; bring a key or ClinePass | Free tier plus paid subscription |
 
 Sources: [Cline docs](https://docs.cline.bot/), [Cline repository](https://github.com/cline/cline), [Cline Marketplace](https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev), [Cursor docs](https://cursor.com/docs), [Cursor models and pricing](https://cursor.com/docs/models-and-pricing). Compared on 2026-11-19; competitor features and prices change. Cline and Cursor are trademarks of their owners; this comparison is informational, not an endorsement.
 
@@ -75,7 +80,7 @@ Where each fits:
 
 - **Choose Cline** if you want a large provider catalogue, a CLI/desktop/JetBrains surface, and a mature community.
 - **Choose Cursor** if you want an all-in-one IDE with Tab completion, built-in frontier models, cloud agents, and code review in one product.
-- **Choose sideCode** if you want a lean, MIT-licensed sidebar across VS Code and Open VSX hosts, local Ollama and CLI providers, review-before-keep, and workspace-safe settings.
+- **Choose sideCode** if you want a lean, source-available sidebar across VS Code and Open VSX hosts, local Ollama and CLI providers, review-before-keep, and workspace-safe settings.
 
 ## Install
 
@@ -144,6 +149,12 @@ npm run eval
 `npm test` runs the Node unit suite, the `tools/**/*.test.mjs` suite, and the jsdom/Testing Library webview suite. `npm run visual` renders the built webview in installed Chrome or Edge and writes screenshots under `.melink/reports/visual/`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [Build from source](#build-from-source) for the full workflow.
+
+## Support the project
+
+If sideCode saves you time, a **GitHub star** helps other developers find it and is genuinely appreciated: [star the repository](https://github.com/melink-ai-group/melink-sidecode).
+
+If you fix a bug, add a provider or a skill, improve the documentation, or update a dependency, send a pull request so the change benefits everyone. Focused PRs are easiest to review. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and open an issue when you want to agree on the approach before writing code.
 
 ## What it is
 
@@ -1018,7 +1029,7 @@ docs/                   usage and manual-test documentation
 
 ## License
 
-sideCode is released under the [MIT License](LICENSE).
+sideCode is released under the [sideCode Source-Available License](LICENSE.md). You may read, build, run, and modify it for your own use, including at work. You may not sell it, redistribute it, or publish a modified version without prior written permission.
 
-Bundled `ffmpeg` binaries are GPL-3.0-or-later and are covered by their own license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The sideCode name and the meLink logo are project marks. Cline, Cursor, VS Code, Open VSX, Ollama, OpenAI Codex, and OpenCode are trademarks of their respective owners.
+Bundled `ffmpeg` binaries are GPL-3.0-or-later and are covered by their own license; those GPL rights are not restricted by the sideCode license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The sideCode name and the meLink logo are project marks. Cline, Cursor, VS Code, Open VSX, Ollama, OpenAI Codex, and OpenCode are trademarks of their respective owners.
 

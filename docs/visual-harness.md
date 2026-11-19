@@ -1,7 +1,7 @@
 # Visual harness (dev only)
 
 `npm run visual` renders the **built** sideCode webview in headless Chromium,
-seeded with fixed host state, and writes twelve screens (24 PNGs) plus a
+seeded with fixed host state, and writes fourteen screens (28 PNGs) plus a
 manifest and an index under `.melink/reports/visual/`.
 
 It is a screenshot tool for reviews, not a product feature. It is excluded from
@@ -64,12 +64,14 @@ $env:MELINK_VISUAL_BROWSER = 'chrome'; npm run visual
 npm run visual
 ```
 
-Output:
+Output (abridged; `index.md` lists every screen):
 
 ```text
 .melink/reports/visual/
   chat-idle-1280x800.png
   chat-idle-390x844.png
+  chat-model-picker-1280x800.png
+  chat-model-picker-390x844.png
   stream-reasoning-1280x800.png
   stream-reasoning-390x844.png
   change-review-1280x800.png
@@ -116,7 +118,9 @@ file naming live in `tools/visual-harness/catalog.mjs`.
 
 | Slug | What it shows | Seeded state |
 | --- | --- | --- |
-| `chat-idle` | Empty chat / composer | Available Ollama, Codex, and OpenCode Zen providers, models, settings, context strip, one open chat tab |
+| `subagent-activity` | Orchestration activity rows, including a keyboard-opened worker disclosure | A completed turn with running review and styling agents, completed host checks, and queued, failed, and cancelled workers |
+| `chat-idle` | Empty chat / composer | Available Ollama Cloud, Ollama Local, Codex, and OpenCode Zen providers, models, settings, context strip, one open chat tab |
+| `chat-model-picker` | Model picker open over the empty chat, with provider tabs and a filter | Four available providers; eight Ollama Cloud models and four each for Ollama Local, Codex, and OpenCode Zen |
 | `stream-reasoning` | A turn mid-stream with reasoning expanded | User message, running turn, streamed reasoning, partial assistant reply, context usage |
 | `change-review` | Expanded change review | Completed turn, three changed files, pending review snapshot |
 | `plan-todos` | Plan card with all four steps visible (capture-only expansion) | Conversation plus a pending four-step plan |
@@ -130,7 +134,7 @@ file naming live in `tools/visual-harness/catalog.mjs`.
 | `chat-queued` | Composer busy with queued turns | One running turn and two queued messages |
 
 Every screen is captured at **1280x800** and **390x844** (DPR 1), so there are
-always 24 expected files. Every navigation, wait, click, text assertion,
+always 28 expected files. Every navigation, wait, click, text assertion,
 row assertion, and screenshot runs inside a per-screen context, so any failure
 starts with the screen and viewport:
 
@@ -142,6 +146,20 @@ This covers a webview that never posts `ready`, a missing selector or expected
 text, a click or post-click wait that times out, page errors, short body text,
 row-count/clipping assertions, and a PNG smaller than a reasonable rendered
 frame. A baseline `--check` failure also names the screen and viewport.
+
+### Model-picker capture adjustment
+
+The product's model panel is 440px wide and uses the default tab metrics, so
+four provider tabs can scroll horizontally. For the `chat-model-picker` capture
+only, the catalog applies:
+
+```css
+.model-panel__tabs .tab { font-size: 12px; padding-left: 7px; padding-right: 7px; }
+```
+
+This uses the same quieter metrics as `.tablist--nested` and keeps every
+provider tab visible in the screenshot. The product still scrolls when the tabs
+do not fit.
 
 ### Plan-todos capture adjustment
 
@@ -175,7 +193,7 @@ The harness fixes:
 - the browser executable used for the run.
 
 With the same OS, fonts, browser build, and harness revision, two consecutive
-runs produced byte-identical PNGs in the release verification (all 24 files).
+runs produced byte-identical PNGs in the release verification (all files in that run).
 
 Known sources of variation:
 

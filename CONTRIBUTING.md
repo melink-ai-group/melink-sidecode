@@ -63,7 +63,7 @@ Press **F5** in VS Code to launch the Extension Development Host. For a rebuild 
 - Describe the user-visible behavior, the tests you ran, and any provider or host limitation.
 - Never commit a token, `.env`, `.vscode/settings.json`, a personal absolute path, or a generated `.vsix`.
 - Do not bundle unrelated formatting changes with a behavior change.
-- By contributing, you agree that your contribution is licensed under the MIT License.
+- By contributing, you agree that your contribution is licensed under the [sideCode Source-Available License](LICENSE.md) and that you grant meLink the rights in its Contributions section, including the right to relicense your contribution. If you cannot grant those rights, open an issue instead of a pull request.
 
 ## Security
 

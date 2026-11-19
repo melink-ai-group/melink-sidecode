@@ -200,6 +200,8 @@ the chat with a bounded height and its own scrolling list. It contains:
 - **Per-provider entries** for a provider that is not signed in, with a **Set
   token** button.
 
+![Model picker with provider tabs and a searchable model list](images/model-picker.png)
+
 Selecting a model sets the check mark and updates the trigger label. Switching
 applies to your **next message**; the current conversation is kept. The trigger
 shows the selected provider's dot (blue for Ollama Cloud, neutral for Codex).
@@ -816,6 +818,8 @@ reply finishes. Changes apply from the **next turn**; the summary at the top of
 the tab spells out the current policy. Reviews are advisory and do not change
 Keep/Reject or raise permissions. Relevant findings or failed host checks can
 return to the main Agent for one automatic correction turn per user request.
+
+![Orchestration settings with the effective policy banner and Testing, Reviewing, Styling check, Double-check, Quick tasks, and Plan autopilot rows](images/orchestration.png)
 
 Every role has three states. **Auto** runs it only when this turn is relevant;
 **On** runs it whenever the role's hard mode applies; **Off** never runs it. A

@@ -52,6 +52,97 @@ test('an invalid closed question fence is removed and reported', () => {
   assert.doesNotMatch(extracted.text, /sidecode-question/);
 });
 
+test('a truncated question tail inside a json fence is recovered instead of discarded', () => {
+  const tail =
+    'it unchanged?","options":["Model picker in README (Recommended)","Both figures in README","Switch all images to dark","Leave README unchanged"]}]}';
+  const text = `Two of the three are worth using.\n\n\`\`\`json\n${tail}\n\`\`\``;
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.invalid, undefined);
+  assert.equal(extracted.questions?.length, 1);
+  assert.equal(extracted.questions?.[0]?.prompt, 'it unchanged?');
+  assert.deepEqual(extracted.questions?.[0]?.options, [
+    'Model picker in README (Recommended)',
+    'Both figures in README',
+    'Switch all images to dark',
+    'Leave README unchanged'
+  ]);
+  assert.equal(extracted.text, 'Two of the three are worth using.');
+  assert.equal(containsQuestionPayload(text), true);
+});
+
+test('an inline json fence with a truncated question tail is recovered', () => {
+  const text = 'Prose.\n\n```json it unchanged?","options":["Keep it","Drop it"]}]}';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.invalid, undefined);
+  assert.equal(extracted.questions?.[0]?.prompt, 'it unchanged?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['Keep it', 'Drop it']);
+  assert.equal(extracted.text, 'Prose.');
+});
+
+test('an inline json fence with a complete question object opens the card', () => {
+  const text = 'Done.\n```json {"questions":[{"prompt":"Which?","options":["A","B"]}]}```';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.questions?.[0]?.prompt, 'Which?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['A', 'B']);
+  assert.equal(extracted.text, 'Done.');
+});
+
+test('a question object that lost its outer questions wrapper is recovered', () => {
+  const text = 'Before.\n```sidecode-question\n"prompt":"Which?","options":["A","B"]}]}\n```\nAfter.';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.invalid, undefined);
+  assert.equal(extracted.questions?.[0]?.prompt, 'Which?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['A', 'B']);
+  assert.equal(extracted.text, 'Before.\n\nAfter.');
+});
+
+test('a json sample that only looks similar stays in the reply', () => {
+  const text = 'Example:\n```json\n{"name":"app","options":["a","b"]}\n```\nDone.';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.text, text);
+  assert.equal(extracted.questions, undefined);
+  assert.equal(extracted.invalid, undefined);
+
+  const questionShaped = 'Example:\n```json\n{"prompt":"Which?","options":["A","B"]}\n```\nDone.';
+  assert.equal(extractSidecodeQuestions(questionShaped).text, questionShaped);
+  assert.equal(extractSidecodeQuestions(questionShaped).questions, undefined);
+});
+
+test('an unclosed question fence recovers a readable tail', () => {
+  const text = 'Before.\n```sidecode-question\nit unchanged?","options":["Keep it","Drop it"]}]}';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.invalid, undefined);
+  assert.equal(extracted.questions?.[0]?.prompt, 'it unchanged?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['Keep it', 'Drop it']);
+  assert.equal(extracted.text, 'Before.');
+});
+
+test('an unclosed json fence recovers a question tail', () => {
+  const text = 'Before.\n```json\nit unchanged?","options":["Keep it","Drop it"]}]}';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.invalid, undefined);
+  assert.equal(extracted.questions?.[0]?.prompt, 'it unchanged?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['Keep it', 'Drop it']);
+  assert.equal(extracted.text, 'Before.');
+});
+
+test('a bare damaged question tail at a line start is recovered', () => {
+  const text = 'Before.\n\nit unchanged?","options":["Keep it","Drop it"]}]}\n\nAfter.';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.invalid, undefined);
+  assert.equal(extracted.questions?.[0]?.prompt, 'it unchanged?');
+  assert.deepEqual(extracted.questions?.[0]?.options, ['Keep it', 'Drop it']);
+  assert.equal(extracted.text, 'Before.\n\nAfter.');
+});
+
+test('an unclosed json sample that only looks similar stays in the reply', () => {
+  const text = 'Example:\n```json\n{"name":"app","options":["a","b"]}';
+  const extracted = extractSidecodeQuestions(text);
+  assert.equal(extracted.text, text);
+  assert.equal(extracted.questions, undefined);
+  assert.equal(extracted.invalid, undefined);
+});
+
 test('a json fence whose question body fails to parse is invalid, a normal code sample is not', () => {
   const broken = 'Before.\n```json\n{"questions":[{"prompt":"Which?"}\n```\nAfter.';
   const extracted = extractSidecodeQuestions(broken);
