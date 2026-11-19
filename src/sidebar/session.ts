@@ -35,10 +35,12 @@ export interface ChatSession {
   modelSettings: Record<string, ModelSettingOverrides>;
   pendingApproval?: ApprovalRequest;
   pendingQuestion?: { source: 'fence' | 'native'; request: QuestionRequest };
+  planTurnId?: string;
   nativePlanThisTurn: boolean;
   revisePlanThisTurn: boolean;
   /** Answers already folded into this thread's plan, in ask order. */
   planDecisions: string[];
+  planContextExcluded: boolean;
   /** Bumped on a user send so a late autopilot decision cannot start another turn. */
   planEpoch: number;
   /** True when the open turn was started to keep a built plan moving. */

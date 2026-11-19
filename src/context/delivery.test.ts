@@ -298,6 +298,27 @@ test('invalidateAll re-arms every thread and is safe when no thread is open', as
   assert.doesNotMatch(b.snapshot!, /const secret = 1;/);
 });
 
+test('linked plan context is fresh for each request and deduplicates the same editor file', async () => {
+  const reads = new FakeReads();
+  const delivery = new ContextDelivery({ reads });
+  const plan = { path: '.melink/plans/sidebar.md', languageId: 'markdown', excluded: false, text: 'Saved plan' };
+  const first = await delivery.forTurn('codex:plan', {}, '', plan);
+  assert.match(first.attachedFile!, /Saved plan/);
+  assert.doesNotMatch(first.snapshot!, /Saved plan/);
+
+  delivery.setIncludeViewedFile(true);
+  reads.attachment = { ...plan, path: '.melink\\plans\\sidebar.md', text: 'Old editor buffer' };
+  const second = await delivery.forTurn('opencode:plan', {}, '', { ...plan, text: 'Saved revision' });
+  assert.equal(second.attachedFile!.match(/<attached-file>/g)?.length, 1);
+  assert.match(second.attachedFile!, /Saved revision/);
+  assert.doesNotMatch(second.attachedFile!, /Old editor buffer/);
+
+  reads.attachment = { ...plan, path: 'README.md', text: 'Separate file' };
+  const removed = await delivery.forTurn('opencode:plan');
+  assert.match(removed.attachedFile!, /Separate file/);
+  assert.doesNotMatch(removed.attachedFile!, /Saved plan|Saved revision/);
+});
+
 test('the detected frontend stack rides on the prime, every delta turn, and refresh', async () => {
   const reads = new FakeReads();
   const delivery = new ContextDelivery({ reads });

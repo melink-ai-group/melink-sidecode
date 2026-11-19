@@ -45,6 +45,7 @@ export interface ChatTabState extends StoredComposer {
   draftText?: string;
   /** Unsent composer files for this tab. Metadata only. */
   draftAttachments?: DraftAttachment[];
+  planContextExcluded?: boolean;
 }
 
 /**
@@ -127,6 +128,7 @@ export function parseChatTabState(state: unknown): ChatTabState {
     ...(record.active === true ? { active: true } : {}),
     ...(draftText ? { draftText } : {}),
     ...(draftAttachments.length > 0 ? { draftAttachments } : {}),
+    ...(record.planContextExcluded === true ? { planContextExcluded: true } : {}),
     ...composer
   };
 }

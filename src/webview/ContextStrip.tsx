@@ -22,6 +22,38 @@ export interface ContextStripProps {
   includeViewedFile: boolean;
   /** Add or remove that file. Off until the user asks. */
   onSetIncludeViewedFile: (included: boolean) => void;
+  plan?: ContextFileProps;
+}
+
+interface ContextFileProps {
+  path: string;
+  included: boolean;
+  blocked?: boolean;
+  onOpen: () => void;
+  onSetIncluded: (included: boolean) => void;
+}
+
+function ContextFile({ path, included, blocked, onOpen, onSetIncluded }: ContextFileProps): JSX.Element {
+  const action = included ? 'Remove ' + path + ' from context' : 'Add ' + path + ' to context';
+  return (
+    <span className={included ? 'context-file is-on' : 'context-file is-ghost'}>
+      <button className="context-path" type="button" title={'Open ' + path + ' in the editor'} onClick={onOpen}>
+        <FileIcon className="ico ico--xs" />
+        <span className="context-path-text">{path}</span>
+      </button>
+      <button
+        className="context-file-toggle"
+        type="button"
+        aria-pressed={included}
+        aria-label={action}
+        title={blocked ? 'This file cannot be added to the next turn' : action}
+        disabled={blocked}
+        onClick={() => onSetIncluded(!included)}
+      >
+        {included ? <CircleMinusIcon /> : <CirclePlusIcon />}
+      </button>
+    </span>
+  );
 }
 
 export function ContextStrip({
@@ -30,69 +62,45 @@ export function ContextStrip({
   exclusions,
   onOpenFile,
   includeViewedFile,
-  onSetIncludeViewedFile
+  onSetIncludeViewedFile,
+  plan
 }: ContextStripProps): JSX.Element | null {
-  if (!view) {
+  if (!view && !plan) {
     return null;
   }
 
-  const effective = applyViewExclusions(view, exclusions);
-  const status = settingsEnabled ? effective.status : 'empty';
-  const included = includeViewedFile && !effective.viewedFileBlocked;
+  const effective = view && applyViewExclusions(view, exclusions);
+  const status = settingsEnabled ? effective?.status : 'empty';
+  const included = includeViewedFile && !effective?.viewedFileBlocked;
+  const sameIncludedPlan = plan?.included && effective?.viewedFile?.replace(/\\/g, '/') === plan.path;
 
   const selectionLabel =
-    effective.selectionLines > 0
+    effective && effective.selectionLines > 0
       ? `${effective.selectionLines} line${effective.selectionLines === 1 ? '' : 's'} selected`
       : undefined;
 
   return (
     <div className="ctx-region">
       <div className={`context-strip is-${status}`} aria-label="Project context for the next turn">
-        <span className="context-workspace">{effective.workspaceName ?? 'Workspace'}</span>
+        {effective ? <span className="context-workspace">{effective.workspaceName ?? 'Workspace'}</span> : null}
 
-        {effective.viewedFile && status !== 'empty' ? (
+        {effective?.viewedFile && status !== 'empty' && !sameIncludedPlan ? (
           <>
             <span className="context-sep" aria-hidden="true">
               ·
             </span>
-            <span
-              className={`context-file${included ? ' is-on' : ' is-ghost'}`}
-            >
-              <button
-                className="context-path"
-                type="button"
-                title={`Open ${effective.viewedFile} in the editor`}
-                onClick={() => onOpenFile(effective.viewedFilePath ?? '')}
-              >
-                <FileIcon className="ico ico--xs" />
-                <span className="context-path-text">{effective.viewedFile}</span>
-              </button>
-              <button
-                className="context-file-toggle"
-                type="button"
-                aria-pressed={included}
-                aria-label={
-                  included
-                    ? `Remove ${effective.viewedFile} from context`
-                    : `Add ${effective.viewedFile} to context`
-                }
-                title={
-                  effective.viewedFileBlocked
-                    ? 'This file cannot be added to the next turn'
-                    : included
-                      ? 'Remove the current file from the next turn'
-                      : 'Add the current file to the next turn'
-                }
-                disabled={effective.viewedFileBlocked}
-                onClick={() => onSetIncludeViewedFile(!included)}
-              >
-                {included ? <CircleMinusIcon /> : <CirclePlusIcon />}
-              </button>
-            </span>
+            <ContextFile
+              path={effective.viewedFile}
+              included={included}
+              blocked={effective.viewedFileBlocked}
+              onOpen={() => onOpenFile(effective.viewedFilePath ?? '')}
+              onSetIncluded={onSetIncludeViewedFile}
+            />
           </>
         ) : null}
 
         {selectionLabel ? <span className="context-selection">{selectionLabel}</span> : null}
+        {plan ? <ContextFile {...plan} /> : null}
 
         {status === 'building' ? (
           <span className="context-status" role="status">

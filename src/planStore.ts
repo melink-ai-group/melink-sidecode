@@ -1,11 +1,14 @@
 import * as vscode from 'vscode';
+import { writeFile } from 'node:fs/promises';
 import type { PlanArtifact, TodoStep } from './backends/types';
 import {
   PLAN_DIRECTORY,
   canonicalPlanPath,
+  createPlanAtAvailablePath,
   planArtifactFromMarkdown,
   planRelativePath,
-  renderPlanMarkdown
+  renderPlanMarkdown,
+  replacePlanStepStatuses
 } from './backends/plan';
 
 /**
@@ -21,6 +24,8 @@ import {
  * is deleted when the friendly file replaces it.
  */
 export class PlanStore {
+  private readonly creatingVirtualPlans = new Set<string>();
+
   /** The workspace root, or `undefined` when no folder is open. */
   private get root(): vscode.Uri | undefined {
     const folders = vscode.workspace.workspaceFolders;
@@ -42,11 +47,13 @@ export class PlanStore {
     steps: readonly TodoStep[];
     /** Workspace-relative path already stored for this chat, when it has one. */
     path?: string;
+    migratePlaceholder?: boolean;
   }): Promise<PlanArtifact> {
     const chosen = canonicalPlanPath({
       threadId: input.threadId,
       title: input.title,
-      existingPath: input.path
+      existingPath: input.path,
+      migratePlaceholder: input.migratePlaceholder ?? false
     });
     const markdown = renderPlanMarkdown({
       title: input.title,
@@ -55,33 +62,63 @@ export class PlanStore {
       steps: input.steps
     });
     const root = this.root;
+    let path = chosen.path;
     if (root) {
-      const fileUri = vscode.Uri.joinPath(root, chosen.path);
       const dirUri = vscode.Uri.joinPath(root, PLAN_DIRECTORY);
       await vscode.workspace.fs.createDirectory(dirUri);
-      await vscode.workspace.fs.writeFile(fileUri, Buffer.from(markdown, 'utf8'));
-      const extras = new Set<string>();
-      if (chosen.retire && chosen.retire !== chosen.path) {
-        extras.add(chosen.retire);
+      const bytes = Buffer.from(markdown, 'utf8');
+      if (path !== input.path?.replace(/\\/g, '/')) {
+        path = await createPlanAtAvailablePath(path, (candidate) =>
+          this.tryCreatePlan(vscode.Uri.joinPath(root, candidate), bytes)
+        );
+      } else {
+        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(root, path), bytes);
       }
-      const threadPath = planRelativePath(input.threadId);
-      if (threadPath !== chosen.path) {
-        extras.add(threadPath);
-      }
-      for (const extra of extras) {
+      if (chosen.retire && chosen.retire !== path) {
         try {
-          await vscode.workspace.fs.delete(vscode.Uri.joinPath(root, extra));
+          await vscode.workspace.fs.delete(vscode.Uri.joinPath(root, chosen.retire));
         } catch {
           // The duplicate was already gone.
         }
       }
     }
     return planArtifactFromMarkdown({
-      path: chosen.path,
+      path,
       markdown,
       fallbackTitle: input.title,
       updatedAt: Date.now()
     });
+  }
+
+  private async tryCreatePlan(uri: vscode.Uri, contents: Uint8Array): Promise<boolean> {
+    if (uri.scheme === 'file') {
+      try {
+        await writeFile(uri.fsPath, contents, { flag: 'wx' });
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          return false;
+        }
+        throw error;
+      }
+    }
+    const key = uri.toString();
+    if (this.creatingVirtualPlans.has(key)) {
+      return false;
+    }
+    this.creatingVirtualPlans.add(key);
+    try {
+      const edit = new vscode.WorkspaceEdit();
+      edit.createFile(uri, { contents, overwrite: false });
+      if (await vscode.workspace.applyEdit(edit)) {
+        return true;
+      }
+      // A rejected edit is a collision only when the candidate exists.
+      await vscode.workspace.fs.stat(uri);
+      return false;
+    } finally {
+      this.creatingVirtualPlans.delete(key);
+    }
   }
 
   /**
@@ -106,30 +143,65 @@ export class PlanStore {
     }
   }
 
-  /**
-   * Read a thread's plan file if it exists, parsed into the artifact shape.
-   * Returns `undefined` when the file is absent, so a missing plan degrades to
-   * "no plan" rather than an error. `path` is the friendly file when the chat
-   * has one; otherwise the legacy thread-id path is read.
-   */
-  async read(threadId: string, path?: string): Promise<PlanArtifact | undefined> {
-    const root = this.root;
-    if (!root) {
+  async writeStepStatuses(path: string, previous: readonly TodoStep[], steps: readonly TodoStep[]): Promise<string | undefined> {
+    const uri = this.planUri(path);
+    if (!uri) {
       return undefined;
     }
-    const relative = path?.replace(/\\/g, '/') || planRelativePath(threadId);
-    const fileUri = vscode.Uri.joinPath(root, relative);
+    let document: vscode.TextDocument;
     try {
-      const bytes = await vscode.workspace.fs.readFile(fileUri);
-      const markdown = Buffer.from(bytes).toString('utf8');
-      return planArtifactFromMarkdown({
-        path: relative,
-        markdown,
-        fallbackTitle: 'Plan',
-        updatedAt: Date.now()
-      });
+      document = await vscode.workspace.openTextDocument(uri);
     } catch {
       return undefined;
     }
+    const version = document.version;
+    const markdown = document.getText();
+    const saved = await this.readMarkdown(path);
+    if (document.isDirty || document.version !== version || saved?.replace(/^\uFEFF/, '') !== markdown) {
+      return undefined;
+    }
+    const updated = replacePlanStepStatuses(markdown, previous, steps);
+    if (updated === undefined || updated === markdown) {
+      return updated;
+    }
+    const edit = new vscode.WorkspaceEdit();
+    const lines = updated.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const original = document.lineAt(index);
+      if (original.text !== lines[index]) {
+        edit.replace(uri, original.range, lines[index]);
+      }
+    }
+    // VS Code attaches the open document version to the workspace edit.
+    // Saving through that same document also honors disk save conflicts.
+    if (!await vscode.workspace.applyEdit(edit) || await this.readMarkdown(path) !== saved ||
+        document.version !== version + 1 || document.getText() !== updated || !await document.save()) {
+      return undefined;
+    }
+    const persisted = await this.readMarkdown(path);
+    return persisted?.replace(/^\uFEFF/, '') === updated ? persisted : undefined;
+  }
+
+  async readMarkdown(relative: string): Promise<string | undefined> {
+    const uri = this.planUri(relative);
+    if (!uri) {
+      return undefined;
+    }
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      return Buffer.from(bytes).toString('utf8');
+    } catch {
+      return undefined;
+    }
+  }
+
+  private planUri(relative: string): vscode.Uri | undefined {
+    const root = this.root;
+    relative = relative.replace(/\\/g, '/');
+    if (!root || !relative.startsWith(PLAN_DIRECTORY + '/') ||
+        !/^[^/]+\.md$/i.test(relative.slice(PLAN_DIRECTORY.length + 1))) {
+      return undefined;
+    }
+    return vscode.Uri.joinPath(root, relative);
   }
 }

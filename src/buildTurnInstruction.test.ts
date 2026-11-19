@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { buildTurnInstruction } from './sidebar/turnInstruction.ts';
 
 /**
  * `sidebarView` imports `vscode`, so this guard reads the helper's source
@@ -26,12 +27,16 @@ async function buildTurnInstructionSource(): Promise<string> {
   return source.slice(start, end);
 }
 
-test('the build transition keeps the ordered checklist and checkbox protocol', async () => {
-  const body = await buildTurnInstructionSource();
-  assert.match(body, /steps\.map\(\(step\) => `- \[ \] \$\{step\.text\}`\)\.join\('\\n'\)/);
+test('the build transition keeps the ordered checklist and checkbox protocol', () => {
+  const body = buildTurnInstruction([
+    { text: 'Start here', status: 'inProgress' },
+    { text: 'Then verify', status: 'pending' }
+  ], '.melink/plans/current.md');
+  assert.match(body, /Build the approved plan at \.melink\/plans\/current\.md/);
+  assert.match(body, /- \[ \] Start here\n- \[ \] Then verify/);
   assert.match(body, /"- \[~\] \.\.\."/);
   assert.match(body, /"- \[x\] \.\.\."/);
-  assert.match(body, /Execute each step in order/);
+  assert.match(body, /execute the remaining steps listed below in order/);
   assert.match(body, /Leave the plan document prose unchanged/);
 });
 
@@ -51,8 +56,9 @@ test('the build transition ends with an explicit verification step', async () =>
 
 test('the helper is still the one the build transition sends as an instruction', async () => {
   const source = await viewSource();
+  assert.match(source, /const remaining = state\.steps\.filter\(\(step\) => step\.status === 'pending' \|\| step\.status === 'inProgress'\)/);
   assert.match(
     source,
-    /await this\.sendTurn\(\s*buildTurnInstruction\(state\.steps\),[\s\S]*?'instruction'\s*\)/
+    /await this\.sendTurn\(\s*buildTurnInstruction\(remaining, planPath\),[\s\S]*?'instruction'\s*\)/
   );
 });

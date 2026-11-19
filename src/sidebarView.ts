@@ -12,7 +12,7 @@ import { DeadlineError, SAVE_TIMEOUT_MESSAGE, runSettingsWrite, withDeadline } f
 import { runSkillOperation } from './settings/skillOperation.ts';
 import type { SaveResult } from './settings/planWrites.ts';
 import { PlanStore } from './planStore';
-import { ThreadStore } from './backends/threadStore';
+import { ThreadStore, type PersistedPlanState } from './backends/threadStore';
 import {
   BackendError,
   denyInProgressStep,
@@ -70,7 +70,6 @@ import {
   withStoredHistory
 } from './backends/historyWindow.ts';
 import {
-  adoptedPlanSteps,
   applyPlanDecisions,
   assistantProgressText,
   carriedPlanDismissal,
@@ -85,12 +84,15 @@ import {
   mergeCheckboxStatuses,
   mergePlanDecisionLines,
   mergeReportedStepStatuses,
-  canonicalPlanPath,
   planDocumentFromReply,
+  planArtifactFromMarkdown,
+  planHasRemainingSteps,
+  parsePlanSteps,
   planRelativePath,
   planTitleFromFileName,
   planTurnWork,
   recoverPlanDraft,
+  renderPlanMarkdown,
   shouldAutoOpenPlanDocument,
   shouldDismissCompletedPlan,
   updateStepStatus,
@@ -141,6 +143,7 @@ import {
 } from './orchestration/doubleCheck.ts';
 import { readFileDiagnostics } from './orchestration/vscodeDiagnostics.ts';
 import { anyCategoryEnabled, applyContextExclusions } from './context/contextView';
+import { ATTACHED_FILE_BYTES, cutToBytes, type ViewedFileAttachment } from './context/projectContext';
 import type { CheckpointPlanRecord } from './changes/journal';
 import { REVIEW_HUNK_LINE_LIMIT, capReviewLines } from './changes/reviewLines.ts';
 import { ReviewStore, STYLING_REVIEW_STORE_KEY } from './review/reviewStore.ts';
@@ -502,10 +505,11 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // dispose on deactivate removes both.
     this.nativeDiff = new NativeDiffService(this.changeJournal);
     this.planPreview = new PlanPreview(this.extensionUri, () => {
-      const session = this.planPreviewThreadId
-        ? this.sessions.find((entry) => entry.activeThread?.threadId === this.planPreviewThreadId)
-        : undefined;
-      void this.sessionStore.run(session, () => this.buildPlan());
+      const session = this.visible;
+      const thread = session?.activeThread;
+      if (thread && this.planPreviewThreadId === rewindKey(thread.backendId, thread.threadId)) {
+        void this.sessionStore.run(session, () => this.buildPlan());
+      }
     });
     context.subscriptions.push(
       this.nativeDiff,
@@ -530,6 +534,9 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     context.subscriptions.push(
       planFiles,
       planFiles.onDidChange((uri) => {
+        this.adoptExternalPlanFile(uri);
+      }),
+      planFiles.onDidDelete((uri) => {
         this.adoptExternalPlanFile(uri);
       }),
       planFiles.onDidCreate((uri) => {
@@ -594,7 +601,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         // partial progress instead of a spinner that never stops. A denied step
         // (set by the `approval/denied` branch below) is terminal and left alone.
         if (event.threadId && !(event.type === 'turn/completed' && this.mode === 'agent')) {
-          void this.flushBuiltPlanProgress(event.backendId, event.threadId);
+          const threadId = event.threadId;
+          if (this.mode === 'agent') {
+            void this.flushBuiltPlanProgress(event.backendId, threadId);
+          } else if (this.mode === 'plan') {
+            void this.enqueuePlanSteps(() => this.settlePlanProgress(event.backendId, threadId));
+          }
         }
       }
       if (
@@ -620,27 +632,29 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         if (this.session) {
           this.session.planHold = true;
         }
-        void this.denyPlanStep(event.backendId, event.threadId);
+        void this.enqueuePlanSteps(() => this.denyPlanStep(event.backendId, event.threadId));
       }
       if (event.type === 'turn/started') {
         // A new turn starts; a native plan update for it has not arrived yet.
         this.nativePlanThisTurn = false;
         if (this.session) {
+          this.session.planTurnId = event.turnId;
           this.session.planHold = false;
         }
         // Open the change boundary and start the fallback watcher, reusing the
         // existing turn lifecycle rather than adding a parallel one.
         this.beginChangeTurn(event.backendId, event.threadId, event.turnId);
       }
-      if (event.type === 'plan/updated') {
+      if (event.type === 'plan/updated' && this.session?.planTurnId === event.turnId && this.mode !== 'ask') {
         // Native plan tracking: keep the persisted todo list in step with the
         // provider's own plan, and write the plan artifact so Plan mode always
         // produces the documented markdown file. Writing that file is the one
         // permitted host-side write in Plan mode; the provider follows its
         // selected permission level.
         this.nativePlanThisTurn = true;
+        const mode = this.mode;
         void this.enqueuePlanSteps(() =>
-          this.recordNativePlan(event.backendId, event.threadId, event.steps, event.explanation)
+          this.recordNativePlan(event.backendId, event.threadId, mode, event.steps, event.explanation)
         );
       }
       if (event.threadId && shouldCaptureFenceQuestions(event.type, this.mode)) {
@@ -656,13 +670,20 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       ) {
         this.stripAskQuestionFence(event.backendId, event.threadId);
       }
-      if (event.type === 'turn/completed' && this.mode === 'plan' && event.threadId) {
-        // Derive the plan document from the reply. Native step updates that
-        // already arrived stay the todo list; the reply still supplies the body.
-        // capturePlanFromReply reads and clears revisePlanThisTurn synchronously.
-        void this.capturePlanFromReply(event.backendId, event.threadId, this.nativePlanThisTurn);
-      } else if (event.type === 'turn/completed') {
+      if ((event.type === 'turn/completed' || event.type === 'turn/interrupted') &&
+          this.session?.planTurnId === event.turnId) {
+        const nativeSteps = this.nativePlanThisTurn;
+        const revising = this.revisePlanThisTurn;
+        this.session.planTurnId = undefined;
         this.revisePlanThisTurn = false;
+        if (event.type === 'turn/completed' && this.mode === 'plan' && !this.pendingQuestion) {
+          const latest = [...this.store.getTranscript(event.backendId, event.threadId)]
+            .reverse().find((item) => item.kind === 'message');
+          const reply = latest?.role === 'assistant' ? latest.text ?? '' : '';
+          void this.enqueuePlanSteps(() =>
+            this.capturePlanFromReply(event.backendId, event.threadId, nativeSteps, revising, reply)
+          );
+        }
       }
       if (
         event.threadId &&
@@ -2145,6 +2166,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       steps,
       built: record.state.built,
       completedDismissed: record.state.completedDismissed,
+      nativeOnly: record.state.nativeOnly,
       updatedAt: record.state.updatedAt
     });
   }
@@ -2473,6 +2495,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       nativePlanThisTurn: false,
       revisePlanThisTurn: false,
       planDecisions: extractPlanDecisionLines(restoredPlanBody),
+      planContextExcluded: init.planContextExcluded === true,
       planEpoch: 0,
       planRunAutomatic: false,
       planHold: false,
@@ -2498,6 +2521,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     this.visible = session;
     this.publishTabs();
     await this.sessionStore.run(session, async () => {
+      this.syncPlanPreviewThread();
       const pending = session.resume;
       if (pending) {
         session.resume = undefined;
@@ -2541,6 +2565,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const { backendId, threadId, model } = thread;
+    await this.enqueuePlanSteps(() => this.adoptPlanFile(backendId, threadId, false, false));
     if (this.session && !this.session.modeChosen) {
       const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
       this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
@@ -2628,6 +2653,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         ...(session === this.visible ? { active: true } : {}),
         ...(draftText ? { draftText } : {}),
         ...(draftAttachments.length > 0 ? { draftAttachments } : {}),
+        ...(session.planContextExcluded ? { planContextExcluded: true } : {}),
         ...(session.modeChosen ? { mode: session.mode } : {}),
         ...(session.tabPermission ? { permissionLevel: session.tabPermission } : {}),
         ...(session.composerBackendId ? { composerBackendId: session.composerBackendId } : {}),
@@ -2647,6 +2673,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         id: session.id,
         title: session.title,
         active: session === this.visible,
+        ...(session.planContextExcluded ? { planContextExcluded: true } : {}),
         ...(backendId ? { backendId } : {}),
         ...(threadId ? { threadId } : {})
       };
@@ -2895,6 +2922,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       case 'setIncludeViewedFile':
         this.setIncludeViewedFile(message.included);
         break;
+      case 'setPlanContext': {
+        const session = this.session;
+        const thread = session?.activeThread;
+        if (session?.id === message.tabId && thread?.threadId === message.threadId && session.mode === 'plan' &&
+            this.store.getPlanState(thread.backendId, thread.threadId)) {
+          session.planContextExcluded = !message.included;
+          this.publishTabs();
+        }
+        break;
+      }
       case 'openContextFile':
         await this.openContextFile(message.path);
         break;
@@ -3032,16 +3069,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         await this.rememberComposerModel(message.backendId, message.modelId);
         break;
       case 'buildPlan':
-        await this.buildPlan();
+        await this.buildPlan(message.composer);
         break;
       case 'rejectPlan':
         await this.rejectPlan();
         break;
       case 'writePlan':
-        await this.writePlan(message.title, message.summary, message.steps, message.body);
+        await this.enqueuePlanSteps(() => this.writePlan(message.title, message.summary, message.steps, message.body));
         break;
       case 'setTodoStepStatus':
-        await this.setTodoStepStatus(message.step, message.status);
+        await this.enqueuePlanSteps(() => this.setTodoStepStatus(message.step, message.status));
         break;
       case 'revokeApprovalRule': {
         await this.registry.revokeApprovalRule(message.backendId, message.ruleId);
@@ -3946,7 +3983,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         handover
       });
       this.activeThread = handle;
-      this.syncPlanPreviewThread(handle.threadId);
+      this.syncPlanPreviewThread();
       this.contextDelivery.begin(ContextDelivery.key(backendId, handle.threadId), prime, Boolean(handle.contextPrimed));
       await this.rememberPermission(level);
       this.mode = mode;
@@ -3964,10 +4001,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this.store.setTranscript(backendId, handle.threadId, carried);
       }
       if (handover?.trim() && previous) {
-        const plan = this.store.getPlanState(previous.backendId, previous.threadId);
-        if (plan) {
-          await this.store.setPlanState(backendId, handle.threadId, { ...plan, updatedAt: Date.now() });
-        }
+        await this.enqueuePlanSteps(async () => {
+          const plan = this.store.getPlanState(previous.backendId, previous.threadId);
+          if (plan) {
+            await this.store.setPlanState(backendId, handle.threadId, plan);
+            await this.adoptPlanFile(backendId, handle.threadId, false, false);
+          }
+        });
       }
       await this.store.setActiveThread({
         backendId,
@@ -3980,6 +4020,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       });
       await this.store.setLastUsedModel({ backendId, modelId: model ?? handle.model ?? '' });
       if (notify) {
+        this.publishTabs();
         const history = carried ? this.openHistory(carried) : undefined;
         this.post({
           type: 'conversation',
@@ -4208,7 +4249,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async paintStoredThread(backendId: string, threadId: string, storedItems: TranscriptItem[]): Promise<void> {
     const ref = this.store.listThreads(backendId).find((entry) => entry.threadId === threadId);
     this.activeThread = { backendId, threadId, model: ref?.modelId };
-    this.syncPlanPreviewThread(threadId);
+    this.syncPlanPreviewThread();
+    await this.enqueuePlanSteps(() => this.adoptPlanFile(backendId, threadId, false, false));
     if (!this.session?.modeChosen) {
       this.mode = this.resolveMode(backendId, ref?.mode ?? this.mode);
       if (this.session) {
@@ -4303,7 +4345,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       );
       const result = await withDeadline(resume, RESUME_PROVIDER_MS, 'Reconnecting to the provider');
       this.activeThread = result.handle;
-      this.syncPlanPreviewThread(result.handle.threadId);
+      this.syncPlanPreviewThread();
+      await this.enqueuePlanSteps(() => this.adoptPlanFile(backendId, threadId, false, false));
       this.contextDelivery.begin(
         ContextDelivery.key(backendId, threadId),
         prime,
@@ -5146,7 +5189,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     });
     if (candidateBackend) {
       const currentMode = this.resolveMode(candidateBackend, this.mode);
-      const suggestedMode = inferRequestedMode(text);
+      const suggestedMode = updatePlan === true && currentMode !== 'ask' ? 'plan' : inferRequestedMode(text);
       const supported = this.registry.modes(candidateBackend);
       // Ask stays an explicit user choice. Automatically narrowing an Agent
       // request to Ask can block tool work the user expected to happen.
@@ -5583,8 +5626,22 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     requestText = ''
   ): Promise<import('./backends/types').ContextPayload> {
     const key = ContextDelivery.key(backendId, threadId);
+    await this.planStepChain;
+    const plan = this.mode === 'plan' && !this.session?.planContextExcluded
+      ? this.store.getPlanState(backendId, threadId)
+      : undefined;
+    let linkedPlan: ViewedFileAttachment | undefined;
+    if (plan && plan.steps.length > 0) {
+      const planPath = (plan.path ?? planRelativePath(threadId)).replace(/\\/g, '/');
+      const markdown = await this.plans.readMarkdown(planPath);
+      if (markdown && parsePlanSteps(markdown).length > 0) {
+        linkedPlan = { path: planPath, languageId: 'markdown', excluded: false, ...cutToBytes(markdown, ATTACHED_FILE_BYTES) };
+      } else {
+        this.post({ type: 'notice', level: 'warning', message: 'The linked plan could not be read as a plan. This request will continue without it.' });
+      }
+    }
     try {
-      return await this.contextDelivery.forTurn(key, {}, requestText);
+      return await this.contextDelivery.forTurn(key, {}, requestText, linkedPlan);
     } catch {
       return {
         notice: 'Project context is not available right now. Continue without it; do not block the turn.'
@@ -5715,24 +5772,32 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const { backendId, threadId } = this.activeThread;
+    await this.enqueuePlanSteps(() => this.adoptPlanFile(backendId, threadId, false, false));
     const state = this.store.getPlanState(backendId, threadId);
-    if (!state?.path) {
+    const markdown = state && await this.plans.readMarkdown(state.path ?? planRelativePath(threadId));
+    if (!markdown || parsePlanSteps(markdown).length === 0) {
+      this.post({ type: 'notice', level: 'warning', message: 'The linked plan file could not be opened.' });
       return;
     }
-    this.publishPlanDocument(this.planArtifact(backendId, threadId), true);
+    this.publishPlanDocument(this.planArtifact(backendId, threadId), true, markdown);
   }
 
   /**
    * Drop the rendered plan when the visible thread changes, so a document from
    * the previous conversation is not left up as if it belonged to the new one.
    */
-  private syncPlanPreviewThread(threadId: string | undefined): void {
-    if (threadId === this.planPreviewThreadId) {
+  private syncPlanPreviewThread(): void {
+    if (this.session !== this.visible) {
+      return;
+    }
+    const thread = this.activeThread;
+    const key = thread && rewindKey(thread.backendId, thread.threadId);
+    if (key === this.planPreviewThreadId) {
       return;
     }
     this.planPreview.close();
     this.planPreviewOpenedFor = undefined;
-    this.planPreviewThreadId = threadId;
+    this.planPreviewThreadId = key;
   }
 
   /**
@@ -5742,26 +5807,27 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * open preview without taking focus, unless `reveal` is set because the user
    * asked to open it.
    */
-  private publishPlanDocument(plan: PlanArtifact, reveal: boolean): void {
-    const threadId = this.activeThread?.threadId;
-    if (!threadId) {
+  private publishPlanDocument(plan: PlanArtifact, reveal: boolean, markdown?: string): void {
+    const thread = this.activeThread;
+    if (!thread || this.session !== this.visible) {
       return;
     }
-    this.planPreviewThreadId = threadId;
+    this.syncPlanPreviewThread();
+    const key = rewindKey(thread.backendId, thread.threadId);
     const wasOpen = this.planPreview.isOpen;
     const autoOpen = shouldAutoOpenPlanDocument({
       built: plan.built,
       stepCount: plan.steps.length,
-      alreadyOpened: wasOpen && this.planPreviewOpenedFor === threadId
+      alreadyOpened: wasOpen && this.planPreviewOpenedFor === key
     });
     const show = reveal || wasOpen || autoOpen;
     if (!show) {
       return;
     }
     if (reveal || autoOpen) {
-      this.planPreviewOpenedFor = threadId;
+      this.planPreviewOpenedFor = key;
     }
-    this.planPreview.show(planPreviewState(plan), reveal || !wasOpen);
+    this.planPreview.show(planPreviewState(plan, markdown), reveal || !wasOpen);
   }
 
   /**
@@ -5803,48 +5869,75 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * the only route from Plan mode to a write path; the mode returns to `agent`
    * first so the build turn itself is not read-only.
    */
-  private async buildPlan(): Promise<void> {
-    if (!this.activeThread) {
+  private async buildPlan(composer?: { tabId: string; threadId: string }): Promise<void> {
+    const session = this.session;
+    if (!session || !this.activeThread || this.mode === 'ask' || session.turnBusy || session.turnOpen ||
+        this.pendingApproval || this.pendingQuestion || this.subagentRuns.has(session.id) ||
+        this.userTurnQueues.get(session.id)?.length) {
       return;
     }
     const { backendId, threadId } = this.activeThread;
-    const state = this.store.getPlanState(backendId, threadId);
-    if (!state) {
-      this.post({
-        type: 'notice',
-        level: 'warning',
-        message: 'There is no plan to build yet. Ask for a plan first.'
-      });
+    if (composer && (composer.tabId !== session.id || composer.threadId !== threadId ||
+        this.mode !== 'plan' || session.planContextExcluded)) {
       return;
     }
-    // The plan's bullet list is the source of truth; persist it as built so a
-    // reload shows the thread in execution rather than re-offering the build.
-    await this.store.setPlanState(backendId, threadId, { ...state, built: true, updatedAt: Date.now() });
-    this.mode = 'agent';
-    await this.store.setActiveThread({
-      backendId,
-      threadId,
-      modelId: this.activeThread.model,
-      mode: 'agent',
-      title: this.store.getActiveThread()?.title,
-      updatedAt: Date.now()
-    });
-    const builtPlan = this.planArtifact(backendId, threadId);
-    this.post({ type: 'plan', plan: builtPlan });
-    this.post({ type: 'modes', modes: this.modeSnapshot(backendId) });
-    this.publishPlanDocument(builtPlan, false);
-    // Kick off execution as the next turn, now that the mode is `agent`. This is
-    // a host-built instruction, so it never appears as a message the user wrote.
-    await this.sendTurn(
-      buildTurnInstruction(state.steps),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      'instruction'
-    );
+    const provider = session.composerBackendId ?? backendId;
+    if (this.registry.snapshot().find((entry) => entry.id === provider)?.status !== 'available') {
+      this.post({ type: 'notice', level: 'warning', message: 'The selected provider is unavailable.' });
+      return;
+    }
+    session.turnBusy = true;
+    try {
+      await this.enqueuePlanSteps(async () => {
+        await this.adoptPlanFile(backendId, threadId);
+      });
+      const state = this.store.getPlanState(backendId, threadId);
+      const planPath = state?.path ?? planRelativePath(threadId);
+      const markdown = state && await this.plans.readMarkdown(planPath);
+      if (!state || !markdown || parsePlanSteps(markdown).length === 0 || !planHasRemainingSteps(state.steps)) {
+        this.post({
+          type: 'notice',
+          level: 'warning',
+          message: 'A saved plan with unfinished steps is required to build.'
+        });
+        return;
+      }
+      const remaining = state.steps.filter((step) => step.status === 'pending' || step.status === 'inProgress');
+      await this.store.setPlanState(backendId, threadId, { ...state, built: true, updatedAt: Date.now() });
+      this.mode = 'agent';
+      await this.store.setActiveThread({
+        backendId,
+        threadId,
+        modelId: this.activeThread?.model,
+        mode: 'agent',
+        title: this.store.getActiveThread()?.title,
+        updatedAt: Date.now()
+      });
+      this.persistOpenTabs();
+      const builtPlan = this.planArtifact(backendId, threadId);
+      this.post({ type: 'plan', plan: builtPlan });
+      this.post({ type: 'modes', modes: this.modeSnapshot(backendId) });
+      this.publishPlanDocument(builtPlan, false, markdown);
+      await this.sendTurn(
+        buildTurnInstruction(remaining, planPath),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'instruction'
+      );
+    } catch {
+      this.post({
+        type: 'notice',
+        level: 'error',
+        message: 'The plan could not be built. Check the plan file and try again.'
+      });
+    } finally {
+      session.turnBusy = false;
+      this.flushQueuedTurns();
+    }
   }
 
   /**
@@ -5884,7 +5977,8 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     title: string,
     summary: string | undefined,
     steps: TodoStep[],
-    body?: string
+    body?: string,
+    nativeOnly = false
   ): Promise<void> {
     if (!this.activeThread) {
       return;
@@ -5899,20 +5993,12 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       steps,
       path: previous?.path
     });
-    const completedDismissed = carriedPlanDismissal(artifact.steps, previous?.completedDismissed);
-    const plan = { ...artifact, built: previous?.built ?? false, completedDismissed };
-    await this.store.setPlanState(backendId, threadId, {
-      path: plan.path,
-      title: plan.title,
-      summary: plan.summary,
-      body: plan.body,
-      steps: plan.steps,
-      built: plan.built,
-      completedDismissed: plan.completedDismissed,
-      updatedAt: plan.updatedAt
+    await this.publishSavedPlan(backendId, threadId, {
+      ...artifact,
+      built: previous?.built ?? false,
+      nativeOnly,
+      completedDismissed: carriedPlanDismissal(artifact.steps, previous?.completedDismissed)
     });
-    this.post({ type: 'plan', plan });
-    this.publishPlanDocument(plan, false);
   }
 
   /**
@@ -5925,65 +6011,40 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async recordNativePlan(
     backendId: string,
     threadId: string,
+    mode: DefaultMode,
     steps: TodoStep[],
     explanation?: string
   ): Promise<void> {
+    if (this.activeThread?.backendId !== backendId || this.activeThread.threadId !== threadId) {
+      return;
+    }
+    await this.adoptPlanFile(backendId, threadId);
     const existing = this.store.getPlanState(backendId, threadId);
-    const reported =
-      existing?.built && existing.steps.length > 0 ? mergeReportedStepStatuses(existing.steps, steps) : undefined;
-    // A built plan document keeps its own steps. A native todo list that does
-    // not name those steps must not replace them.
-    if (existing?.built && existing.body && existing.steps.length > 0 && reported && !reported.matched) {
+    if (existing?.steps.length && (existing.nativeOnly === false ||
+        (existing.nativeOnly === undefined && existing.body))) {
+      const reported = mergeReportedStepStatuses(existing.steps, steps);
+      if (reported.steps.some((step, index) => step.status !== existing.steps[index].status)) {
+        await this.persistPlanSteps(backendId, threadId, reported.steps);
+      }
       return;
     }
-    const nextSteps = reported?.matched ? reported.steps : steps;
-    // Only write the file for the thread the sidebar is actually showing, so a
-    // background thread's notification cannot overwrite the visible plan.
-    if (this.activeThread?.backendId === backendId && this.activeThread?.threadId === threadId) {
-      // A native update replaces step status only. The document body stays;
-      // a short explanation never overwrites prose that is already written.
-      const artifact = await this.plans.write({
-        threadId,
-        title: existing?.title ?? 'Plan',
-        body: existing?.body,
-        summary: existing?.body ? existing.summary : (existing?.summary ?? explanation),
-        steps: nextSteps,
-        path: existing?.path
-      });
-      const built = existing?.built ?? this.mode !== 'plan';
-      const completedDismissed = carriedPlanDismissal(artifact.steps, existing?.completedDismissed);
-      await this.store.setPlanState(backendId, threadId, {
-        path: artifact.path,
-        title: artifact.title,
-        summary: artifact.summary,
-        // A native update must not invent a document body from its short
-        // explanation. The reply capture fills the body when the plan is new.
-        body: existing?.body ? artifact.body : undefined,
-        steps: artifact.steps,
-        // Native agent todo lists are already execution plans. Keep Plan mode's
-        // explicit review/build transition, but surface Agent mode lists live.
-        built,
-        completedDismissed,
-        updatedAt: artifact.updatedAt
-      });
-      const visible = { ...artifact, body: existing?.body ? artifact.body : undefined, built, completedDismissed };
-      this.post({ type: 'plan', plan: visible });
-      this.publishPlanDocument(visible, false);
+    if (steps.length === 0 && !existing) {
       return;
     }
-    await this.store.setPlanState(backendId, threadId, {
-      path: canonicalPlanPath({
-        threadId,
-        title: existing?.title ?? 'Plan',
-        existingPath: existing?.path
-      }).path,
+    const artifact = await this.plans.write({
+      threadId,
       title: existing?.title ?? 'Plan',
-      summary: existing?.summary,
+      summary: existing?.summary ?? explanation,
       body: existing?.body,
-      steps: nextSteps,
-      built: existing?.built ?? false,
-      completedDismissed: carriedPlanDismissal(nextSteps, existing?.completedDismissed),
-      updatedAt: Date.now()
+      steps,
+      path: existing?.path
+    });
+    await this.publishSavedPlan(backendId, threadId, {
+      ...artifact,
+      body: existing?.body ? artifact.body : undefined,
+      built: existing?.built ?? mode !== 'plan',
+      nativeOnly: true,
+      completedDismissed: carriedPlanDismissal(artifact.steps, existing?.completedDismissed)
     });
   }
 
@@ -5996,6 +6057,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const { backendId, threadId } = this.activeThread;
+    await this.adoptPlanFile(backendId, threadId);
     const existing = this.store.getPlanState(backendId, threadId);
     if (!existing) {
       return;
@@ -6014,6 +6076,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
    * stops. A `denied` step is terminal and is left untouched.
    */
   private async settlePlanProgress(backendId: string, threadId: string): Promise<void> {
+    await this.adoptPlanFile(backendId, threadId);
     const existing = this.store.getPlanState(backendId, threadId);
     if (!existing) {
       return;
@@ -6035,6 +6098,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (this.activeThread?.backendId !== backendId || this.activeThread?.threadId !== threadId) {
       return;
     }
+    await this.adoptPlanFile(backendId, threadId);
     const existing = this.store.getPlanState(backendId, threadId);
     if (!existing) {
       return;
@@ -6057,34 +6121,35 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private async capturePlanFromReply(
     backendId: string,
     threadId: string,
-    nativeSteps: boolean
+    nativeSteps: boolean,
+    revising: boolean,
+    reply: string
   ): Promise<void> {
-    const revising = this.revisePlanThisTurn;
-    this.revisePlanThisTurn = false;
     if (this.activeThread?.backendId !== backendId || this.activeThread?.threadId !== threadId) {
       return;
     }
+    await this.adoptPlanFile(backendId, threadId);
     const existing = this.store.getPlanState(backendId, threadId);
     // A plan that already has a body stays put unless this turn is a revision.
     // Step status from a native update has already been written.
-    if (existing && existing.steps.length > 0 && existing.body && !revising) {
+    if (existing?.steps.length && (existing.nativeOnly === false ||
+        (existing.nativeOnly === undefined && existing.body)) && !revising) {
       return;
     }
-    const lastReply = [...this.store.getTranscript(backendId, threadId)]
-      .reverse()
-      .find((item) => item.kind === 'message' && item.role === 'assistant');
-    const reply = lastReply?.text ?? '';
     // A question follow-up that never came back as a plan must not replace the
     // document. The answers are already in the body from when the card closed.
-    if (revising && existing && existing.steps.length > 0 && existing.body && !hasPlanStepsHeading(reply)) {
+    if (revising && existing?.steps.length && !hasPlanStepsHeading(reply)) {
       return;
     }
     const draft = planDocumentFromReply(reply);
-    const steps = nativeSteps && existing && existing.steps.length > 0 && !revising ? existing.steps : draft.steps;
+    const steps = existing && (revising || hasPlanStepsHeading(reply) && draft.steps.length > 0)
+      ? mergeReportedStepStatuses(draft.steps, existing.steps).steps
+      : nativeSteps && existing?.steps.length ? existing.steps : draft.steps;
     if (steps.length === 0) {
       return;
     }
-    const title = draft.title || existing?.title || this.store.getActiveThread()?.title || 'Plan';
+    const title = draft.title || existing?.title ||
+      this.store.listThreads(backendId).find((entry) => entry.threadId === threadId)?.title || 'Plan';
     const replyBody = draft.body;
     let body: string | undefined;
     if (hasPlanDecisionsSection(replyBody)) {
@@ -6107,22 +6172,15 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       summary: draft.summary ?? existing?.summary,
       body,
       steps,
-      path: existing?.path
+      path: existing?.path,
+      migratePlaceholder: existing?.nativeOnly ?? Boolean(existing && !existing.body)
     });
-    const completedDismissed = carriedPlanDismissal(artifact.steps, existing?.completedDismissed);
-    const plan = { ...artifact, built: existing?.built ?? false, completedDismissed };
-    await this.store.setPlanState(backendId, threadId, {
-      path: plan.path,
-      title: plan.title,
-      summary: plan.summary,
-      body: plan.body,
-      steps: plan.steps,
-      built: plan.built,
-      completedDismissed: plan.completedDismissed,
-      updatedAt: plan.updatedAt
+    await this.publishSavedPlan(backendId, threadId, {
+      ...artifact,
+      built: existing?.built ?? false,
+      nativeOnly: false,
+      completedDismissed: carriedPlanDismissal(artifact.steps, existing?.completedDismissed)
     });
-    this.post({ type: 'plan', plan });
-    this.publishPlanDocument(plan, false);
   }
 
   /**
@@ -6653,45 +6711,73 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Take checkbox statuses from the plan file when the agent edited that file
-   * directly. Host writes land in the store first, so the echo of our own
-   * write finds nothing to change.
-   */
+  /** Refresh the chats that own this exact plan file. */
   private adoptExternalPlanFile(uri: vscode.Uri): void {
-    const relative = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
-    const session = this.sessions.find((entry) => {
-      const thread = entry.activeThread;
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!root) {
+      return;
+    }
+    const relative = this.workspaceRelative(uri);
+    if (vscode.Uri.joinPath(root, relative).toString() !== uri.toString()) {
+      return;
+    }
+    const owners = new Set<string>();
+    for (const session of this.sessions) {
+      const thread = session.activeThread ?? session.resume;
       if (!thread) {
-        return false;
+        continue;
       }
       const state = this.store.getPlanState(thread.backendId, thread.threadId);
-      const owned = (state?.path ?? planRelativePath(thread.threadId)).replace(/\\/g, '/');
-      return owned === relative;
-    });
-    const thread = session?.activeThread;
-    if (!session || !thread) {
-      return;
+      const key = rewindKey(thread.backendId, thread.threadId);
+      if (!state || (state.path ?? planRelativePath(thread.threadId)).replace(/\\/g, '/') !== relative || owners.has(key)) {
+        continue;
+      }
+      owners.add(key);
+      void this.sessionStore.run(session, () =>
+        this.enqueuePlanSteps(() => this.adoptPlanFile(thread.backendId, thread.threadId, true))
+      );
     }
-    void this.sessionStore.run(session, () => {
-      void this.enqueuePlanSteps(() => this.adoptPlanFile(thread.backendId, thread.threadId));
-    });
   }
 
-  private async adoptPlanFile(backendId: string, threadId: string): Promise<void> {
+  private async adoptPlanFile(backendId: string, threadId: string, reportInvalid = false, publish = true): Promise<void> {
     const existing = this.store.getPlanState(backendId, threadId);
-    if (!existing?.built || existing.steps.length === 0) {
+    if (!existing) {
       return;
     }
-    const artifact = await this.plans.read(threadId, existing.path);
-    if (!artifact) {
+    const path = (existing.path ?? planRelativePath(threadId)).replace(/\\/g, '/');
+    const markdown = await this.plans.readMarkdown(path);
+    const normalized = markdown?.replace(/\r\n/g, '\n');
+    if (normalized === renderPlanMarkdown(existing)) {
       return;
     }
-    const steps = adoptedPlanSteps(existing.steps, artifact.steps);
-    if (!steps) {
+    const artifact = normalized && planArtifactFromMarkdown({
+      path, markdown: normalized, fallbackTitle: existing.title, updatedAt: Date.now()
+    });
+    if (!artifact || artifact.steps.length === 0) {
+      if (reportInvalid && this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
+        this.post({ type: 'notice', level: 'warning', message: 'The linked plan needs a readable Steps section with at least one step.' });
+      }
       return;
     }
-    await this.persistPlanSteps(backendId, threadId, steps);
+    if (existing.nativeOnly === false && existing.title === artifact.title && existing.body === artifact.body &&
+        existing.summary === artifact.summary && existing.steps.length === artifact.steps.length &&
+        existing.steps.every((step, index) => step.text === artifact.steps[index].text && step.status === artifact.steps[index].status)) {
+      return;
+    }
+    if (this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
+      this.planDecisions = extractPlanDecisionLines(artifact.body);
+    }
+    const plan = {
+      ...artifact,
+      built: existing.built,
+      nativeOnly: false,
+      completedDismissed: carriedPlanDismissal(artifact.steps, existing.completedDismissed)
+    };
+    if (publish) {
+      await this.publishSavedPlan(backendId, threadId, plan, markdown);
+    } else {
+      await this.store.setPlanState(backendId, threadId, plan);
+    }
   }
 
   /**
@@ -6703,13 +6789,16 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (this.activeThread?.backendId !== backendId || this.activeThread?.threadId !== threadId) {
       return;
     }
+    const reply = assistantProgressText(this.store.getTranscript(backendId, threadId));
+    if (!/^\s*[-*+]\s+\[[^\]]\]/m.test(reply)) {
+      return;
+    }
+    await this.adoptPlanFile(backendId, threadId);
     const existing = this.store.getPlanState(backendId, threadId);
     if (!existing?.built || existing.steps.length === 0) {
       return;
     }
-    const reply = assistantProgressText(this.store.getTranscript(backendId, threadId));
-    const merged = mergeCheckboxStatuses(existing.steps, reply);
-    const steps = /^\s*[-*+]\s+\[[^\]]\]/m.test(reply) ? completeStepsBeforeFrontier(merged) : merged;
+    const steps = completeStepsBeforeFrontier(mergeCheckboxStatuses(existing.steps, reply));
     if (!steps.some((step, index) => step.status !== existing.steps[index]?.status)) {
       return;
     }
@@ -6725,35 +6814,26 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (!existing) {
       return;
     }
-    const artifact = await this.plans.write({
-      threadId,
-      title: existing.title,
-      summary: existing.summary,
-      body: existing.body,
+    const path = existing.path ?? planRelativePath(threadId);
+    const markdown = await this.plans.writeStepStatuses(path, existing.steps, steps);
+    if (markdown === undefined) {
+      await this.adoptPlanFile(backendId, threadId, true);
+      return;
+    }
+    await this.publishSavedPlan(backendId, threadId, {
+      ...existing,
+      path,
       steps,
-      path: existing.path
-    });
-    const completedDismissed = carriedPlanDismissal(artifact.steps, existing.completedDismissed);
-    const plan = {
-      ...artifact,
-      body: existing.body ? artifact.body : undefined,
-      summary: existing.body ? artifact.summary : existing.summary,
-      built: existing.built,
-      completedDismissed
-    };
-    await this.store.setPlanState(backendId, threadId, {
-      path: plan.path,
-      title: plan.title,
-      summary: plan.summary,
-      body: plan.body,
-      steps: plan.steps,
-      built: plan.built,
-      completedDismissed: plan.completedDismissed,
-      updatedAt: plan.updatedAt
-    });
-    if (this.activeThread?.backendId === backendId && this.activeThread?.threadId === threadId) {
+      completedDismissed: carriedPlanDismissal(steps, existing.completedDismissed),
+      updatedAt: Date.now()
+    }, markdown);
+  }
+
+  private async publishSavedPlan(backendId: string, threadId: string, plan: PersistedPlanState, markdown?: string): Promise<void> {
+    await this.store.setPlanState(backendId, threadId, plan);
+    if (this.activeThread?.backendId === backendId && this.activeThread.threadId === threadId) {
       this.post({ type: 'plan', plan });
-      this.publishPlanDocument(plan, false);
+      this.publishPlanDocument(plan, false, markdown);
     }
   }
 
@@ -6765,11 +6845,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private planArtifact(backendId: string, threadId: string): PlanArtifact {
     const state = this.store.getPlanState(backendId, threadId);
     return {
-      path: canonicalPlanPath({
-        threadId,
-        title: state?.title ?? 'Plan',
-        existingPath: state?.path
-      }).path,
+      path: state?.path ?? planRelativePath(threadId),
       title: state?.title ?? 'Plan',
       summary: state?.summary,
       body: state?.body,
@@ -6981,17 +7057,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (revisingPlan) {
       // Recompute the base from the authoritative persisted body, then append
       // this round. The in-memory buffer is only a derived view.
-      const currentBody = this.store.getPlanState(
-        pending.request.backendId,
-        pending.request.threadId
-      )?.body;
-      const merge = mergePlanDecisionLines(extractPlanDecisionLines(currentBody), [
-        ...this.planDecisions,
-        ...planDecisionLines(pending.request.questions, answers)
-      ]);
-      this.planDecisions = merge.lines;
-      const truncated = hasPlanDecisionsTruncationMarker(currentBody) || merge.truncated;
-      await this.applyDecisionsToPlan(truncated);
+      await this.enqueuePlanSteps(async () => {
+        const { backendId, threadId } = pending.request;
+        await this.adoptPlanFile(backendId, threadId);
+        const currentBody = this.store.getPlanState(backendId, threadId)?.body;
+        const merge = mergePlanDecisionLines(extractPlanDecisionLines(currentBody), [
+          ...this.planDecisions,
+          ...planDecisionLines(pending.request.questions, answers)
+        ]);
+        this.planDecisions = merge.lines;
+        const truncated = hasPlanDecisionsTruncationMarker(currentBody) || merge.truncated;
+        await this.applyDecisionsToPlan(truncated);
+      });
     }
     if (pending.source === 'native') {
       if (revisingPlan) {
@@ -7033,7 +7110,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     if (body === existing.body) {
       return;
     }
-    await this.writePlan(existing.title || 'Plan', existing.summary, existing.steps, body);
+    await this.writePlan(existing.title || 'Plan', existing.summary, existing.steps, body, existing.nativeOnly === true);
   }
 
   private decideApproval(
