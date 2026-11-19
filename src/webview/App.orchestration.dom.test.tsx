@@ -78,6 +78,43 @@ describe('subagent activity', () => {
     expect(screen.getByText('Use the shared input radius.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
   });
+
+  it('groups visible checks by their owning turn when a late result arrives', async () => {
+    const notice = (id: string, role: string, status: AgentActivity['status'] = 'completed') => ({
+      id, kind: 'notice' as const, agentActivity: { role, status, reason: 'Code changed' }
+    });
+    render(<App />);
+    act(() => {
+      sendHostMessage({ type: 'snapshot', availability: [availableBackend] });
+      sendHostMessage({ type: 'restoring', value: false });
+      sendHostMessage({ type: 'conversation', backendId: 'codex', threadId: THREAD_ID, replay: [
+        notice('subagent_first_tests', 'Tests (host check)'),
+        notice('subagent_first_review', 'Review agent', 'unavailable'),
+        notice('subagent_first_analysis-0', 'Analysis agent 1'),
+        notice('subagent_second_tests', 'Second turn tests')
+      ] });
+    });
+    expect(screen.getByLabelText('Tests (host check): Completed')).toBeTruthy();
+    expect(screen.queryByText(/Post-turn checks/)).toBeNull();
+
+    await act(async () => {
+      sendHostMessage({ type: 'agentEvent', event: {
+        type: 'item/started', backendId: 'codex', threadId: THREAD_ID,
+        item: notice('double-check_first', 'Diagnostics (host check)', 'failed')
+      } });
+    });
+    const heading = await screen.findByText('Post-turn checks (2)');
+    const disclosure = heading.closest('details')!;
+    expect(disclosure.open).toBe(false);
+    expect(heading.closest('summary')?.textContent).toContain('1 failed');
+    expect(disclosure.querySelectorAll('details')).toHaveLength(2);
+    expect(screen.getByLabelText('Analysis agent 1: Completed').closest('.post-turn-checks')).toBeNull();
+    expect(screen.getByLabelText('Second turn tests: Completed').closest('.post-turn-checks')).toBeNull();
+
+    fireEvent.click(heading.closest('summary')!);
+    expect(disclosure.open).toBe(true);
+    expect(screen.getByLabelText('Diagnostics (host check): Failed').closest('.post-turn-checks')).toBe(disclosure);
+  });
 });
 
 function openConversation(

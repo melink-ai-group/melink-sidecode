@@ -122,10 +122,7 @@ export function entryContains(entry: TranscriptEntry, itemId: string): boolean {
   if (entry.kind === 'item') {
     return entry.item.id === itemId;
   }
-  if (entry.kind === 'group') {
-    return entry.items.some((item) => item.id === itemId);
-  }
-  return entry.id === itemId || entry.message.id === itemId || entry.items.some((item) => item.id === itemId);
+  return (entry.kind === 'narration' && entry.message.id === itemId) || entry.items.some((item) => item.id === itemId);
 }
 
 export function sameItems(left: readonly TranscriptItemView[], right: readonly TranscriptItemView[]): boolean {

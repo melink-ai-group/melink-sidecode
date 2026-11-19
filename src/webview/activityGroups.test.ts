@@ -212,13 +212,7 @@ test('the group id stays the first child as later tools join the same run', () =
 });
 
 function entryKey(entry: TranscriptEntry): string {
-  if (entry.kind === 'group') {
-    return `group:${entry.id}`;
-  }
-  if (entry.kind === 'narration') {
-    return `narration:${entry.id}`;
-  }
-  return entry.item.id;
+  return entry.kind === 'item' ? entry.item.id : `${entry.kind}:${entry.id}`;
 }
 
 test('a one-line reply holds the following lookups and a later reply starts the next line', () => {
