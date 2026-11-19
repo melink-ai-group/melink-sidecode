@@ -23,11 +23,17 @@ evals/eval-report.md
 .cursor/
 .zvec-grep/
 
-# Machine-specific workspace settings (absolute tool paths live here)
-.vscode/settings.json
+# Machine-specific editor state (absolute tool paths live here)
+.vscode/
+.idea/
+.history/
 
 # Logs and scratch
 *.log
+*.bak
+*.orig
+*.swp
+.tmp-*
 err.txt
 
 # Secrets

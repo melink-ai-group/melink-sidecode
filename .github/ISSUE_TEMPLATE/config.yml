@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage and provider setup
+    url: https://github.com/melink-ai-group/melink-sidecode/blob/main/docs/usage.md
+    about: Read the usage guide before opening an issue.
+  - name: Security policy
+    url: https://github.com/melink-ai-group/melink-sidecode/blob/main/SECURITY.md
+    about: Report vulnerabilities privately, not in a public issue.

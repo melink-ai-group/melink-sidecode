@@ -1,4 +1,4 @@
-﻿import { MODE_DESCRIPTORS } from '../backends/modes.ts';
+import { MODE_DESCRIPTORS } from '../backends/modes.ts';
 import type {
   AgentEvent,
   ApprovalDecision,
@@ -602,7 +602,7 @@ function upsertTurnChange(turns: readonly TurnChange[], next: TurnChange): TurnC
  * The host reports a refused CLI path as `field` / `fieldMessage`, so the
  * screen can show the refusal on the path field itself. The bridge forwards
  * the message through this one helper, so a field can never be dropped
- * between the host and the reducer â€” the mistake that silently left the
+ * between the host and the reducer — the mistake that silently left the
  * refusal invisible.
  *
  * Pure and exported, so the forwarding is unit-tested rather than inferred
@@ -1540,7 +1540,7 @@ function applyAgentEvent(state: AppState, event: AgentEvent): AppState {
     case 'thread/status/changed':
       // The provider's own thread status is informational: `active` means a turn
       // is running, so the composer stays locked, but a status flap never clears
-      // a busy state early â€” only the turn lifecycle does that.
+      // a busy state early — only the turn lifecycle does that.
       if (event.status === 'active' && !state.busy) {
         return { ...state, busy: true };
       }

@@ -1,4 +1,4 @@
-﻿import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
+import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ApprovalDecision, ApprovalRule } from '../backends/types';
 import { historyEntries, historyLoading } from './historyEntries';
 import { reasoningTransition } from './reasoningStatus';
@@ -909,7 +909,7 @@ export function App(): JSX.Element {
   // Load every available backend's models so the floating panel can list them all
   // in one place; the provider concept stays in the host, the panel only reads
   // the neutral `models` payload. An unauthenticated provider has no list to
-  // fetch â€” it is represented by an actionable entry instead.
+  // fetch — it is represented by an actionable entry instead.
   useEffect(() => {
     for (const backend of available) {
       if (state.models[backend.id] === undefined && state.modelErrors[backend.id] === undefined) {
@@ -1637,7 +1637,7 @@ export function App(): JSX.Element {
     : !dictationModel
       ? 'Choose a dictation model in Settings.'
       : dictationStatus && micGestureHint
-        ? `${dictationStatus} â€” ${micGestureHint}`
+        ? `${dictationStatus} — ${micGestureHint}`
         : dictationStatus ?? micGestureHint ?? 'Dictate a message';
   const showMic =
     listening || cleaning || (!state.busy && draft.trim().length === 0 && state.attachments.length === 0);
@@ -1655,7 +1655,7 @@ export function App(): JSX.Element {
     listeningRef.current = false;
     setListening(false);
     setCleaning(true);
-    setDictationStatus('Finishing the recordingâ€¦');
+    setDictationStatus('Finishing the recording…');
     bridge.post({ type: 'stopDictation', requestId });
   };
   stopDictationRef.current = stopDictation;
@@ -1669,7 +1669,7 @@ export function App(): JSX.Element {
     listeningRef.current = true;
     dispatch({ type: 'dismissAttachmentError' });
     setListening(true);
-    setDictationStatus('Starting the microphoneâ€¦');
+    setDictationStatus('Starting the microphone…');
     bridge.post({ type: 'startDictation', requestId });
   };
 
@@ -2583,7 +2583,7 @@ export function App(): JSX.Element {
           {!state.restoring && state.hasOlderHistory ? (
             <div className="history-more">
               <button type="button" onClick={() => requestOlder(true)} disabled={state.loadingOlder}>
-                {state.loadingOlder ? 'Loading earlier messagesâ€¦' : 'Load earlier messages'}
+                {state.loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}
               </button>
             </div>
           ) : null}
@@ -3014,7 +3014,7 @@ export function App(): JSX.Element {
                     aria-label={busyActionLabel}
                     title={
                       queuePending
-                        ? 'Queueing this messageâ€¦'
+                        ? 'Queueing this message…'
                         : busyActionLabel === 'Queue message'
                           ? 'Sends when this turn finishes'
                           : 'Send to this turn'

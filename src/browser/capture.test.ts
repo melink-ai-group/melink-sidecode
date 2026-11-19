@@ -20,6 +20,16 @@ test('a saved capture names the PNG and keeps its path', () => {
   assert.equal(attachment.kind, 'image');
   assert.equal(attachment.size, Buffer.byteLength('png-bytes'));
   assert.equal(attachment.dataUrl, `data:image/png;base64,${pngBase64}`);
+
+  const posix = browserImageAttachment({
+    pngBase64,
+    title: 'Login',
+    url: 'http://localhost:3000/login',
+    path: '/home/dev/.melink/reports/browser/shot.png',
+    kind: 'page'
+  });
+  assert.equal(posix.name, 'shot.png');
+  assert.equal(posix.path, '/home/dev/.melink/reports/browser/shot.png');
 });
 
 test('an unsaved snippet is named from its kind, time, and URL host', () => {

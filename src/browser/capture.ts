@@ -1,7 +1,16 @@
-import { basename } from 'node:path';
 import type { Attachment } from '../backends/types';
 import { createAttachmentId, MAX_ATTACHMENT_BYTES } from '../attachments.ts';
 import { screenshotBaseName, screenshotTimestamp } from './screenshots.ts';
+
+/**
+ * The capture path may come from a Windows host while the extension runs on a
+ * POSIX host (or the other way around), so `node:path.basename` is not enough.
+ * Split on both separators and keep the final segment.
+ */
+function captureFileName(path: string): string {
+  const segments = path.split(/[\\/]/);
+  return segments[segments.length - 1] ?? path;
+}
 
 /**
  * Turn a PNG captured from the browser into a composer attachment.
@@ -30,7 +39,7 @@ export function browserImageAttachment(input: BrowserCaptureInput): Attachment {
     throw new Error('The capture is too large to attach.');
   }
   const name = input.path
-    ? basename(input.path)
+    ? captureFileName(input.path)
     : `${input.kind}-${screenshotTimestamp(input.now ?? new Date())}-${screenshotBaseName(
         input.title,
         input.url
