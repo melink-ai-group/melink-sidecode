@@ -25,6 +25,20 @@ export const SCREENS = Object.freeze([
     waitFor: '.app--chat-empty'
   }),
   Object.freeze({
+    slug: 'chat-model-picker',
+    title: 'Composer / model picker',
+    expectText: 'Choose a model',
+    waitFor: '.app--chat-empty',
+    click: '.model-trigger',
+    afterClick: '.model-panel',
+    afterClickText: 'OpenAI Codex CLI',
+    assertNoOverflow: true,
+    // Capture-only: the 440px panel scrolls its tabs at the default 13px/10px
+    // metrics. The nested-tab metrics keep all four provider tabs visible.
+    captureCss:
+      '.model-panel__tabs .tab { font-size: 12px; padding-left: 7px; padding-right: 7px; }'
+  }),
+  Object.freeze({
     slug: 'stream-reasoning',
     title: 'Streamed turn with expanded reasoning',
     expectText: 'Refactor the auth guard',

@@ -2,6 +2,12 @@
 
 All notable changes to sideCode are documented here. The project follows a simple versioned release history; earlier development builds were distributed as VSIX assets from the private repository.
 
+## [Unreleased]
+
+### Changed
+
+- Relicensed from MIT to the [sideCode Source-Available License](LICENSE.md). Reading, building, running, and private modification stay free, including at work, but selling, redistributing, or publishing a modified version now needs prior written consent. Copies distributed under MIT keep their MIT terms.
+
 ## [0.3.4] - 2026-11-19
 
 ### Added

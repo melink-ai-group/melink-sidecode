@@ -62,15 +62,31 @@ const MAX_OPTIONS = 6;
 
 const CLOSED_FENCE = /```([^\n`]*)\r?\n([\s\S]*?)```/g;
 const QUESTION_FENCE_OPEN = /```[ \t]*(?:sidecode[-_ ]?questions?|questions?)[^\n`]*\r?\n/gi;
+const JSON_FENCE_OPEN = /```[ \t]*(?:json|jsonc)[^\n`]*\r?\n/gi;
 const QUESTION_FENCE_TEXT = /```[ \t]*(?:sidecode[-_ ]?questions?|questions?)[^\n`]*/i;
+/**
+ * A fence whose payload starts on the info line, with no newline after the
+ * language tag. Models produce this shape, and a payload that lost its opening
+ * wrapper often survives there as a tail.
+ */
+const INLINE_FENCE = /```[ \t]*(sidecode[-_ ]?questions?|questions?|jsonc?)[ \t]+([^\n`]+)/gi;
 /**
  * A bare payload is only recognised at the start of a line, outside a fence.
  * JSON quoted inline in prose, or in a code sample, is not a question.
  */
 const QUESTION_OBJECT_AT_LINE_START = /^[ \t]*\{\s*"questions"\s*:/gm;
+/**
+ * A damaged tail can also arrive bare at the start of a line, without the
+ * fence or the opening wrapper: `it unchanged?","options":[...]}]}`.
+ */
+const DAMAGED_TAIL_AT_LINE_START = /^[ \t]*(?:jsonc?[ \t]+)?([^\n]*?"\s*,\s*"(?:options|choices)"\s*:\s*\[[^\n]*)$/gm;
 const QUESTION_BODY_START = /^\s*\{\s*"questions"\s*:/;
 const QUESTION_INFO = /^(?:sidecode[-_ ]?questions?|questions?)$/i;
 const JSON_INFO = /^(?:json|jsonc)$/i;
+/** A damaged question tail still names an options array, plus a prompt tail or key. */
+const DAMAGED_OPTIONS = /"(?:options|choices)"\s*:\s*\[/;
+const DAMAGED_PROMPT = /"(?:prompt|question|header|title)"\s*:/;
+const DAMAGED_PROMPT_TAIL = /"\s*,\s*"(?:options|choices)"\s*:/;
 
 interface QuestionSpan {
   start: number;
@@ -110,7 +126,8 @@ export function containsQuestionPayload(text: string): boolean {
 /**
  * Pull every question payload out of an assistant reply and remove all of them,
  * valid and invalid. Payloads keep source order; ids are reassigned `q1..` so
- * two payloads cannot collide. A malformed question fence is removed and
+ * two payloads cannot collide. A malformed payload is recovered when its
+ * readable tail still names an options array, and is otherwise removed and
  * reported through `invalid`. An empty result means there is nothing to ask.
  */
 export function extractSidecodeQuestions(text: string): {
@@ -187,6 +204,17 @@ function findQuestionSpans(text: string): QuestionSpan[] {
     spans.push(unclosed);
     fences.push([unclosed.start, unclosed.end]);
   }
+  const unclosedJson = findUnclosedJsonFence(text, fences);
+  if (unclosedJson) {
+    spans.push(unclosedJson);
+    fences.push([unclosedJson.start, unclosedJson.end]);
+  }
+  for (const inline of findInlineQuestionSpans(text, fences)) {
+    if (spans.some((span) => spansOverlap(span, inline))) {
+      continue;
+    }
+    spans.push(inline);
+  }
   for (const bare of findBareQuestionSpans(text)) {
     // An unbalanced candidate runs to the end of the text, so containment must
     // be judged by where it starts, not where its (unfinished) span ends.
@@ -196,7 +224,46 @@ function findQuestionSpans(text: string): QuestionSpan[] {
     }
     spans.push(bare);
   }
+  for (const damaged of findDamagedTailSpans(text, fences)) {
+    if (spans.some((span) => spansOverlap(span, damaged))) {
+      continue;
+    }
+    spans.push(damaged);
+  }
   spans.sort((left, right) => left.start - right.start || left.end - right.end);
+  return spans;
+}
+
+/**
+ * A fence whose payload begins on the same line as its info tag. This is the
+ * shape a damaged stream often leaves behind, and the payload can be a full
+ * question object or a recoverable tail.
+ */
+function findInlineQuestionSpans(text: string, fences: Array<[number, number]>): QuestionSpan[] {
+  const spans: QuestionSpan[] = [];
+  INLINE_FENCE.lastIndex = 0;
+  for (const match of text.matchAll(INLINE_FENCE)) {
+    const start = match.index ?? 0;
+    if (fences.some(([fenceStart, fenceEnd]) => start >= fenceStart && start < fenceEnd)) {
+      continue;
+    }
+    const info = match[1] ?? '';
+    const body = match[2] ?? '';
+    const questions = parseQuestionJson(body);
+    if (!questions && !isQuestionInfo(info) && !(isJsonInfo(info) && looksLikeQuestionPayload(body))) {
+      continue;
+    }
+    let end = start + match[0].length;
+    if (text.startsWith('```', end)) {
+      end += 3;
+    } else {
+      const close = text.indexOf('```', end);
+      if (close >= 0 && /^\s*$/.test(text.slice(end, close))) {
+        end = close + 3;
+      }
+    }
+    spans.push(questions ? { start, end, questions } : { start, end, invalid: true });
+  }
   return spans;
 }
 
@@ -218,7 +285,40 @@ function findUnclosedQuestionFence(text: string, fences: Array<[number, number]>
     if (last) {
       return { start, end: bodyStart + last.end, questions: last.questions };
     }
+    // The fence may hold only the readable tail of the payload. Recover it
+    // rather than discarding a question the user can still answer.
+    const recovered = recoverQuestionJson(body);
+    if (recovered) {
+      return { start, end: text.length, questions: recovered };
+    }
     return { start, end: text.length, invalid: true };
+  }
+  return undefined;
+}
+
+/**
+ * An unclosed `json` fence can carry a complete question object or the
+ * recoverable tail of one. It is only removed when the body actually yields a
+ * question, so an ordinary code sample that is still streaming stays visible.
+ */
+function findUnclosedJsonFence(text: string, fences: Array<[number, number]>): QuestionSpan | undefined {
+  JSON_FENCE_OPEN.lastIndex = 0;
+  for (const match of text.matchAll(JSON_FENCE_OPEN)) {
+    const start = match.index ?? 0;
+    if (fences.some(([fenceStart, fenceEnd]) => start >= fenceStart && start < fenceEnd)) {
+      continue;
+    }
+    const bodyStart = start + match[0].length;
+    const body = text.slice(bodyStart);
+    const inner = findBareQuestionObjects(body);
+    const last = inner[inner.length - 1];
+    if (last) {
+      return { start, end: bodyStart + last.end, questions: last.questions };
+    }
+    const questions = parseQuestionJson(body);
+    if (questions) {
+      return { start, end: text.length, questions };
+    }
   }
   return undefined;
 }
@@ -263,6 +363,27 @@ function findBareQuestionSpans(text: string): QuestionSpan[] {
     const expandedEnd = expandWrappingTicks(text, candidate, end)[1];
     const questions = parseQuestionJson(text.slice(candidate, end));
     spans.push(questions ? { start: lineStart, end: expandedEnd, questions } : { start: lineStart, end: expandedEnd, invalid: true });
+  }
+  return spans;
+}
+
+/**
+ * A damaged tail at the start of a line, outside any fence. The tail must still
+ * name an options array and occupy the line, so ordinary prose is not a candidate.
+ */
+function findDamagedTailSpans(text: string, fences: Array<[number, number]>): QuestionSpan[] {
+  const spans: QuestionSpan[] = [];
+  DAMAGED_TAIL_AT_LINE_START.lastIndex = 0;
+  for (const match of text.matchAll(DAMAGED_TAIL_AT_LINE_START)) {
+    const start = match.index ?? 0;
+    if (fences.some(([fenceStart, fenceEnd]) => start >= fenceStart && start < fenceEnd)) {
+      continue;
+    }
+    const questions = recoverQuestionJson(match[1] ?? '');
+    if (!questions) {
+      continue;
+    }
+    spans.push({ start, end: start + match[0].length, questions });
   }
   return spans;
 }
@@ -441,6 +562,10 @@ export function rankedOptions(raw: unknown): string[] {
 }
 
 function parseQuestionJson(body: string): ClarifyingQuestion[] | undefined {
+  return parseQuestionBody(body) ?? recoverQuestionJson(body);
+}
+
+function parseQuestionBody(body: string): ClarifyingQuestion[] | undefined {
   const value = parseJsonLoose(body);
   if (value === undefined) {
     return undefined;
@@ -452,6 +577,46 @@ function parseQuestionJson(body: string): ClarifyingQuestion[] | undefined {
   }
   const questions = normalizeQuestionList(list);
   return questions.length > 0 ? questions : undefined;
+}
+
+/**
+ * Recover a question payload whose opening wrapper was lost in the stream.
+ *
+ * A damaged reply can begin mid-string, e.g.
+ * `it unchanged?","options":["Keep it","Drop it"]}]}`, or after the opening
+ * object, e.g. `"prompt":"Which?","options":["A","B"]}]}`. The tail keeps the
+ * options and enough of the prompt to answer, so put the missing prefix back and
+ * parse that. Only a body that still has an options array and a prompt marker is
+ * repaired, so an ordinary JSON code sample is left alone.
+ */
+function recoverQuestionJson(body: string): ClarifyingQuestion[] | undefined {
+  const trimmed = body.trim();
+  if (!trimmed || !DAMAGED_OPTIONS.test(trimmed)) {
+    return undefined;
+  }
+  if (!DAMAGED_PROMPT.test(trimmed) && !DAMAGED_PROMPT_TAIL.test(trimmed)) {
+    return undefined;
+  }
+  const core = trimmed.replace(/^jsonc?\b[\s:]*/i, '').trimStart();
+  if (!core) {
+    return undefined;
+  }
+  const repairs = [
+    `{"questions":[{"prompt":"${core}`,
+    `{"questions":[{"prompt":${core}`,
+    `{"questions":[{${core}`,
+    `{"questions":[${core}`,
+    `{"questions":${core}`,
+    `{${core}`
+  ];
+  for (const candidate of repairs) {
+    const questions = parseQuestionBody(candidate);
+    // A repaired card without a suggestion is not worth the guess.
+    if (questions?.some((question) => question.options.length > 0)) {
+      return questions;
+    }
+  }
+  return undefined;
 }
 
 /** JSON.parse, then one repair for a trailing comma inside the payload. */

@@ -34,20 +34,20 @@ function validManifest() {
   };
 }
 
-test('the visual catalog has stable unique slugs and twenty-six expected files', () => {
-  assert.equal(SCREENS.length, 13);
+test('the visual catalog has stable unique slugs and twenty-eight expected files', () => {
+  assert.equal(SCREENS.length, 14);
   assert.equal(new Set(SCREENS.map((screen) => screen.slug)).size, SCREENS.length);
   assert.equal(VIEWPORTS.length, 2);
   for (const screen of SCREENS) {
     assert.match(screen.slug, SLUG_PATTERN);
   }
   const files = expectedFiles().map((entry) => entry.file);
-  assert.equal(files.length, 26);
-  assert.equal(new Set(files).size, 26);
+  assert.equal(files.length, 28);
+  assert.equal(new Set(files).size, 28);
   for (const file of files) {
     assert.match(file, FILE_PATTERN);
   }
-  for (const slug of ['subagent-activity', 'settings-orchestration', 'settings-provider-local', 'chat-queued', 'settings-skills-ast', 'settings-skills-zvec']) {
+  for (const slug of ['subagent-activity', 'chat-model-picker', 'settings-orchestration', 'settings-provider-local', 'chat-queued', 'settings-skills-ast', 'settings-skills-zvec']) {
     assert.equal(SCREENS.some((screen) => screen.slug === slug), true, slug);
   }
   assert.equal(fileName('chat-idle', { width: 1280, height: 800 }), 'chat-idle-1280x800.png');
