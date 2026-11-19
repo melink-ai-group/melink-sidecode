@@ -112,7 +112,7 @@ jobs:
             target: darwin-x64
           # ffmpeg-static 5.3.0 publishes ffmpeg-darwin-arm64 and onnxruntime-node
           # 1.14.0 ships bin/napi-v3/darwin/arm64, so this target can be staged.
-          - os: macos-14
+          - os: macos-15
             target: darwin-arm64
     steps:
       - name: Checkout

@@ -281,7 +281,7 @@ speech model itself is downloaded once and cached.) Install the asset for your
 OS/architecture: the wrong one can still load the sidebar but cannot run
 dictation.
 
-macOS arm64 (`darwin-arm64`) is supported and built on a macOS 14 arm64 runner.
+macOS arm64 (`darwin-arm64`) is supported and built on a macOS 15 arm64 runner.
 Windows arm64 and Linux arm64 are not published; use the x64 asset under
 emulation or build locally from source.
 
