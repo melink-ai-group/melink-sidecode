@@ -261,12 +261,12 @@ settings below.
 
 ### Option A — from a packaged `.vsix`
 
-1. Build the package (or obtain a released `melink-sidecode-0.3.4.vsix`) —
+1. Build the package (or obtain a released `melink-sidecode-0.4.0.vsix`) —
    see [Build from source](#build-from-source) if you need to make one.
 2. Install it:
    - **VS Code CLI:**
      ```sh
-     code --install-extension ./melink-sidecode-0.3.4.vsix
+     code --install-extension ./melink-sidecode-0.4.0.vsix
      ```
    - **Any host (including Open VSX consumers):** open the Extensions view, click
      the `...` menu in its title bar, choose **Install from VSIX…**, and pick the
@@ -308,7 +308,7 @@ npm run build
 with:
 
 ```sh
-npm run package   # produces melink-sidecode-0.3.4.vsix
+npm run package   # produces melink-sidecode-0.4.0.vsix
 ```
 
 `npm run package` still packages for the current host under the default name. For

@@ -12,7 +12,7 @@ body:
     attributes:
       label: sideCode version
       description: The version shown in the Extensions view or the VSIX filename.
-      placeholder: 0.3.4
+      placeholder: 0.4.0
     validations:
       required: true
   - type: dropdown

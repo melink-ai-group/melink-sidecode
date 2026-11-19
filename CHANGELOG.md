@@ -2,11 +2,16 @@
 
 All notable changes to sideCode are documented here. The project follows a simple versioned release history; earlier development builds were distributed as VSIX assets from the private repository.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-19
 
 ### Changed
 
 - Relicensed from MIT to the [sideCode Source-Available License](LICENSE.md). Reading, building, running, and private modification stay free, including at work, but selling, redistributing, or publishing a modified version now needs prior written consent. Copies distributed under MIT keep their MIT terms.
+- Package metadata attributes the project to Marc Uberstein.
+
+### Documentation
+
+- Added a Support the project section that asks for GitHub stars and pull requests.
 
 ## [0.3.4] - 2026-11-19
 
@@ -36,4 +41,5 @@ All notable changes to sideCode are documented here. The project follows a simpl
 - [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - GitHub issue and pull-request templates.
 
+[0.4.0]: https://github.com/melink-ai-group/melink-sidecode/releases/tag/v0.4.0
 [0.3.4]: https://github.com/melink-ai-group/melink-sidecode/releases/tag/v0.3.4
